@@ -303,7 +303,6 @@ func buildMinimalEnforceGateway(t *testing.T, db *store.DB, tenantID string) *Ga
 	gw, bypassPool, tenant := newMinimalGateway(t, MinimalGatewayOpts{
 		DeploymentMode: deployment.ModeMultiTenant,
 	})
-	_ = bypassPool
 	_ = tenant
 
 	// Replace DB-bound fields with the ENFORCE pool, but keep the
@@ -315,9 +314,12 @@ func buildMinimalEnforceGateway(t *testing.T, db *store.DB, tenantID string) *Ga
 	// NB: serviceAccounts intentionally stays on the bypass pool —
 	// its global infra reads cross tenants by design.
 
-	// Align deployment config with the DB the gateway actually uses
-	// so authorize() + middleware read the same row.
-	gw.deploymentConfig = deployment.NewConfig(db.Pool)
+	// deployment_config is a global admin table that the restricted
+	// qorven_app role cannot write. Use the bypass pool for admin
+	// writes while the gateway's data path uses the RLS pool.
+	// The middleware reads deploymentConfig.IsMultiTenant via the
+	// same bypass pool — that read is not tenant-scoped.
+	gw.deploymentConfig = deployment.NewConfig(bypassPool)
 	if err := gw.deploymentConfig.SetMode(context.Background(), deployment.ModeMultiTenant); err != nil {
 		t.Fatalf("SetMode: %v", err)
 	}
