@@ -66,7 +66,7 @@ export function StatusBar() {
     setChangelogOpen(true);
     if (changelogMd) return; // already loaded
     try {
-      const r = await fetch('/api/changelog');
+      const r = await fetch('/api/v1/changelog');
       const d = await r.json();
       setChangelogMd(d.changelog ?? '');
     } catch {

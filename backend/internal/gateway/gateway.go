@@ -114,6 +114,11 @@ func SetBuildInfo(version, commit, buildTime string) {
 	buildInfo.BuildTime = buildTime
 }
 
+var changelogContent string
+
+// SetChangelog injects the CHANGELOG.md content embedded by the binary.
+func SetChangelog(s string) { changelogContent = s }
+
 type Gateway struct {
 	cfg              *config.Config
 	router           chi.Router

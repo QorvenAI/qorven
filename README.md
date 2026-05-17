@@ -15,11 +15,17 @@ For developers, teams, and businesses that want powerful AI automation without s
 
 ## Quick start
 
+**Linux / macOS (amd64 or arm64):**
 ```bash
 curl -fsSL https://get.qorven.ai | sudo bash
 ```
 
-Requires a Linux server (amd64 or arm64) with 2 GB RAM and PostgreSQL. The installer sets up the database, downloads the binary, runs migrations, and opens the setup wizard in your browser — no config file editing required.
+**Windows (PowerShell — run as Administrator):**
+```powershell
+iwr -useb https://get.qorven.ai/install.ps1 | iex
+```
+
+The installer sets up PostgreSQL, downloads the binary, runs migrations, and opens the setup wizard in your browser — no config file editing required. Requires 2 GB RAM.
 
 **Docs:** [docs.qorven.ai](https://docs.qorven.ai) &nbsp;·&nbsp; **Discussions:** [GitHub Discussions](https://github.com/QorvenAI/qorven/discussions)
 

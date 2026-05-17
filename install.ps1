@@ -1,4 +1,4 @@
-# Copyright 2026 Tekky AI Academy LLP. Licensed under FSL-1.1-ALv2.
+# Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
 #
 # Qorven installer for Windows — one-shot PowerShell script.
 #
