@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -31,6 +32,18 @@ func init() {
 			}
 
 			gateway.SetBuildInfo(Version, Commit, BuildTime)
+			if exe, err2 := os.Executable(); err2 == nil {
+				for _, p := range []string{
+					filepath.Join(filepath.Dir(exe), "CHANGELOG.md"),
+					filepath.Join(filepath.Dir(exe), "..", "CHANGELOG.md"),
+					"CHANGELOG.md",
+				} {
+					if b, err3 := os.ReadFile(p); err3 == nil {
+						gateway.SetChangelog(string(b))
+						break
+					}
+				}
+			}
 			gw, err := gateway.New(serverCfg)
 			if err != nil {
 				return fmt.Errorf("gateway: %w", err)

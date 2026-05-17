@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -595,6 +596,20 @@ func uniqueChannels(msgs []timelineMsg) []string {
 		}
 	}
 	return out
+}
+
+func (gw *Gateway) handleGetChangelog(w http.ResponseWriter, r *http.Request) {
+	content := changelogContent
+	if content == "" {
+		// Try to read from disk relative to binary or working directory.
+		for _, p := range []string{"CHANGELOG.md", "../CHANGELOG.md"} {
+			if b, err := os.ReadFile(p); err == nil {
+				content = string(b)
+				break
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]string{"changelog": content})
 }
 
 func verifyWebhookHMAC(r *http.Request, secret, sig string) bool {
