@@ -51,7 +51,7 @@ func openPool(dsn, rlsMode string) (*DB, error) {
 		return nil, fmt.Errorf("parse dsn: %w", err)
 	}
 	cfg.MaxConns = 20
-	cfg.MinConns = 2
+	cfg.MinConns = 0
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute
 
