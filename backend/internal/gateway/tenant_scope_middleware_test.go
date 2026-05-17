@@ -33,7 +33,7 @@ func TestTenantScopeMiddleware_EarlyReleaseReturnsConnToPool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewForMultiTenant: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 
 	bypassPool, tenantA := testutil.NewIsolatedTenant(t)
 	ctx := testutil.Ctx(t)
@@ -118,7 +118,7 @@ func TestTenantScopeMiddleware_PoisonTxForcesRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewForMultiTenant: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 
 	bypassPool, tenantA := testutil.NewIsolatedTenant(t)
 	ctx := testutil.Ctx(t)
@@ -198,7 +198,7 @@ func TestTenantScopeMiddleware_PanicRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewForMultiTenant: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 
 	bypassPool, tenantA := testutil.NewIsolatedTenant(t)
 	ctx := testutil.Ctx(t)
