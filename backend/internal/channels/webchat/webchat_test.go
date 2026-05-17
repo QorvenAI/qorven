@@ -119,6 +119,8 @@ func TestWebchatChannel_ConcurrentStartStop(t *testing.T) {
 }
 
 // wsConnect sets up a test WebSocket server and returns the client conn.
+// It waits until HandleWS has registered the session in c.clients before
+// returning, so callers can call ch.Send() without a race.
 func wsConnect(t *testing.T, ch *WebchatChannel, query string) (*websocket.Conn, func()) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +130,29 @@ func wsConnect(t *testing.T, ch *WebchatChannel, query string) (*websocket.Conn,
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
+	}
+	// Extract the session ID from the query string so we can wait for
+	// HandleWS to register it in c.clients. Dial success only means the
+	// TCP handshake completed; the goroutine running HandleWS may not
+	// have reached c.clients[sessionID] = conn yet.
+	sessionID := ""
+	if i := strings.Index(query, "session="); i >= 0 {
+		sessionID = strings.TrimPrefix(query[i:], "session=")
+		if j := strings.IndexByte(sessionID, '&'); j >= 0 {
+			sessionID = sessionID[:j]
+		}
+	}
+	if sessionID != "" {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			ch.mu.Lock()
+			_, registered := ch.clients[sessionID]
+			ch.mu.Unlock()
+			if registered {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}
 	return conn, func() { conn.Close(); srv.Close() }
 }
