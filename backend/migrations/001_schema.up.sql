@@ -86,7 +86,7 @@ COMMENT ON FUNCTION public.app_rls_bypass() IS 'Returns TRUE when app.bypass_rls
 -- Name: uuid_generate_v7(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.uuid_generate_v7() RETURNS uuid
+CREATE OR REPLACE FUNCTION public.uuid_generate_v7() RETURNS uuid
     LANGUAGE plpgsql
     AS $$
 DECLARE unix_ts_ms bytea; uuid_bytes bytea; rand_bytes bytea;
