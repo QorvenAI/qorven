@@ -1,0 +1,68 @@
+# Backend
+backend/config.toml
+backend/.env
+.env.dev
+.env.local
+.env.*.local
+backend/*.log
+backend/dist/
+
+# Secrets / certs
+*.pem
+*.key
+*.p12
+*.pfx
+*.sql.dump
+*.sqldump
+
+# Coredumps
+*.core
+core.*
+
+# Web + examples — never commit node_modules / build output
+web/node_modules/
+web/.next/
+web/out/
+**/node_modules/
+**/.next/
+**/.turbo/
+**/tsconfig.tsbuildinfo
+
+# Sidecar artifacts
+sidecar/whatsapp/node_modules/
+sidecar/whatsapp/dist/
+
+# Compiled binaries (use release artifacts instead)
+backend/qorven
+backend/qorven-*
+/dist/
+
+# OS
+.DS_Store
+*.swp
+*.swo
+config.toml
+backend/web/
+
+# Internal docs — never push
+AUDIT-*.md
+CLAUDE.md
+*.prompt
+*.plan
+TODO*.md
+NOTES*.md
+# local smoke-test script + its artifacts
+web/.qorven-smoke.mjs
+.claude/
+web/.qorven-nav.mjs
+.superpowers/
+
+.air.toml
+dev.sh
+# Dev tool artifacts
+.playwright-mcp/
+docs/superpowers/
+# Root-level debug screenshots
+*.png
+*.jpeg
+*.jpg

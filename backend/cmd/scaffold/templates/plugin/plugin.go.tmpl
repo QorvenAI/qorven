@@ -1,0 +1,69 @@
+// [[.Name]] — scaffolded Qorven Wasm plugin.
+//
+// Build:
+//   GOOS=wasip1 GOARCH=wasm go build -o [[.Name]].wasm .
+//
+// Upload (admin-only; see AGENTS.md §5):
+//   curl -X POST <gateway>/v1/wasm-plugins \
+//     -H "Authorization: Bearer <admin-jwt>" \
+//     -F name=[[.Name]] \
+//     -F description="[[.Description]]" \
+//     -F wasm=@[[.Name]].wasm
+//
+// Once uploaded, the orchestrator surfaces this tool in the LLM's
+// tool menu for your tenant automatically. Its invocations are
+// sandboxed (no network, no filesystem) and gated by the platform
+// permission system.
+
+package main
+
+import (
+	"encoding/json"
+	"io"
+	"os"
+)
+
+// Request is the JSON shape the host sends on STDIN. Edit to match
+// the `parameters` schema you upload alongside the binary.
+type Request struct {
+	// TODO: add your input fields here.
+	Input string `json:"input"`
+}
+
+// Response is the JSON shape you emit on STDOUT. The orchestrator
+// forwards this verbatim to the LLM as a tool-call result. Keep it
+// small — the LLM sees every byte.
+type Response struct {
+	Output string `json:"output"`
+}
+
+func main() {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Stderr.WriteString("[[.Name]]: read stdin: " + err.Error())
+		os.Exit(1)
+	}
+
+	var req Request
+	if err := json.Unmarshal(raw, &req); err != nil {
+		os.Stderr.WriteString("[[.Name]]: decode request: " + err.Error())
+		os.Exit(1)
+	}
+
+	// TODO: your logic here. The sandbox has no network and no
+	// filesystem; anything I/O related must be passed in via the
+	// Request JSON or left to the orchestrator.
+	resp := Response{
+		Output: "received: " + req.Input,
+	}
+
+	out, err := json.Marshal(resp)
+	if err != nil {
+		os.Stderr.WriteString("[[.Name]]: encode response: " + err.Error())
+		os.Exit(1)
+	}
+	if _, err := os.Stdout.Write(out); err != nil {
+		os.Stderr.WriteString("[[.Name]]: write stdout: " + err.Error())
+		os.Exit(1)
+	}
+}

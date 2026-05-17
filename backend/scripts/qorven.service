@@ -1,0 +1,49 @@
+[Unit]
+# Qorven gateway — systemd unit for bare-metal + VM deployments.
+# Mirrors qorven-voice.service; see docs/ops/systemd.md for install.
+Description=Qorven gateway (API + web listener)
+Documentation=https://github.com/qorven/qorven
+After=network-online.target postgresql.service
+Wants=network-online.target
+# If postgres is co-located on this host, wait for it; on dedicated DB
+# hosts this is a no-op and the gateway's own probes will catch DB
+# being unavailable.
+PartOf=qorven.target
+
+[Service]
+Type=simple
+# Run as an unprivileged user. Create with:
+#   sudo useradd --system --home /var/lib/qorven --shell /usr/sbin/nologin qorven
+User=qorven
+Group=qorven
+WorkingDirectory=/var/lib/qorven
+# Optional env file — put QORVEN_POSTGRES_DSN etc. here.
+EnvironmentFile=-/etc/qorven/qorven.env
+ExecStart=/usr/local/bin/qorven start
+# Respect SIGTERM drain — the gateway installs a 10s graceful shutdown
+# handler, so give systemd the same window plus a small buffer before
+# it force-kills.
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+# Restart-on-failure with backoff. StartLimitBurst=10 in 5min window
+# means a crash loop eventually trips into "failed" state instead of
+# thrashing indefinitely.
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Hardening — drop capabilities the gateway doesn't need. If you run
+# on a port <1024 (e.g. :80 for HTTP challenge in autocert mode), grant
+# cap_net_bind_service explicitly.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/qorven
+# Uncomment if binding to a privileged port:
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

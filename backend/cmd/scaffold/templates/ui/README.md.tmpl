@@ -1,0 +1,58 @@
+# [[.NameTitle]] — Qorven App Bundle
+
+Scaffolded by `qorven agent init`. Builds a self-contained IIFE bundle that installs into a running Qorven host.
+
+## Project layout
+
+```
+src/index.tsx      — App entry point (JSX, uses window.__QorvenUI + window.__QorvenApp)
+qorven-app.d.ts    — TypeScript declarations for Qorven host globals (do not edit)
+vite.config.ts     — Vite IIFE build config
+tsconfig.json      — TypeScript config
+frontend/          — Build output (bundle.js lands here after `npm run build`)
+```
+
+## Development workflow
+
+```bash
+npm install
+npm run build       # → frontend/bundle.js
+```
+
+Install the built bundle into a running Qorven instance:
+
+```bash
+# Via the Qorven CLI:
+qorven app install --path /path/to/this/dir
+
+# Or via the API:
+curl -X POST http://localhost:4200/api/v1/apps \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/this/dir"}'
+```
+
+## Available globals
+
+Inside your `src/index.tsx`, two host globals are available:
+
+**`window.__QorvenApp`** — host utilities
+- `React` — the host's React instance (same version as the host)
+- `request(path, init?)` — authenticated fetch against the Qorven API
+- `getToken()` — returns the current auth token
+- `register(app)` — register your pages/tabs with the host router
+
+**`window.__QorvenUI`** — Qorven's Metronic component library
+- All components: `Button`, `Card`, `Tabs`, `Dialog`, `Sheet`, `Input`, `Badge`, and 25+ more
+- `cn(...classes)` — Tailwind class merging utility
+- `icons` — full `lucide-react` icon namespace
+- `useCurrentUser()` — React hook: current authenticated user
+- `useActiveSoul()` — React hook: currently open Qorven soul
+- `useWsConnected()` — React hook: WebSocket connection state
+
+## Type checking
+
+```bash
+npm run typecheck
+```
+
+TypeScript declarations for all globals are in `qorven-app.d.ts` (generated — do not edit).

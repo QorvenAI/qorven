@@ -1,0 +1,114 @@
+.wrap {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.banner {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-left: 4px solid #f59e0b;
+  background: #fffbeb;
+  color: #78350f;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.node {
+  position: relative;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: border-color 120ms ease-out, background 120ms ease-out;
+}
+
+.rowTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.kind { font-weight: 600; }
+.state { font-weight: 500; }
+
+.title {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.msg,
+.outcome {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* State-specific styles: visual at-a-glance. Keep color + structure
+   so colorblind users aren't the only signal. */
+
+.statePending {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+.stateRunning {
+  background: #eff6ff;
+  border-color: #60a5fa;
+  color: #1e3a8a;
+  /* gentle pulse so "running" is obvious */
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.stateBlocked {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #78350f;
+}
+
+.stateDone {
+  background: #f0fdf4;
+  border-color: #4ade80;
+  color: #166534;
+}
+
+.stateFailed {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #991b1b;
+}
+
+.stateCancelled {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #374151;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.stateUnknown {
+  background: #fafaf9;
+  border-color: #d6d3d1;
+  color: #57534e;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(96, 165, 250, 0); }
+}

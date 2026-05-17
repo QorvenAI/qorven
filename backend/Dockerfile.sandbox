@@ -1,0 +1,65 @@
+# Qorven Sandbox Container
+# Provides isolated execution environment for agent code execution
+#
+# Build: docker build -f Dockerfile.sandbox -t qorven-sandbox:latest .
+# 
+# Features:
+# - Debian bookworm-slim base (stable, small)
+# - Python 3 with pip
+# - Node.js 20 LTS
+# - Common CLI tools: git, curl, jq, ripgrep
+# - Non-root user for security
+# - Minimal attack surface
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Install base packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ripgrep \
+    unzip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20 LTS
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install common Python packages
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests \
+    httpx \
+    pyyaml \
+    python-dotenv
+
+# Install common Node packages globally
+RUN npm install -g \
+    typescript \
+    tsx \
+    prettier \
+    eslint
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash --uid 1000 sandbox
+
+# Set up workspace
+RUN mkdir -p /workspace && chown sandbox:sandbox /workspace
+
+# Switch to non-root user
+USER sandbox
+WORKDIR /workspace
+
+# Keep container running
+CMD ["sleep", "infinity"]

@@ -1,0 +1,251 @@
+# Qorven configuration — example
+#
+# Copy this file to ~/.qorven/config.toml or set QORVEN_CONFIG to a
+# custom path. Every value below is optional — the defaults shown are
+# what Qorven uses when the key is missing.
+#
+# For a fresh developer laptop:   `qorven init`  (generates a minimal
+# config, a self-signed cert, and an empty database.)
+#
+# For production:   start here, configure providers, set [tls].mode
+# and [server] listen addresses to match your topology, add an
+# encryption key under [auth].
+
+# ─── HTTP / TLS ──────────────────────────────────────────────────────────
+
+[server]
+# API listener — where /v1/*, /auth/*, /ws, /health live. Defaults to
+# 127.0.0.1:4200 so a fresh install doesn't accidentally expose the
+# admin API. Docker / reverse-proxy deployments override explicitly.
+api_listen = "127.0.0.1:4200"
+
+# Web UI listener — user-facing. Defaults to 0.0.0.0:4201 so the UI is
+# reachable on the LAN. Behind Nginx/Caddy, set to 127.0.0.1:4201 so
+# only the proxy talks to Qorven.
+# Set to "" to disable the web listener (headless / API-only mode).
+web_listen = "0.0.0.0:4201"
+
+# Canonical base URL used in outbound emails, magic links, and channel
+# webhooks. Keep blank on localhost; set to your public https URL in
+# production (e.g. "https://qorven.example.com").
+base_url = ""
+
+# Legacy single-listener knob. Kept for backward compatibility: when
+# api_listen/web_listen are unset and `listen` is set, both surfaces
+# share the same port. Prefer the split schema for new installs.
+# listen = "0.0.0.0:4200"
+
+# SSRF guard — hostnames that outbound fetch / url tools are allowed
+# to reach outside the default deny-rules. Localhost + RFC1918 are
+# always denied unless listed here.
+# ssrf_allowed_hosts = ["internal.mycorp.com"]
+
+# CORS — set these when a separate frontend host calls the API
+# directly. Leave empty behind a same-origin reverse proxy.
+# allowed_origins = ["https://app.qorven.example.com"]
+
+
+[server.tls]
+# TLS mode for the web listener. Four options:
+#   "auto"          (default) self-signed ECDSA P-256 cert for
+#                   localhost, or Let's Encrypt via ACME HTTP-01
+#                   when domain below is set to a public hostname.
+#   "reverse-proxy" Qorven serves plain HTTP; Nginx/Caddy handles TLS
+#                   upstream. The most common self-hosted shape.
+#   "custom"        User-provided cert_file + key_file below.
+#   "disabled"      No TLS. Dev only. Loud warning on boot.
+mode = "auto"
+
+# Domain only used when mode = "auto" and the box is reachable from
+# the public internet on port 80 (ACME HTTP-01 requirement). Empty
+# keeps the self-signed localhost cert.
+# domain = "qorven.example.com"
+
+# For mode = "custom": absolute paths to your PEM-encoded cert+key.
+# cert_file = "/etc/letsencrypt/live/qorven.example.com/fullchain.pem"
+# key_file  = "/etc/letsencrypt/live/qorven.example.com/privkey.pem"
+
+# autocert cache — stores obtained certificates. Defaults to
+# ~/.qorven/certs so the user account has write access without root.
+# cache_dir = "/var/lib/qorven/certs"
+
+
+# ─── Database ────────────────────────────────────────────────────────────
+
+[database]
+# Postgres DSN. Prefer setting QORVEN_POSTGRES_DSN in the environment
+# so secrets stay out of the config file. When both are set, the env
+# var wins.
+#
+# Minimum requirements: PostgreSQL 15+ with pgvector extension.
+# `qorven init` will run every migration in migrations/ against a
+# fresh database, so pointing at an empty DB is the happy path.
+# dsn = "postgres://qorven:CHANGE_ME@localhost:5432/qorven?sslmode=disable"
+
+
+# ─── Auth ────────────────────────────────────────────────────────────────
+
+[auth]
+# A shared-secret token that bypasses JWT auth when present in the
+# Authorization: Bearer header. Useful for bootstrapping admin tools,
+# CI, and one-off scripts. Generate once with:
+#   openssl rand -hex 16
+# Leave blank to disable this bypass entirely — users auth via login
+# only.
+# token = ""
+
+# 32-byte key (hex or base64) used to encrypt provider API keys and
+# channel credentials at rest in the providers / channel_instances /
+# vault tables. Generate once with:
+#   openssl rand -hex 32
+# Required for production. If left blank, Qorven uses a machine-local
+# default derived from the config path — fine for dev, NOT fine for
+# multi-machine deployments.
+# encryption_key = ""
+
+# Email used as the "from" address for magic-link password resets
+# when SMTP is configured. Overrides [email].from when set.
+# owner_email = ""
+
+
+# ─── Providers ───────────────────────────────────────────────────────────
+#
+# Multiple [[providers]] blocks are allowed — Qorven's smart router
+# and fallback logic use all enabled providers. You can also add
+# providers at runtime via the setup wizard or POST /v1/providers.
+#
+# Supported types (see internal/providers/types.go for the full list):
+#   openai_compat    generic OpenAI-compatible API; base URL varies
+#   anthropic_native native Anthropic Messages API
+#   bedrock          AWS Bedrock; uses the server's IAM credentials
+#   deepseek / groq / mistral / xai / openrouter /
+#   together / fireworks / cohere / ollama / moonshot /
+#   perplexity / minimax / zhipu / dashscope
+#
+# For OpenAI-compatible providers that don't have a dedicated type,
+# use "openai_compat" with the provider's base URL.
+
+# Example: AWS Bedrock — no api_key, uses the server's AWS credentials.
+# [[providers]]
+# name = "bedrock"
+# type = "bedrock"
+# api_base = "us-east-1"     # region — the Bedrock driver treats api_base as region
+# enabled = true
+
+# Example: OpenAI
+# [[providers]]
+# name = "openai"
+# type = "openai_compat"
+# api_base = "https://api.openai.com/v1"
+# api_key = "sk-..."          # prefer env: QORVEN_OPENAI_API_KEY + vault
+# enabled = true
+
+# Example: Anthropic (direct API)
+# [[providers]]
+# name = "anthropic"
+# type = "anthropic_native"
+# api_base = "https://api.anthropic.com/v1"
+# api_key = "sk-ant-..."
+# enabled = true
+
+# Example: DeepSeek
+# [[providers]]
+# name = "deepseek"
+# type = "deepseek"
+# api_base = "https://api.deepseek.com/v1"
+# api_key = ""
+# enabled = true
+
+# Example: Ollama (local)
+# [[providers]]
+# name = "ollama"
+# type = "ollama"
+# api_base = "http://localhost:11434/v1"
+# enabled = true
+
+
+# ─── Agents ──────────────────────────────────────────────────────────────
+
+[agent_defaults]
+# Defaults applied to every new agent unless overridden at creation.
+# temperature = 0.5
+# context_window = 128000
+# max_tool_iterations = 15
+# tool_profile = "full"          # full | chat_only | none
+# memory_enabled = true
+# auto_compact = true
+
+
+# ─── Tenant quotas (multi-tenant deployments) ────────────────────────────
+
+# [quota]
+# monthly_tokens_cents   = 10000    # $100/month per tenant
+# max_agents_per_tenant  = 50
+# max_sessions_per_day   = 500
+
+
+# ─── Email (SMTP) ────────────────────────────────────────────────────────
+#
+# Optional. When configured, Qorven can send outbound email via the
+# `email_send` tool and deliver magic-link password resets over email
+# instead of logging them.
+
+[email]
+# smtp_host = "smtp.example.com"
+# smtp_port = 465               # 465 (implicit TLS) or 587 (STARTTLS)
+# smtp_user = "qorven@example.com"
+# smtp_pass = ""                # prefer env: QORVEN_SMTP_PASS
+# from      = "qorven@example.com"
+# from_name = "Qorven"
+
+
+# ─── Telegram ────────────────────────────────────────────────────────────
+#
+# Optional. Paste the bot token from @BotFather to connect Qorven
+# agents to Telegram DMs and groups.
+
+[telegram]
+# bot_token = ""                # prefer env: QORVEN_TELEGRAM_BOT_TOKEN
+
+
+# ─── Web search (optional, for /research + web_search tool) ──────────────
+#
+# Run your own SearXNG instance or point at a hosted one for private,
+# aggregated search without per-query API fees.
+
+# searxng_url = "http://localhost:8888"
+
+
+# ─── Self-improvement loop ───────────────────────────────────────────────
+#
+# When enabled, the named agent wakes up on an interval to audit its
+# own behaviour and post findings to the supervisor. Keep disabled on
+# fresh installs — it only adds value once you have weeks of history.
+
+[self_build]
+enabled = false
+interval = "6h"
+agent_id = "prime"
+
+
+# ─── LLM Stats enrichment (optional) ─────────────────────────────────────
+#
+# When an API key is set, Qorven fetches live pricing / context /
+# modality data for known models and merges it into the Models Hub
+# catalog. Refresh happens once on boot, then every refresh_hours.
+#
+# Sign up at https://llm-stats.com for an API key. Leave api_key
+# empty to skip enrichment — the static catalog (1,773 models) still
+# works without it.
+
+[llm_stats]
+# api_key       = ""
+# refresh_hours = 24
+
+
+# ─── Managed (for Qorven Cloud — ignored in self-hosted mode) ────────────
+
+[managed]
+# enabled     = false
+# credits_api = ""
+# billing_api = ""

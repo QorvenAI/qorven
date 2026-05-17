@@ -1,0 +1,44 @@
+# [[.Name]]
+
+[[.Description]]
+
+Scaffolded by `qorven agent init`. See `AGENTS.md` in the Qorven repo root for the full contract.
+
+## Contract
+
+- **Input:** JSON on STDIN matching `parameters.json`.
+- **Output:** JSON on STDOUT (the LLM sees this verbatim).
+- **Errors:** write diagnostic to STDERR, exit(1). exit(0) on success.
+- **Sandbox:** no network, no filesystem, 4 MiB memory cap, 2 s runtime cap.
+
+## Build
+
+```bash
+make build        # produces [[.Name]].wasm
+```
+
+Requires Go ≥ 1.21 (native `GOOS=wasip1 GOARCH=wasm` target).
+
+## Upload
+
+```bash
+export TOKEN=<admin-jwt>    # from POST /auth/login
+make upload
+```
+
+The gateway responds with `201 Created` and echoes the sha256 + size. If the gateway rejects:
+
+| Code | Meaning | Fix |
+|---|---|---|
+| `admin_only` | Current user is not an admin | Log in as an admin account |
+| `reserved_name` | Name collides with a platform-reserved tool | Rename the plugin; `AGENTS.md` §5 lists reserved names |
+| `invalid_name` | Name is not `^[a-z][a-z0-9_]{0,62}$` | Use snake_case starting with a letter |
+| `payload_too_large` | Wasm > 8 MiB | Shrink the binary (TinyGo produces 50 KiB binaries) |
+
+## Invoke (from an agent run)
+
+Once uploaded, Qorven's orchestrator will include this tool in every plan run for the uploading tenant. The LLM can call it by name (`[[.Name]]`) with the `parameters.json` schema. The per-invocation response lands in the LLM's next turn.
+
+## Iterate
+
+Every `make upload` with a changed binary revokes the previous row and inserts a new one with a new sha256 — history preserved for audit. Call `DELETE /v1/wasm-plugins/[[.Name]]` to retire the plugin entirely.

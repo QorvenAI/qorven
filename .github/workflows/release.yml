@@ -1,0 +1,193 @@
+# Release workflow — Qorven
+#
+# Triggered on git tag push matching v*. Produces:
+#   - Cross-compiled binaries with the embedded web UI for:
+#       linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
+#       windows/amd64
+#   - SHA-256 sidecar for every binary (consumed by `qorven update`)
+#   - GitHub Release with notes from CHANGELOG.md (if present)
+#   - install.sh attached as a release asset so operators can pin
+#     a known-good installer to a specific version.
+#
+# No telemetry. The binary's only network call at boot is whatever
+# the operator configures (LLM providers).
+
+name: release
+
+on:
+  push:
+    tags: ["qorven-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag (e.g. qorven-v0.2.0-alpha)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "version=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${REF#refs/tags/}"; echo "version=${TAG#qorven-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build web UI (static export)
+        working-directory: web
+        env:
+          QORVEN_STATIC: "1"
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Populate embed dir
+        run: |
+          rm -rf backend/internal/webui/dist
+          mkdir -p backend/internal/webui/dist
+          cp -r web/out/. backend/internal/webui/dist/
+          printf '*\n!.gitignore\n!.embedded\n' > backend/internal/webui/dist/.gitignore
+          printf 'Release build populated this dir.\n' > backend/internal/webui/dist/.embedded
+
+      - name: Build binary
+        working-directory: backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
+          CGO_ENABLED: "0"
+        run: |
+          OUT="qorven-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then OUT="${OUT}.exe"; fi
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X 'github.com/qorvenai/qorven/cmd.Version=${VERSION}'" \
+            -o "dist/${OUT}" .
+          ( cd dist && sha256sum "${OUT}" > "${OUT}.sha256" && cat "${OUT}.sha256" )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qorven-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            backend/dist/qorven-${{ matrix.goos }}-${{ matrix.goarch }}*
+          retention-days: 14
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find dist -type f \( -name 'qorven-*' -o -name '*.sha256' \) -exec cp {} release/ \;
+          cp install.sh release/install.sh
+          ls -lh release/
+
+      - name: Resolve tag
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "tag=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${REF#refs/tags/}"; echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          VER="${TAG#qorven-}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v tag="$VER" 'BEGIN{f=0} $0=="## "tag{f=1;next} /^## /{f=0} f' CHANGELOG.md > RELEASE_NOTES.md
+            [ -s RELEASE_NOTES.md ] || echo "Release $TAG." > RELEASE_NOTES.md
+          else
+            echo "Release $TAG." > RELEASE_NOTES.md
+          fi
+          # Append install commands
+          printf "\n\n## Install\n\n\`\`\`bash\ncurl -fsSL https://get.qorven.ai | sudo bash\n\`\`\`\n" >> RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: release/*
+          draft: false
+          make_latest: false
+          fail_on_unmatched_files: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-rc') || contains(steps.version.outputs.tag, '-beta') || contains(steps.version.outputs.tag, '-alpha') }}
+
+      - name: Publish install.sh to get.qorven.ai
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Upload to both keys: curl-pipe path (index) and explicit path (install.sh)
+          for key in index install.sh; do
+            aws s3 cp install.sh "s3://get.qorven.ai/${key}" \
+              --content-type "text/plain; charset=utf-8" \
+              --cache-control "no-cache, no-store, must-revalidate"
+          done
+          # Bust CloudFront so the new script is live within ~30 s
+          aws cloudfront create-invalidation \
+            --distribution-id E26ILMD5IZVM7R \
+            --paths "/*"
+          echo "get.qorven.ai updated to ${{ steps.version.outputs.tag }}"

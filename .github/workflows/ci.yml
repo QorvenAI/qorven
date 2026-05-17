@@ -1,0 +1,102 @@
+# CI — runs on every push to main and every PR. Catches breakage
+# before merge. The existing backend.yml workflow covers Go vet +
+# tests + multi-arch build; this one adds the frontend-side checks
+# (typecheck, static-export sanity) and a tiny "embed build" smoke
+# that proves the release pipeline's shape still compiles.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web (typecheck + static build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Install deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Type-check
+        working-directory: web
+        run: pnpm exec tsc --noEmit
+      - name: Lint — no thin fonts
+        working-directory: web
+        run: |
+          # Reject Tailwind thin/extralight/light weight utilities in tsx/ts files,
+          # and font-family: overrides in CSS files.
+          # Metronic tokens are the only allowed typography source.
+          # (JS-style camelCase `fontFamily:` in inline style objects is allowed.)
+          FAIL=0
+          # 1. Tailwind utility classes font-thin, font-extralight, font-light
+          if grep -rn --include="*.tsx" --include="*.ts" \
+              -E "\bfont-(thin|extralight|light)\b" \
+              --exclude-dir=node_modules .; then
+            echo "ERROR: Tailwind thin/extralight/light font-weight class found." && FAIL=1
+          fi
+          # 2. CSS property font-family in .css files (outside node_modules/.next)
+          if grep -rn --include="*.css" \
+              -E "^\s*font-family\s*:" \
+              --exclude-dir=node_modules --exclude-dir=.next .; then
+            echo "ERROR: font-family CSS override found — use Metronic tokens instead." && FAIL=1
+          fi
+          [ "$FAIL" -eq 0 ] && echo "Font check passed." || exit 1
+      - name: Static export build
+        working-directory: web
+        env:
+          QORVEN_STATIC: "1"
+        run: pnpm build
+
+  embed:
+    name: embed smoke (web export + go build)
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Build web
+        working-directory: web
+        env:
+          QORVEN_STATIC: "1"
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Populate embed dir
+        run: |
+          rm -rf backend/internal/webui/dist
+          mkdir -p backend/internal/webui/dist
+          cp -r web/out/. backend/internal/webui/dist/
+          printf '*\n!.gitignore\n!.embedded\n' > backend/internal/webui/dist/.gitignore
+          printf 'CI embed smoke.\n' > backend/internal/webui/dist/.embedded
+      - name: Build embedded binary
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -o /tmp/qorven .
+          ls -lh /tmp/qorven
+          /tmp/qorven version || true

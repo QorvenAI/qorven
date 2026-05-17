@@ -1,0 +1,20 @@
+# Qorven Configuration (Docker)
+# Generated for docker-compose deployment
+
+[server]
+listen = "0.0.0.0:4200"
+
+[database]
+# DSN comes from QORVEN_POSTGRES_DSN env var
+
+[auth]
+# Generate with: openssl rand -hex 32
+gateway_token = "change-me-to-a-random-token"
+encryption_key = "change-me-to-a-random-32-byte-key!!"
+
+# Add your LLM provider:
+# [[providers]]
+# name = "deepseek"
+# type = "openai"
+# api_base = "https://api.deepseek.com/v1"
+# api_key = "sk-your-key-here"

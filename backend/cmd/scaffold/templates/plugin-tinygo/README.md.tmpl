@@ -1,0 +1,59 @@
+# [[.Name]] (TinyGo variant)
+
+[[.Description]]
+
+Scaffolded by `qorven agent init --runtime tinygo`. The Go source is byte-identical to the standard-Go template — only the toolchain differs.
+
+## Why TinyGo
+
+| Toolchain | Artifact size | Binary startup | Notes |
+|---|---|---|---|
+| Standard Go (wasip1) | ~3.2 MiB | ~300 ms | Full runtime, GC, reflect |
+| TinyGo (wasi-p1) | **~50 KiB** | ~15 ms | Stripped runtime, no reflect |
+
+In a multi-tenant Qorven gateway, each tenant's plugin lives in DB + RAM. TinyGo's 60× smaller artifact + faster cold start pays off on every invocation.
+
+## Install TinyGo
+
+- **macOS:** `brew install tinygo`
+- **Linux:** https://tinygo.org/getting-started/install/linux/
+- **Docker:** `docker run --rm -v $PWD:/src -w /src tinygo/tinygo:0.34 tinygo build ...`
+
+Minimum version: 0.34 (the first with stable `wasi-p1` target).
+
+## Build
+
+```bash
+make build        # produces [[.Name]].wasm, ~50 KiB
+```
+
+If `make build` errors with "tinygo not found", either install it or switch templates:
+
+```bash
+qorven agent init --runtime go   # standard Go fallback
+```
+
+## Upload
+
+Same as the standard-Go template — the uploaded `.wasm` is indistinguishable to the Qorven gateway; only the binary happens to be smaller.
+
+```bash
+export TOKEN=<admin-jwt>
+make upload
+```
+
+## Caveats
+
+- **No `cgo` imports.** TinyGo wasi targets don't support cgo — pure-Go only.
+- **Limited `reflect`.** TinyGo implements a subset of `reflect`. Libraries that reach for `reflect.Value.Call` or field-walking at runtime may not compile. `encoding/json` works for the common case (struct marshal/unmarshal).
+- **`time.Now()` returns zero.** WASI wall-clock access works but TinyGo's stripped runtime may return stubs in some flag combinations. Don't rely on it inside a plugin — the host is the time source.
+
+## Switching back to standard Go
+
+If TinyGo's restrictions bite you, regenerate with:
+
+```bash
+qorven agent init --runtime go --name [[.Name]]
+```
+
+and copy over any custom logic you've written in `plugin.go`. The two templates share the same Request/Response shape so the move is a single `cp`.

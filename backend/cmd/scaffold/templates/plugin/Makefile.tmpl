@@ -1,0 +1,28 @@
+# Build + upload targets for [[.Name]].
+#
+# Override GATEWAY and TOKEN via env:
+#   make upload GATEWAY=https://qorven.example.com TOKEN=$JWT
+
+PLUGIN := [[.Name]]
+GATEWAY ?= http://localhost:8080
+TOKEN ?=
+
+.PHONY: build upload clean
+
+## build — compile to wasip1 Wasm.
+build:
+	GOOS=wasip1 GOARCH=wasm go build -o $(PLUGIN).wasm .
+	@ls -lh $(PLUGIN).wasm
+
+## upload — POST the built .wasm to /v1/wasm-plugins.
+upload: build
+	@test -n "$(TOKEN)" || (echo "ERROR: set TOKEN=<admin-jwt>"; exit 1)
+	curl -fsSL -X POST "$(GATEWAY)/v1/wasm-plugins" \
+		-H "Authorization: Bearer $(TOKEN)" \
+		-F "name=$(PLUGIN)" \
+		-F "description=[[.Description]]" \
+		-F "parameters=$$(cat parameters.json)" \
+		-F "wasm=@$(PLUGIN).wasm" | jq .
+
+clean:
+	rm -f $(PLUGIN).wasm

@@ -1,0 +1,68 @@
+// [[.Name]] — scaffolded Qorven Wasm plugin (TinyGo variant).
+//
+// This file is byte-identical to the standard-Go template. TinyGo
+// accepts the same main() + io.ReadAll + encoding/json shape. The
+// runtime differences are entirely in the build toolchain; see
+// Makefile.
+//
+// Target artifact: ~50 KiB (vs. ~3.2 MiB with standard Go). The
+// 60× size reduction matters in a multi-tenant SaaS — with 1000
+// plugins the wire + memory footprint drops from ~3 GB to ~50 MB.
+//
+// Build:
+//   make build    # requires tinygo ≥ 0.34 (see README)
+//
+// Upload: same as the standard-Go template.
+
+package main
+
+import (
+	"encoding/json"
+	"io"
+	"os"
+)
+
+// Request is the JSON shape the host sends on STDIN. Edit to match
+// the `parameters` schema you upload alongside the binary.
+type Request struct {
+	// TODO: add your input fields here.
+	Input string `json:"input"`
+}
+
+// Response is the JSON shape you emit on STDOUT. The orchestrator
+// forwards this verbatim to the LLM as a tool-call result. Keep it
+// small — the LLM sees every byte.
+type Response struct {
+	Output string `json:"output"`
+}
+
+func main() {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Stderr.WriteString("[[.Name]]: read stdin: " + err.Error())
+		os.Exit(1)
+	}
+
+	var req Request
+	if err := json.Unmarshal(raw, &req); err != nil {
+		os.Stderr.WriteString("[[.Name]]: decode request: " + err.Error())
+		os.Exit(1)
+	}
+
+	// TODO: your logic here. The sandbox has no network and no
+	// filesystem; anything I/O related must be passed in via the
+	// Request JSON or left to the orchestrator.
+	resp := Response{
+		Output: "received: " + req.Input,
+	}
+
+	out, err := json.Marshal(resp)
+	if err != nil {
+		os.Stderr.WriteString("[[.Name]]: encode response: " + err.Error())
+		os.Exit(1)
+	}
+	if _, err := os.Stdout.Write(out); err != nil {
+		os.Stderr.WriteString("[[.Name]]: write stdout: " + err.Error())
+		os.Exit(1)
+	}
+}

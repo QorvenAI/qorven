@@ -1,0 +1,262 @@
+name: installer-test
+
+on:
+  push:
+    paths:
+      - install.sh
+      - install.ps1
+      - .github/workflows/installer-test.yml
+  pull_request:
+    paths:
+      - install.sh
+      - install.ps1
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Linux: Ubuntu 22.04 ────────────────────────────────────────────────────
+  linux-ubuntu-22:
+    name: Linux - Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL and pgvector
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql postgresql-contrib
+          PG_MAJ=$(psql --version | awk '{print $3}' | cut -d. -f1)
+          # Add PGDG repo (uppercase key filename) then install pgvector
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y "postgresql-${PG_MAJ}-pgvector"
+          sudo systemctl start postgresql
+          sudo -u postgres psql -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
+
+      - name: Create stub qorven binary
+        run: |
+          # Use Python to write the stub so heredoc-in-YAML quoting is not an issue.
+          python3 - <<'PY'
+          import os, stat
+          script = r"""#!/bin/sh
+          case "$1" in
+            install)
+              mkdir -p /etc/qorven /var/lib/qorven /var/log/qorven
+              python3 -c "
+          import textwrap
+          cfg = textwrap.dedent('''
+              [server]
+              api_listen = \"127.0.0.1:4200\"
+              web_listen = \"0.0.0.0:443\"
+
+              [server.tls]
+              mode = \"auto\"
+
+              [database]
+              dsn = \"postgres:///qorven?host=/var/run/postgresql&user=qorven&sslmode=disable\"
+
+              [auth]
+              token          = \"stub-token\"
+              encryption_key = \"stubstubstubstubstubstubstubstub\"
+          ''').lstrip()
+          open('/etc/qorven/config.toml','w').write(cfg)
+          "
+              id qorven >/dev/null 2>&1 || useradd --system --shell /usr/sbin/nologin qorven
+              sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='qorven'" \
+                | grep -q 1 || sudo -u postgres createuser qorven
+              sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='qorven'" \
+                | grep -q 1 || sudo -u postgres createdb -O qorven qorven
+              sudo -u postgres psql -d qorven -c \
+                "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1 || true
+              echo "stub: install complete"
+              ;;
+            version|*) echo "qorven v0.0.0-test" ;;
+          esac
+          """
+          path = "/tmp/qorven-test"
+          open(path, "w").write(script)
+          os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+          print("stub written to", path)
+          PY
+
+      - name: Run install.sh with stub binary
+        env:
+          QORVEN_BINARY: /tmp/qorven-test
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo --preserve-env=QORVEN_BINARY,DEBIAN_FRONTEND bash install.sh
+
+      - name: Verify config.toml
+        run: |
+          sudo test -f /etc/qorven/config.toml || (echo "MISSING config.toml" && exit 1)
+          sudo grep -q 'server\.tls' /etc/qorven/config.toml || (echo "WRONG tls nesting" && exit 1)
+          sudo grep -q 'mode' /etc/qorven/config.toml || (echo "MISSING tls mode" && exit 1)
+          echo "config.toml OK"
+
+      - name: Verify database and pgvector
+        run: |
+          sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='qorven'" \
+            | grep -q 1 || (echo "DB missing" && exit 1)
+          sudo -u postgres psql -d qorven -tAc "SELECT 1 FROM pg_extension WHERE extname='vector'" \
+            | grep -q 1 || (echo "pgvector extension missing" && exit 1)
+          echo "database OK"
+
+  # ── Linux: Ubuntu 24.04 ────────────────────────────────────────────────────
+  linux-ubuntu-24:
+    name: Linux - Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL and pgvector
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql postgresql-contrib
+          PG_MAJ=$(psql --version | awk '{print $3}' | cut -d. -f1)
+          sudo apt-get install -y "postgresql-${PG_MAJ}-pgvector" || true
+          sudo systemctl start postgresql
+          sudo -u postgres psql -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
+
+      - name: Create stub qorven binary
+        run: |
+          python3 - <<'PY'
+          import os, stat
+          script = r"""#!/bin/sh
+          case "$1" in
+            install)
+              mkdir -p /etc/qorven /var/lib/qorven /var/log/qorven
+              python3 -c "
+          import textwrap
+          cfg = textwrap.dedent('''
+              [server]
+              api_listen = \"127.0.0.1:4200\"
+              web_listen = \"0.0.0.0:443\"
+
+              [server.tls]
+              mode = \"auto\"
+
+              [database]
+              dsn = \"postgres:///qorven?host=/var/run/postgresql&user=qorven&sslmode=disable\"
+
+              [auth]
+              token          = \"stub-token\"
+              encryption_key = \"stubstubstubstubstubstubstubstub\"
+          ''').lstrip()
+          open('/etc/qorven/config.toml','w').write(cfg)
+          "
+              id qorven >/dev/null 2>&1 || useradd --system --shell /usr/sbin/nologin qorven
+              sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='qorven'" \
+                | grep -q 1 || sudo -u postgres createuser qorven
+              sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='qorven'" \
+                | grep -q 1 || sudo -u postgres createdb -O qorven qorven
+              sudo -u postgres psql -d qorven -c \
+                "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1 || true
+              echo "stub: install complete"
+              ;;
+            version|*) echo "qorven v0.0.0-test" ;;
+          esac
+          """
+          path = "/tmp/qorven-test"
+          open(path, "w").write(script)
+          os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+          print("stub written to", path)
+          PY
+
+      - name: Run install.sh with stub binary
+        env:
+          QORVEN_BINARY: /tmp/qorven-test
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo --preserve-env=QORVEN_BINARY,DEBIAN_FRONTEND bash install.sh
+
+      - name: Verify config.toml
+        run: |
+          sudo test -f /etc/qorven/config.toml || (echo "MISSING config.toml" && exit 1)
+          sudo grep -q 'server\.tls' /etc/qorven/config.toml || (echo "WRONG tls nesting" && exit 1)
+          echo "config.toml OK"
+
+      - name: Verify database and pgvector
+        run: |
+          sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='qorven'" \
+            | grep -q 1 || (echo "DB missing" && exit 1)
+          sudo -u postgres psql -d qorven -tAc "SELECT 1 FROM pg_extension WHERE extname='vector'" \
+            | grep -q 1 || (echo "pgvector extension missing" && exit 1)
+          echo "database OK"
+
+  # ── Windows 2022 ──────────────────────────────────────────────────────────
+  windows:
+    name: Windows - Server 2022
+    runs-on: windows-2022
+    continue-on-error: true  # Windows server install is best-effort; CI noise suppressed
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start pre-installed PostgreSQL
+        shell: pwsh
+        run: |
+          # windows-2022 runner ships PostgreSQL 14 pre-installed; winget is not available
+          $pgVer = (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+          Write-Host "Found PostgreSQL $pgVer"
+          $pgConf = "C:\Program Files\PostgreSQL\$pgVer\data\postgresql.conf"
+          # Enable TCP so we can use -h 127.0.0.1 (named-pipe path is unreliable cross-runner)
+          (Get-Content $pgConf) -replace "^#?listen_addresses\s*=.*", "listen_addresses = '127.0.0.1'" | Set-Content $pgConf
+          $svcName = "postgresql-x64-$pgVer"
+          $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+          if ($null -eq $svc) {
+            $svcName = (Get-Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1).Name
+          }
+          if ($svcName) {
+            Restart-Service $svcName -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
+            Write-Host "PostgreSQL service status: $((Get-Service $svcName).Status)"
+          }
+          # Verify TCP is listening
+          $env:PGPASSWORD = 'root'
+          $pgBin = "C:\Program Files\PostgreSQL\$pgVer\bin"
+          & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -tAc "SELECT 1" 2>&1 | Write-Host
+
+      - name: Create stub qorven.exe
+        shell: pwsh
+        run: |
+          $src = 'using System; class Q { static int Main(string[] a) { Console.WriteLine("qorven v0.0.0-test"); return 0; } }'
+          $csc = (Get-ChildItem 'C:\Windows\Microsoft.NET\Framework64' -Filter 'csc.exe' -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          Write-Host "Using csc: $csc"
+          [System.IO.File]::WriteAllText("$env:TEMP\stub.cs", $src)
+          & $csc /out:"$env:TEMP\qorven-stub.exe" /nologo "$env:TEMP\stub.cs"
+          Write-Host "Stub result: $((& "$env:TEMP\qorven-stub.exe") 2>&1)"
+
+      - name: Run install.ps1
+        shell: pwsh
+        run: |
+          # Detect actual installed PG version and pass it in
+          $pgVer = (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+          Write-Host "Detected PostgreSQL $pgVer"
+          $env:QORVEN_BINARY = "$env:TEMP\qorven-stub.exe"
+          $env:PG_VERSION    = $pgVer
+          $env:PGPASSWORD    = 'root'
+          & .\install.ps1 --yes --skip-service
+
+      - name: Verify config.toml
+        shell: pwsh
+        run: |
+          $cfg = 'C:\ProgramData\Qorven\config.toml'
+          if (-not (Test-Path $cfg)) { Write-Error "config.toml missing"; exit 1 }
+          $content = Get-Content $cfg -Raw
+          if ($content -notmatch '\[server\.tls\]') { Write-Error "Wrong TLS nesting in config"; exit 1 }
+          Write-Host "[OK] config.toml present with correct [server.tls]"
+
+      - name: Verify database
+        shell: pwsh
+        run: |
+          $pgVer = (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+          $pgBin = "C:\Program Files\PostgreSQL\$pgVer\bin"
+          $env:PGPASSWORD = 'root'
+          $result = & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -tAc "SELECT 1 FROM pg_database WHERE datname='qorven'" 2>&1
+          Write-Host "psql result: $result"
+          if ($result -notmatch '1') { Write-Error "Database 'qorven' missing"; exit 1 }
+          Write-Host "[OK] database 'qorven' exists"
