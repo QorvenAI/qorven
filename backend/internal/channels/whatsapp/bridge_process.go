@@ -24,6 +24,7 @@ type BridgeProcess struct {
 	sidecarBin string // path to compiled sidecar index.js; auto-resolved if empty
 
 	mu        sync.RWMutex
+	writeMu   sync.Mutex // serializes all WebSocket writes (gorilla/websocket requires it)
 	clients   map[*websocket.Conn]struct{}
 	qrSubs    []func(string)
 	msgSubs   []func(BridgeMessage)
@@ -178,7 +179,9 @@ func (bp *BridgeProcess) broadcast(msg any) error {
 		return fmt.Errorf("no sidecar connected")
 	}
 	for conn := range bp.clients {
+		bp.writeMu.Lock()
 		conn.WriteMessage(websocket.TextMessage, payload)
+		bp.writeMu.Unlock()
 	}
 	return nil
 }
@@ -258,7 +261,9 @@ func (bp *BridgeProcess) handleWS(w http.ResponseWriter, r *http.Request) {
 			slog.Info("whatsapp.pairing_code", "code", code, "channel", bp.channelID)
 
 		case "ping":
+			bp.writeMu.Lock()
 			conn.WriteJSON(map[string]string{"type": "pong"})
+			bp.writeMu.Unlock()
 		}
 	}
 }
