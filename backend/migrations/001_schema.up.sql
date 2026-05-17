@@ -3745,6 +3745,8 @@ ALTER TABLE ONLY public.scenarios
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
+ALTER TABLE public.schema_migrations
+    DROP CONSTRAINT IF EXISTS schema_migrations_pkey;
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
 
