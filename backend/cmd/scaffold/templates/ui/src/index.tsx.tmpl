@@ -1,0 +1,30 @@
+/// <reference path="../qorven-app.d.ts" />
+
+if (!window.__QorvenUI) {
+  console.error('[[.NameTitle]]: Qorven UI SDK not available — is this bundle running inside a Qorven host?');
+} else {
+  const { Button, Card } = window.__QorvenUI;
+  const { register, React } = window.__QorvenApp;
+
+  function [[.NamePascal]]Page() {
+    return (
+      <Card>
+        <div className="p-6">
+          <h2 className="text-sm font-semibold mb-4">[[.NameTitle]]</h2>
+          <Button>Hello from [[.NameTitle]]!</Button>
+        </div>
+      </Card>
+    );
+  }
+
+  register({
+    id: '[[.Name]]',
+    pages: [
+      {
+        id: 'home',
+        path: 'home',
+        component: () => <[[.NamePascal]]Page />,
+      },
+    ],
+  });
+}

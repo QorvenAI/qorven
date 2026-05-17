@@ -1,0 +1,138 @@
+// Copyright 2026 Qorven AI. All rights reserved.
+// Use of this source code is governed by the FSL-1.1-ALv2 license
+// that can be found in the LICENSE file.
+
+// Package sandbox — fsbridge.go provides sandboxed file operations via Docker exec.
+//
+// When sandbox is enabled, file tools (read_file, write_file, list_files)
+// route through FsBridge instead of direct host filesystem access.
+package sandbox
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// FsBridge provides sandboxed file operations via Docker exec.
+type FsBridge struct {
+	containerID string
+	workdir     string
+}
+
+// NewFsBridge creates a bridge to a running sandbox container.
+func NewFsBridge(containerID, workdir string) *FsBridge {
+	if workdir == "" {
+		workdir = "/workspace"
+	}
+	return &FsBridge{containerID: containerID, workdir: workdir}
+}
+
+// ReadFile reads file contents from inside the container.
+func (b *FsBridge) ReadFile(ctx context.Context, path string) (string, error) {
+	resolved := b.resolvePath(path)
+	stdout, stderr, exitCode, err := b.dockerExec(ctx, nil, "cat", "--", resolved)
+	if err != nil {
+		return "", fmt.Errorf("fsbridge read: %w", err)
+	}
+	if exitCode != 0 {
+		return "", fmt.Errorf("read failed: %s", strings.TrimSpace(stderr))
+	}
+	return stdout, nil
+}
+
+// WriteFile writes content to a file inside the container.
+func (b *FsBridge) WriteFile(ctx context.Context, path, content string) error {
+	resolved := b.resolvePath(path)
+
+	// Create parent directory
+	dir := resolved[:strings.LastIndex(resolved, "/")]
+	if dir != "" && dir != "/" {
+		_, _, _, _ = b.dockerExec(ctx, nil, "mkdir", "-p", dir)
+	}
+
+	_, stderr, exitCode, err := b.dockerExec(ctx, []byte(content), "sh", "-c", fmt.Sprintf("cat > %q", resolved))
+	if err != nil {
+		return fmt.Errorf("fsbridge write: %w", err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("write failed: %s", strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
+// ListDir lists files and directories inside the container.
+func (b *FsBridge) ListDir(ctx context.Context, path string) (string, error) {
+	resolved := b.resolvePath(path)
+	stdout, stderr, exitCode, err := b.dockerExec(ctx, nil, "ls", "-la", "--", resolved)
+	if err != nil {
+		return "", fmt.Errorf("fsbridge list: %w", err)
+	}
+	if exitCode != 0 {
+		return "", fmt.Errorf("list failed: %s", strings.TrimSpace(stderr))
+	}
+	return stdout, nil
+}
+
+// Stat checks if a path exists and returns basic info.
+func (b *FsBridge) Stat(ctx context.Context, path string) (string, error) {
+	resolved := b.resolvePath(path)
+	stdout, stderr, exitCode, err := b.dockerExec(ctx, nil, "stat", "--", resolved)
+	if err != nil {
+		return "", fmt.Errorf("fsbridge stat: %w", err)
+	}
+	if exitCode != 0 {
+		return "", fmt.Errorf("stat failed: %s", strings.TrimSpace(stderr))
+	}
+	return stdout, nil
+}
+
+// resolvePath resolves a path relative to the container workdir.
+func (b *FsBridge) resolvePath(path string) string {
+	if path == "" || path == "." {
+		return b.workdir
+	}
+	if strings.HasPrefix(path, "/") {
+		cleaned := filepath.Clean(path)
+		if cleaned == b.workdir || strings.HasPrefix(cleaned, b.workdir+"/") {
+			return cleaned
+		}
+		return b.workdir // fallback for escapes
+	}
+	return filepath.Clean(filepath.Join(b.workdir, path))
+}
+
+// dockerExec runs a command inside the container.
+func (b *FsBridge) dockerExec(ctx context.Context, stdin []byte, args ...string) (string, string, int, error) {
+	dockerArgs := []string{"exec"}
+	if stdin != nil {
+		dockerArgs = append(dockerArgs, "-i")
+	}
+	dockerArgs = append(dockerArgs, b.containerID)
+	dockerArgs = append(dockerArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+			err = nil
+		} else {
+			return "", "", -1, err
+		}
+	}
+
+	return stdout.String(), stderr.String(), exitCode, nil
+}

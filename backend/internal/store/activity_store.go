@@ -1,0 +1,44 @@
+// Copyright 2026 Qorven AI. All rights reserved.
+// Use of this source code is governed by the FSL-1.1-ALv2 license
+// that can be found in the LICENSE file.
+
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// ActivityLog represents a single audit log entry.
+type ActivityLog struct {
+	ID         uuid.UUID       `json:"id"`
+	ActorType  string          `json:"actor_type"`
+	ActorID    string          `json:"actor_id"`
+	Action     string          `json:"action"`
+	EntityType string          `json:"entity_type,omitempty"`
+	EntityID   string          `json:"entity_id,omitempty"`
+	Details    json.RawMessage `json:"details,omitempty"`
+	IPAddress  string          `json:"ip_address,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+// ActivityListOpts configures activity log listing.
+type ActivityListOpts struct {
+	ActorType  string
+	ActorID    string
+	Action     string
+	EntityType string
+	EntityID   string
+	Limit      int
+	Offset     int
+}
+
+// ActivityStore manages activity audit logs.
+type ActivityStore interface {
+	Log(ctx context.Context, entry *ActivityLog) error
+	List(ctx context.Context, opts ActivityListOpts) ([]ActivityLog, error)
+	Count(ctx context.Context, opts ActivityListOpts) (int, error)
+}

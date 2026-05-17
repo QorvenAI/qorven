@@ -1,0 +1,19 @@
+# errcheck exclusions for Qorven backend.
+# Lines are patterns of the form: package.Function
+# These are intentionally unchecked — all are either side-effect-only (fmt.*),
+# cleanup calls where the error cannot be acted on (Close after write done),
+# or test-only helpers.
+fmt.Fprintf
+fmt.Fprintln
+fmt.Printf
+fmt.Println
+(io.Closer).Close
+(*os.File).Close
+(*compress/gzip.Writer).Close
+(*archive/tar.Writer).Close
+(*database/sql.Rows).Close
+(*github.com/jackc/pgx/v5.Rows).Close
+(*net/http.Response.Body).Close
+os.Remove
+os.MkdirAll
+syscall.SetNonblock

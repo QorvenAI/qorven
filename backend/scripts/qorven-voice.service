@@ -1,0 +1,15 @@
+[Unit]
+Description=Qorven Voice Server (Kokoro TTS + Faster-Whisper STT)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/qorven-voice
+EnvironmentFile=/opt/qorven/.env
+ExecStart=/opt/qorven-voice/venv/bin/python server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

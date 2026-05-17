@@ -1,0 +1,36 @@
+Qorven
+Copyright 2026 Tekky AI Academy LLP
+
+Licensed under the Functional Source License, Version 1.1, Apache 2.0
+Future License (FSL-1.1-ALv2). See LICENSE for the full license text.
+
+This product includes the following open-source components:
+
+  go-chi/chi           — BSD-3-Clause
+  jackc/pgx            — MIT
+  golang-jwt/jwt       — MIT
+  golang.org/x/crypto  — BSD-3-Clause (incl. golang.org/x/crypto/acme/autocert)
+  golang.org/x/oauth2  — BSD-3-Clause
+  aws/aws-sdk-go-v2    — Apache-2.0
+  pelletier/go-toml    — MIT
+  spf13/cobra          — Apache-2.0
+  nhooyr.io/websocket  — MIT
+  google/uuid          — BSD-3-Clause
+  pgvector/pgvector-go — MIT
+
+Frontend:
+  next.js              — MIT
+  react / react-dom    — MIT
+  tailwindcss          — MIT
+  sonner               — MIT
+  lucide-react         — ISC
+  @xyflow/react        — MIT
+  zustand              — MIT
+
+Model data enrichment:
+  Pricing / context / modality metadata for the Models Hub is enriched
+  from https://llm-stats.com under their public API terms. Attribution
+  shown in the Models Hub footer.
+
+Trademarks and product names referenced within this software are
+property of their respective owners.

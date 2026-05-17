@@ -1,0 +1,300 @@
+@layer components {
+  /* Layout Variables */
+  .qorven {
+    --rail-width: 60px;
+    --sidebar-width: 280px;
+    --sidebar-width-collapse: 0px;
+    --sidebar-default-width: 280px;
+    --header-height: 44px;
+    --context-panel-width: 320px;
+    --sidebar-transition-duration: 0.25s;
+    --sidebar-transition-timing: ease;
+    --toolbar-height: 44px;
+    --nav-width: calc(var(--rail-width) + var(--sidebar-width));
+  }
+
+  @media (max-width: theme(--breakpoint-lg)) {
+    .qorven {
+      --header-height: 44px;
+      --sidebar-width: 0px;
+    }
+  }
+
+  /* Header */
+  .qorven .header {
+    height: var(--header-height);
+  }
+
+  /* Rail — always visible */
+  .qorven .rail {
+    width: var(--rail-width);
+  }
+
+  /* Sidebar */
+  .qorven .sidebar {
+    width: var(--sidebar-width);
+  }
+
+  /* Wrapper — positioned AFTER rail+sidebar using margin, not padding */
+  .qorven .wrapper {
+    margin-left: var(--rail-width);
+    width: calc(100% - var(--rail-width));
+  }
+
+  .qorven.header-fixed .wrapper {
+    padding-top: var(--header-height);
+  }
+
+  .qorven.header-fixed.has-toolbar .wrapper {
+    padding-top: calc(var(--header-height) + var(--toolbar-height));
+  }
+
+  /* Header — spans full width, includes sidebar header area */
+  .qorven.header-fixed .header {
+    left: var(--rail-width);
+    right: 0;
+  }
+
+  /* Toolbar — fixed below header, same left/right as header */
+  .qorven .toolbar {
+    position: fixed;
+    top: var(--header-height);
+    left: var(--rail-width);
+    right: 0;
+    height: var(--toolbar-height);
+    z-index: 10;
+    border-bottom: 1px solid var(--border);
+    background: var(--background);
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    padding: 0 1.25rem;
+    gap: 0.625rem;
+  }
+
+  /* Desktop mode */
+  @media (min-width: theme(--breakpoint-lg)) {
+    .qorven .sidebar {
+      width: var(--sidebar-width);
+      transition: width var(--sidebar-transition-duration)
+        var(--sidebar-transition-timing);
+    }
+
+    .qorven.sidebar-fixed .wrapper {
+      margin-left: var(--nav-width);
+      width: calc(100% - var(--nav-width));
+    }
+
+    .qorven.sidebar-fixed.header-fixed .header {
+      left: var(--nav-width);
+      right: 0;
+    }
+
+    .qorven.sidebar-fixed .toolbar {
+      left: var(--nav-width);
+    }
+
+    /* Sidebar collapse — hides sidebar, rail stays */
+    .qorven.sidebar-collapse {
+      --sidebar-width: var(--sidebar-width-collapse);
+    }
+
+    .qorven.sidebar-collapse .sidebar {
+      transition: width var(--sidebar-transition-duration)
+        var(--sidebar-transition-timing);
+      overflow: hidden;
+    }
+
+    /* data-slot pattern: hide labels/badges when sidebar collapsed */
+    .qorven.sidebar-collapse .sidebar [data-slot='nav-label'],
+    .qorven.sidebar-collapse .sidebar [data-slot='nav-badge'],
+    .qorven.sidebar-collapse .sidebar [data-slot='sidebar-section-title'],
+    .qorven.sidebar-collapse .sidebar [data-slot='soul-status-text'],
+    .qorven.sidebar-collapse .sidebar [data-slot='soul-channel-badges'] {
+      display: none !important;
+    }
+
+    .qorven.sidebar-collapse .sidebar > * {
+      visibility: hidden;
+    }
+  }
+
+  /* Context Panel — shrinks wrapper when open */
+  .qorven .context-panel {
+    width: 0;
+    transition: width var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing);
+    overflow: hidden;
+  }
+
+  .qorven.context-panel-open .context-panel {
+    width: var(--context-panel-width);
+  }
+
+  .qorven.context-panel-open .wrapper {
+    width: calc(100% - var(--nav-width) - var(--context-panel-width));
+  }
+
+  .qorven.context-panel-open .header {
+    right: var(--context-panel-width);
+  }
+
+  .qorven.context-panel-open .toolbar {
+    right: var(--context-panel-width);
+  }
+
+  /* Right panel push — pushes content on lg+ screens, overlays on smaller */
+  @media (min-width: theme(--breakpoint-lg)) {
+    .qorven.right-panel-open .wrapper {
+      width: calc(100% - var(--nav-width) - 320px);
+    }
+    .qorven.sidebar-collapse.right-panel-open .wrapper {
+      width: calc(100% - var(--rail-width) - 320px);
+    }
+    .qorven.right-panel-open .header {
+      right: 320px;
+    }
+
+    .qorven.right-panel-open .toolbar {
+      right: 320px;
+    }
+  }
+
+  /* Smooth transitions after initial load — prevents flash */
+  .qorven.layout-initialized .wrapper {
+    transition: margin-left var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing),
+      width var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing);
+  }
+
+  .qorven.layout-initialized .header {
+    transition: left var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing),
+      right var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing);
+  }
+
+  .qorven.layout-initialized .toolbar {
+    transition: left var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing),
+      right var(--sidebar-transition-duration)
+      var(--sidebar-transition-timing);
+  }
+
+  /* Smooth transition when right panel pushes content */
+  .qorven.layout-initialized.right-panel-open .wrapper,
+  .qorven.layout-initialized:not(.right-panel-open) .wrapper {
+    transition: margin-left var(--sidebar-transition-duration) var(--sidebar-transition-timing),
+      width var(--sidebar-transition-duration) var(--sidebar-transition-timing);
+  }
+
+  /* Instant layout change — disable all transitions for one frame.
+     Used when navigating to/from /code to prevent sidebar slide animation. */
+  .qorven.no-transition .wrapper,
+  .qorven.no-transition .header,
+  .qorven.no-transition .toolbar,
+  .qorven.no-transition .sidebar,
+  .qorven.no-transition .right-panel {
+    transition: none !important;
+  }
+
+  /* Status bar — 24px pinned to the bottom. Main canvas always reserves
+     that space; bottom drawer stacks directly above it. */
+  .qorven {
+    --status-bar-height: 0px;
+    --bottom-drawer-height: 0px;
+  }
+
+  /* Main-canvas always leaves room for the status bar. When the drawer
+     is open, it also leaves room for the drawer. */
+  .qorven .main-canvas {
+    padding-bottom: calc(1.25rem + var(--status-bar-height));
+  }
+  .qorven.bottom-drawer-open .main-canvas {
+    padding-bottom: calc(1.25rem + var(--status-bar-height) + var(--bottom-drawer-height));
+  }
+  @media (min-width: theme(--breakpoint-lg)) {
+    .qorven .main-canvas {
+      padding-bottom: calc(1.5rem + var(--status-bar-height));
+    }
+    .qorven.bottom-drawer-open .main-canvas {
+      padding-bottom: calc(1.5rem + var(--status-bar-height) + var(--bottom-drawer-height));
+    }
+  }
+
+  /* Bottom drawer sits above the status bar. */
+  .qorven-bottom-drawer {
+    bottom: var(--status-bar-height) !important;
+  }
+
+  /* Main canvas — default centered content */
+  .qorven .main-canvas {
+    padding: 1.25rem;
+  }
+  .qorven .main-canvas > *:not(.full-bleed) {
+    max-width: 90rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  @media (min-width: theme(--breakpoint-lg)) {
+    .qorven .main-canvas {
+      padding: 1.5rem;
+    }
+  }
+  /* Full-bleed pages skip centering and padding */
+  .qorven .main-canvas > .full-bleed {
+    margin: -1.25rem;
+    width: calc(100% + 2.5rem);
+    max-width: none;
+  }
+  @media (min-width: theme(--breakpoint-lg)) {
+    .qorven .main-canvas > .full-bleed {
+      margin: -1.5rem;
+      width: calc(100% + 3rem);
+    }
+  }
+
+  /* Mobile: sidebar as overlay sheet */
+  @media (max-width: theme(--breakpoint-lg)) {
+    .qorven .sidebar {
+      position: fixed;
+      z-index: 40;
+      transform: translateX(-100%);
+      transition: transform var(--sidebar-transition-duration) var(--sidebar-transition-timing);
+    }
+    .qorven.sidebar-mobile-open .sidebar {
+      transform: translateX(0);
+    }
+    .qorven .wrapper {
+      margin-left: var(--rail-width);
+      width: calc(100% - var(--rail-width));
+    }
+  }
+
+  /* Mobile: rail hidden on small screens — show bottom nav bar */
+  @media (max-width: 640px) {
+    .qorven .rail { display: none; }
+    .qorven .wrapper { margin-left: 0; width: 100%; padding-bottom: 56px; }
+    .qorven .mobile-bottom-bar { display: flex; }
+  }
+  @media (min-width: 641px) { .qorven .mobile-bottom-bar { display: none; } }
+
+  /* Mobile bottom navigation bar */
+  .qorven .mobile-bottom-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+    height: 56px;
+    border-top: 1px solid var(--border);
+    background: var(--background);
+    align-items: center; justify-content: space-around;
+  }
+
+  /* Page content fade-in on mount */
+  .qorven .main-canvas > *:not(.full-bleed) {
+    animation: qorven-fadein 0.18s ease;
+  }
+  @keyframes qorven-fadein {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}

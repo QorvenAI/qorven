@@ -1,0 +1,30 @@
+# Binaries
+qorven
+*.exe
+
+# Environment
+.env
+.env.local
+
+# Go
+vendor/
+
+# UI
+ui/web/node_modules/
+ui/web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+*.db
+*.sqlite
+server.log
+config.toml

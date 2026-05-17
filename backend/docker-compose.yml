@@ -1,0 +1,59 @@
+# Qorven — docker-compose for local development.
+#
+# Quick start:
+#   cp .env.example .env              # or export the vars below manually
+#   docker compose up -d
+#
+# Required env (set in .env or shell):
+#   QORVEN_DB_PASSWORD   — picks the password for the local pg superuser.
+#                          No default — compose will refuse to start until
+#                          you set one.
+#
+# Optional env:
+#   QORVEN_API_PORT      default 4200
+#   QORVEN_WEB_PORT      default 3000
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: qorven
+      POSTGRES_PASSWORD: ${QORVEN_DB_PASSWORD:?set QORVEN_DB_PASSWORD in .env before compose up}
+      POSTGRES_DB: qorven
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qorven"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${QORVEN_API_PORT:-4200}:4200"
+    environment:
+      - QORVEN_POSTGRES_DSN=postgres://qorven:${QORVEN_DB_PASSWORD}@postgres:5432/qorven?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - qorven-data:/root/.qorven
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "${QORVEN_WEB_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:${QORVEN_API_PORT:-4200}
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  qorven-data:

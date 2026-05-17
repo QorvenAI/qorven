@@ -1,0 +1,164 @@
+# Backend CI — Qorven
+#
+# Phase 3 gate requirements:
+#   - Every PR + push to main runs `make verify` + `make build`.
+#   - The verify step uses `qorven migrate up` (P3E-01), not raw SQL
+#     replay, so CI exercises the exact migrator that ships.
+#   - Release builds produce BOTH linux/amd64 and linux/arm64 binaries
+#     with sha256 sidecars (P3E-02).
+#
+# If you move to a different CI tool, mirror these steps — do NOT drop
+# the verify step, do NOT go back to raw-SQL replay, and do NOT ship a
+# single-arch binary.
+#
+# See CONTRIBUTING.md for setup and workflow details.
+
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - .github/workflows/backend.yml
+  pull_request:
+    paths:
+      - backend/**
+      - .github/workflows/backend.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  verify:
+    name: verify (vet + test)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: qorven
+          POSTGRES_PASSWORD: qorven
+          POSTGRES_DB: qorven_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      QORVEN_TEST_DSN: postgres://qorven:qorven@localhost:5432/qorven_test?sslmode=disable
+      QORVEN_POSTGRES_DSN: postgres://qorven:qorven@localhost:5432/qorven_test?sslmode=disable
+      # Phase 4 (P4-D3-A): a restricted role is required for RLS tests
+      # to exercise the Postgres-level tenant boundary. The default
+      # Postgres service container role is a superuser and bypasses RLS
+      # regardless of policy/FORCE. The RLS suite will FAIL (no longer
+      # skip) if this DSN resolves to a role that has superuser or
+      # BYPASSRLS.
+      QORVEN_APP_TEST_DSN: postgres://qorven_app:qorven_app@localhost:5432/qorven_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Build qorven binary (needed for migrate up)
+        working-directory: backend
+        run: make build
+
+      - name: Apply database migrations via qorven binary
+        working-directory: backend
+        run: |
+          # Single source of truth — same migrator the gateway uses at
+          # boot. No raw-SQL replay; no tolerated errors.
+          ./qorven migrate up --dir ./migrations
+
+      - name: Seed the CI test tenant
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+          PGPASSWORD=qorven psql -h localhost -U qorven -d qorven_test -c "
+            INSERT INTO tenants (id, name, slug) VALUES
+              ('00000000-0000-0000-0000-000000000001', 'Test', 'test')
+            ON CONFLICT DO NOTHING;
+          "
+
+      - name: Provision restricted qorven_app role (RLS enforcement)
+        # Phase 4 (P4-D3-A): RLS tests MUST run under a non-superuser /
+        # non-bypass role, otherwise they silently pass for the wrong
+        # reason. The Postgres service container's bootstrap user
+        # (qorven) is a superuser; we create a dedicated restricted
+        # role that the RLS suite connects as. CI must FAIL if this
+        # role is missing — the rls_test.go file refuses to skip now.
+        run: |
+          PGPASSWORD=qorven psql -h localhost -U qorven -d qorven_test -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='qorven_app') THEN
+                CREATE ROLE qorven_app LOGIN PASSWORD 'qorven_app';
+              END IF;
+              EXECUTE 'ALTER ROLE qorven_app NOSUPERUSER NOBYPASSRLS';
+            END \$\$;
+            GRANT ALL ON ALL TABLES IN SCHEMA public TO qorven_app;
+            GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO qorven_app;
+            GRANT USAGE ON SCHEMA public TO qorven_app;
+          "
+          # Fail loudly if the role ended up with superuser / BYPASSRLS
+          # — the RLS tests depend on this assertion.
+          PGPASSWORD=qorven psql -h localhost -U qorven -d qorven_test -tAc "
+            SELECT CASE WHEN rolsuper OR rolbypassrls
+                        THEN 'FAIL'
+                        ELSE 'OK'
+                   END
+              FROM pg_roles WHERE rolname='qorven_app';
+          " | tee /tmp/role-check.txt
+          grep -q '^OK$' /tmp/role-check.txt
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: verify
+        working-directory: backend
+        run: make verify
+
+  build:
+    name: build release binaries (multi-arch)
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: build-release-${{ matrix.goos }}-${{ matrix.goarch }}
+        working-directory: backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: make build-release-arch
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qorven-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
+          path: |
+            backend/dist/qorven-${{ matrix.goos }}-${{ matrix.goarch }}
+            backend/dist/qorven-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+          retention-days: 14

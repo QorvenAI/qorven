@@ -1,0 +1,27 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    outDir: 'frontend',
+    lib: {
+      entry: 'src/index.tsx',
+      formats: ['iife'],
+      name: '__app_[[.SlugCamel]]',
+      fileName: () => 'bundle.js',
+    },
+    rollupOptions: {
+      external: ['react', 'react-dom'],
+      output: {
+        globals: {
+          // Both react and react-dom resolve to the host's React instance.
+          // App bundles render inside the host tree — no separate ReactDOM root is needed.
+          react: 'window.__QorvenApp.React',
+          'react-dom': 'window.__QorvenApp.React',
+        },
+      },
+    },
+    minify: false,
+  },
+});

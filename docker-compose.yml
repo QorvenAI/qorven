@@ -1,0 +1,67 @@
+# Qorven — docker-compose for local + single-host deployments.
+#
+# Quick start:
+#   cp .env.example .env              # or export QORVEN_DB_PASSWORD manually
+#   docker compose up -d
+#   # open https://localhost:${QORVEN_WEB_PORT:-443}
+#
+# One container ships both the backend API and the web UI (the Next.js
+# build is embedded via go:embed — see Dockerfile). Only Postgres runs
+# as a separate service.
+#
+# Required env (set in .env or shell):
+#   QORVEN_DB_PASSWORD   — password for the local pg superuser. No
+#                          default — compose refuses to start without
+#                          one.
+#
+# Optional env:
+#   QORVEN_API_PORT      default 4200
+#   QORVEN_WEB_PORT      default 443
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: qorven
+      POSTGRES_PASSWORD: ${QORVEN_DB_PASSWORD:?set QORVEN_DB_PASSWORD in .env before compose up}
+      POSTGRES_DB: qorven
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qorven"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  qorven:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # unless-stopped = survive reboots + auto-restart on crash, but
+    # stop when the operator explicitly runs `docker compose stop`.
+    # "always" would fight manual stops; "on-failure" would miss OOM
+    # kills that exit 0. This is the Goldilocks default.
+    restart: unless-stopped
+    ports:
+      - "${QORVEN_API_PORT:-4200}:4200"
+      - "${QORVEN_WEB_PORT:-443}:443"
+    environment:
+      - QORVEN_POSTGRES_DSN=postgres://qorven:${QORVEN_DB_PASSWORD}@postgres:5432/qorven?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - qorven-data:/root/.qorven
+    # /livez is cheap (no DB, no deps) — keep the interval tight so a
+    # crash is reflected in docker ps within ~15s. start_period gives
+    # the process room to finish DB migrations before probes begin.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4200/livez || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  pgdata:
+  qorven-data:

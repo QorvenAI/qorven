@@ -1,0 +1,240 @@
+{
+  "drivers": [
+    {
+      "id": "openai_compat",
+      "name": "OpenAI-compatible (any /v1/audio/*)",
+      "kind_supports": ["tts", "stt"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": false,
+      "hint": "Drop-in adapter for anything that speaks OpenAI's audio API — OpenAI, Groq, whisper.cpp server, LocalAI, LMNT, LiteLLM proxy.",
+      "fields": [
+        { "name": "api_base", "label": "Base URL", "type": "url", "required": true, "placeholder": "https://api.openai.com/v1" },
+        { "name": "api_key",  "label": "API key",  "type": "password", "required": false, "placeholder": "leave blank for no-auth local servers" },
+        { "name": "model",    "label": "Model",    "type": "text", "required": false, "placeholder": "tts-1 / whisper-1 / whisper-large-v3-turbo" },
+        { "name": "voice",    "label": "Voice",    "type": "text", "required": false, "placeholder": "alloy (TTS only)" }
+      ],
+      "models": {
+        "tts": ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"],
+        "stt": ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-large-v3", "whisper-large-v3-turbo"]
+      }
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "kind_supports": ["tts", "stt"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": false,
+      "fields": [
+        { "name": "api_key", "label": "API key", "type": "password", "required": true, "placeholder": "sk-…" },
+        { "name": "voice",   "label": "Default voice", "type": "text", "required": false, "placeholder": "alloy" }
+      ],
+      "models": {
+        "tts": ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"],
+        "stt": ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+      },
+      "default_model": { "tts": "tts-1", "stt": "whisper-1" }
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "kind_supports": ["stt"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": false,
+      "hint": "Cheapest cloud STT on the market at $0.04/hr. Whisper-family models running on Groq's LPU.",
+      "fields": [
+        { "name": "api_key", "label": "API key", "type": "password", "required": true, "placeholder": "gsk_…" },
+        { "name": "model",   "label": "Model",   "type": "text", "required": false, "placeholder": "whisper-large-v3-turbo" }
+      ],
+      "models": { "stt": ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"] },
+      "default_model": { "stt": "whisper-large-v3-turbo" }
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "kind_supports": ["tts"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": true,
+      "hint": "High-quality TTS with voice cloning. Flash v2.5 is the low-latency option.",
+      "fields": [
+        { "name": "api_key",  "label": "API key",  "type": "password", "required": true },
+        { "name": "voice_id", "label": "Voice ID", "type": "text", "required": false, "placeholder": "Rachel default" }
+      ],
+      "models": { "tts": ["eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2"] },
+      "default_model": { "tts": "eleven_flash_v2_5" }
+    },
+    {
+      "id": "deepgram",
+      "name": "Deepgram",
+      "kind_supports": ["stt"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": true,
+      "hint": "Real-time STT leader. Nova-3 is the flagship model.",
+      "fields": [
+        { "name": "api_key", "label": "API key", "type": "password", "required": true },
+        { "name": "model",   "label": "Model",   "type": "text", "required": false, "placeholder": "nova-3" }
+      ],
+      "models": { "stt": ["nova-3", "nova-2", "enhanced", "base"] },
+      "default_model": { "stt": "nova-3" }
+    },
+    {
+      "id": "cartesia",
+      "name": "Cartesia",
+      "kind_supports": ["tts"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": true,
+      "hint": "90ms time-to-first-audio with Sonic-3. Voice cloning from 5s of audio.",
+      "fields": [
+        { "name": "api_key",  "label": "API key",  "type": "password", "required": true },
+        { "name": "voice_id", "label": "Voice ID", "type": "text", "required": false }
+      ],
+      "models": { "tts": ["sonic-3", "sonic-2", "sonic-english"] },
+      "default_model": { "tts": "sonic-3" }
+    },
+    {
+      "id": "assemblyai",
+      "name": "AssemblyAI",
+      "kind_supports": ["stt"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": true,
+      "hint": "Universal-Streaming STT. $0.15/hr, speaker diarization + sentiment included.",
+      "fields": [
+        { "name": "api_key", "label": "API key", "type": "password", "required": true },
+        { "name": "model",   "label": "Model",   "type": "text", "required": false, "placeholder": "universal" }
+      ],
+      "models": { "stt": ["universal-2", "universal-streaming"] },
+      "default_model": { "stt": "universal-2" }
+    },
+    {
+      "id": "huggingface",
+      "name": "HuggingFace Inference",
+      "kind_supports": ["tts", "stt"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": false,
+      "hint": "Any HF-hosted voice model via the Inference API. Bring-your-own model_id.",
+      "fields": [
+        { "name": "api_key",  "label": "HF token",   "type": "password", "required": true, "placeholder": "hf_…" },
+        { "name": "model_id", "label": "Model ID",   "type": "text", "required": true, "placeholder": "openai/whisper-large-v3" }
+      ],
+      "models": {
+        "tts": ["suno/bark", "microsoft/speecht5_tts", "facebook/mms-tts-eng", "coqui/XTTS-v2", "espnet/kan-bayashi_ljspeech_vits"],
+        "stt": ["openai/whisper-large-v3", "openai/whisper-large-v3-turbo", "distil-whisper/distil-large-v3", "nvidia/canary-1b", "nvidia/parakeet-tdt-1.1b"]
+      }
+    },
+    {
+      "id": "ollama_voice",
+      "name": "Ollama (local)",
+      "kind_supports": ["tts", "stt"],
+      "hosting": "local",
+      "auth": "none",
+      "streaming": false,
+      "hint": "Run voice models locally via Ollama. Pull the model with `ollama pull xtts-v2` (or similar) before use.",
+      "fields": [
+        { "name": "api_base", "label": "Ollama URL", "type": "url", "required": true, "placeholder": "http://localhost:11434" },
+        { "name": "model",    "label": "Model tag", "type": "text", "required": true, "placeholder": "xtts-v2" }
+      ],
+      "hardware_hint": "TTS models need 4-8 GB RAM or GPU. STT via whisper.cpp works on CPU."
+    },
+    {
+      "id": "kokoro",
+      "name": "Kokoro TTS (local)",
+      "kind_supports": ["tts"],
+      "hosting": "local",
+      "auth": "none",
+      "streaming": false,
+      "hint": "82M-parameter TTS, Apache-2.0. Runs on CPU. Expect a local Kokoro FastAPI server at the configured URL.",
+      "fields": [
+        { "name": "api_base", "label": "Kokoro URL", "type": "url",  "required": true, "placeholder": "http://localhost:8880" },
+        { "name": "voice",    "label": "Voice",      "type": "text", "required": false, "placeholder": "af_heart" }
+      ]
+    },
+    {
+      "id": "edge_tts",
+      "name": "Microsoft Edge TTS (free)",
+      "kind_supports": ["tts"],
+      "hosting": "local",
+      "auth": "none",
+      "streaming": false,
+      "hint": "Free neural TTS via Microsoft Edge's public endpoint. Requires the `edge-tts` CLI installed (`pip install edge-tts`).",
+      "fields": [
+        { "name": "voice", "label": "Voice", "type": "text", "required": false, "placeholder": "en-US-AriaNeural" }
+      ]
+    },
+    {
+      "id": "faster_whisper",
+      "name": "faster-whisper (local)",
+      "kind_supports": ["stt"],
+      "hosting": "local",
+      "auth": "none",
+      "streaming": false,
+      "hint": "Self-hosted whisper.cpp successor. Run faster-whisper-server at :8881 or point api_base at your own.",
+      "fields": [
+        { "name": "api_base", "label": "Server URL", "type": "url",  "required": false, "placeholder": "http://localhost:8881" },
+        { "name": "model",    "label": "Model",       "type": "text", "required": false, "placeholder": "base" }
+      ],
+      "models": { "stt": ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"] }
+    },
+    {
+      "id": "moonshine",
+      "name": "Moonshine STT (local)",
+      "kind_supports": ["stt"],
+      "hosting": "local",
+      "auth": "none",
+      "streaming": false,
+      "hint": "Tiny local STT (26-245M params) — beats Whisper large-v3 on streaming WER at a fraction of the size. Run usefulsensors/moonshine's reference server.",
+      "fields": [
+        { "name": "api_base", "label": "Moonshine server URL", "type": "url",  "required": false, "placeholder": "http://localhost:8882" },
+        { "name": "model",    "label": "Model",                  "type": "text", "required": false, "placeholder": "base" }
+      ],
+      "models": { "stt": ["tiny", "base"] },
+      "hardware_hint": "Runs on CPU (~107ms on a MacBook). Browser-side ONNX build also supported."
+    },
+    {
+      "id": "piper",
+      "name": "Piper TTS (local)",
+      "kind_supports": ["tts"],
+      "hosting": "local",
+      "auth": "none",
+      "streaming": false,
+      "hint": "Rhasspy's single-binary CPU TTS. Voice models are ~20-60MB each. Runs on a Raspberry Pi.",
+      "fields": [
+        { "name": "binary",     "label": "Piper binary",        "type": "text", "required": false, "placeholder": "piper (on PATH)" },
+        { "name": "model_path", "label": "Voice model (.onnx)", "type": "text", "required": true,  "placeholder": "/opt/piper/en_US-lessac-medium.onnx" }
+      ],
+      "hardware_hint": "Install: https://github.com/rhasspy/piper — download voice models from https://rhasspy.github.io/piper-samples/"
+    },
+    {
+      "id": "openai_realtime",
+      "name": "OpenAI Realtime",
+      "kind_supports": ["realtime"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": true,
+      "hint": "Full-duplex voice-to-voice (no transcribe/synthesize round-trip). WS or WebRTC.",
+      "fields": [
+        { "name": "api_key", "label": "API key", "type": "password", "required": true, "placeholder": "sk-…" },
+        { "name": "model",   "label": "Model",   "type": "text", "required": false, "placeholder": "gpt-4o-realtime-preview" },
+        { "name": "voice",   "label": "Voice",   "type": "text", "required": false, "placeholder": "alloy" }
+      ]
+    },
+    {
+      "id": "gemini_live",
+      "name": "Gemini Live",
+      "kind_supports": ["realtime"],
+      "hosting": "cloud",
+      "auth": "api_key",
+      "streaming": true,
+      "hint": "Google's realtime voice API. WebSocket-based, not WebRTC.",
+      "fields": [
+        { "name": "api_key", "label": "API key", "type": "password", "required": true }
+      ]
+    }
+  ]
+}

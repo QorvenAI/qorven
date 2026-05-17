@@ -1,0 +1,223 @@
+/* Tailwind Core */
+@import 'tailwindcss';
+
+/* Typography (prose classes for markdown rendering) */
+@plugin "@tailwindcss/typography";
+
+/* Qorven Design Tokens */
+@import './config.qorven.css';
+
+/* Layout */
+@import './layout.qorven.css';
+
+/** Global Styles **/
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  *:focus-visible {
+    @apply outline-ring rounded-xs shadow-none outline-2 outline-offset-3 transition-none!;
+  }
+}
+
+/** Dark/Light Theme Variant **/
+@custom-variant dark (&:is(.dark *));
+@custom-variant light (&:not(.dark *));
+
+/* Hidden scrollbar — scrollable but no visible bar */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Sharper font rendering — Qorven standard: antialiased */
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar — Qorven style: thin, dark, visible on hover */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+::-webkit-scrollbar {
+  width: 0.35rem;
+  height: 0.35rem;
+}
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 1.25rem;
+  background-color: transparent;
+}
+::-webkit-scrollbar-corner {
+  background-color: transparent;
+}
+*:hover, *:focus, *:focus-within {
+  scrollbar-color: var(--color-zinc-700, #3f3f46) transparent;
+}
+*:hover::-webkit-scrollbar-thumb,
+*:focus::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background-color: var(--color-zinc-700, #3f3f46);
+}
+
+/* Qorven icon standard — 1.5px stroke for lucide line icons.
+   Slightly thinner than Lucide's default 2px; plays well with
+   Metronic's Inter weights and avoids chunky UI icons.
+   Scoped to Lucide roots so SVGs shipped inside cards (brand logos,
+   gradient illustrations) keep their own stroke widths. */
+.lucide, [data-lucide] {
+  stroke-width: 1.5;
+  shape-rendering: geometricPrecision;
+}
+
+/* Shimmer animation for thinking indicator */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Citation flash — brief highlight on the source pill when the
+   user clicks an inline [N] chip. Gives a visible "jumped to here"
+   cue without requiring focus-ring plumbing on an <a>. */
+@keyframes citation-flash-kf {
+  0%   { background-color: hsl(var(--primary) / 0.4); box-shadow: 0 0 0 4px hsl(var(--primary) / 0.25); }
+  100% { background-color: inherit; box-shadow: 0 0 0 0 transparent; }
+}
+.citation-flash {
+  animation: citation-flash-kf 1.2s ease-out 1;
+}
+
+/* Streaming caret. Placed after the final text node so the blink
+   sits flush with the last character the LLM has produced. Scoped
+   to .qorven-streaming so it never shows up on archived messages. */
+@keyframes qorven-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.qorven-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: hsl(var(--primary));
+  border-radius: 1px;
+  animation: qorven-caret-blink 1s steps(2, end) infinite;
+}
+/* When hovering we suppress the caret briefly — the blinking gets
+   in the way of text selection. */
+.qorven-streaming:hover .qorven-caret {
+  animation-play-state: paused;
+  opacity: 0.3;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Qorven UI utility classes — mirror Metronic v9 shapes exactly.
+   Metronic button heights: lg=h-10 (40px), md=h-8.5 (34px),
+   sm=h-7 (28px). Inputs use the same scale. Cards use radius-xl.
+   Radii cascade from --radius=0.5rem (md=6, lg=8, xl=12).
+   ────────────────────────────────────────────────────────────── */
+.qr-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  border-radius: var(--radius-md); padding: 0 0.75rem;
+  height: 2.125rem; /* h-8.5 — Metronic md */
+  font-size: 0.8125rem; /* text-2sm */ font-weight: 500;
+  line-height: calc(1.075 / 0.8125);
+  transition: color 0.15s, background-color 0.15s, box-shadow 0.15s; cursor: pointer;
+  white-space: nowrap;
+}
+.qr-btn:disabled { opacity: 0.6; pointer-events: none; }
+.qr-btn-primary { background: var(--primary); color: var(--primary-foreground); }
+.qr-btn-primary:hover { background: color-mix(in srgb, var(--primary) 90%, transparent); }
+.qr-btn-outline {
+  border: 1px solid var(--input); background: var(--background); color: var(--accent-foreground);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); /* shadow-xs */
+}
+.qr-btn-outline:hover { background: var(--accent); }
+.qr-btn-ghost { background: transparent; color: var(--accent-foreground); }
+.qr-btn-ghost:hover { background: var(--accent); }
+.qr-btn-destructive { background: var(--destructive); color: var(--destructive-foreground); }
+.qr-btn-destructive:hover { background: color-mix(in srgb, var(--destructive) 90%, transparent); }
+/* Sizes mirror Metronic's lg / md / sm scale */
+.qr-btn-lg { height: 2.5rem; padding: 0 1rem; font-size: 0.875rem; gap: 0.375rem; }
+.qr-btn-sm { height: 1.75rem; padding: 0 0.625rem; font-size: 0.75rem; gap: 0.3125rem; }
+.qr-btn-xs { height: 1.5rem; padding: 0 0.5rem; font-size: 0.6875rem; gap: 0.25rem; }
+.qr-btn-icon { width: 2.125rem; height: 2.125rem; padding: 0; }
+
+.qr-input {
+  width: 100%; border-radius: var(--radius-md);
+  border: 1px solid var(--input); background: var(--background);
+  height: 2.125rem; /* h-8.5 — Metronic md */
+  padding: 0 0.75rem; font-size: 0.8125rem;
+  color: var(--foreground); outline: none;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); /* shadow-xs */
+  transition: color 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+.qr-input::placeholder { color: color-mix(in srgb, var(--muted-foreground) 80%, transparent); }
+.qr-input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }
+.qr-input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.qr-select {
+  width: 100%; border-radius: var(--radius-md);
+  border: 1px solid var(--input); background: var(--background);
+  height: 2.125rem;
+  padding: 0 0.75rem; font-size: 0.8125rem;
+  color: var(--foreground); outline: none;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  appearance: auto; /* keep native arrow */
+}
+.qr-select:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }
+.qr-select:disabled { opacity: 0.6; cursor: not-allowed; }
+/* option bg matches card in dark mode so dropdown list is readable */
+.qr-select option { background: var(--card); color: var(--foreground); }
+
+.qr-textarea {
+  width: 100%; border-radius: var(--radius-md);
+  border: 1px solid var(--input); background: var(--background);
+  padding: 0.5rem 0.75rem; font-size: 0.8125rem;
+  color: var(--foreground); outline: none; resize: vertical;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.qr-textarea::placeholder { color: color-mix(in srgb, var(--muted-foreground) 80%, transparent); }
+.qr-textarea:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }
+.qr-textarea:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.qr-card {
+  border-radius: var(--radius-xl); /* 12px — Metronic card radius */
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); /* shadow-xs */
+}
+.qr-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 3.5rem; /* min-h-14 */
+  padding: 0 1.25rem; /* px-5 */
+  border-bottom: 1px solid var(--border);
+  gap: 0.625rem;
+}
+.qr-card-title {
+  font-size: 1rem; /* text-base */
+  font-weight: 600; /* semibold — never lighter */
+  line-height: 1; letter-spacing: -0.01em; /* tracking-tight */
+}
+.qr-card-description { font-size: 0.875rem; color: var(--muted-foreground); }
+.qr-card-content { padding: 1.25rem; flex: 1; }
+
+.qr-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  border-radius: 9999px; padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem; /* text-2xs */ font-weight: 500;
+  line-height: 1.2;
+}
+.qr-badge-primary { composes: qr-badge; background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary); }
+.qr-badge-muted { composes: qr-badge; background: var(--muted); color: var(--muted-foreground); }
+.qr-badge-success { composes: qr-badge; background: color-mix(in srgb, #10b981 10%, transparent); color: #10b981; }
+.qr-badge-warning { composes: qr-badge; background: color-mix(in srgb, #f59e0b 10%, transparent); color: #f59e0b; }
+.qr-badge-destructive { composes: qr-badge; background: color-mix(in srgb, var(--destructive) 10%, transparent); color: var(--destructive); }
