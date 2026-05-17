@@ -82,7 +82,7 @@ const ICON_MAP: Record<string, string> = {
   tavily: 'tavily.webp',
   exa: 'exa.webp',
   elevenlabs: 'elevenlabs.webp',
-  deepgram: 'deepgram.jpeg',
+  deepgram: 'https://cdn.simpleicons.org/deepgram',
   'brave-search': 'brave.svg',
   brave: 'brave.svg',
   github: 'github.webp',
