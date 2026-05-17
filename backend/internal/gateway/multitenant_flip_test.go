@@ -6,8 +6,6 @@ package gateway
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -185,20 +183,30 @@ func TestMultitenantFlip_BackfillLeavesLegacyRowNullIfNoAdmin(t *testing.T) {
 	}
 }
 
-// runBackfillMigration reads the on-disk migration SQL and executes
-// it against the test pool. Tests call this to exercise the CANONICAL
-// migration body — if a future reviewer edits 041's SQL, these tests
-// automatically cover the new behavior.
-func runBackfillMigration(t *testing.T, pool *pgxpool.Pool, filename string) {
+// backfillSQL is the canonical Phase 4 backfill that assigns NULL
+// owner_actor_id sessions to the oldest active admin in the same tenant.
+// Previously stored in 041_phase4_legacy_owner_backfill.up.sql; inlined
+// here because fresh installs have no legacy data and the file was removed.
+const backfillSQL = `
+UPDATE public.sessions s
+SET owner_actor_id = (
+    SELECT u.id
+    FROM public.users u
+    WHERE u.tenant_id = s.tenant_id
+      AND u.role = 'admin'
+      AND u.is_active = true
+    ORDER BY u.created_at ASC
+    LIMIT 1
+)
+WHERE s.owner_actor_id IS NULL;
+`
+
+// runBackfillMigration executes the Phase 4 owner-backfill SQL against
+// the test pool. The SQL is inlined above so the test does not depend on
+// an external migration file.
+func runBackfillMigration(t *testing.T, pool *pgxpool.Pool, _ string) {
 	t.Helper()
-	// Tests run under `go test` in the backend package directory,
-	// so migrations/ is two levels up from internal/gateway.
-	path := filepath.Join("..", "..", "migrations", filename)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read migration %s: %v", filename, err)
-	}
-	if _, err := pool.Exec(context.Background(), string(data)); err != nil {
-		t.Fatalf("apply migration %s: %v", filename, err)
+	if _, err := pool.Exec(context.Background(), backfillSQL); err != nil {
+		t.Fatalf("apply backfill: %v", err)
 	}
 }
