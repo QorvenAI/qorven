@@ -5,6 +5,7 @@ backend/.env
 .env.local
 .env.*.local
 backend/*.log
+backend/tmp/
 backend/dist/
 
 # Secrets / certs
