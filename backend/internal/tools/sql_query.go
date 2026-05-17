@@ -499,11 +499,29 @@ const (
 )
 
 func runSelect(ctx context.Context, db *sql.DB, query string, params []any) *Result {
-	rows, err := db.QueryContext(ctx, query, params...)
+	// Wrap in a read-only transaction so the DB engine enforces the
+	// read-only constraint even for CTEs that attempt a write inside a
+	// SELECT (e.g. WITH ins AS (INSERT ...) SELECT ...).
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("query: %v", err))
+		// Driver doesn't support read-only tx (e.g. sqlite) — fall back.
+		tx = nil
 	}
-	defer rows.Close()
+	var rows *sql.Rows
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, query, params...)
+		if err != nil {
+			_ = tx.Rollback()
+			return ErrorResult(fmt.Sprintf("query: %v", err))
+		}
+		defer func() { rows.Close(); _ = tx.Rollback() }()
+	} else {
+		rows, err = db.QueryContext(ctx, query, params...)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("query: %v", err))
+		}
+		defer rows.Close()
+	}
 
 	cols, err := rows.Columns()
 	if err != nil {

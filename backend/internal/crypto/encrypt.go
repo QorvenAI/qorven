@@ -139,7 +139,10 @@ func GenerateAPIKey() (raw, hash, displayPrefix string, err error) {
 	return raw, hash, displayPrefix, nil
 }
 
-// HashAPIKey returns the SHA-256 hex digest of a raw API key.
+// HashAPIKey returns the SHA-256 hex digest of a raw API key for use as a
+// lookup token. This is NOT used for password hashing — passwords go through
+// bcrypt (see auth package). SHA-256 is appropriate here because API keys are
+// already high-entropy random secrets, so pre-image resistance is sufficient.
 func HashAPIKey(raw string) string {
 	h := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(h[:])
