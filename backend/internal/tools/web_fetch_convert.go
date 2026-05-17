@@ -188,7 +188,11 @@ func (c *htmlConverter) handleParagraph(n *html.Node) {
 
 func (c *htmlConverter) handleLink(n *html.Node) {
 	href := getHTMLAttr(n, "href")
-	if c.mode == modeText || c.inLink || href == "" || strings.HasPrefix(strings.ToLower(href), "javascript:") {
+	lhref := strings.ToLower(href)
+	if c.mode == modeText || c.inLink || href == "" ||
+		strings.HasPrefix(lhref, "javascript:") ||
+		strings.HasPrefix(lhref, "data:") ||
+		strings.HasPrefix(lhref, "vbscript:") {
 		c.walkChildren(n)
 		return
 	}

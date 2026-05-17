@@ -208,7 +208,7 @@ export default function SchedulePage() {
                       return (
                         <div key={i} className="px-4 py-3">
                           <div className="flex items-start gap-2">
-                            <div className={cn('w-1.5 h-1.5 rounded-full mt-1.5 shrink-0', color.replace('bg-', 'bg-').split(' ')[0] ?? '')} />
+                            <div className={cn('w-1.5 h-1.5 rounded-full mt-1.5 shrink-0', color.split(' ')[0] ?? '')} />
                             <div className="min-w-0">
                               <p className="text-sm font-medium">{e.title || e.event_type || 'Event'}</p>
                               {soul && <p className="text-xs text-muted-foreground">{soul.display_name}</p>}

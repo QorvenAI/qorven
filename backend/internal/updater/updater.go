@@ -193,11 +193,18 @@ func applyMacOS(r io.Reader, tmpDir, appPath string) error {
 			return fmt.Errorf("tar: %w", err)
 		}
 
-		target := filepath.Join(tmpDir, hdr.Name)
-		// Path traversal guard
+		// Clean the entry name first to neutralise any ".." components
+		// before joining — this is the primary zip-slip guard.
+		cleanName := filepath.Clean(hdr.Name)
+		if cleanName == ".." || strings.HasPrefix(cleanName, "../") || strings.HasPrefix(cleanName, "/") {
+			slog.Warn("updater: skipping path-traversal entry", "name", hdr.Name)
+			continue
+		}
+		target := filepath.Join(tmpDir, cleanName)
+		// Secondary guard: ensure the joined path stays inside tmpDir.
 		if !strings.HasPrefix(filepath.Clean(target)+string(filepath.Separator), cleanTmpDir) &&
 			filepath.Clean(target) != filepath.Clean(tmpDir) {
-			slog.Warn("updater: skipping path-traversal entry", "name", hdr.Name)
+			slog.Warn("updater: skipping path-traversal entry (secondary check)", "name", hdr.Name)
 			continue
 		}
 
@@ -214,9 +221,14 @@ func applyMacOS(r io.Reader, tmpDir, appPath string) error {
 				return fmt.Errorf("extract %s: %w", hdr.Name, err)
 			}
 		case tar.TypeSymlink:
-			// Validate symlink target doesn't escape tmpDir
+			// Disallow absolute symlink targets; resolve relative ones against
+			// the entry's directory and verify they stay inside tmpDir.
+			if filepath.IsAbs(hdr.Linkname) {
+				slog.Warn("updater: skipping absolute symlink", "name", hdr.Name, "target", hdr.Linkname)
+				continue
+			}
 			linkTarget := filepath.Join(filepath.Dir(target), hdr.Linkname)
-			if !strings.HasPrefix(filepath.Clean(linkTarget), filepath.Clean(tmpDir)) {
+			if !strings.HasPrefix(filepath.Clean(linkTarget)+string(filepath.Separator), cleanTmpDir) {
 				slog.Warn("updater: skipping symlink escaping tmpDir", "name", hdr.Name, "target", hdr.Linkname)
 				continue
 			}

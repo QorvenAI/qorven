@@ -362,14 +362,15 @@ func (e *EmailChannel) SendReplyWithAttachments(to, subject, body, inReplyTo str
 	boundary := fmt.Sprintf("qorven_%d", time.Now().UnixNano())
 	var msg strings.Builder
 
-	// Thread headers
+	// Thread headers — sanitize all values to prevent header injection.
 	if inReplyTo != "" {
-		msg.WriteString(fmt.Sprintf("In-Reply-To: %s\r\n", inReplyTo))
-		msg.WriteString(fmt.Sprintf("References: %s\r\n", inReplyTo))
+		safe := sanitizeHeader(inReplyTo)
+		msg.WriteString(fmt.Sprintf("In-Reply-To: %s\r\n", safe))
+		msg.WriteString(fmt.Sprintf("References: %s\r\n", safe))
 	}
-	msg.WriteString(fmt.Sprintf("From: %s\r\n", e.cfg.Email))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", replySubject))
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", sanitizeHeader(e.cfg.Email)))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeHeader(to)))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", sanitizeHeader(replySubject)))
 	msg.WriteString("MIME-Version: 1.0\r\n")
 
 	if len(attachments) == 0 {
