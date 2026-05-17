@@ -96,9 +96,9 @@ func (t *EmailSendTool) Execute(ctx context.Context, args map[string]any) *Resul
 
 	// Build message
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", s.FromName, s.From))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", sanitizeEmailHeader(s.FromName), sanitizeEmailHeader(s.From)))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeEmailHeader(to)))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", sanitizeEmailHeader(subject)))
 	msg.WriteString(fmt.Sprintf("Message-ID: %s\r\n", msgID))
 	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
 	msg.WriteString(body + "\r\n")
