@@ -51,6 +51,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+          -c max_connections=200
 
     env:
       QORVEN_TEST_DSN: postgres://qorven:qorven@localhost:5432/qorven_test?sslmode=disable
