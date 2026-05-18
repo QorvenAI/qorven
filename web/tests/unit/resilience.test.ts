@@ -1,4 +1,4 @@
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 //
 // Unit tests for web/lib/resilience.ts. Runs with Node's built-in test
 // runner (node 24 has native TypeScript execution), no vitest/jest

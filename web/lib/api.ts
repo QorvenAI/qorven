@@ -1,4 +1,4 @@
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // Barrel re-export — consumers that import from '@/lib/api' continue to work unchanged.
 // New code should import directly from the domain module.

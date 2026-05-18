@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // Admin-only endpoint; we render the card for everyone and let the POST's 403
 // surface as a toast. Backend enforces name regex + 8 MiB cap + reserved-name list.

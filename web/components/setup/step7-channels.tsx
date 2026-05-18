@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { CheckCircle2, MessageCircle, Send, Smartphone, Bell, Lock } from 'lucide-react';
 import { QorvenSpinner, SectionTitle } from './setup-atoms';

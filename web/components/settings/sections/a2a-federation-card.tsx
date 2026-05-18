@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // A2A is the agent-to-agent protocol: peer Qorven instances can discover
 // this platform's agents via the well-known URLs and call them as remote skills.

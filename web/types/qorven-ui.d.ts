@@ -1,4 +1,4 @@
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // Augments the Window interface with Qorven host bus globals.
 // App-developer-facing declarations live in the scaffold's qorven-app.d.ts.

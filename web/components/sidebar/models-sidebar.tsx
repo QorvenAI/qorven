@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useRouter, usePathname } from 'next/navigation';
 import { Brain, Image, Eye, Mic, Globe, GitBranch, BarChart3 } from 'lucide-react';

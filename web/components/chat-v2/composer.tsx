@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useRef, useState, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
 import { Paperclip, MonitorUp, Globe, Mic, Send, Square, Loader2, X, MicOff, Brain } from 'lucide-react';
