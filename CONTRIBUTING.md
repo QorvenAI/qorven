@@ -202,4 +202,4 @@ Do **not** open a public GitHub issue for security vulnerabilities. See [`SECURI
 
 ## License
 
-By contributing, you agree your contributions will be licensed under [FSL-1.1-ALv2](./LICENSE).
+By contributing, you agree your contributions will be licensed under [Elastic License 2.0 (ELv2)](./LICENSE).

@@ -1,4 +1,4 @@
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest } from './api-core';
 import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent } from '@/types';

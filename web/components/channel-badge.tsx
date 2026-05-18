@@ -1,4 +1,4 @@
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { cn } from '@/lib/utils';
 import { BrandIcon, getBrandColor } from '@/components/brand-icon';

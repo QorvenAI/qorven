@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Trash2, Loader2, X, CheckCircle2, AlertCircle, Zap, Key, ImageIcon, Film, Music } from 'lucide-react';

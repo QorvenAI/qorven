@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Tekky AI Academy LLP. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Tekky AI Academy LLP. Licensed under Elastic License 2.0 (ELv2).
 
 import { useCallback, useEffect, useState } from 'react';
 import {

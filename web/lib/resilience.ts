@@ -1,4 +1,4 @@
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // resilience.ts — pure, testable helpers used by the WebSocket reconnect
 // loop and the REST retry wrapper. Kept separate so a Node unit test

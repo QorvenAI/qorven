@@ -1,6 +1,6 @@
 'use client';
 
-// Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+// Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // Reset page — step 2 of the password reset flow. The user lands here
 // from a magic link (/reset?token=...) and sets a new password. The

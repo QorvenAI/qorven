@@ -1,7 +1,7 @@
 # Qorven
 
 [![Release](https://img.shields.io/github/v/release/QorvenAI/qorven?include_prereleases&label=release)](https://github.com/QorvenAI/qorven/releases)
-[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](./LICENSE)
+[![License: ELv2](https://img.shields.io/badge/license-Elastic--2.0-blue)](./LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26-00ADD8)](./backend/go.mod)
 [![CI](https://github.com/QorvenAI/qorven/actions/workflows/backend.yml/badge.svg)](https://github.com/QorvenAI/qorven/actions/workflows/backend.yml)
 
@@ -205,4 +205,4 @@ Full dependency list: [`backend/go.mod`](./backend/go.mod) · [`web/package.json
 
 ## License
 
-[FSL-1.1-ALv2](./LICENSE) — free to use, modify, and self-host. Converts to Apache 2.0 two years after each release date.
+[Elastic License 2.0 (ELv2)](./LICENSE) — free to use, modify, and self-host. Commercial hosting-as-a-service is not permitted. Contact [hello@qorven.ai](mailto:hello@qorven.ai) for a commercial license.
