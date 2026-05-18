@@ -1,4 +1,4 @@
-# Copyright 2026 Qorven AI. Licensed under FSL-1.1-ALv2.
+# Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 #
 # Qorven installer for Windows — one-shot PowerShell script.
 #
@@ -28,15 +28,16 @@ $YesAll      = $args -contains '--yes'
 $SkipService = $args -contains '--skip-service'
 
 # ── configuration ─────────────────────────────────────────────────────────────
-$GithubOwner  = $env:GITHUB_OWNER  ?? 'qorvenai'
-$GithubRepo   = $env:GITHUB_REPO   ?? 'qorven'
-$ReleaseTag   = $env:RELEASE_TAG   ?? 'latest'
-$InstallDir   = $env:QORVEN_INSTALL_DIR ?? 'C:\Program Files\Qorven'
-$ConfigDir    = $env:QORVEN_CONFIG_DIR  ?? 'C:\ProgramData\Qorven'
-$DataDir      = $env:QORVEN_DATA_DIR    ?? 'C:\ProgramData\Qorven\data'
+# Use if/else instead of ?? so this works on PowerShell 5.1 (built-in on Windows)
+if ($env:GITHUB_OWNER)        { $GithubOwner  = $env:GITHUB_OWNER }        else { $GithubOwner  = 'qorvenai' }
+if ($env:GITHUB_REPO)         { $GithubRepo   = $env:GITHUB_REPO }         else { $GithubRepo   = 'qorven' }
+if ($env:RELEASE_TAG)         { $ReleaseTag   = $env:RELEASE_TAG }         else { $ReleaseTag   = 'latest' }
+if ($env:QORVEN_INSTALL_DIR)  { $InstallDir   = $env:QORVEN_INSTALL_DIR }  else { $InstallDir   = 'C:\Program Files\Qorven' }
+if ($env:QORVEN_CONFIG_DIR)   { $ConfigDir    = $env:QORVEN_CONFIG_DIR }   else { $ConfigDir    = 'C:\ProgramData\Qorven' }
+if ($env:QORVEN_DATA_DIR)     { $DataDir      = $env:QORVEN_DATA_DIR }     else { $DataDir      = 'C:\ProgramData\Qorven\data' }
 $LogDir       = "$ConfigDir\logs"
 $ServiceName  = 'QorvenAI'
-$PgVersion    = $env:PG_VERSION ?? '16'
+if ($env:PG_VERSION)          { $PgVersion    = $env:PG_VERSION }          else { $PgVersion    = '16' }
 $NssmVersion  = '2.24'
 $Port         = 8080   # Windows: 443 needs a cert; default to 8080 for simplicity
 $ApiPort      = 4200
@@ -82,7 +83,14 @@ if ($answer -notmatch '^[Yy]') { Write-Host "  Installation cancelled."; exit 0 
 # ── helpers ───────────────────────────────────────────────────────────────────
 function Command-Exists { param($cmd) return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
-function Random-Hex { param($bytes) $buf = [byte[]]::new($bytes); [System.Security.Cryptography.RandomNumberGenerator]::Fill($buf); return ([System.BitConverter]::ToString($buf) -replace '-','').ToLower() }
+function Random-Hex {
+    param($bytes)
+    $buf = [byte[]]::new($bytes)
+    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    $rng.GetBytes($buf)
+    $rng.Dispose()
+    return ([System.BitConverter]::ToString($buf) -replace '-','').ToLower()
+}
 
 function Get-MyIP {
     try { return (Invoke-RestMethod 'https://api.ipify.org').Trim() } catch {}
