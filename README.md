@@ -9,7 +9,7 @@
 
 For developers, teams, and businesses that want powerful AI automation without sending data to a third-party cloud. One binary. Your server. Full control.
 
-> **Status: v0.1.0-alpha** — running well on single-node Linux deployments. APIs and config schema may change before v1.0. Not yet recommended for critical workloads without a backup strategy.
+> **Status: v0.1.3-alpha** — running well on single-node Linux deployments. APIs and config schema may change before v1.0. Not yet recommended for critical workloads without a backup strategy.
 
 ---
 
@@ -33,17 +33,75 @@ The installer sets up PostgreSQL, downloads the binary, runs migrations, and ope
 
 ## What's included
 
+### Agents & teams
+
 | | |
 |---|---|
-| **Multi-agent team** | Prime (coordinator) + Developer, Researcher, Writer, and Email agents out of the box. Create unlimited custom agents with their own identity, model, and tool access. |
-| **120+ built-in tools** | Web search, file ops, code execution, email send/receive, terminal, shipment tracking, social media, web scraping, and more. |
-| **20+ channel integrations** | Telegram, WhatsApp, Email (IMAP/SMTP), Slack, Discord, Teams, LINE, Webchat, Webhook, GitHub, DingTalk, WeCom, Zalo, and more. |
-| **Scheduling & automation** | Cron-based scheduled tasks, inbound message routing rules, and daily AI briefings. |
-| **Memory** | Agents remember preferences, past conversations, and project context across sessions using pgvector. |
-| **Approval workflows** | Human-in-the-loop gates for sensitive agent actions — approve or reject from any connected channel. |
-| **App platform** | Install Go binary connectors from disk. Agents can scaffold and install new connectors at runtime. |
-| **Web dashboard** | Chat, Code IDE, Mail, Sessions, Channels, Models Hub, Agents, Approvals, Settings, Audit log. |
-| **CLI & TUI** | `qorven chat` — full terminal interface with markdown rendering and slash commands. |
+| **Multi-agent team** | Prime (coordinator) + Developer, Researcher, Writer, and Email agents out of the box. Create unlimited custom agents with their own identity, model, tools, and memory. |
+| **Soul system** | Each agent has a rich identity bundle — system prompt, capabilities, behavior rules — with priority layering. Agents can generate souls for sub-agents. |
+| **Agent runtime** | Heartbeat probes, pause/resume/wakeup controls, scheduled dreaming (reflection), goals tracking, and escalation-to-human when stuck. |
+| **Approval workflows** | Human-in-the-loop gates for sensitive agent actions. Approve or reject from any connected channel. |
+
+### Tools (120+)
+
+| | |
+|---|---|
+| **Code & terminal** | Shell exec, file ops, `apply_patch`, glob/grep, go/ts/cargo diagnostics, git, GitHub API. Full in-browser IDE with file explorer and terminal. |
+| **Web & research** | Multi-source search, full-page reader with 5-layer anti-bot stack (TLS/JA3, HTTP/2, header profiles, headless browser, proxy rotation), PDF reader, structured scraping. |
+| **Email** | Send, receive, and reply via any SMTP/IMAP account. Header injection protection, HTML-to-text conversion. |
+| **Social media** | Publish to Twitter/X, LinkedIn, Facebook, Instagram, Threads, TikTok, YouTube, Bluesky, Mastodon, and Pinterest. Schedule posts, autopost from RSS/webhook, content calendar. |
+| **Image generation** | DALL-E, Stability AI, FLUX. Size and quality options with provider fallback chains. |
+| **Video generation** | FAL, Seedance, Runway, Kling. Async polling with 5–10 second clip support. |
+| **Voice & audio** | Speech-to-text (AssemblyAI, Deepgram, OpenAI, Moonshine, HuggingFace, Cartesia, LiveKit, Ollama). Text-to-speech (ElevenLabs, OpenAI, Piper, HuggingFace, Cartesia, Ollama, Plivo, Twilio). Real-time voice via WebRTC and OpenAI Realtime API. |
+| **Business ops** | Shipment tracking (DHL, FedEx, SF Express, YTO, STO). Bilingual PDF quote and invoice generation. |
+| **Data & SQL** | SQL query tool with read-only transaction enforcement. Spreadsheet ops, document reader. |
+| **Connectors** | 50 pre-seeded integration schemas: Google Workspace, Notion, HubSpot, Airtable, Stripe, Shopify, Salesforce, Linear, Jira, Zendesk, Mailchimp, SendGrid, Twilio, Zoom, and more. |
+
+### Channels (20+)
+
+Telegram · WhatsApp (Cloud API) · Email (IMAP/SMTP) · Slack · Discord · Teams · LINE · DingTalk · WeCom · Feishu · Zalo · Webchat (WebSocket) · Webhook · GitHub · Signal · Matrix · Mattermost · iMessage · SMS
+
+Each channel has inbound routing rules, keyword triggers, approval gates, and reply queues.
+
+### Memory & intelligence
+
+| | |
+|---|---|
+| **Persistent memory** | pgvector semantic search with BM25 full-text fallback. Hierarchical scopes: workspace → team → agent. |
+| **Knowledge graph** | Entity extraction, vector similarity, relationship indexing, PageRank centrality. |
+| **REM dreaming** | Scheduled memory consolidation — agents reflect on past conversations and surface key insights. |
+| **Deep search** | Multi-source research graphs with source deduplication and cross-referencing. |
+| **Daily briefings** | Per-agent scheduled briefings delivered to any channel. Include connector snapshots, pending tasks, and prioritised items. |
+
+### Social media management
+
+Qorven includes a full social media management layer — similar to Postiz or Buffer, but agent-driven and self-hosted:
+
+- **10-platform publisher** — Twitter/X, LinkedIn, Facebook, Instagram, Threads, TikTok, YouTube, Bluesky, Mastodon, Pinterest
+- **Scheduling** — ISO datetime scheduling with automatic publish at the scheduled time
+- **Content calendar** — month view with scheduled, published, and draft posts
+- **AutoPost rules** — cron-driven posting from RSS feeds or webhooks
+- **Trend monitoring** — Twitter, YouTube, Reddit, HackerNews trend signals
+- **Topic monitoring** — continuous tracking with change detection and agent notifications
+- **Human approval gate** — agent-drafted posts go to `/outbound` for review before publishing
+
+### Automation
+
+| | |
+|---|---|
+| **Cron scheduler** | Per-agent cron schedules with DB-backed deduplication and human-readable display. |
+| **Inbound rules engine** | Classify messages, auto-reply, route to agents, or generate draft replies for human review — on every channel. |
+| **Workflow engine** | Multi-step automation with branching and error handling. |
+| **Scenario engine** | Multi-agent simulations and stakeholder analysis. Generate personas from seed text, run multi-round deliberations. |
+| **Goals system** | Agent and workspace-scoped goal tracking with 6 built-in templates (research, marketing, monitoring, standup, support, code review). |
+
+### App platform & self-extension
+
+| | |
+|---|---|
+| **App SDK** | Install any binary as an agent tool using a simple stdin/stdout protocol. Hot-loaded at runtime. |
+| **Self-extending connectors** | Agents research an API, write a Go connector, compile it, install it, and use it — in one conversation. No developer. No restart. |
+| **Self-building dashboards** | 15+ widget types (stat card, chart, kanban, timeline, data table, feed). Agents build and populate dashboards from live connector data. |
 
 ---
 
@@ -54,6 +112,36 @@ Qorven works with every major AI provider. Use your own API keys — zero markup
 **OpenAI · Anthropic · Google Gemini · DeepSeek · Groq · Mistral · xAI · Cerebras · Ollama · OpenRouter · any OpenAI-compatible endpoint**
 
 The smart router picks the right model tier per task automatically, or pin a specific model per agent.
+
+---
+
+## Web dashboard
+
+| Route | Purpose |
+|---|---|
+| `/chat` | Streaming chat with tool call display and session history |
+| `/code` | In-browser IDE with terminal, file explorer, and diagnostics |
+| `/social` | Social media composer, scheduler, content calendar |
+| `/channels` | Channel management with connection status and QR flows |
+| `/models-hub` | Provider key management, model registry browser |
+| `/qors` | Agent profiles with Memory, Skills, Metrics, Schedules, Mail, Permissions tabs |
+| `/mail` | Agent-managed inbox |
+| `/approvals` | Pending agent action approvals |
+| `/calendar` | Combined events + scheduled social posts |
+| `/sessions`, `/memories`, `/knowledge-graph`, `/audit`, `/settings` | Operations and history |
+
+---
+
+## CLI & TUI
+
+```bash
+qorven start                # run the server
+qorven chat                 # terminal chat with markdown rendering and / slash commands
+qorven install              # full-screen BubbleTea TUI installer
+qorven migrate up/down      # database migrations
+qorven agents list/get/...  # agent management
+qorven auth login/logout    # local API authentication
+```
 
 ---
 
