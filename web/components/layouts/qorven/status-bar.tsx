@@ -99,7 +99,7 @@ export function StatusBar() {
     <>
       <div
         className="qorven-status-bar fixed bottom-0 z-30 h-6 flex items-center gap-2 border-t border-border bg-muted px-2 text-2xs text-muted-foreground select-none"
-        style={{ left: 'var(--rail-width)', width: 'var(--sidebar-default-width)' }}
+        style={{ left: 'var(--rail-width)', right: 0 }}
       >
         {/* Brand — links to qorven.ai */}
         <Link

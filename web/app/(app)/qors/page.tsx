@@ -21,6 +21,7 @@ import {
   Plus, X, Search, MessageSquare, Settings, Trash2, MoreHorizontal,
   Users, Hash, ChevronDown,
 } from 'lucide-react';
+import { SidebarHeader } from '@/components/layouts/qorven/sidebar';
 import type { Soul } from '@/types';
 
 interface Room {
@@ -117,7 +118,9 @@ export default function QorsPage() {
         style={{ height: 'calc(100vh - var(--header-height, 44px) - var(--status-bar-height, 0px))' }}
       >
         {/* ── Left sidebar ── */}
-        <div className="flex w-(--sidebar-default-width) shrink-0 flex-col border-r border-border bg-card/50 overflow-y-auto">
+        <div className="flex w-(--sidebar-default-width) shrink-0 flex-col border-r border-border bg-muted overflow-hidden">
+          <SidebarHeader />
+          <div className="flex-1 overflow-y-auto">
 
           {/* Qors section header */}
           <div className="flex items-center justify-between px-3 pt-3 pb-1 shrink-0">
@@ -230,6 +233,7 @@ export default function QorsPage() {
               )}
             </div>
           )}
+          </div>
         </div>
 
         {/* ── Right panel ── */}
