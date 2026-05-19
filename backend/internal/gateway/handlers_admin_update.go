@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -227,7 +226,8 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 }
 
 // triggerSelfRestart hands the restart to systemd if available, otherwise
-// sends SIGTERM to self (clean exit → systemd/supervisor restarts us).
+// calls the platform-specific selfExit() to trigger supervisor restart.
+// selfExit is defined in update_restart_unix.go / update_restart_windows.go.
 func triggerSelfRestart() {
 	// Ensure the installed unit has Restart=always so a clean exit triggers
 	// a restart. Older installs shipped with Restart=on-failure.
@@ -241,11 +241,9 @@ func triggerSelfRestart() {
 			return
 		}
 	}
-	// Fallback: SIGTERM self. systemd Restart=always catches the clean exit.
-	slog.Info("update.restart", "method", "sigterm_self")
-	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-		slog.Error("update.restart_failed", "err", err)
-	}
+	// Fallback: platform-specific clean exit — supervisor/NSSM/launchd restarts us.
+	slog.Info("update.restart", "method", "self_exit")
+	selfExit()
 }
 
 // patchServiceRestartPolicy upgrades the installed systemd unit from
