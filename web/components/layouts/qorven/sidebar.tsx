@@ -64,10 +64,21 @@ export const statusColor: Record<string, string> = {
 export function Sidebar() {
   const voice = useVoiceEnabled();
   const activeRail = useActiveRail();
+  const pathname = usePathname();
   const souls = useStore((s) => s.souls);
   const soulStates = useStore((s) => s.soulStates);
   const liveEvents = useStore((s) => s.liveEvents);
   const [showCreateSoul, setShowCreateSoul] = useState(false);
+
+  // Within the code rail, dispatch sidebar by exact pathname so /tasks, /approvals, etc.
+  // show their purpose-built sidebars rather than CodeSidebar.
+  const codeSidebarContent = (() => {
+    if (pathname?.startsWith('/tasks')) return <TasksSidebar />;
+    if (pathname?.startsWith('/approvals')) return <WorkflowsSidebar />;
+    if (pathname?.startsWith('/workflows')) return <WorkflowsSidebar />;
+    if (pathname?.startsWith('/plans')) return <WorkflowsSidebar />;
+    return <CodeSidebar />;
+  })();
 
   return (
     <div
@@ -81,7 +92,6 @@ export function Sidebar() {
           {activeRail === 'sessions' && <MailSidebar />}
           {activeRail === 'live' && <CalendarSidebar />}
           {activeRail === 'drive' && <DriveSidebar />}
-          {(activeRail === 'tasks' as any) && <TasksSidebar />}
           {activeRail === 'connectors' && <ChannelsSidebar />}
           {activeRail === 'workflows' && <WorkflowsSidebar />}
           {(activeRail as string) === 'social' && <SocialSidebar />}
@@ -93,7 +103,7 @@ export function Sidebar() {
           {activeRail === 'models' && <ModelsSidebar />}
           {activeRail === 'settings' && <SettingsSidebar />}
           {(activeRail as string) === 'apps' && <AppsSidebar />}
-          {(activeRail as string) === 'code' && <CodeSidebar />}
+          {(activeRail as string) === 'code' && codeSidebarContent}
         </div>
 
         <div className="px-2 pb-2">
@@ -107,7 +117,7 @@ export function Sidebar() {
 }
 
 /* ─── Sidebar Header (User profile) ─── */
-function SidebarHeader() {
+export function SidebarHeader() {
   const router = useRouter();
   const [user, setUser] = useState<{ username: string; role: string } | null>(null);
 
