@@ -261,24 +261,33 @@ export default function DashboardPage() {
             ) : auditFeed.length === 0 ? (
               <EmptyPanel icon={<MessageSquare className="h-5 w-5" />} label="No activity yet today" />
             ) : (
-              auditFeed.map((m) => (
-                <div key={m.id} className="flex items-start gap-3 px-3 py-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0 mt-0.5">
-                    <Zap className="h-3.5 w-3.5" />
+              auditFeed.map((m) => {
+                const intentLabel = friendlyIntent(m.intent);
+                const from = friendlyAgentId(m.from);
+                const to = friendlyAgentId(m.to);
+                const isEscalation = m.intent === 'ESCALATION_NOTICE';
+                const isAck = m.intent === 'ACK';
+                const iconColor = isEscalation ? 'bg-amber-500/10 text-amber-500'
+                  : isAck ? 'bg-emerald-500/10 text-emerald-500'
+                  : 'bg-primary/10 text-primary';
+                const IconEl = isEscalation ? AlertCircle : isAck ? CheckCircle : Zap;
+                return (
+                  <div key={m.id} className="flex items-start gap-3 px-3 py-2.5">
+                    <div className={cn('flex h-7 w-7 items-center justify-center rounded-md shrink-0 mt-0.5', iconColor)}>
+                      <IconEl className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-foreground truncate">{intentLabel}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {from} {to && to !== from ? `→ ${to}` : ''}
+                      </p>
+                      <p className="text-2xs text-muted-foreground mt-0.5">
+                        {new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground truncate">
-                      <span className="text-muted-foreground">{m.from}</span>
-                      {' → '}
-                      <span className="text-muted-foreground">{m.to}</span>
-                    </p>
-                    <p className="text-xs text-foreground/80 truncate mt-0.5">{m.intent}</p>
-                    <p className="text-2xs text-muted-foreground mt-0.5">
-                      {new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </Panel>
 
@@ -297,6 +306,42 @@ export default function DashboardPage() {
   );
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const outboundLabels: Record<string, string> = {
+  email_send: 'Send Email',
+  telegram_send: 'Send Telegram Message',
+  slack_send: 'Send Slack Message',
+  discord_send: 'Send Discord Message',
+  whatsapp_send: 'Send WhatsApp Message',
+  social_post: 'Post to Social Media',
+  webhook_send: 'Fire Webhook',
+  sms_send: 'Send SMS',
+};
+
+const intentLabels: Record<string, string> = {
+  STATUS_REQUEST: 'Status check',
+  REVIEW_REQUEST: 'Review requested',
+  ACK: 'Task confirmed',
+  ESCALATION_NOTICE: 'Escalation raised',
+  AUTO_FIX: 'Auto-fix applied',
+  HEARTBEAT: 'Agent heartbeat',
+};
+
+function friendlyOutboundLabel(actionType: string): string {
+  return outboundLabels[actionType] ?? actionType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function friendlyIntent(intent: string): string {
+  return intentLabels[intent] ?? intent.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function friendlyAgentId(id: string): string {
+  if (!id || id === 'prime' || id === 'supervisor') return id === 'prime' ? 'Supervisor' : id;
+  if (id === 'human') return 'You';
+  return id.slice(0, 8);
+}
+
 // ─── Outbound row ─────────────────────────────────────────────────────────────
 
 function OutboundRow({ item: ob, onDecide }: {
@@ -305,14 +350,15 @@ function OutboundRow({ item: ob, onDecide }: {
 }) {
   const [busy, setBusy] = useState(false);
   const act = async (d: 'approve' | 'reject') => { setBusy(true); await onDecide(ob.id, d); setBusy(false); };
+  const label = friendlyOutboundLabel(ob.action_type);
   return (
     <div className="flex items-center gap-3 px-3 py-2.5">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500 shrink-0">
         <Mail className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-foreground truncate">{ob.action_type}</p>
-        <p className="text-xs text-muted-foreground truncate mt-0.5">Outbound · {ob.agent_id?.slice(0, 8)}</p>
+        <p className="text-sm font-medium text-foreground truncate">{label}</p>
+        <p className="text-xs text-muted-foreground truncate mt-0.5">Needs approval to send</p>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         <button onClick={() => act('approve')} disabled={busy}
@@ -333,9 +379,11 @@ function OutboundRow({ item: ob, onDecide }: {
 function ApprovalRow({ item: a, onDecide }: { item: ApprovalItem; onDecide: (id: string, d: 'approve' | 'reject') => void | Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const act = async (d: 'approve' | 'reject') => { setBusy(true); await onDecide(a.id, d); setBusy(false); };
-  const label = a.kind === 'tool' && a.tool_name ? a.tool_name
-    : a.kind === 'plan' ? (a.node_id ? `Plan ${String(a.node_id).slice(0, 8)}` : 'Plan step')
-    : a.kind || 'Approval';
+  const label = a.kind === 'tool' && a.tool_name
+    ? a.tool_name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : a.kind === 'plan' ? 'Plan step approval'
+    : a.kind ? a.kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : 'Approval';
   return (
     <div className="flex items-center gap-3 px-3 py-2.5">
       <div className={cn(
