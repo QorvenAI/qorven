@@ -6,10 +6,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Megaphone, Calendar, Clock, CheckCircle2, FileText, Users, Zap,
-  Plus, Trash2, Send, Loader2, Twitter, Linkedin, Facebook,
-  Instagram, Youtube, Check, AlertCircle, RefreshCw, X,
-  ChevronLeft, ChevronRight, ExternalLink,
+  Plus, Trash2, Send, Loader2, Check, X,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { social as socialApi } from '@/lib/api';
 import { useStore } from '@/store';
@@ -47,7 +47,7 @@ const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 export default function SocialPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const tab = searchParams.get('tab') || 'compose';
+  const tab = searchParams.get('tab') ?? 'compose';
   const setTab = (t: string) => router.push(`/social?tab=${t}`);
 
   const souls = useStore(s => s.souls);
@@ -55,61 +55,38 @@ export default function SocialPage() {
 
   return (
     <ErrorBoundary>
-      <div className="space-y-5">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold flex items-center gap-2">
-              <Megaphone className="h-5 w-5" /> Social Publishing
-            </h1>
-            <p className="text-sm text-muted-foreground">Schedule and publish to 10+ platforms</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={agentFilter}
-              onChange={e => setAgentFilter(e.target.value)}
-              className="qr-select">
-              <option value="">All Agents</option>
-              {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
-            </select>
-            <button
-              onClick={() => setTab('compose')}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer"
-            >
-              <Plus className="h-4 w-4" /> New Post
-            </button>
-          </div>
+      <div className="flex flex-col h-full min-h-0">
+        <CanvasHeader
+          title="Social Publishing"
+          description="Schedule and publish to 10+ platforms"
+          actions={
+            <>
+              <select
+                value={agentFilter}
+                onChange={e => setAgentFilter(e.target.value)}
+                className="qr-select"
+              >
+                <option value="">All Agents</option>
+                {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+              </select>
+              <button
+                onClick={() => setTab('compose')}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" /> New Post
+              </button>
+            </>
+          }
+        />
+        <div className="flex-1 overflow-y-auto px-6 pb-6">
+          {tab === 'compose'   && <ComposeTab agentId={agentFilter} onScheduled={() => setTab('scheduled')} />}
+          {tab === 'calendar'  && <CalendarTab agentId={agentFilter} />}
+          {tab === 'scheduled' && <PostsTab agentId={agentFilter} status="scheduled" />}
+          {tab === 'published' && <PostsTab agentId={agentFilter} status="published" />}
+          {tab === 'drafts'    && <PostsTab agentId={agentFilter} status="draft" />}
+          {tab === 'accounts'  && <AccountsTab agentId={agentFilter} />}
+          {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
         </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 border-b border-border">
-          {[
-            { id: 'compose', label: 'Compose', icon: Megaphone },
-            { id: 'calendar', label: 'Calendar', icon: Calendar },
-            { id: 'scheduled', label: 'Scheduled', icon: Clock },
-            { id: 'published', label: 'Published', icon: CheckCircle2 },
-            { id: 'drafts', label: 'Drafts', icon: FileText },
-            { id: 'accounts', label: 'Accounts', icon: Users },
-            { id: 'autopost', label: 'AutoPost', icon: Zap },
-          ].map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={cn(
-                'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors',
-                tab === id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}>
-              <Icon className="h-3.5 w-3.5" /> {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab Content */}
-        {tab === 'compose'   && <ComposeTab agentId={agentFilter} onScheduled={() => setTab('scheduled')} />}
-        {tab === 'calendar'  && <CalendarTab agentId={agentFilter} />}
-        {tab === 'scheduled' && <PostsTab agentId={agentFilter} status="scheduled" />}
-        {tab === 'published' && <PostsTab agentId={agentFilter} status="published" />}
-        {tab === 'drafts'    && <PostsTab agentId={agentFilter} status="draft" />}
-        {tab === 'accounts'  && <AccountsTab agentId={agentFilter} />}
-        {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
       </div>
     </ErrorBoundary>
   );
