@@ -80,19 +80,10 @@ $pgSvcObj = Get-Service -Name "postgresql-x64-$PgVersion" -ErrorAction SilentlyC
 $pgSvcRunning = $pgSvcObj -and $pgSvcObj.Status -eq 'Running'
 
 if ((Test-Path "$PgBinDir\psql.exe") -and $pgSvcRunning) {
-    # Try pg_hba trust auth first (works if user set it up that way), then ask for password
+    # Try passwordless connection first (peer/trust auth on some installs).
+    # If it fails, skip DB removal silently — the service and files are already
+    # gone, so this is cosmetic. The user can drop manually if they care.
     $env:PGPASSWORD = ''
-    $testConn = & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1
-    if ($testConn -notmatch '1') {
-        Write-Host ""
-        Write-Host "  Enter the PostgreSQL 'postgres' password to drop the qorven database." -ForegroundColor Cyan
-        Write-Host "  (Press Enter to skip if you don't know it)" -ForegroundColor DarkGray
-        $secPw = Read-Host "  postgres password" -AsSecureString
-        $bstr  = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
-        $env:PGPASSWORD = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-
     $canConnect = (& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1'
     if ($canConnect) {
         & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -c "DROP DATABASE IF EXISTS qorven;" 2>&1 | Out-Null
@@ -100,9 +91,10 @@ if ((Test-Path "$PgBinDir\psql.exe") -and $pgSvcRunning) {
         & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -c "DROP ROLE IF EXISTS qorven;" 2>&1 | Out-Null
         Write-Ok "Role 'qorven' dropped"
     } else {
-        Write-Warn "Could not connect to PostgreSQL — database and role NOT removed. Drop manually:"
-        Write-Host "    psql -U postgres -h 127.0.0.1 -c `"DROP DATABASE IF EXISTS qorven;`"" -ForegroundColor DarkGray
-        Write-Host "    psql -U postgres -h 127.0.0.1 -c `"DROP ROLE IF EXISTS qorven;`"" -ForegroundColor DarkGray
+        Write-Skip "Cannot connect to PostgreSQL without a password — skipping DB removal (safe to ignore)"
+        Write-Host "       To remove manually later:" -ForegroundColor DarkGray
+        Write-Host "         psql -U postgres -h 127.0.0.1 -c `"DROP DATABASE IF EXISTS qorven;`"" -ForegroundColor DarkGray
+        Write-Host "         psql -U postgres -h 127.0.0.1 -c `"DROP ROLE IF EXISTS qorven;`"" -ForegroundColor DarkGray
     }
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 } else {
