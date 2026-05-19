@@ -9,7 +9,7 @@
     --context-panel-width: 320px;
     --sidebar-transition-duration: 0.25s;
     --sidebar-transition-timing: ease;
-    --toolbar-height: 44px;
+    --toolbar-height: 0px;
     --nav-width: calc(var(--rail-width) + var(--sidebar-width));
   }
 
@@ -43,6 +43,10 @@
 
   .qorven.header-fixed .wrapper {
     padding-top: var(--header-height);
+  }
+
+  .qorven.has-toolbar {
+    --toolbar-height: 44px;
   }
 
   .qorven.header-fixed.has-toolbar .wrapper {
