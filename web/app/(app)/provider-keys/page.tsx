@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Key, Plus, Trash2, CheckCircle, Eye, EyeOff, Loader2, GitBranch, ExternalLink } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { providers as providersApi, connections } from '@/lib/api';
 import { toast } from 'sonner';
@@ -384,12 +385,10 @@ export default function ProviderKeysPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load API keys">
       <div className="space-y-8">
-        <div>
-          <h1 className="text-lg font-semibold">API Keys & Integrations</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Connect external services so agents can take autonomous actions
-          </p>
-        </div>
+        <CanvasHeader
+          title="API Keys & Integrations"
+          description="Connect external services so agents can take autonomous actions"
+        />
 
         {/* GitHub — most important for autonomous dev loop */}
         <section className="space-y-3">

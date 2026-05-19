@@ -12,6 +12,7 @@ import {
   BarChart3, Cpu, DollarSign, Activity, AlertTriangle,
   Clock, Zap, TrendingUp, RefreshCw,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 
 export default function AnalyticsPage() {
   const souls = useStore((s) => s.souls);
@@ -52,17 +53,17 @@ export default function AnalyticsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load analytics">
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-semibold">Analytics & Usage</h1>
-            <p className="text-sm text-muted-foreground">Token usage, traces, and per-agent spend — current month</p>
-          </div>
-          <button onClick={load} disabled={loading}
-            className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
-            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-            Refresh
-          </button>
-        </div>
+        <CanvasHeader
+          title="Analytics & Usage"
+          description="Token usage, traces, and per-agent spend — current month"
+          actions={
+            <button onClick={load} disabled={loading}
+              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
+              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+              Refresh
+            </button>
+          }
+        />
 
         {/* ── Top stat cards ── */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

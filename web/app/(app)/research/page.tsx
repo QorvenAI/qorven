@@ -20,6 +20,7 @@ import {
   Search, Send, Loader2, Zap, Scale, Layers, ExternalLink, AlertCircle,
   CheckCircle2, XCircle, BookOpen, RotateCw,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { research, type ResearchJob, type ResearchMode } from '@/lib/api';
 
@@ -88,16 +89,7 @@ export default function ResearchPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <header>
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <Search className="h-6 w-6 text-primary" />
-          Research
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Decompose a question into sub-queries, search the web in parallel,
-          extract + cite, synthesize.
-        </p>
-      </header>
+      <CanvasHeader title="Research" description="Decompose a question into sub-queries, search the web in parallel, extract + cite, synthesize." />
 
       {/* Mode picker */}
       <div className="grid grid-cols-3 gap-2">

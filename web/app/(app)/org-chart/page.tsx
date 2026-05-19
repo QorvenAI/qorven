@@ -14,8 +14,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Users, Crown, User, Loader2, AlertCircle, ChevronRight, ChevronDown,
+  Crown, User, Users, Loader2, AlertCircle, ChevronRight, ChevronDown,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { orgChart, type OrgChartAgent } from '@/lib/api';
@@ -42,15 +43,7 @@ export default function OrgChartPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <header>
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <Users className="h-6 w-6 text-primary" />
-          Org chart
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Reporting structure across all Qors. Click a card to open a profile.
-        </p>
-      </header>
+      <CanvasHeader title="Org Chart" description="Reporting structure across all Qors. Click a card to open a profile." />
 
       {loading && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">

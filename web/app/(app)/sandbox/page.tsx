@@ -18,6 +18,7 @@ import {
   Play, Loader2, Copy, Check, Terminal, Clock, FileDown,
   AlertCircle, RotateCw, ChevronRight,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { sandbox, type SandboxRun, type SandboxArtifact } from '@/lib/api';
 import { useStore } from '@/store';
@@ -153,29 +154,27 @@ export default function SandboxPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 full-bleed p-4 lg:p-6">
-      {/* Header */}
-      <header className="flex flex-wrap items-center gap-3">
-        <Terminal className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-semibold">Sandbox</h1>
-        <p className="text-xs text-muted-foreground">
-          Run code inside an agent&apos;s workspace — isolated, tool-profile-gated.
-        </p>
-        <div className="ml-auto flex items-center gap-2">
-          <label className="text-2xs text-muted-foreground">Agent</label>
-          <select
-            value={agentId}
-            onChange={(e) => setAgentId(e.target.value)}
-            className="qr-input text-xs h-7 py-0"
-          >
-            <option value="" disabled>Choose…</option>
-            {souls.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.display_name || s.agent_key}
-              </option>
-            ))}
-          </select>
-        </div>
-      </header>
+      <CanvasHeader
+        title="Sandbox"
+        description="Run code inside an agent's workspace — isolated, tool-profile-gated."
+        actions={
+          <div className="flex items-center gap-2">
+            <label className="text-2xs text-muted-foreground">Agent</label>
+            <select
+              value={agentId}
+              onChange={(e) => setAgentId(e.target.value)}
+              className="qr-input text-xs h-7 py-0"
+            >
+              <option value="" disabled>Choose…</option>
+              {souls.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.display_name || s.agent_key}
+                </option>
+              ))}
+            </select>
+          </div>
+        }
+      />
 
       {/* 3-column layout */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[240px_1fr_240px]">

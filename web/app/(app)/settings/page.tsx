@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { useStore } from '@/store';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { useAppSettingTabs } from '@/components/apps/app-registry-context';
 import { request as apiRequest, getToken } from '@/lib/api-core';
@@ -25,10 +26,7 @@ export default function SettingsPage() {
   return (
     <ErrorBoundary>
       <div>
-        <div className="mb-6">
-          <h1 className="text-lg font-semibold">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage your account and workspace preferences</p>
-        </div>
+        <CanvasHeader title="Settings" description="Manage your account and workspace preferences" />
 
         {activeTab === 'profile'       && <ProfileSettings />}
         {activeTab === 'appearance'    && <AppearanceSettings />}

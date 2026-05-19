@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState, useCallback } from 'react';
-import { Shield, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request } from '@/lib/api-core';
@@ -37,10 +38,7 @@ export default function AuditPage() {
   // if (events.length === 0) return <EmptyState {...emptyStates.audit} />;
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold flex items-center gap-2"><Shield className="h-5 w-5" />Audit Log</h1>
-        <p className="text-sm text-muted-foreground">Every action tracked — who did what, when</p>
-      </div>
+      <CanvasHeader title="Audit Log" description="Every action tracked — who did what, when" />
       <div className="flex gap-2 items-center">
         <select value={resource} onChange={e => { setResource(e.target.value); setPage(0); }}
           className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm">

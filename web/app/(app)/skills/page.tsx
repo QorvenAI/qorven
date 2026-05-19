@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { skills as skillsApi, agents } from '@/lib/api';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -196,12 +197,7 @@ export default function SkillsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load skills">
       <div className="space-y-5">
-        <div>
-          <h1 className="text-lg font-semibold">Skills</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Extend your Qors with installable capabilities.
-          </p>
-        </div>
+        <CanvasHeader title="Skills" description="Extend your Qors with installable capabilities." />
 
         {/* Tab bar */}
         <div className="flex gap-1 border-b border-border">

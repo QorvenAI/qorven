@@ -23,6 +23,7 @@ import {
   ShieldAlert, CheckCircle2, XCircle, Loader2, RefreshCw, Clock, Mail,
   MessageSquare, Globe, Webhook, Megaphone, AlertTriangle,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import {
   outbound,
@@ -65,27 +66,25 @@ export default function OutboundPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-4 lg:p-6">
-      <header className="flex items-start gap-3">
-        <ShieldAlert className="h-6 w-6 text-amber-400" />
-        <div>
-          <h1 className="text-lg font-semibold">Outbound</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Everything an agent wants to send outside the platform lands here
-            first. Approve to release · reject to drop.
-          </p>
-        </div>
-        <span className="ml-auto rounded-md border border-border bg-muted/30 px-2 py-0.5 font-mono text-xs">
-          {loading ? '…' : total} pending
-        </span>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Refresh
-        </button>
-      </header>
+      <CanvasHeader
+        title="Outbound"
+        description="Everything an agent wants to send outside the platform lands here first. Approve to release · reject to drop."
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="rounded-md border border-border bg-muted/30 px-2 py-0.5 font-mono text-xs">
+              {loading ? '…' : total} pending
+            </span>
+            <button
+              onClick={refresh}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
+            >
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh
+            </button>
+          </div>
+        }
+      />
 
       {err && <ErrorBanner message={err} />}
 

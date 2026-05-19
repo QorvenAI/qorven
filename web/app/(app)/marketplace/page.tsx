@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, CheckCircle, ArrowRight, Sparkles, Search, Users, Zap } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request } from '@/lib/api-core';
@@ -48,10 +49,10 @@ export default function MarketplacePage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div className="text-center space-y-2">
-        <h1 className="text-lg font-semibold">Blueprints</h1>
-        <p className="text-sm text-muted-foreground max-w-lg mx-auto">Pick a Blueprint and deploy a full AI team with dashboard in 30 seconds. Or describe what you need and let AI build it for you.</p>
-      </div>
+      <CanvasHeader
+        title="Blueprints"
+        description="Pick a Blueprint and deploy a full AI team with dashboard in 30 seconds. Or describe what you need and let AI build it for you."
+      />
 
       <div className="flex gap-3 justify-center">
         <div className="relative flex-1 max-w-md">

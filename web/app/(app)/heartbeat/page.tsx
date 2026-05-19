@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Activity, RefreshCw, Crown } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import SupervisorPage from '@/app/(app)/supervisor/page';
 import { cn } from '@/lib/utils';
@@ -66,20 +67,21 @@ export default function HealthPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold">Health</h1>
-        {tab === 'health' && (
-          <button
-            onClick={() => fetchHealth(true)}
-            disabled={refreshing}
-            className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground transition disabled:opacity-50"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-            Refresh
-          </button>
-        )}
-      </div>
+      <CanvasHeader
+        title="Health"
+        actions={
+          tab === 'health' ? (
+            <button
+              onClick={() => fetchHealth(true)}
+              disabled={refreshing}
+              className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground transition disabled:opacity-50"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+              Refresh
+            </button>
+          ) : undefined
+        }
+      />
 
       {/* Tab bar */}
       <div className="flex items-center gap-0 border-b border-border">

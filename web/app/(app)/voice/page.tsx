@@ -5,8 +5,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Mic, MicOff, Volume2, Play, Loader2, AlertCircle,
-  Radio, Save, Settings, Plus, Trash2, Star,
+  Save, Settings, Plus, Trash2, Star, Radio,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import {
   voice,
@@ -49,15 +50,7 @@ export default function VoicePage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <header>
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <Radio className="h-6 w-6 text-primary" />
-          Voice
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage TTS + STT providers. Recording requires microphone permission.
-        </p>
-      </header>
+      <CanvasHeader title="Voice" description="Manage TTS + STT providers. Recording requires microphone permission." />
 
       {!voiceLoading && !voiceEnabled && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-300">

@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState } from 'react'
-import { BarChart3, Loader2, AlertCircle, DollarSign, Cpu } from 'lucide-react'
+import { Loader2, AlertCircle, DollarSign, Cpu } from 'lucide-react'
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { usage as usageApi } from '@/lib/api';
 
@@ -42,10 +43,7 @@ export default function UsagePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3 mb-8">
-        <BarChart3 className="w-7 h-7 text-primary" />
-        <h1 className="text-lg font-semibold">Usage &amp; Costs</h1>
-      </div>
+      <CanvasHeader title="Usage & Costs" description="Track token usage and API costs across your Qors." />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         <div className="border border-border rounded-lg p-5 flex items-center gap-4">
           <DollarSign className="w-8 h-8 text-primary" />

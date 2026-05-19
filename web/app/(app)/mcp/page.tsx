@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react'
 import { Plug, Trash2 } from 'lucide-react'
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { mcp } from '@/lib/api';
 
@@ -49,16 +50,15 @@ export default function McpPage() {
   // if (servers.length === 0) return <EmptyState {...emptyStates.mcp} />;
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Plug className="text-primary" size={28} />
-          <h1 className="text-lg font-semibold">MCP Servers</h1>
-          {!loading && <span className="text-sm text-muted-foreground">{connected}/{servers.length} connected</span>}
-        </div>
-        <button onClick={() => setShowForm(!showForm)} className="bg-primary hover:bg-primary/90 px-4 py-2 rounded-lg text-sm font-medium transition">
-          {showForm ? 'Cancel' : 'Add Server'}
-        </button>
-      </div>
+      <CanvasHeader
+        title="MCP Servers"
+        description={!loading ? `${connected}/${servers.length} connected` : undefined}
+        actions={
+          <button onClick={() => setShowForm(!showForm)} className="bg-primary hover:bg-primary/90 px-4 py-2 rounded-lg text-sm font-medium transition">
+            {showForm ? 'Cancel' : 'Add Server'}
+          </button>
+        }
+      />
 
       {showForm && (
         <div className="bg-card border border-border rounded-xl p-5">

@@ -13,11 +13,12 @@
  */
 
 import Link from 'next/link';
-import { Beaker, ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import {
   FlaskConical, Box, GraduationCap, Users, Search, GitBranch,
   type LucideIcon,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 
 interface Experiment {
   href: string;
@@ -84,18 +85,7 @@ const TONE_CLASSES: Record<string, { bg: string; text: string; border: string }>
 export default function LabsPage() {
   return (
     <div className="space-y-5">
-      <header className="flex items-start gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-          <Beaker className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">Labs</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Experimental surfaces — not production paths. Things land here first so we can learn from them
-            without blocking the daily workflow.
-          </p>
-        </div>
-      </header>
+      <CanvasHeader title="Labs" description="Experimental surfaces — not production paths. Things land here first so we can learn from them without blocking the daily workflow." />
 
       <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-2xs text-amber-600">
         Heads up: anything under Labs can change behavior, schema, or disappear between releases.

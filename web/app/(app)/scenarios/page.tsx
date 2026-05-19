@@ -19,6 +19,7 @@ import {
   FlaskConical, Plus, Play, Loader2, CheckCircle2, XCircle, Clock,
   RefreshCw, MessageSquare, AlertCircle, Beaker, ArrowLeft,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { scenarios, type ScenarioProject, type ScenarioStatus } from '@/lib/api';
@@ -100,23 +101,20 @@ export default function ScenariosPage() {
         </Link>
       </div>
 
-      <header className="flex items-center gap-3">
-        <FlaskConical className="h-6 w-6 text-primary" />
-        <div>
-          <h1 className="text-lg font-semibold">Scenario Lab</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Multi-agent simulations — seed a premise, watch the team play it out. Not a production path.
-          </p>
-        </div>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Refresh
-        </button>
-      </header>
+      <CanvasHeader
+        title="Scenario Lab"
+        description="Multi-agent simulations — seed a premise, watch the team play it out. Not a production path."
+        actions={
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Refresh
+          </button>
+        }
+      />
 
       {err && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">

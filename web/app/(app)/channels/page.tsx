@@ -8,6 +8,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { ChannelConnectForm } from '@/components/channels/channel-connect-form';
 import { channelFormSchemas, CHANNEL_TYPES } from '@/components/channels/channel-schemas';
 import { AlertCircle, Plus, Power, Pencil, Trash2, Loader2, Zap, ChevronRight, Search, Info } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import type { Channel, ChannelType, Soul } from '@/types';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -106,22 +107,19 @@ export default function ChannelsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load channels">
       <div className="space-y-4">
-        {/* Page header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">Channels</h1>
-            <p className="text-sm text-muted-foreground">
-              {loading ? 'Loading…' : `${list.length} channel${list.length !== 1 ? 's' : ''} configured`}
-            </p>
-          </div>
-          <button
-            onClick={() => { setShowAddPicker(true); setPickerSearch(''); }}
-            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            Add Channel
-          </button>
-        </div>
+        <CanvasHeader
+          title="Channels"
+          description={loading ? 'Loading…' : `${list.length} channel${list.length !== 1 ? 's' : ''} configured`}
+          actions={
+            <button
+              onClick={() => { setShowAddPicker(true); setPickerSearch(''); }}
+              className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <Plus className="h-4 w-4" />
+              Add Channel
+            </button>
+          }
+        />
 
         {/* Agent tab strip */}
         {!loading && agentList.length > 0 && (

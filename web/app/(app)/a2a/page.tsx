@@ -4,8 +4,9 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Network, Bot, Tag, Globe, ExternalLink, Loader2, RefreshCw, Copy, Check,
+  Bot, Tag, Globe, ExternalLink, Loader2, RefreshCw, Copy, Check,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { BASE } from '@/lib/api-core';
 
@@ -63,23 +64,20 @@ export default function A2APage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <header className="flex items-center gap-3">
-        <Network className="h-6 w-6 text-primary" />
-        <div>
-          <h1 className="text-lg font-semibold">Agent-to-Agent (A2A)</h1>
-          <p className="text-sm text-muted-foreground">
-            Qorven exposes an A2A endpoint for external agents to discover and delegate tasks.
-          </p>
-        </div>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Refresh
-        </button>
-      </header>
+      <CanvasHeader
+        title="Agent-to-Agent (A2A)"
+        description="Qorven exposes an A2A endpoint for external agents to discover and delegate tasks."
+        actions={
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Refresh
+          </button>
+        }
+      />
 
       {/* Discovery URL */}
       <div className="rounded-xl border border-border bg-card p-4">

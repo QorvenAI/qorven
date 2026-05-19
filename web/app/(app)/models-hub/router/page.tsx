@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { providers as providersApi } from '@/lib/api';
 import { RoutingTab } from '../routing-tab';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 
 type SelModel = { model_id: string; provider_id: string; is_default?: boolean };
 
@@ -24,10 +25,7 @@ export default function RouterPage() {
 
   return (
     <div className="space-y-5">
-      <div className="pb-2">
-        <h1 className="text-lg font-semibold leading-none">Model Router</h1>
-        <p className="text-sm text-muted-foreground mt-1">Assign models to work categories and review SmartRouter decisions</p>
-      </div>
+      <CanvasHeader title="Model Router" description="Assign models to work categories and review SmartRouter decisions" />
       {loading ? (
         <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…

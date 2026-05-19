@@ -9,6 +9,7 @@ import { workflows } from '@/lib/api';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { descriptions } from '@/lib/branding';
 import { AlertCircle, Plus, Play, GitBranch, Loader2, Trash2 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { cn } from '@/lib/utils';
 
@@ -53,18 +54,18 @@ export default function WorkflowsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load workflows">
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">Workflows</h1>
-            <p className="text-sm text-muted-foreground">{descriptions.workflows}</p>
-          </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" /> New Workflow
-          </button>
-        </div>
+        <CanvasHeader
+          title="Workflows"
+          description={descriptions.workflows}
+          actions={
+            <button
+              onClick={() => setShowCreate(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <Plus className="h-4 w-4" /> New Workflow
+            </button>
+          }
+        />
 
         {loading ? (
           <div className="space-y-2">

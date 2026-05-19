@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, Clock, Search as SearchIcon, X, Loader2 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { sessions, agents } from '@/lib/api';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { TableSkeleton } from '@/components/page-skeleton';
@@ -82,16 +83,12 @@ export default function SessionsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load sessions">
       <div className="space-y-5">
-        <header>
-          <h1 className="text-lg font-semibold">Sessions</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {mode === 'search'
-              ? `${rows.length} match${rows.length !== 1 ? 'es' : ''} for "${query.trim()}"`
-              : loading
-              ? 'Loading sessions…'
-              : `${rows.length} session${rows.length !== 1 ? 's' : ''}`}
-          </p>
-        </header>
+        <CanvasHeader title="Sessions"
+          description={mode === 'search'
+            ? `${rows.length} match${rows.length !== 1 ? 'es' : ''} for "${query.trim()}"`
+            : loading ? 'Loading sessions…'
+            : `${rows.length} session${rows.length !== 1 ? 's' : ''}`}
+        />
 
         <form onSubmit={runSearch} className="flex items-center gap-2">
           <div className="relative flex-1 max-w-xl">

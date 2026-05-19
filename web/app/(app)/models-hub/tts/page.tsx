@@ -3,14 +3,12 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { VoiceModelsTab } from '../voice-tab';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 
 export default function TtsPage() {
   return (
     <div className="space-y-5">
-      <div className="pb-2">
-        <h1 className="text-lg font-semibold leading-none">Text-to-Speech</h1>
-        <p className="text-sm text-muted-foreground mt-1">TTS voice drivers and configured providers</p>
-      </div>
+      <CanvasHeader title="Text-to-Speech" description="TTS voice drivers and configured providers" />
       <VoiceModelsTab kind="tts" />
     </div>
   );

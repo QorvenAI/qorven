@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState } from 'react';
-import { DollarSign, Zap, BarChart3 } from 'lucide-react';
+import { Zap, BarChart3 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request } from '@/lib/api-core';
@@ -24,10 +25,7 @@ export default function BillingPage() {
   // if (data.length === 0) return <EmptyState {...emptyStates.billing} />;
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold flex items-center gap-2"><DollarSign className="h-6 w-6 text-primary/70" />Billing & Costs</h1>
-        <p className="text-sm text-muted-foreground">Per-agent cost tracking and budget management</p>
-      </div>
+      <CanvasHeader title="Billing & Costs" description="Per-agent cost tracking and budget management" />
 
       <div className="grid grid-cols-3 gap-4">
         <div className="qr-card p-4">

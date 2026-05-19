@@ -23,6 +23,7 @@ import {
   Crown, AlertTriangle, CheckCircle2, XCircle, Activity,
   Heart, ShieldCheck, Wrench, Loader2, RefreshCw, ShieldOff,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import {
   supervisor,
@@ -86,23 +87,15 @@ export default function SupervisorPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
-      <header className="flex items-start gap-3">
-        <Crown className="h-6 w-6 text-amber-400" />
-        <div>
-          <h1 className="text-lg font-semibold">Supervisor</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Prime&apos;s view of the team — health, escalations, and auto-fixes.
-          </p>
-        </div>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Refresh
-        </button>
-      </header>
+      <CanvasHeader title="Supervisor" description="Prime's view of the team — health, escalations, and auto-fixes."
+        actions={
+          <button onClick={refresh} disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Refresh
+          </button>
+        }
+      />
 
       {loadError && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">

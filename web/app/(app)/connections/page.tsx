@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Plug, Unplug, ExternalLink, Check, Search, Key, Shield, ChevronDown, ChevronUp } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE } from '@/lib/api-core';
@@ -93,10 +94,7 @@ export default function ConnectionsPage() {
           <button onClick={() => setError(null)} className="ml-4 text-destructive/60 hover:text-destructive">✕</button>
         </div>
       )}
-      <div>
-        <h1 className="text-lg font-semibold">Links</h1>
-        <p className="text-sm text-muted-foreground">Link external services. Your agents will use these to interact with apps on your behalf.</p>
-      </div>
+      <CanvasHeader title="Links" description="Link external services. Your agents will use these to interact with apps on your behalf." />
 
       <div className="flex gap-3 items-center">
         <div className="relative flex-1">
