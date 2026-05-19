@@ -72,6 +72,8 @@ export default function CodePage() {
   const router = useRouter();
   const activeCodeTab = (searchParams.get('tab') as CodeTabId) || 'editor';
 
+  const [activeProject, setActiveProject] = useState<CodeProject | null>(null);
+
   const codeTabBar = useMemo(() => (
     <nav className="flex items-stretch gap-0">
       {CODE_TABS.map(t => {
@@ -89,7 +91,7 @@ export default function CodePage() {
       })}
     </nav>
   ), [activeCodeTab, router]);
-  useToolbarContent(codeTabBar);
+  useToolbarContent(activeProject ? codeTabBar : null);
 
   const [tree, setTree] = useState<FileNode[]>([]);
   const [tabs, setTabs] = useState<FileTab[]>([]);
@@ -101,7 +103,6 @@ export default function CodePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [projectPath, setProjectPath] = useState('');
   const [projects, setProjects] = useState<CodeProject[]>([]);
-  const [activeProject, setActiveProject] = useState<CodeProject | null>(null);
   const termOpen = useStore((s) => s.codeTermOpen);
   const setTermOpen = useStore((s) => s.setCodeTermOpen);
   const [quickOpen, setQuickOpen] = useState(false);
