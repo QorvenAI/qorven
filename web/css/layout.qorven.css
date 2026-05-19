@@ -249,12 +249,14 @@
   /* Full-bleed pages skip centering and padding */
   .qorven .main-canvas > .full-bleed {
     margin: -1.25rem;
+    margin-bottom: calc(-1.25rem - var(--status-bar-height, 0px) - var(--bottom-drawer-height, 0px));
     width: calc(100% + 2.5rem);
     max-width: none;
   }
   @media (min-width: theme(--breakpoint-lg)) {
     .qorven .main-canvas > .full-bleed {
       margin: -1.5rem;
+      margin-bottom: calc(-1.5rem - var(--status-bar-height, 0px) - var(--bottom-drawer-height, 0px));
       width: calc(100% + 3rem);
     }
   }
