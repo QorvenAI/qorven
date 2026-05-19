@@ -25,11 +25,10 @@ ExecStart=/usr/local/bin/qorven start
 # it force-kills.
 TimeoutStopSec=15s
 KillSignal=SIGTERM
-# Restart-on-failure with backoff. StartLimitBurst=10 in 5min window
-# means a crash loop eventually trips into "failed" state instead of
-# thrashing indefinitely.
-Restart=on-failure
-RestartSec=5s
+# Restart=always so a clean exit (e.g. self-update) also triggers restart.
+# StartLimitBurst=10 in 5min window prevents crash-loop thrashing.
+Restart=always
+RestartSec=3s
 StartLimitIntervalSec=300
 StartLimitBurst=10
 

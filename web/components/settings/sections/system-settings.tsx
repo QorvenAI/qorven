@@ -2,7 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, Monitor, ExternalLink, RefreshCw, ArrowUpCircle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { systemInfo, admin } from '@/lib/api';
@@ -74,8 +74,9 @@ function UpdateCard() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [restartRequired, setRestartRequired] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const check = async () => {
     setChecking(true);
@@ -91,26 +92,64 @@ function UpdateCard() {
 
   useEffect(() => { check(); }, []);
 
+  // Poll /health until server is back up, then reload the page.
+  const waitForRestart = () => {
+    setReconnecting(true);
+    let attempts = 0;
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        const r = await fetch('/health', { cache: 'no-store' });
+        if (r.ok) {
+          clearInterval(pollRef.current!);
+          window.location.reload();
+        }
+      } catch {
+        // server still down — keep polling
+      }
+      if (attempts >= 40) { // 40 × 2s = 80s timeout
+        clearInterval(pollRef.current!);
+        setReconnecting(false);
+        setError('Server did not restart within 80 s — check service logs.');
+      }
+    }, 2000);
+  };
+
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
   const install = async () => {
     setInstalling(true);
     setError('');
     try {
       const res = await admin.installUpdate();
       if (res.restart) {
-        setRestartRequired(true);
-        toast.success(`Updated to ${res.to} — restart the service to apply`);
+        toast.success(`Installing ${res.to} — restarting…`);
+        // Give the server ~1 s to begin shutting down, then start polling.
+        setTimeout(waitForRestart, 1000);
       } else {
         toast.success(res.message ?? 'Already up to date');
+        await check();
       }
-      await check();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Install failed');
-    } finally {
       setInstalling(false);
     }
+    // Don't clear installing — the page will reload on successful restart.
   };
 
   const upToDate = info?.up_to_date ?? false;
+
+  if (reconnecting) {
+    return (
+      <Card id="software_update" title="Software Update" description="Restarting with the new version…">
+        <div className="flex flex-col items-center gap-3 py-6">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Server is restarting — reconnecting…</p>
+          <p className="text-xs text-muted-foreground">The page will reload automatically.</p>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card
@@ -158,17 +197,9 @@ function UpdateCard() {
             )}
           </div>
 
-          {/* Restart notice */}
-          {restartRequired && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-600">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              Restart required — run <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded mx-1">sudo systemctl restart qorven</code> to apply
-            </div>
-          )}
-
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {!upToDate && !restartRequired && (
+            {!upToDate && (
               <Btn variant="primary" loading={installing} onClick={install}>
                 <ArrowUpCircle className="h-3.5 w-3.5" />
                 Install {info.latest}
