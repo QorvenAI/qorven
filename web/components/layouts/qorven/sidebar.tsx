@@ -11,6 +11,7 @@ import { CreateSoulSheet } from '@/components/forms/create-soul-sheet';
 import {
   ChevronDown, Plus, Settings2, Key, Palette, LogOut, Users, BarChart3,
   MessageSquare, CheckSquare, Search, Sparkles, Pin, Lock, User,
+  ShieldCheck, Zap, Cpu, Bell,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -187,11 +188,14 @@ function HomeSidebar({ events }: { events: any[] }) {
   const [feedOpen, setFeedOpen] = useState(true);
 
   const navItems = [
-    { icon: BarChart3, label: 'Dashboard', href: '/' },
-    { icon: Users, label: 'Qors', href: '/qors' },
-    { icon: MessageSquare, label: 'Chats', href: '/mail' },
-    { icon: CheckSquare, label: 'Tasks', href: '/tasks' },
-    { icon: Settings2, label: 'Settings', href: '/settings' },
+    { icon: BarChart3,    label: 'Dashboard',  href: '/' },
+    { icon: Sparkles,     label: 'Qors',       href: '/qors' },
+    { icon: MessageSquare,label: 'Inbox',      href: '/mail' },
+    { icon: CheckSquare,  label: 'Tasks',      href: '/tasks' },
+    { icon: ShieldCheck,  label: 'Approvals',  href: '/approvals' },
+    { icon: Zap,          label: 'Channels',   href: '/channels' },
+    { icon: Cpu,          label: 'Models',     href: '/models-hub' },
+    { icon: Settings2,    label: 'Settings',   href: '/settings' },
   ] as const;
 
   return (
