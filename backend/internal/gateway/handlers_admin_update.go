@@ -10,10 +10,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const releaseRepo = "qorvenai/qorven"
@@ -202,11 +206,70 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"from":    current,
-		"to":      latest,
-		"restart": true,
+		"ok":          true,
+		"from":        current,
+		"to":          latest,
+		"restart":     true,
+		"auto_restart": true,
 	})
+
+	// Flush the response, then self-restart.
+	// On systemd installs (Restart=always) the service manager brings the
+	// new binary back up within RestartSec (3 s). On non-systemd installs
+	// the process exits and the user or supervisor must restart manually.
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond) // give the HTTP response time to reach the client
+		triggerSelfRestart()
+	}()
+}
+
+// triggerSelfRestart hands the restart to systemd if available, otherwise
+// sends SIGTERM to self (clean exit → systemd/supervisor restarts us).
+func triggerSelfRestart() {
+	// Ensure the installed unit has Restart=always so a clean exit triggers
+	// a restart. Older installs shipped with Restart=on-failure.
+	patchServiceRestartPolicy()
+
+	// Try systemctl restart first (works when running as root or with sudo).
+	if path, err := exec.LookPath("systemctl"); err == nil {
+		cmd := exec.Command(path, "restart", "qorven")
+		if err := cmd.Start(); err == nil {
+			slog.Info("update.restart", "method", "systemctl")
+			return
+		}
+	}
+	// Fallback: SIGTERM self. systemd Restart=always catches the clean exit.
+	slog.Info("update.restart", "method", "sigterm_self")
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		slog.Error("update.restart_failed", "err", err)
+	}
+}
+
+// patchServiceRestartPolicy upgrades the installed systemd unit from
+// Restart=on-failure to Restart=always so that a self-update clean exit
+// (exit 0) also causes a restart. Safe to call repeatedly — no-ops when
+// the unit already has Restart=always or doesn't exist.
+func patchServiceRestartPolicy() {
+	const unitPath = "/etc/systemd/system/qorven.service"
+	data, err := os.ReadFile(unitPath)
+	if err != nil {
+		return // no unit file (non-systemd install) — nothing to do
+	}
+	updated := strings.ReplaceAll(string(data), "Restart=on-failure", "Restart=always")
+	if updated == string(data) {
+		return // already correct
+	}
+	if err := os.WriteFile(unitPath, []byte(updated), 0644); err != nil {
+		slog.Warn("update.patch_unit_failed", "err", err)
+		return
+	}
+	if path, err := exec.LookPath("systemctl"); err == nil {
+		exec.Command(path, "daemon-reload").Run()
+	}
+	slog.Info("update.unit_patched", "restart_policy", "always")
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
