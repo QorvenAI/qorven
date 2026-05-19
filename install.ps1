@@ -80,6 +80,23 @@ if ($YesAll) {
 }
 if ($answer -notmatch '^[Yy]') { Write-Host "  Installation cancelled."; exit 0 }
 
+# ── PostgreSQL superuser password ─────────────────────────────────────────────
+# The Windows PostgreSQL installer always sets a password on the 'postgres' user.
+# Accept it via env var so the installer can run non-interactively.
+if ($env:PG_SUPERUSER_PASSWORD) {
+    $PgSuperPassword = $env:PG_SUPERUSER_PASSWORD
+} else {
+    Write-Host ""
+    Write-Host "  PostgreSQL requires the superuser ('postgres') password to set up" -ForegroundColor Cyan
+    Write-Host "  the database. This is the password you set when PostgreSQL was" -ForegroundColor Cyan
+    Write-Host "  installed. It is NOT stored by Qorven." -ForegroundColor Cyan
+    Write-Host ""
+    $secPw = Read-Host "  postgres superuser password" -AsSecureString
+    $bstr  = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
+    $PgSuperPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+}
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 function Command-Exists { param($cmd) return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
@@ -194,6 +211,7 @@ try {
 Write-Step 3 7 "Database setup"
 
 $env:PATH += ";$PgBinDir"
+$env:PGPASSWORD = $PgSuperPassword
 
 # Run psql as postgres superuser
 function Invoke-Psql {
@@ -201,6 +219,14 @@ function Invoke-Psql {
     $result = & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d $Db -tAc $Sql 2>&1
     return $result
 }
+
+# Verify the password is correct before proceeding
+$pgCheck = Invoke-Psql "SELECT 1"
+if ($pgCheck -notmatch '1') {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    Write-Fail "Could not connect to PostgreSQL as 'postgres'. Wrong password or service not running. Error: $pgCheck"
+}
+Write-Ok "Connected to PostgreSQL"
 
 $roleExists = Invoke-Psql "SELECT 1 FROM pg_roles WHERE rolname='qorven'"
 if ($roleExists -notmatch '1') {
@@ -220,6 +246,7 @@ if ($dbExists -notmatch '1') {
 
 & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d qorven -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>&1 | Out-Null
 Write-Ok "pgvector extension enabled"
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 
 $PG_DSN = "postgres://qorven@localhost:5432/qorven?sslmode=disable"
 
