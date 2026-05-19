@@ -113,11 +113,11 @@ export default function QorsPage() {
     <ErrorBoundary fallbackTitle="Failed to load Qors">
       {/* Full-height two-panel layout */}
       <div
-        className="flex overflow-hidden -m-5"
-        style={{ height: 'calc(100vh - var(--header-height, 56px) - 1px)' }}
+        className="flex overflow-hidden -m-5 lg:-m-6"
+        style={{ height: 'calc(100vh - var(--header-height, 44px) - var(--status-bar-height, 0px))' }}
       >
         {/* ── Left sidebar ── */}
-        <div className="flex w-52 shrink-0 flex-col border-r border-border bg-card/50 overflow-y-auto">
+        <div className="flex w-(--sidebar-default-width) shrink-0 flex-col border-r border-border bg-card/50 overflow-y-auto">
 
           {/* Qors section header */}
           <div className="flex items-center justify-between px-3 pt-3 pb-1 shrink-0">
