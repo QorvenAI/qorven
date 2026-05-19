@@ -4,9 +4,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, ChevronDown, ChevronRight, Loader2, RefreshCw,
-  AlertCircle, CheckCircle2, XCircle, Clock,
+  ChevronDown, ChevronRight, Loader2, RefreshCw,
+  AlertCircle, CheckCircle2, XCircle, Clock, Activity,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { traces as tracesApi, type TraceRow, type SpanRow, type TraceSummary } from '@/lib/api';
 import { useStore } from '@/store';
@@ -66,32 +67,23 @@ export default function TracesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
-      <header className="flex items-center gap-3">
-        <Activity className="h-6 w-6 text-primary" />
-        <div>
-          <h1 className="text-lg font-semibold">Traces</h1>
-          <p className="text-sm text-muted-foreground">LLM call traces with token + cost breakdown</p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <select
-            value={agentFilter}
-            onChange={(e) => setAgentFilter(e.target.value)}
-            className="qr-select text-xs">
-            <option value="">All agents</option>
-            {souls.map((s) => (
-              <option key={s.id} value={s.id}>{s.display_name || s.agent_key}</option>
-            ))}
-          </select>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </button>
-        </div>
-      </header>
+      <CanvasHeader title="Traces" description="LLM call traces with token + cost breakdown"
+        actions={
+          <>
+            <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="qr-select text-xs">
+              <option value="">All agents</option>
+              {souls.map((s) => (
+                <option key={s.id} value={s.id}>{s.display_name || s.agent_key}</option>
+              ))}
+            </select>
+            <button onClick={refresh} disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60">
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {/* Summary strip */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">

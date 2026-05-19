@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Target, Plus, Loader2, AlertCircle, CheckCircle2, TrendingUp } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { goals, type Goal } from '@/lib/api';
 import { useStore } from '@/store';
@@ -40,17 +41,17 @@ export default function GoalsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 lg:p-6">
-      <header className="flex items-center gap-3">
-        <Target className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-semibold">Goals</h1>
-        <button
-          onClick={() => setCreating((v) => !v)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {creating ? 'Cancel' : 'New goal'}
-        </button>
-      </header>
+      <CanvasHeader title="Goals" description="Track OKRs and key results across your team"
+        actions={
+          <button
+            onClick={() => setCreating((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {creating ? 'Cancel' : 'New goal'}
+          </button>
+        }
+      />
 
       {creating && <CreateForm onCreated={() => { setCreating(false); refresh(); }} />}
 

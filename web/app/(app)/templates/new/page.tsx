@@ -8,6 +8,7 @@ import {
   Plus, Trash2, ArrowLeft, Loader2, Sparkles, Users,
   BarChart3, Save, Check, Bot, Layout,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { workspaces } from '@/lib/api';
 import { request } from '@/lib/api-core';
 import { cn } from '@/lib/utils';
@@ -125,17 +126,16 @@ export default function NewWorkspacePage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <button onClick={() => router.back()}
-          className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-accent cursor-pointer">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div>
-          <h1 className="text-lg font-semibold">Custom Workspace Builder</h1>
-          <p className="text-sm text-muted-foreground">Design your own AI team and dashboard</p>
-        </div>
-      </div>
+      <CanvasHeader
+        title="Custom Workspace Builder"
+        description="Design your own AI team and dashboard"
+        actions={
+          <button onClick={() => router.back()}
+            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-accent cursor-pointer">
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+        }
+      />
 
       {/* Step progress */}
       <div className="flex items-center gap-0">

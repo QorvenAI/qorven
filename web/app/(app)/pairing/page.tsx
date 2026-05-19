@@ -13,8 +13,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Smartphone, CheckCircle2, Loader2, AlertCircle, Monitor, ShieldCheck, RefreshCw,
+  Smartphone, CheckCircle2, Loader2, AlertCircle, Monitor, RefreshCw, ShieldCheck,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { pairing, type PairingDevice, type PairingRequest } from '@/lib/api';
 
@@ -41,21 +42,18 @@ export default function PairingPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 lg:p-6">
-      <header className="flex items-center gap-3">
-        <ShieldCheck className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-semibold">Pairing</h1>
-        <p className="text-xs text-muted-foreground">
-          Authorize new chat endpoints before agents can reach them.
-        </p>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-        >
+      <CanvasHeader title="Pairing" description="Authorize new chat endpoints before agents can reach them."
+        actions={
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+          >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Refresh
-        </button>
-      </header>
+            Refresh
+          </button>
+        }
+      />
 
       {err && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">

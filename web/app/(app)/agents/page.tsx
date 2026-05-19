@@ -9,6 +9,7 @@ import { PlanApproval } from '@/components/agents/PlanApproval';
 import { useStore } from '@/store';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/qor/tabs';
 import { Bot, ListChecks, ClipboardCheck } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 
 export default function AgentsPage() {
   useAgentsStream();
@@ -18,13 +19,7 @@ export default function AgentsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="border-b border-border px-6 py-4">
-        <h1 className="text-base font-semibold">Agents</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Monitor connected agents, track tasks, and approve plans
-        </p>
-      </div>
+      <CanvasHeader title="Agents" description="Monitor connected agents, track tasks, and approve plans" />
 
       <Tabs defaultValue="agents" className="flex flex-col flex-1 overflow-hidden">
         {/* Tab bar */}

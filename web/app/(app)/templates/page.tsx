@@ -9,6 +9,7 @@ import {
   Plus, Users, BarChart3, Globe, Bot, Search, X, ExternalLink,
   CheckCircle2, ChevronRight,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { workspaces } from '@/lib/api';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { cn } from '@/lib/utils';
@@ -77,27 +78,22 @@ export default function TemplatesPage() {
   return (
     <ErrorBoundary>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-semibold flex items-center gap-2">
-              <LayoutTemplate className="h-6 w-6" /> Workspaces
-            </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              One-click AI workspaces — install a pre-built team or describe what you need
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => router.push('/templates/new')}
-              className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-accent cursor-pointer transition-colors">
-              <Plus className="h-4 w-4" /> Custom Builder
-            </button>
-            <button onClick={() => setShowBuilder(true)}
-              className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-lg shadow-primary/20 transition-all hover:scale-[1.02]">
-              <Sparkles className="h-4 w-4" /> Build with AI
-            </button>
-          </div>
-        </div>
+        <CanvasHeader
+          title="Workspaces"
+          description="One-click AI workspaces — install a pre-built team or describe what you need"
+          actions={
+            <div className="flex items-center gap-2">
+              <button onClick={() => router.push('/templates/new')}
+                className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-accent cursor-pointer transition-colors">
+                <Plus className="h-4 w-4" /> Custom Builder
+              </button>
+              <button onClick={() => setShowBuilder(true)}
+                className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-lg shadow-primary/20 transition-all hover:scale-[1.02]">
+                <Sparkles className="h-4 w-4" /> Build with AI
+              </button>
+            </div>
+          }
+        />
 
         {/* AI Builder */}
         {showBuilder && (

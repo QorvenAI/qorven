@@ -9,6 +9,7 @@ import {
   ClipboardPaste, AlertCircle, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { providers as providersApi } from '@/lib/api';
 import { extractErrorMessage } from '@/lib/api-core';
 import { toast } from 'sonner';
@@ -1151,10 +1152,7 @@ export default function GenerativePage() {
   return (
     <>
       <div className="space-y-4">
-        <div className="mb-6">
-          <h1 className="text-lg font-semibold">Generative AI</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">LLM providers, key pools, budgets and model routing</p>
-        </div>
+        <CanvasHeader title="Generative AI" description="LLM providers, key pools, budgets and model routing" />
 
         <SCard
           title="Providers"

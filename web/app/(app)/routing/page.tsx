@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { routing, providers as providersApi } from '@/lib/api';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { useSelectedModels } from '@/hooks/use-selected-models';
 import { cn } from '@/lib/utils';
 import { modelDisplayName } from '@/lib/model-names';
@@ -47,10 +48,7 @@ export default function RoutingPage() {
   // if (rules.length === 0) return <EmptyState {...emptyStates.routing} />;
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-lg font-semibold">Smart Routing</h1>
-        <p className="text-sm text-muted-foreground">Assign models to work categories. Every message is classified and routed automatically.</p>
-      </div>
+      <CanvasHeader title="Smart Routing" description="Assign models to work categories. Every message is classified and routed automatically." />
 
       {/* Test classifier */}
       <div className="qr-card p-4">

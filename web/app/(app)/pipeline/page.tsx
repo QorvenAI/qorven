@@ -21,6 +21,7 @@ import {
   FileCode, AlertTriangle, AlertCircle, Clock, ShieldAlert,
   FileDiff, FilePlus, FileX,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import {
   pipeline,
@@ -104,21 +105,20 @@ export default function PipelinePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 full-bleed p-4 lg:p-6">
-      <header className="flex items-center gap-3">
-        <GitBranch className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-semibold">Pipeline</h1>
-        <p className="text-xs text-muted-foreground">
-          Agent-proposed code changes — validate, then apply.
-        </p>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Refresh
-        </button>
-      </header>
+      <CanvasHeader
+        title="Pipeline"
+        description="Agent-proposed code changes — validate, then apply."
+        actions={
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Refresh
+          </button>
+        }
+      />
 
       {err && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">

@@ -11,6 +11,7 @@ import {
   ShieldCheck, ShieldAlert, ArrowRight, GitBranch, Wrench,
   ListChecks, Play, Ban, CircleDot, CheckCheck, AlertCircle,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import {
   plans as plansApi, approvals as approvalsApi, outbound,
@@ -439,17 +440,10 @@ export default function PlansPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 lg:p-6">
-      <header className="flex items-start gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-          <Workflow className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">Plans</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Approval inbox, plan history, and team health monitoring.
-          </p>
-        </div>
-      </header>
+      <CanvasHeader
+        title="Plans"
+        description="Approval inbox, plan history, and team health monitoring."
+      />
 
       <div className="flex gap-1 border-b border-border">
         {PLAN_TABS.map((t) => (

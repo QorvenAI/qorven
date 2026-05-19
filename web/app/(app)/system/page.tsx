@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState } from 'react';
-import { Activity, Cpu, Wrench, RefreshCw } from 'lucide-react';
+import { Cpu, Wrench, RefreshCw } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { request } from '@/lib/api-core';
 
@@ -23,13 +24,9 @@ export default function SystemPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold flex items-center gap-2"><Activity className="h-5 w-5" />System Knowledge</h1>
-          <p className="text-sm text-muted-foreground">Auto-generated from codebase · refreshes every 30s</p>
-        </div>
-        <button onClick={() => setTick(t => t + 1)} className="text-muted-foreground hover:text-foreground/90 cursor-pointer"><RefreshCw className="h-4 w-4" /></button>
-      </div>
+      <CanvasHeader title="System Knowledge" description="Auto-generated from codebase · refreshes every 30s"
+        actions={<button onClick={() => setTick(t => t + 1)} className="text-muted-foreground hover:text-foreground/90 cursor-pointer"><RefreshCw className="h-4 w-4" /></button>}
+      />
 
       {/* Supervisor stats */}
       {supervisor && (

@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState } from 'react';
-import { Bell, Check, CheckCheck, Filter, AlertCircle } from 'lucide-react';
+import { Check, CheckCheck, Filter, AlertCircle } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/page-skeleton';
@@ -44,40 +45,35 @@ export default function NotificationsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load notifications">
       <div className="space-y-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-lg font-semibold flex items-center gap-2">
-              <Bell className="h-6 w-6" />
-              Notifications
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {loading ? 'Loading…' : `${unreadCount} unread`}
-            </p>
-          </div>
-          {!loading && !error && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setFilter((f) => (f === 'all' ? 'unread' : 'all'))}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors',
-                  filter === 'unread' && 'bg-accent',
-                )}
-              >
-                <Filter className="h-3.5 w-3.5" />
-                {filter === 'all' ? 'All' : 'Unread'}
-              </button>
-              {unreadCount > 0 && (
+        <CanvasHeader
+          title="Notifications"
+          description={loading ? 'Loading…' : `${unreadCount} unread`}
+          actions={
+            !loading && !error ? (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={markAllRead}
-                  className="flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                  onClick={() => setFilter((f) => (f === 'all' ? 'unread' : 'all'))}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors',
+                    filter === 'unread' && 'bg-accent',
+                  )}
                 >
-                  <CheckCheck className="h-3.5 w-3.5" />
-                  Mark all read
+                  <Filter className="h-3.5 w-3.5" />
+                  {filter === 'all' ? 'All' : 'Unread'}
                 </button>
-              )}
-            </div>
-          )}
-        </div>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={markAllRead}
+                    className="flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                  >
+                    <CheckCheck className="h-3.5 w-3.5" />
+                    Mark all read
+                  </button>
+                )}
+              </div>
+            ) : undefined
+          }
+        />
 
         {loading ? (
           <TableSkeleton rows={5} />

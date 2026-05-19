@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { Users, Plus, X, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { cn } from '@/lib/utils';
@@ -66,18 +67,16 @@ export default function TeamsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load teams">
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold flex items-center gap-2">
-              <Users className="h-5 w-5" /> Teams
-            </h1>
-            <p className="text-sm text-muted-foreground">{teams.length} team{teams.length !== 1 ? 's' : ''}</p>
-          </div>
-          <button onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer">
-            <Plus className="h-4 w-4" /> Create Team
-          </button>
-        </div>
+        <CanvasHeader
+          title="Teams"
+          description={`${teams.length} team${teams.length !== 1 ? 's' : ''}`}
+          actions={
+            <button onClick={() => setShowForm(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer">
+              <Plus className="h-4 w-4" /> Create Team
+            </button>
+          }
+        />
 
         {showForm && (
           <div className="rounded-xl border border-border bg-card p-4 flex gap-3 items-center">

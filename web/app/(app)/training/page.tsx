@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useCallback, useEffect, useState } from 'react';
-import { GraduationCap, Download, Loader2, AlertCircle } from 'lucide-react';
+import { Download, Loader2, AlertCircle } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { agents, training, BASE, getToken } from '@/lib/api';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -58,15 +59,7 @@ export default function TrainingPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load training page">
       <div className="space-y-6">
-        <div className="flex items-start gap-3">
-          <GraduationCap className="h-7 w-7 text-primary shrink-0" />
-          <div>
-            <h1 className="text-lg font-semibold">Training Data</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Export conversation histories and feedback to fine-tune or evaluate your Qors.
-            </p>
-          </div>
-        </div>
+        <CanvasHeader title="Training Data" description="Export conversation histories and feedback to fine-tune or evaluate your Qors." />
 
         {/* Format picker */}
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">

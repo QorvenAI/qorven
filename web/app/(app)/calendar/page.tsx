@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Calendar as CalIcon, Plus, Clock, Megaphone, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { calendarApi, social as socialApi } from '@/lib/api';
 import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -113,34 +114,28 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold flex items-center gap-2">
-            <CalIcon className="h-5 w-5" /> Calendar
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {calFilter ? souls.find(s => s.id === calFilter)?.display_name ?? 'Agent' : 'All Agents'} · events and social posts
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* View toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            <button onClick={() => setView('month')}
-              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
-              Month
-            </button>
-            <button onClick={() => setView('list')}
-              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
-              List
+      <CanvasHeader
+        title="Calendar"
+        description={`${calFilter ? souls.find(s => s.id === calFilter)?.display_name ?? 'Agent' : 'All Agents'} · events and social posts`}
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              <button onClick={() => setView('month')}
+                className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+                Month
+              </button>
+              <button onClick={() => setView('list')}
+                className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+                List
+              </button>
+            </div>
+            <button onClick={() => setShowCreate(v => !v)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
+              <Plus className="h-4 w-4" /> New Event
             </button>
           </div>
-          <button onClick={() => setShowCreate(v => !v)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
-            <Plus className="h-4 w-4" /> New Event
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Create form */}
       {showCreate && (

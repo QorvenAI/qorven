@@ -3,7 +3,8 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState, useCallback } from 'react';
-import { Brain, Plus, Search, Building2, User, Loader2, Filter } from 'lucide-react';
+import { Plus, Search, Building2, User, Loader2, Filter, Brain } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { useStore } from '@/store';
@@ -112,10 +113,7 @@ export default function MemoriesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">Memory</h1>
-        <p className="text-sm text-muted-foreground">Company-wide knowledge + per-agent vector memories</p>
-      </div>
+      <CanvasHeader title="Memory" description="Company-wide knowledge + per-agent vector memories" />
 
       <div className="flex gap-1 border-b border-border">
         {[

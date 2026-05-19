@@ -25,6 +25,7 @@ import {
   Plug, Search, Check, ExternalLink, Shield, AlertCircle,
   Loader2, X, RefreshCw, Package, Trash2, Bot,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { toast } from 'sonner';
 import {
   connectors,
@@ -200,28 +201,28 @@ export default function ConnectorsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load connectors">
       <div className="space-y-5">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-semibold">Connectors</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {view === 'catalog'
-                ? `Plug your agents into the services you already use. ${entries.length} platforms available.`
-                : view === 'installed'
-                  ? 'Connectors your agents built and installed at runtime. Each one is a compiled Go binary the agent generated from API docs.'
-                  : 'Register OAuth apps on each provider\u2019s developer console and paste credentials here. The same credentials serve every user on this Qorven install.'}
-            </p>
-          </div>
-          {(view === 'catalog' || view === 'installed') && (
-            <button
-              onClick={load}
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-              Refresh
-            </button>
-          )}
-        </header>
+        <CanvasHeader
+          title="Connectors"
+          description={
+            view === 'catalog'
+              ? `Plug your agents into the services you already use. ${entries.length} platforms available.`
+              : view === 'installed'
+                ? 'Connectors your agents built and installed at runtime. Each one is a compiled Go binary the agent generated from API docs.'
+                : 'Register OAuth apps on each provider\u2019s developer console and paste credentials here. The same credentials serve every user on this Qorven install.'
+          }
+          actions={
+            (view === 'catalog' || view === 'installed') ? (
+              <button
+                onClick={load}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+                Refresh
+              </button>
+            ) : undefined
+          }
+        />
 
         {/* Tab toggle */}
         <div className="inline-flex rounded-lg border border-border bg-card p-0.5 text-xs">

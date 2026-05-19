@@ -12,7 +12,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Wrench, Search, BarChart3, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, BarChart3, Loader2, AlertCircle, RefreshCw, Wrench } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { toolMetrics, type ToolMetric, type ToolMetricsSummary } from '@/lib/api';
 
@@ -73,10 +74,7 @@ export default function ToolsPage() {
 
   return (
     <div className="space-y-5">
-      <header className="flex items-center gap-3">
-        <Wrench className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-semibold">Tools</h1>
-      </header>
+      <CanvasHeader title="Tools" description="Browse and monitor all registered agent tools." />
 
       {/* Tab bar */}
       <div className="flex items-center gap-0 border-b border-border">
