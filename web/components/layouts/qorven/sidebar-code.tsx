@@ -96,23 +96,25 @@ export function CodeSidebar() {
         </div>
       )}
 
-      <div className="flex border-b border-border shrink-0">
-        {[
-          { id: 'explorer' as const, label: 'Explorer', icon: FolderOpen },
-          { id: 'github' as const, label: 'GitHub', icon: GitBranch },
-        ].map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors',
-              tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}>
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {(codeProjectName || activeProject) && (
+        <div className="flex border-b border-border shrink-0">
+          {[
+            { id: 'explorer' as const, label: 'Explorer', icon: FolderOpen },
+            { id: 'github' as const, label: 'GitHub', icon: GitBranch },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors',
+                tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              )}>
+              <t.icon className="h-3.5 w-3.5" />
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {tab === 'explorer' && (
+      {(tab === 'explorer' || !(codeProjectName || activeProject)) && (
         <>
           <div className="flex items-center gap-1.5 px-3 pt-3 pb-2">
             <select
@@ -183,7 +185,7 @@ export function CodeSidebar() {
         </>
       )}
 
-      {tab === 'github' && (
+      {tab === 'github' && (codeProjectName || activeProject) && (
         <>
           {ghConnected === false && (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-5 text-center">
