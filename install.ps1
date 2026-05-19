@@ -2,7 +2,8 @@
 #
 # Qorven installer for Windows — one-shot PowerShell script.
 #
-#   iwr -useb https://qorven.ai/install.ps1 | iex
+#   iwr -useb https://get.qorven.ai | iex
+#   iwr -useb https://get.qorven.ai/install.ps1 | iex
 #
 # What it does:
 #   1. Installs PostgreSQL via winget (if missing)
@@ -12,6 +13,8 @@
 #   5. Writes config.toml + secrets
 #   6. Registers a Windows Service via NSSM (auto-start on boot)
 #   7. Prints the URL and opens the browser
+#
+# If anything fails, all changes made so far are automatically rolled back.
 #
 # Requirements:
 #   - Windows 10 22H2+ or Windows Server 2019+
@@ -43,11 +46,107 @@ $Port         = 8080   # Windows: 443 needs a cert; default to 8080 for simplici
 $ApiPort      = 4200
 
 # ── colours ───────────────────────────────────────────────────────────────────
-function Write-Step   { param($n, $total, $msg) Write-Host "`n  [$n/$total] $msg" -ForegroundColor Cyan }
-function Write-Ok     { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
-function Write-Warn   { param($msg) Write-Host "  [!!] $msg" -ForegroundColor Yellow }
-function Write-Fail   { param($msg) Write-Host "  [XX] $msg" -ForegroundColor Red; exit 1 }
-function Write-Info   { param($msg) Write-Host "       $msg" -ForegroundColor DarkGray }
+function Write-Step { param($n, $total, $msg) Write-Host "`n  [$n/$total] $msg" -ForegroundColor Cyan }
+function Write-Ok   { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
+function Write-Warn { param($msg) Write-Host "  [!!] $msg" -ForegroundColor Yellow }
+function Write-Info { param($msg) Write-Host "       $msg" -ForegroundColor DarkGray }
+
+# ── rollback state ────────────────────────────────────────────────────────────
+# Each flag records something WE installed so rollback can undo exactly that.
+# Pre-existing items (PostgreSQL already installed, DB already existed, etc.)
+# are never rolled back — we only remove what we added.
+$script:RollbackInstalledPg      = $false  # we ran winget install PostgreSQL
+$script:RollbackCreatedRole      = $false  # we ran CREATE ROLE qorven
+$script:RollbackCreatedDb        = $false  # we ran CREATE DATABASE qorven
+$script:RollbackCreatedInstallDir = $false # we created $InstallDir
+$script:RollbackCreatedConfigDir  = $false # we created $ConfigDir
+$script:RollbackCreatedService   = $false  # we registered the service
+$script:PgBinDir                 = ''      # filled in once psql is found
+
+function Invoke-Rollback {
+    param([string]$Reason)
+    Write-Host ""
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor Red
+    Write-Host "  [XX] Installation failed: $Reason" -ForegroundColor Red
+    Write-Host "       Rolling back everything Qorven installed..." -ForegroundColor Yellow
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor Red
+
+    # Service
+    if ($script:RollbackCreatedService) {
+        try {
+            $nssmExe = "$InstallDir\nssm.exe"
+            if (Test-Path $nssmExe) {
+                & $nssmExe stop $ServiceName 2>&1 | Out-Null
+                & $nssmExe remove $ServiceName confirm 2>&1 | Out-Null
+            } else {
+                Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+                sc.exe delete $ServiceName 2>&1 | Out-Null
+            }
+            Write-Host "  [RB] Service removed" -ForegroundColor DarkGray
+        } catch { Write-Host "  [RB] Could not remove service: $_" -ForegroundColor DarkGray }
+    }
+
+    # Database objects — only if we have a working psql
+    if (($script:RollbackCreatedDb -or $script:RollbackCreatedRole) -and $script:PgBinDir) {
+        $env:PGPASSWORD = $PgSuperPassword
+        if ($script:RollbackCreatedDb) {
+            & "$($script:PgBinDir)\psql.exe" -U postgres -h 127.0.0.1 -d postgres -c "DROP DATABASE IF EXISTS qorven;" 2>&1 | Out-Null
+            Write-Host "  [RB] Database 'qorven' dropped" -ForegroundColor DarkGray
+        }
+        if ($script:RollbackCreatedRole) {
+            & "$($script:PgBinDir)\psql.exe" -U postgres -h 127.0.0.1 -d postgres -c "DROP ROLE IF EXISTS qorven;" 2>&1 | Out-Null
+            Write-Host "  [RB] Role 'qorven' dropped" -ForegroundColor DarkGray
+        }
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    }
+
+    # Config and install directories
+    if ($script:RollbackCreatedConfigDir -and (Test-Path $ConfigDir)) {
+        Remove-Item $ConfigDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  [RB] Removed $ConfigDir" -ForegroundColor DarkGray
+    }
+    if ($script:RollbackCreatedInstallDir -and (Test-Path $InstallDir)) {
+        Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  [RB] Removed $InstallDir" -ForegroundColor DarkGray
+    }
+
+    # PATH
+    $sysPath = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+    if ($sysPath -like "*$InstallDir*") {
+        $newPath = ($sysPath -split ';' | Where-Object { $_ -ne $InstallDir }) -join ';'
+        [System.Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine')
+        Write-Host "  [RB] Removed $InstallDir from PATH" -ForegroundColor DarkGray
+    }
+
+    # PostgreSQL — only if we installed it (not if it was already there)
+    if ($script:RollbackInstalledPg -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "  [RB] Removing PostgreSQL (we installed it)..." -ForegroundColor DarkGray
+        winget uninstall --id PostgreSQL.PostgreSQL.$PgVersion --silent 2>&1 | Out-Null
+        Write-Host "  [RB] PostgreSQL removed" -ForegroundColor DarkGray
+    }
+
+    # Temp files
+    $pgvectorDir = "$env:TEMP\pgvector"
+    if (Test-Path $pgvectorDir) {
+        Remove-Item $pgvectorDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  [RB] Removed pgvector temp dir" -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    Write-Host "  Rollback complete. Your system is back to its previous state." -ForegroundColor Yellow
+    Write-Host "  Fix the issue above and re-run the installer." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  To uninstall manually at any time:" -ForegroundColor DarkGray
+    Write-Host "    iwr -useb https://get.qorven.ai/uninstall.ps1 | iex" -ForegroundColor DarkGray
+    Write-Host ""
+    exit 1
+}
+
+# Trap all terminating errors and route through rollback
+trap {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    Invoke-Rollback $_.Exception.Message
+}
 
 # ── banner ────────────────────────────────────────────────────────────────────
 try { Clear-Host } catch {}
@@ -80,23 +179,6 @@ if ($YesAll) {
 }
 if ($answer -notmatch '^[Yy]') { Write-Host "  Installation cancelled."; exit 0 }
 
-# ── PostgreSQL superuser password ─────────────────────────────────────────────
-# The Windows PostgreSQL installer always sets a password on the 'postgres' user.
-# Accept it via env var so the installer can run non-interactively.
-if ($env:PG_SUPERUSER_PASSWORD) {
-    $PgSuperPassword = $env:PG_SUPERUSER_PASSWORD
-} else {
-    Write-Host ""
-    Write-Host "  PostgreSQL requires the superuser ('postgres') password to set up" -ForegroundColor Cyan
-    Write-Host "  the database. This is the password you set when PostgreSQL was" -ForegroundColor Cyan
-    Write-Host "  installed. It is NOT stored by Qorven." -ForegroundColor Cyan
-    Write-Host ""
-    $secPw = Read-Host "  postgres superuser password" -AsSecureString
-    $bstr  = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
-    $PgSuperPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-}
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 function Command-Exists { param($cmd) return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
@@ -125,7 +207,7 @@ if ($WingetAvail) {
     Write-Warn "winget not found — will rely on pre-installed software"
 }
 
-# ── Step 2: PostgreSQL ────────────────────────────────────────────────────────
+# ── Step 2: PostgreSQL + pgvector ─────────────────────────────────────────────
 Write-Step 2 7 "PostgreSQL + pgvector"
 
 $pgService = Get-Service -Name "postgresql-x64-$PgVersion" -ErrorAction SilentlyContinue
@@ -134,11 +216,12 @@ if ($pgService) {
 } elseif ($WingetAvail) {
     Write-Info "Installing PostgreSQL $PgVersion via winget..."
     winget install --id PostgreSQL.PostgreSQL.$PgVersion --silent --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -ne 0) { Write-Fail "PostgreSQL install failed" }
+    if ($LASTEXITCODE -ne 0) { Invoke-Rollback "PostgreSQL install failed (winget exit $LASTEXITCODE)" }
+    $script:RollbackInstalledPg = $true
     Write-Ok "PostgreSQL $PgVersion installed"
     Start-Sleep -Seconds 3
 } else {
-    Write-Fail "PostgreSQL $PgVersion not found and winget is not available"
+    Invoke-Rollback "PostgreSQL $PgVersion not found and winget is not available"
 }
 
 # Ensure service is running
@@ -147,23 +230,22 @@ if ($pgService -and $pgService.Status -ne 'Running') {
     Start-Service -Name "postgresql-x64-$PgVersion" -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 }
-# Re-check; if still not running after start attempt, log and continue
 $pgService = Get-Service -Name "postgresql-x64-$PgVersion" -ErrorAction SilentlyContinue
-if ($pgService -and $pgService.Status -ne 'Running') {
-    Write-Warn "PostgreSQL service did not start — proceeding anyway"
+if (-not $pgService -or $pgService.Status -ne 'Running') {
+    Invoke-Rollback "PostgreSQL service is not running. Start it with: Start-Service postgresql-x64-$PgVersion"
 }
 
 # Find psql
 $PgBinDir = "C:\Program Files\PostgreSQL\$PgVersion\bin"
 if (-not (Test-Path "$PgBinDir\psql.exe")) {
-    # Try other common locations
     $found = Get-ChildItem 'C:\Program Files\PostgreSQL' -Filter 'psql.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($found) { $PgBinDir = $found.DirectoryName }
-    else { Write-Fail "psql.exe not found — PostgreSQL may not have installed correctly" }
+    else { Invoke-Rollback "psql.exe not found — PostgreSQL may not have installed correctly" }
 }
+$script:PgBinDir = $PgBinDir
 Write-Info "Using psql at $PgBinDir"
 
-# Install pgvector — build from source (no Windows binary package exists)
+# pgvector — build from source
 Write-Info "Installing pgvector extension..."
 $pgvectorDir = "$env:TEMP\pgvector"
 if (-not (Test-Path $pgvectorDir)) {
@@ -173,14 +255,13 @@ if (-not (Test-Path $pgvectorDir)) {
             winget install --id Git.Git --silent --accept-package-agreements --accept-source-agreements
             $env:PATH += ";C:\Program Files\Git\cmd"
         } else {
-            Write-Fail "Git not found and winget is not available — cannot build pgvector"
+            Invoke-Rollback "Git not found and winget unavailable — cannot build pgvector"
         }
     }
     $gitOut = git clone --depth 1 https://github.com/pgvector/pgvector.git $pgvectorDir 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Fail "git clone pgvector failed: $gitOut"; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Invoke-Rollback "git clone pgvector failed: $gitOut" }
 }
 
-# Check for nmake (Visual Studio Build Tools)
 $nmake = Get-Command nmake -ErrorAction SilentlyContinue
 if (-not $nmake) {
     if ($WingetAvail) {
@@ -190,7 +271,6 @@ if (-not $nmake) {
     } else {
         Write-Warn "nmake not found and winget unavailable — pgvector build may fail"
     }
-    # Find nmake in VS install
     $nmakePath = Get-ChildItem 'C:\Program Files (x86)\Microsoft Visual Studio' -Filter 'nmake.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($nmakePath) { $env:PATH += ";$($nmakePath.DirectoryName)" }
 }
@@ -202,46 +282,64 @@ try {
     nmake /f Makefile.win install 2>&1 | Out-Null
     Write-Ok "pgvector built and installed"
 } catch {
-    Write-Warn "pgvector build failed — vector search will be disabled. See $env:TEMP\pgvector"
+    Write-Warn "pgvector build failed — vector search will be disabled. Error: $_"
 } finally {
     Pop-Location
 }
 
-# ── Step 3: Database setup ────────────────────────────────────────────────────
+# ── Step 3: PostgreSQL superuser password ─────────────────────────────────────
+# Collected here — after we know PG is running, before we need it.
+# This avoids prompting before a potentially long pgvector build.
 Write-Step 3 7 "Database setup"
 
 $env:PATH += ";$PgBinDir"
+
+if ($env:PG_SUPERUSER_PASSWORD) {
+    $PgSuperPassword = $env:PG_SUPERUSER_PASSWORD
+} else {
+    Write-Host ""
+    Write-Host "  Enter the PostgreSQL 'postgres' superuser password." -ForegroundColor Cyan
+    Write-Host "  This is the password set when PostgreSQL was installed." -ForegroundColor Cyan
+    Write-Host "  It is only used during setup and is NOT stored by Qorven." -ForegroundColor Cyan
+    Write-Host ""
+    $secPw = Read-Host "  postgres superuser password" -AsSecureString
+    $bstr  = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
+    $PgSuperPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+}
+
 $env:PGPASSWORD = $PgSuperPassword
 
-# Run psql as postgres superuser
 function Invoke-Psql {
     param([string]$Sql, [string]$Db = 'postgres')
     $result = & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d $Db -tAc $Sql 2>&1
     return $result
 }
 
-# Verify the password is correct before proceeding
+# Verify password before doing anything
 $pgCheck = Invoke-Psql "SELECT 1"
 if ($pgCheck -notmatch '1') {
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-    Write-Fail "Could not connect to PostgreSQL as 'postgres'. Wrong password or service not running. Error: $pgCheck"
+    Invoke-Rollback "Cannot connect to PostgreSQL as 'postgres' — wrong password or service not running. Error: $pgCheck"
 }
 Write-Ok "Connected to PostgreSQL"
 
 $roleExists = Invoke-Psql "SELECT 1 FROM pg_roles WHERE rolname='qorven'"
 if ($roleExists -notmatch '1') {
     Invoke-Psql "CREATE ROLE qorven LOGIN;" | Out-Null
-    Write-Ok "role 'qorven' created"
+    $script:RollbackCreatedRole = $true
+    Write-Ok "Role 'qorven' created"
 } else {
-    Write-Ok "role 'qorven' already exists"
+    Write-Ok "Role 'qorven' already exists"
 }
 
 $dbExists = Invoke-Psql "SELECT 1 FROM pg_database WHERE datname='qorven'"
 if ($dbExists -notmatch '1') {
     & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -c "CREATE DATABASE qorven OWNER qorven;" 2>&1 | Out-Null
-    Write-Ok "database 'qorven' created"
+    $script:RollbackCreatedDb = $true
+    Write-Ok "Database 'qorven' created"
 } else {
-    Write-Ok "database 'qorven' already exists"
+    Write-Ok "Database 'qorven' already exists"
 }
 
 & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d qorven -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>&1 | Out-Null
@@ -253,7 +351,15 @@ $PG_DSN = "postgres://qorven@localhost:5432/qorven?sslmode=disable"
 # ── Step 4: Directories ───────────────────────────────────────────────────────
 Write-Step 4 7 "Directories"
 
-foreach ($dir in @($InstallDir, $ConfigDir, $DataDir, $LogDir)) {
+if (-not (Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    $script:RollbackCreatedInstallDir = $true
+}
+if (-not (Test-Path $ConfigDir)) {
+    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+    $script:RollbackCreatedConfigDir = $true
+}
+foreach ($dir in @($DataDir, $LogDir)) {
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 }
 Write-Ok "Directories ready"
@@ -261,7 +367,7 @@ Write-Ok "Directories ready"
 # ── Step 5: Qorven binary ─────────────────────────────────────────────────────
 Write-Step 5 7 "Qorven binary"
 
-$BinaryPath = "$InstallDir\qorven.exe"
+$BinaryPath  = "$InstallDir\qorven.exe"
 $localBinary = $env:QORVEN_BINARY
 
 if ($localBinary) {
@@ -269,19 +375,22 @@ if ($localBinary) {
     Write-Ok "Installed from local path: $BinaryPath"
 } else {
     if ($ReleaseTag -eq 'latest') {
-        # Fetch all releases so pre-releases (alpha/beta) are included
-        $apiUrl = "https://api.github.com/repos/$GithubOwner/$GithubRepo/releases"
+        $apiUrl   = "https://api.github.com/repos/$GithubOwner/$GithubRepo/releases"
         $releases = Invoke-RestMethod $apiUrl -Headers @{ 'User-Agent' = 'qorven-installer' }
-        $ReleaseTag = $releases[0].tag_name
+        $ReleaseTag = ($releases | Where-Object { -not $_.draft } | Select-Object -First 1).tag_name
+        if (-not $ReleaseTag) { Invoke-Rollback "No releases found in $GithubOwner/$GithubRepo" }
     }
     $BinaryUrl = "https://github.com/$GithubOwner/$GithubRepo/releases/download/$ReleaseTag/qorven-windows-amd64.exe"
     Write-Info "Downloading $BinaryUrl ..."
     Invoke-WebRequest -Uri $BinaryUrl -OutFile "$BinaryPath.tmp" -UseBasicParsing
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$BinaryPath.tmp")) {
+        Invoke-Rollback "Binary download failed from $BinaryUrl"
+    }
     Move-Item "$BinaryPath.tmp" $BinaryPath -Force
     Write-Ok "Downloaded: $BinaryPath"
 }
 
-# Add to system PATH permanently
+# Add to system PATH
 $sysPath = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
 if ($sysPath -notlike "*$InstallDir*") {
     [System.Environment]::SetEnvironmentVariable('PATH', "$sysPath;$InstallDir", 'Machine')
@@ -296,7 +405,7 @@ $ConfigPath = "$ConfigDir\config.toml"
 if (Test-Path $ConfigPath) {
     Write-Warn "$ConfigPath already exists — leaving it unchanged. Delete to regenerate."
 } else {
-    $EncKey   = Random-Hex 32
+    $EncKey    = Random-Hex 32
     $AuthToken = Random-Hex 16
     $configContent = @"
 # Qorven configuration — generated by install.ps1 on $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
@@ -317,7 +426,6 @@ encryption_key = "$EncKey"
 mode = "disabled"
 "@
     Set-Content -Path $ConfigPath -Value $configContent -Encoding UTF8
-    # Restrict read access to current user + SYSTEM
     $acl = Get-Acl $ConfigPath
     $acl.SetAccessRuleProtection($true, $false)
     $rule1 = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM","FullControl","Allow")
@@ -341,15 +449,14 @@ if (-not (Test-Path $NssmPath)) {
     $NssmZip = "$env:TEMP\nssm.zip"
     Invoke-WebRequest -Uri $NssmUrl -OutFile $NssmZip -UseBasicParsing
     Expand-Archive -Path $NssmZip -DestinationPath "$env:TEMP\nssm" -Force
-    # Pick the right architecture
     $nssmBin = Get-ChildItem "$env:TEMP\nssm" -Filter 'nssm.exe' -Recurse | Where-Object { $_.FullName -match 'win64' } | Select-Object -First 1
     if (-not $nssmBin) { $nssmBin = Get-ChildItem "$env:TEMP\nssm" -Filter 'nssm.exe' -Recurse | Select-Object -First 1 }
+    if (-not $nssmBin) { Invoke-Rollback "Could not find nssm.exe in downloaded archive" }
     Copy-Item $nssmBin.FullName $NssmPath -Force
     Remove-Item $NssmZip -Force
     Write-Ok "NSSM installed"
 }
 
-# Stop existing service if running
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($svc) {
     Write-Info "Removing existing service..."
@@ -357,7 +464,6 @@ if ($svc) {
     & $NssmPath remove $ServiceName confirm 2>&1 | Out-Null
 }
 
-# Register service
 & $NssmPath install $ServiceName $BinaryPath start 2>&1 | Out-Null
 & $NssmPath set $ServiceName AppParameters "start" 2>&1 | Out-Null
 & $NssmPath set $ServiceName AppDirectory $DataDir 2>&1 | Out-Null
@@ -365,11 +471,12 @@ if ($svc) {
 & $NssmPath set $ServiceName AppStdout "$LogDir\qorven.log" 2>&1 | Out-Null
 & $NssmPath set $ServiceName AppStderr "$LogDir\qorven.log" 2>&1 | Out-Null
 & $NssmPath set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppRotateBytes 10485760 2>&1 | Out-Null  # 10 MB
+& $NssmPath set $ServiceName AppRotateBytes 10485760 2>&1 | Out-Null
 & $NssmPath set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
 & $NssmPath set $ServiceName Description "Qorven AI Agent Platform" 2>&1 | Out-Null
+$script:RollbackCreatedService = $true
 Start-Service -Name $ServiceName
-Write-Ok "Windows Service '$ServiceName' registered and started (auto-start on boot)"
+Write-Ok "Windows Service '$ServiceName' registered and started"
 
 } # end if (-not $SkipService)
 
@@ -386,6 +493,9 @@ if (-not $SkipService) {
         Start-Sleep -Seconds 2
     }
     Write-Host ""
+    if (-not $healthy) {
+        Invoke-Rollback "Service started but API never became healthy after 60 s. Check logs: $LogDir\qorven.log"
+    }
 }
 
 $MyIP = Get-MyIP
@@ -403,26 +513,16 @@ Write-Host "  |  Logs:    $("$LogDir\qorven.log".PadRight(47))|" -ForegroundColo
 Write-Host "  |  Service: Get-Service $($ServiceName.PadRight(35))|" -ForegroundColor Green
 Write-Host "  +----------------------------------------------------------+" -ForegroundColor Green
 Write-Host ""
-
-if ($healthy) {
-    Write-Ok "API is healthy"
-} else {
-    Write-Warn "API did not respond — check logs: $LogDir\qorven.log"
-}
-
+Write-Host "  To uninstall:" -ForegroundColor DarkGray
+Write-Host "    iwr -useb https://get.qorven.ai/uninstall.ps1 | iex" -ForegroundColor DarkGray
 Write-Host ""
+
 Write-Host "  Verification:" -ForegroundColor White
 Write-Host "    & '$BinaryPath' version" -ForegroundColor DarkGray
 Write-Host "    Get-Service $ServiceName" -ForegroundColor DarkGray
 Write-Host "    Invoke-WebRequest http://127.0.0.1:$ApiPort/health" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  To uninstall:" -ForegroundColor DarkGray
-Write-Host "    nssm stop $ServiceName; nssm remove $ServiceName confirm" -ForegroundColor DarkGray
-Write-Host "    Remove-Item '$InstallDir' -Recurse" -ForegroundColor DarkGray
-Write-Host "    Remove-Item '$ConfigDir' -Recurse" -ForegroundColor DarkGray
-Write-Host ""
 
-# Open browser
 if (-not $SkipService) {
     try { Start-Process $URL } catch {}
 }
