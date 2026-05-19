@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { BarChart3 } from 'lucide-react';
 
 export function SidebarGroupTitle({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 pt-3 pb-1"><span className="text-2xs font-medium text-muted-foreground/60 uppercase tracking-wider">{children}</span></div>;
+  return <div className="px-3 pt-4 pb-1"><span className="text-2xs font-medium text-muted-foreground/60 uppercase tracking-wider">{children}</span></div>;
 }
 
 export function SidebarMenuItem({ icon: Icon, label, badge, badgeColor, active, onClick }: {

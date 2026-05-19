@@ -118,7 +118,7 @@ export function CodeSidebar() {
 
       {(tab === 'explorer' || !(codeProjectName || activeProject)) && (
         <>
-          <div className="flex items-center gap-1.5 px-3 pt-3 pb-2">
+          <div className="flex h-[44px] shrink-0 items-center gap-1.5 border-b border-border px-2">
             <ProjectCombobox
               projects={projects}
               activeProjectId={activeProjectId}

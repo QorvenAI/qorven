@@ -13,11 +13,13 @@ export function AppsSidebar() {
 
   return (
     <>
+      <div className="px-2.5 pt-2">
       <SidebarMenuItem
         icon={LayoutGrid}
         label="Installed Apps"
         onClick={() => router.push('/apps')}
       />
+      </div>
       {pages.length > 0 && (
         <>
           <SidebarDivider />

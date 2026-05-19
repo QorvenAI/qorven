@@ -60,7 +60,7 @@ export function MailSidebar() {
   ];
 
   const agentPicker = (
-    <div className="relative px-3 pt-4 pb-2">
+    <div className="relative flex h-[44px] shrink-0 items-center border-b border-border px-2">
       <button
         onClick={() => setPickerOpen(!pickerOpen)}
         className="flex w-full items-center gap-2.5 h-8.5 rounded-md border border-input px-3 text-2sm font-medium hover:bg-accent transition-colors"

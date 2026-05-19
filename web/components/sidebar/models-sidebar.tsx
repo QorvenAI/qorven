@@ -22,7 +22,7 @@ export function ModelsSidebar() {
   const pathname = usePathname();
 
   return (
-    <ul className="flex flex-col gap-px px-2.5 pt-3">
+    <ul className="flex flex-col gap-px px-2.5 pt-2">
       {ITEMS.map(({ href, label, icon }) => (
         <SidebarMenuItem
           key={href}

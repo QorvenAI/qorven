@@ -86,7 +86,7 @@ export function Sidebar() {
       style={{ left: 'var(--rail-width)' }}>
       <div className="w-(--sidebar-default-width) flex flex-col h-full overflow-hidden">
         <SidebarHeader />
-        <div className={cn('flex-1 overflow-y-auto', (activeRail as string) !== 'code' && 'pt-1')}>
+        <div className="flex-1 overflow-y-auto">
           {activeRail === 'dashboard' && <HomeSidebar events={liveEvents} />}
           {activeRail === 'souls' && <SoulsSidebar souls={souls} soulStates={soulStates} onNewSoul={() => setShowCreateSoul(true)} />}
           {activeRail === 'sessions' && <MailSidebar />}
@@ -97,6 +97,7 @@ export function Sidebar() {
           {(activeRail as string) === 'social' && <SocialSidebar />}
           {(activeRail as string) === 'skills' && <SkillsSidebar />}
           {(activeRail as string) === 'teams' && <TeamsSidebar />}
+          {(activeRail as string) === 'org-chart' && <TeamsSidebar />}
           {(activeRail as string) === 'mcp' && <McpSidebar />}
           {(activeRail as string) === 'kg' && <KnowledgeSidebar />}
           {(activeRail as string) === 'heartbeat' && <HeartbeatSidebar />}
@@ -296,7 +297,7 @@ function SoulsSidebar({ souls, soulStates, onNewSoul }: { souls: any[]; soulStat
 
   return (
     <>
-      <div className="relative flex items-center gap-1 px-3 pt-4 pb-2">
+      <div className="relative flex h-[44px] shrink-0 items-center gap-1 border-b border-border px-2">
         <div className="flex flex-1 items-center h-8 rounded-md border border-input bg-transparent px-2.5 text-2sm min-w-0">
           <Search className="h-3.5 w-3.5 text-muted-foreground mr-1.5 shrink-0" />
           <input type="text" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)}
