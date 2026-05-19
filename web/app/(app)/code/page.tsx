@@ -726,7 +726,7 @@ export default function CodePage() {
             </div>
           </div>
 
-          <aside className="w-[380px] shrink-0 border-l border-border bg-muted/10">
+          <aside className="w-[380px] shrink-0 border-l border-border bg-muted/10 flex flex-col overflow-hidden">
             <ProjectDiscoveryChat
               onReady={() => {}}
               onNameGenerated={(name) => setCodeProjectName(name)}
