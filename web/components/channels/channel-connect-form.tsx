@@ -24,12 +24,21 @@ interface ChannelConnectFormProps {
 export function ChannelConnectForm({ agentId, channelType, existing, onClose, onConnected }: ChannelConnectFormProps) {
   const schema = channelFormSchemas[channelType];
 
-  // Seed values from existing config in edit mode
+  // Seed values from existing config in edit mode; seed select defaults for new channels
   const [values, setValues] = useState<Record<string, string>>(() => {
-    if (!existing?.config) return {};
-    return Object.fromEntries(
-      Object.entries(existing.config).map(([k, v]) => [k, String(v ?? '')])
-    );
+    if (existing?.config) {
+      return Object.fromEntries(
+        Object.entries(existing.config).map(([k, v]) => [k, String(v ?? '')])
+      );
+    }
+    // Pre-fill select fields with their first option so showWhen conditions work immediately
+    const defaults: Record<string, string> = {};
+    for (const f of (channelFormSchemas[channelType]?.fields ?? [])) {
+      if (f.type === 'select' && f.options?.length) {
+        defaults[f.key] = f.options[0]!.value;
+      }
+    }
+    return defaults;
   });
   const [name, setName] = useState<string>(existing?.name ?? '');
   const [savedChannelId, setSavedChannelId] = useState<string | null>(existing?.id ?? null);
