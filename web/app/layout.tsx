@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html className="h-full dark" suppressHydrationWarning>
-      <body className={cn('antialiased flex h-full w-full text-sm text-foreground bg-background', inter.variable, jetbrains.variable, inter.className)}>
+      <body suppressHydrationWarning className={cn('antialiased flex h-full w-full text-sm text-foreground bg-background', inter.variable, jetbrains.variable, inter.className)}>
         <ThemeProvider>
           <WebSocketProvider>
             {children}
