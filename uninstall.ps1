@@ -76,7 +76,8 @@ if (-not (Test-Path "$PgBinDir\psql.exe")) {
     if ($found) { $PgBinDir = $found.DirectoryName }
 }
 
-$pgSvcRunning = (Get-Service -Name "postgresql-x64-$PgVersion" -ErrorAction SilentlyContinue)?.Status -eq 'Running'
+$pgSvcObj = Get-Service -Name "postgresql-x64-$PgVersion" -ErrorAction SilentlyContinue
+$pgSvcRunning = $pgSvcObj -and $pgSvcObj.Status -eq 'Running'
 
 if ((Test-Path "$PgBinDir\psql.exe") -and $pgSvcRunning) {
     # Try pg_hba trust auth first (works if user set it up that way), then ask for password
