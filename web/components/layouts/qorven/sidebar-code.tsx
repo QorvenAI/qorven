@@ -2,15 +2,17 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { apiBase } from '@/lib/api-url';
 import {
   FolderOpen, Search, X, ChevronDown, ChevronRight, GitBranch, Loader2,
-  Code, Plus, Globe,
+  Code, Plus, Globe, Check, FilePlus, FolderPlus,
 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 export function CodeSidebar() {
   const router = useRouter();
@@ -117,35 +119,30 @@ export function CodeSidebar() {
       {(tab === 'explorer' || !(codeProjectName || activeProject)) && (
         <>
           <div className="flex items-center gap-1.5 px-3 pt-3 pb-2">
-            <select
-              value={activeProjectId || ''}
-              onChange={e => useStore.getState().setCodeActiveProjectId(e.target.value || null)}
-              className={cn(
-                'qr-select text-xs transition-all',
-                search ? 'w-0 overflow-hidden opacity-0 p-0 border-0' : 'flex-1'
-              )}
-            >
-              <option value="">Select project…</option>
-              {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <div className={cn('relative transition-all', search ? 'flex-1' : 'w-8')}>
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <ProjectCombobox
+              projects={projects}
+              activeProjectId={activeProjectId}
+              onSelect={id => useStore.getState().setCodeActiveProjectId(id || null)}
+            />
+            <NewItemButton activeProjectId={activeProjectId} />
+          </div>
+
+          {(codeProjectName || activeProject) && (
+            <div className="px-3 pb-2 relative">
+              <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder={search ? 'Search files…' : ''}
-                className={cn(
-                  'qr-input text-xs transition-all',
-                  search ? 'w-full pl-7 pr-7' : 'w-8 pl-7 pr-1 cursor-pointer'
-                )}
+                placeholder="Search files…"
+                className="qr-input text-xs w-full pl-7 pr-7"
               />
               {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <button onClick={() => setSearch('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                   <X className="h-3 w-3" />
                 </button>
               )}
             </div>
-          </div>
+          )}
 
           <div className="flex-1 overflow-y-auto">
             {search.length >= 2 ? (
@@ -333,6 +330,167 @@ export function CodeSidebar() {
         </>
       )}
     </>
+  );
+}
+
+function ProjectCombobox({ projects, activeProjectId, onSelect }: {
+  projects: any[];
+  activeProjectId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const active = projects.find((p: any) => p.id === activeProjectId);
+  const label = active?.display_name || active?.name || 'Select project…';
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="flex flex-1 min-w-0 items-center justify-between gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-accent transition-colors"
+        >
+          <span className="truncate text-left">{label}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0" align="start" sideOffset={4}>
+        <Command>
+          <CommandInput
+            placeholder="Search projects…"
+            value={query}
+            onValueChange={setQuery}
+            className="h-8 text-xs"
+          />
+          <CommandList>
+            <CommandEmpty className="py-4 text-xs text-muted-foreground text-center">No projects found</CommandEmpty>
+            <CommandGroup>
+              {projects.map((p: any) => (
+                <CommandItem
+                  key={p.id}
+                  value={p.display_name || p.name}
+                  onSelect={() => { onSelect(p.id); setOpen(false); setQuery(''); }}
+                  className="text-xs"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 text-amber-500/80 shrink-0" />
+                  <span className="truncate">{p.display_name || p.name}</span>
+                  {p.id === activeProjectId && <Check className="h-3.5 w-3.5 ml-auto text-primary shrink-0" />}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function NewItemButton({ activeProjectId }: { activeProjectId: string | null }) {
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mode, setMode] = useState<'file' | 'folder' | null>(null);
+  const [inputVal, setInputVal] = useState('');
+  const [creating, setCreating] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const projectPath = useStore((s) => s.codeProjectPath);
+  const tok = typeof window !== 'undefined' ? (localStorage.getItem('qorven_token') || '') : '';
+
+  useEffect(() => {
+    if (mode) setTimeout(() => inputRef.current?.focus(), 50);
+  }, [mode]);
+
+  const create = async () => {
+    const name = inputVal.trim();
+    if (!name || !activeProjectId) return;
+    setCreating(true);
+    try {
+      const path = name.startsWith('/') ? name : `${projectPath || ''}/${name}`;
+      const content = mode === 'folder' ? '' : '';
+      const isFolder = mode === 'folder';
+      if (isFolder) {
+        // Create a .gitkeep inside the folder so it exists
+        await fetch(`${apiBase()}/v1/projects/${activeProjectId}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ path: `${path}/.gitkeep`, content: '' }),
+        });
+      } else {
+        await fetch(`${apiBase()}/v1/projects/${activeProjectId}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ path, content }),
+        });
+        router.push(`/code?open=${encodeURIComponent(path)}`);
+      }
+      setMode(null);
+      setInputVal('');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (mode) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          ref={inputRef}
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setMode(null); setInputVal(''); } }}
+          placeholder={mode === 'file' ? 'filename.ts' : 'folder-name'}
+          className="qr-input text-xs flex-1 w-24"
+        />
+        <button
+          onClick={create}
+          disabled={creating || !inputVal.trim()}
+          className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground disabled:opacity-40"
+        >
+          {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+        </button>
+        <button onClick={() => { setMode(null); setInputVal(''); }} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent">
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          title="New…"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-44 p-1" align="end" sideOffset={4}>
+        <button
+          onClick={() => { setMenuOpen(false); useStore.getState().setCodeActiveProjectId(null); router.push('/code'); }}
+          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+        >
+          <FolderPlus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          New project
+        </button>
+        {activeProjectId && (
+          <>
+            <button
+              onClick={() => { setMenuOpen(false); setMode('file'); }}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+            >
+              <FilePlus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              New file
+            </button>
+            <button
+              onClick={() => { setMenuOpen(false); setMode('folder'); }}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+            >
+              <FolderPlus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              New folder
+            </button>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
