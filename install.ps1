@@ -159,7 +159,8 @@ if (-not (Test-Path $pgvectorDir)) {
             Write-Fail "Git not found and winget is not available — cannot build pgvector"
         }
     }
-    git clone --depth 1 https://github.com/pgvector/pgvector.git $pgvectorDir 2>&1 | Out-Null
+    $gitOut = git clone --depth 1 https://github.com/pgvector/pgvector.git $pgvectorDir 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Fail "git clone pgvector failed: $gitOut"; exit 1 }
 }
 
 # Check for nmake (Visual Studio Build Tools)
