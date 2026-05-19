@@ -34,7 +34,7 @@ export function SettingsSidebar() {
 
   return (
     <>
-      <ul className="flex flex-col gap-px px-2.5 pt-3">
+      <ul className="flex flex-col gap-px px-2.5 pt-2">
         {items.map((item) => (
           <SidebarMenuItem
             key={item.tab}

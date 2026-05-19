@@ -30,7 +30,7 @@ export function SocialSidebar() {
   ];
 
   return (
-    <ul className="flex flex-col gap-px px-2.5">
+    <ul className="flex flex-col gap-px px-2.5 pt-2">
       {views.map(v => (
         <SidebarMenuItem
           key={v.label}
