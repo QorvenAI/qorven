@@ -671,7 +671,7 @@ export default function CodePage() {
 
   if (activeCodeTab !== 'editor') {
     return (
-      <div className="full-bleed flex flex-col" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px))' }}>
+      <div className="full-bleed flex flex-col" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
         <div className="flex-1 overflow-hidden">
           {activeCodeTab === 'tickets'   && <TicketsTab />}
           {activeCodeTab === 'tasks'     && <TasksTab />}
@@ -689,7 +689,7 @@ export default function CodePage() {
 
   if (!activeProject) {
     return (
-      <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px))' }}>
+      <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
         <div className="flex flex-1 overflow-hidden">
           <div className="flex-1 min-w-0 overflow-y-auto bg-background">
             <div className="mx-auto max-w-3xl px-6 py-10 space-y-8">
@@ -738,7 +738,7 @@ export default function CodePage() {
   }
 
   return (
-    <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px))' }}>
+    <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
       <div className="flex flex-1 overflow-hidden">
         <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
