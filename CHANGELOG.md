@@ -4,6 +4,27 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.4-alpha — 2026-05-19
+
+### Added
+- **One-click OTA updates** — Settings → System → Install now downloads the new binary,
+  verifies SHA256, atomically swaps it, patches the systemd unit (`Restart=always`),
+  and restarts the service automatically. The UI shows a reconnection spinner and
+  reloads the page when the server is back — no manual `systemctl restart` needed.
+
+### Fixed
+- **Cron deletion race** — deleting a schedule from the Schedules tab now disables
+  the job first, then deletes, eliminating a 30-second window where the runner
+  could pick up the row in a concurrent tick.
+- **Room-mention schedules never fired** — cron jobs created by @mentioning an agent
+  in a room were missing `next_run_at`, so they only started executing after the next
+  server restart. Now set correctly on creation.
+- **Windows installer: git clone NativeCommandError** — `git clone 2>&1 | Out-Null`
+  threw `NativeCommandError` in PowerShell 5.1 when git wrote progress to stderr on
+  success. Fixed by capturing output into a variable and checking `$LASTEXITCODE`.
+
+---
+
 ## v0.1.3-alpha — 2026-05-17
 
 ### Fixes & hardening
