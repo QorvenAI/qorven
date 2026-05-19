@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import {
   agents, sessions, providers, approvals as approvalsApi,
   outbound, supervisor,
@@ -95,27 +96,24 @@ export default function DashboardPage() {
     <ErrorBoundary>
       <div className="flex flex-col gap-6 pb-8">
 
-        {/* Header */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground">{brand.platformName}</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {brand.supervisorName}&apos;s command center — what needs you, what&apos;s running, what happened today
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={load} disabled={loading}
-              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50">
-              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-              Refresh
-            </button>
-            <button onClick={() => router.push('/qors')}
-              className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-              <Send className="h-4 w-4" />
-              New Chat
-            </button>
-          </div>
-        </div>
+        <CanvasHeader
+          title={brand.platformName}
+          description={`${brand.supervisorName}'s command center — what needs you, what's running, what happened today`}
+          actions={
+            <>
+              <button onClick={load} disabled={loading}
+                className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50">
+                <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+                Refresh
+              </button>
+              <button onClick={() => router.push('/qors')}
+                className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+                <Send className="h-4 w-4" />
+                New Chat
+              </button>
+            </>
+          }
+        />
 
         {error && (
           <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">

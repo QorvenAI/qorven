@@ -5,6 +5,7 @@
 import { useRouter, usePathname } from 'next/navigation';
 import { Brain, Image, Eye, Mic, Globe, GitBranch, BarChart3 } from 'lucide-react';
 import { SidebarMenuItem } from './sidebar-primitives';
+import { SidebarLayout } from './sidebar-layout';
 
 const ITEMS = [
   { href: '/models-hub/generative',   label: 'Generative AI',  icon: Brain },
@@ -22,16 +23,20 @@ export function ModelsSidebar() {
   const pathname = usePathname();
 
   return (
-    <ul className="flex flex-col gap-px px-2.5 pt-2">
-      {ITEMS.map(({ href, label, icon }) => (
-        <SidebarMenuItem
-          key={href}
-          icon={icon}
-          label={label}
-          active={pathname === href || pathname?.startsWith(href + '/')}
-          onClick={() => router.push(href)}
-        />
-      ))}
-    </ul>
+    <SidebarLayout
+      section3={
+        <ul className="flex flex-col gap-px px-2.5">
+          {ITEMS.map(({ href, label, icon }) => (
+            <SidebarMenuItem
+              key={href}
+              icon={icon}
+              label={label}
+              active={pathname === href || pathname?.startsWith(href + '/')}
+              onClick={() => router.push(href)}
+            />
+          ))}
+        </ul>
+      }
+    />
   );
 }

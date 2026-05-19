@@ -14,6 +14,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-primitives';
+import { SidebarLayout } from './sidebar-layout';
 import { SearchableSelect } from '@/components/searchable-select';
 import { mail as mailApi, type MailIdentity, type MailAlias } from '@/lib/api';
 import { contacts as contactsApi, type Contact, type ContactAgentPrefs } from '@/lib/api';
@@ -59,8 +60,8 @@ export function MailSidebar() {
     { icon: FileText,  label: 'By Project' },
   ];
 
-  const agentPicker = (
-    <div className="relative flex h-[44px] shrink-0 items-center border-b border-border px-2">
+  const agentPickerContent = (
+    <div className="relative flex w-full items-center">
       <button
         onClick={() => setPickerOpen(!pickerOpen)}
         className="flex w-full items-center gap-2.5 h-8.5 rounded-md border border-input px-3 text-2sm font-medium hover:bg-accent transition-colors"
@@ -104,60 +105,62 @@ export function MailSidebar() {
 
   if (view === 'contacts') {
     return (
-      <>
-        {agentPicker}
-        <ContactsView souls={souls} agentFilter={mailSoulFilter} onBack={() => setMailView(null)} />
-      </>
+      <SidebarLayout
+        section2={agentPickerContent}
+        section3={<ContactsView souls={souls} agentFilter={mailSoulFilter} onBack={() => setMailView(null)} />}
+      />
     );
   }
 
   if (view === 'mailboxes') {
     return (
-      <>
-        {agentPicker}
-        <MailboxesView souls={souls} onBack={() => setMailView(null)} />
-      </>
+      <SidebarLayout
+        section2={agentPickerContent}
+        section3={<MailboxesView souls={souls} onBack={() => setMailView(null)} />}
+      />
     );
   }
 
   return (
-    <>
-      {agentPicker}
-
-      <SidebarGroupTitle>Manage</SidebarGroupTitle>
-      <ul className="flex flex-col gap-px px-2.5">
-        <SidebarMenuItem icon={Users} label="Contacts" onClick={() => setMailView('contacts')} />
-        <SidebarMenuItem icon={AtSign} label="Mailboxes" onClick={() => setMailView('mailboxes')} />
-        <SidebarMenuItem
-          icon={ShieldCheck}
-          label="Approvals"
-          badge={approvalCount > 0 ? String(approvalCount) : undefined}
-          badgeColor="bg-amber-400/20 text-amber-600"
-          onClick={() => router.push('/outbound')}
-        />
-        {mailSoulFilter && (
-          <SidebarMenuItem
-            icon={Settings}
-            label="Mailbox settings"
-            onClick={() => setMailView('mailboxes')}
-          />
-        )}
-      </ul>
-
-      <SidebarDivider />
-      <SidebarGroupTitle>Folders</SidebarGroupTitle>
-      <ul className="flex flex-col gap-px px-2.5 pb-2">
-        {folders.map((f) => (
-          <SidebarMenuItem
-            key={f.label}
-            icon={f.icon}
-            label={f.label}
-            active={mailFolder === f.label.toLowerCase()}
-            onClick={() => { setMailFolder(f.label.toLowerCase()); router.push('/mail'); }}
-          />
-        ))}
-      </ul>
-    </>
+    <SidebarLayout
+      section2={agentPickerContent}
+      section3={
+        <>
+          <SidebarGroupTitle>Manage</SidebarGroupTitle>
+          <ul className="flex flex-col gap-px px-2.5">
+            <SidebarMenuItem icon={Users} label="Contacts" onClick={() => setMailView('contacts')} />
+            <SidebarMenuItem icon={AtSign} label="Mailboxes" onClick={() => setMailView('mailboxes')} />
+            <SidebarMenuItem
+              icon={ShieldCheck}
+              label="Approvals"
+              badge={approvalCount > 0 ? String(approvalCount) : undefined}
+              badgeColor="bg-amber-400/20 text-amber-600"
+              onClick={() => router.push('/outbound')}
+            />
+            {mailSoulFilter && (
+              <SidebarMenuItem
+                icon={Settings}
+                label="Mailbox settings"
+                onClick={() => setMailView('mailboxes')}
+              />
+            )}
+          </ul>
+          <SidebarDivider />
+          <SidebarGroupTitle>Folders</SidebarGroupTitle>
+          <ul className="flex flex-col gap-px px-2.5 pb-2">
+            {folders.map((f) => (
+              <SidebarMenuItem
+                key={f.label}
+                icon={f.icon}
+                label={f.label}
+                active={mailFolder === f.label.toLowerCase()}
+                onClick={() => { setMailFolder(f.label.toLowerCase()); router.push('/mail'); }}
+              />
+            ))}
+          </ul>
+        </>
+      }
+    />
   );
 }
 

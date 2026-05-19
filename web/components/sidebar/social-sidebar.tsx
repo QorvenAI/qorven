@@ -3,13 +3,16 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiBase } from '@/lib/api-url';
 import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap } from 'lucide-react';
 import { SidebarMenuItem } from './sidebar-primitives';
+import { SidebarLayout } from './sidebar-layout';
 
 export function SocialSidebar() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tab = searchParams.get('tab') ?? 'compose';
   const [stats, setStats] = useState<{ scheduled: number; published: number; drafts: number } | null>(null);
 
   useEffect(() => {
@@ -30,17 +33,25 @@ export function SocialSidebar() {
   ];
 
   return (
-    <ul className="flex flex-col gap-px px-2.5 pt-2">
-      {views.map(v => (
-        <SidebarMenuItem
-          key={v.label}
-          icon={v.icon}
-          label={v.label}
-          badge={v.label === 'Scheduled' && stats?.scheduled ? String(stats.scheduled) : undefined}
-          badgeColor="bg-primary/10 text-primary"
-          onClick={() => router.push(v.sub)}
-        />
-      ))}
-    </ul>
+    <SidebarLayout
+      section3={
+        <ul className="flex flex-col gap-px px-2.5">
+          {views.map(v => {
+            const id = v.sub.split('?tab=')[1] ?? 'compose';
+            return (
+              <SidebarMenuItem
+                key={v.label}
+                icon={v.icon}
+                label={v.label}
+                active={tab === id}
+                badge={v.label === 'Scheduled' && stats?.scheduled ? String(stats.scheduled) : undefined}
+                badgeColor="bg-primary/10 text-primary"
+                onClick={() => router.push(v.sub)}
+              />
+            );
+          })}
+        </ul>
+      }
+    />
   );
 }

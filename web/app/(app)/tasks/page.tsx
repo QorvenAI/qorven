@@ -7,6 +7,7 @@ import {
   Plus, Loader2, Filter, X, Send, MessageSquare, Bot, User,
   Circle, CircleDot, CircleCheck, CircleDashed, GitCommit, File, Ticket,
 } from 'lucide-react';
+import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { tasks as tasksApi } from '@/lib/api';
 import { useStore } from '@/store';
@@ -330,6 +331,7 @@ export default function TasksPage() {
 
   return (
     <div className="flex flex-col h-full">
+      <CanvasHeader title="Tasks" description="Track work across all your Qors" />
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
         <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
