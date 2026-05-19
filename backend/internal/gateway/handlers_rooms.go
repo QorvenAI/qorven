@@ -536,9 +536,9 @@ Respond with JSON: {"route_to": ["agent_key"], "reasoning": "brief reason"}`, ag
 							jobName := strings.ReplaceAll(strings.ToLower(ag.AgentKey+"_scheduled"), " ", "_")
 							payloadJSON, _ := json.Marshal(map[string]string{"instruction": task, "executor_agent_id": ag.ID})
 							gw.db.Pool.QueryRow(context.Background(),
-								`INSERT INTO cron_jobs (agent_id, name, cron_expression, payload, executor_agent_id, enabled)
-								 VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
-								ag.ID, jobName, expr, payloadJSON, ag.ID).Scan(&jobID)
+								`INSERT INTO cron_jobs (agent_id, name, cron_expression, payload, executor_agent_id, next_run_at, enabled)
+								 VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
+								ag.ID, jobName, expr, payloadJSON, ag.ID, cronpkg.NextRunFromExpr(expr)).Scan(&jobID)
 
 							humanTime := cronpkg.FormatNextRunExpr(expr)
 							confirm := fmt.Sprintf("Got it! I'll send you %s, %s. 👍", task, humanTime)

@@ -314,9 +314,11 @@ func (gw *Gateway) handleDeleteCronJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "db not available"})
 		return
 	}
+	// Disable first so the runner won't pick it up in a concurrent tick, then hard delete.
+	gw.db.Pool.Exec(r.Context(), `UPDATE cron_jobs SET enabled = false WHERE id = $1`, id)
 	_, err := gw.db.Pool.Exec(r.Context(), `DELETE FROM cron_jobs WHERE id = $1`, id)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
 	w.WriteHeader(204)
