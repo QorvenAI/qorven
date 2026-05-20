@@ -23,7 +23,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { X, ExternalLink } from 'lucide-react';
+import { X, ExternalLink, MemoryStick, HardDrive } from 'lucide-react';
 
 interface StatsBar {
   mem_sys_mb: number;
@@ -39,12 +39,22 @@ interface StatsBar {
   goroutines: number;
 }
 
+// Version seen on the first successful response — any change triggers a reload.
+let _loadedVersion: string | null = null;
+
 function useStatsBar() {
   const [stats, setStats] = useState<StatsBar | null>(null);
   useEffect(() => {
     const fetch_ = () =>
       fetch('/api/v1/stats/bar')
-        .then(r => r.ok ? r.json() : null)
+        .then(r => {
+          const v = r.headers.get('X-Qorven-Version');
+          if (v) {
+            if (_loadedVersion === null) { _loadedVersion = v; }
+            else if (_loadedVersion !== v) { window.location.reload(); }
+          }
+          return r.ok ? r.json() : null;
+        })
         .then(d => d && setStats(d))
         .catch(() => {});
     fetch_();
@@ -174,12 +184,12 @@ export function StatusBar() {
 
               {/* Memory */}
               <StatusChip title={`Heap: ${stats.mem_heap_mb} MB · Sys: ${stats.mem_sys_mb} MB`}>
-                MEM {stats.mem_heap_mb}MB
+                <MemoryStick className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.mem_heap_mb}MB
               </StatusChip>
 
               {/* Disk */}
               <StatusChip title={`Disk: ${stats.disk_used_gb.toFixed(1)} / ${stats.disk_total_gb.toFixed(1)} GB`}>
-                DISK {stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
+                <HardDrive className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
               </StatusChip>
 
               <StatusDivider />
@@ -270,7 +280,7 @@ function StatusChip({ children, title }: { children: React.ReactNode; title?: st
   return (
     <span
       title={title}
-      className="px-1.5 h-full flex items-center font-mono text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
+      className="px-1.5 h-full flex items-center font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
     >
       {children}
     </span>

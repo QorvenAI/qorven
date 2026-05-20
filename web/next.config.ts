@@ -10,6 +10,7 @@ const isStaticBuild = process.env.QORVEN_STATIC === '1';
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  allowedDevOrigins: ['100.67.68.82'],
   // Static export: produces ./out with plain HTML/CSS/JS that any
   // server (including our embedded FS) can serve with no Node
   // runtime. Rewrites + redirects are dropped because the export

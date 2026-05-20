@@ -26,6 +26,7 @@ import (
 func (gw *Gateway) registerV1Routes(parent chi.Router) {
 	parent.Route("/v1", func(r chi.Router) {
 		r.Use(gw.AuthMiddlewareV2)
+		r.Use(versionHeaderMiddleware)
 		// scope every authenticated request to its
 		// tenant's Postgres transaction in multi-tenant mode. No-op in
 		// single-tenant. MUST follow AuthMiddlewareV2 because it reads
