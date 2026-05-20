@@ -23,7 +23,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2, TrendingUp } from 'lucide-react';
 
 interface UpdateInfo {
   current: string;
@@ -33,6 +33,14 @@ interface UpdateInfo {
 }
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'up_to_date' | 'installing' | 'restarting' | 'error';
+
+interface AgentSpend {
+  id: string;
+  name: string;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+}
 
 interface StatsBar {
   mem_used_gb: number;
@@ -46,6 +54,7 @@ interface StatsBar {
   tokens_out_today: number;
   active_qors: number;
   goroutines: number;
+  top_agents: AgentSpend[];
 }
 
 // Version seen on the first successful response — any change triggers a reload.
@@ -281,16 +290,14 @@ export function StatusBar() {
               <StatusDivider />
 
               {/* Tokens today */}
-              <StatusChip title={`Tokens today — Prompt: ${stats.tokens_in_today.toLocaleString()} · Completion: ${stats.tokens_out_today.toLocaleString()} · Total: ${(stats.tokens_in_today + stats.tokens_out_today).toLocaleString()}`}>
-                ↑{fmtK(stats.tokens_in_today)} ↓{fmtK(stats.tokens_out_today)}
+              <StatusChip title={`Tokens today — Prompt (↑): ${stats.tokens_in_today.toLocaleString()} · Completion (↓): ${stats.tokens_out_today.toLocaleString()} · Total: ${(stats.tokens_in_today + stats.tokens_out_today).toLocaleString()}`}>
+                <span className="text-blue-400/70">↑</span>{fmtK(stats.tokens_in_today)}&nbsp;<span className="text-emerald-400/70">↓</span>{fmtK(stats.tokens_out_today)}
               </StatusChip>
 
               <StatusDivider />
 
-              {/* Cost this month */}
-              <StatusChip title={`Total spend this month across all Qors: $${stats.cost_month_usd.toFixed(6)}`}>
-                ${stats.cost_month_usd.toFixed(4)}
-              </StatusChip>
+              {/* Cost this month — hoverable with per-agent breakdown */}
+              <CostChip cost={stats.cost_month_usd} topAgents={stats.top_agents ?? []} />
 
               <StatusDivider />
 
@@ -416,6 +423,63 @@ export function StatusBar() {
   );
 }
 
+function CostChip({ cost, topAgents }: { cost: number; topAgents: AgentSpend[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="px-1.5 h-6 flex items-center gap-0.5 font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-pointer tabular-nums"
+        title={`Total spend this month: $${cost.toFixed(6)}`}
+      >
+        <TrendingUp className="h-2.5 w-2.5 mr-0.5 shrink-0" />
+        ${cost.toFixed(4)}
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-1.5 w-56 rounded-xl border border-border bg-popover shadow-xl z-50 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+            <span className="text-xs font-semibold text-foreground">Monthly spend</span>
+            <Link
+              href="/settings?section=usage"
+              onClick={() => setOpen(false)}
+              className="text-2xs text-primary hover:text-primary/80 transition-colors"
+            >
+              Usage →
+            </Link>
+          </div>
+          {topAgents.length === 0 ? (
+            <p className="px-3 py-2 text-2xs text-muted-foreground">No usage recorded yet.</p>
+          ) : (
+            <div className="py-1">
+              {topAgents.map((a) => (
+                <div key={a.id} className="flex items-center justify-between px-3 py-1.5 hover:bg-accent transition-colors">
+                  <span className="text-2xs text-foreground truncate max-w-[120px]">{a.name}</span>
+                  <span className="text-2xs font-mono text-muted-foreground shrink-0">${a.cost_usd.toFixed(4)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="px-3 py-2 border-t border-border flex items-center justify-between">
+            <span className="text-2xs text-muted-foreground">Total</span>
+            <span className="text-2xs font-mono font-semibold text-foreground">${cost.toFixed(4)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatusChip({ children, title }: { children: React.ReactNode; title?: string }) {
   return (
     <span
@@ -432,9 +496,11 @@ function StatusDivider() {
 }
 
 function fmtUptime(sec: number): string {
-  const h = Math.floor(sec / 3600);
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m ${s}s`;
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
