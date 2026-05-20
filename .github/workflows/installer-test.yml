@@ -224,8 +224,17 @@ jobs:
             $svcName = (Get-Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1).Name
           }
           if ($svcName) {
-            Restart-Service $svcName -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 3
+            $svcObj = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+            if ($svcObj.Status -eq 'Running') {
+              Restart-Service $svcName -ErrorAction SilentlyContinue
+            } else {
+              Start-Service $svcName -ErrorAction SilentlyContinue
+            }
+            # Wait up to 30s for the service to reach Running
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-Service $svcName).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
+              Start-Sleep -Seconds 2
+            }
             Write-Host "PostgreSQL service status: $((Get-Service $svcName).Status)"
           }
           # Verify TCP is listening
