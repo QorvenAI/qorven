@@ -199,12 +199,25 @@ jobs:
       - name: Start pre-installed PostgreSQL
         shell: pwsh
         run: |
-          # windows-2022 runner ships PostgreSQL 14 pre-installed; winget is not available
           $pgVer = (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
           Write-Host "Found PostgreSQL $pgVer"
-          $pgConf = "C:\Program Files\PostgreSQL\$pgVer\data\postgresql.conf"
-          # Enable TCP so we can use -h 127.0.0.1 (named-pipe path is unreliable cross-runner)
-          (Get-Content $pgConf) -replace "^#?listen_addresses\s*=.*", "listen_addresses = '127.0.0.1'" | Set-Content $pgConf
+          # Try known data dir locations — GitHub runner images vary between versions
+          $dataDirs = @(
+            "C:\Program Files\PostgreSQL\$pgVer\data",
+            "C:\PostgreSQL\$pgVer\data",
+            "D:\PostgreSQL\$pgVer\data"
+          )
+          $pgConf = $null
+          foreach ($d in $dataDirs) {
+            $candidate = Join-Path $d 'postgresql.conf'
+            if (Test-Path $candidate) { $pgConf = $candidate; break }
+          }
+          if ($pgConf) {
+            Write-Host "Editing $pgConf to enable TCP"
+            (Get-Content $pgConf) -replace "^#?listen_addresses\s*=.*", "listen_addresses = '127.0.0.1'" | Set-Content $pgConf
+          } else {
+            Write-Host "postgresql.conf not found in known paths — TCP may already be enabled, continuing"
+          }
           $svcName = "postgresql-x64-$pgVer"
           $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
           if ($null -eq $svc) {
