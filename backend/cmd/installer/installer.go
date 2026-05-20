@@ -1480,8 +1480,22 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			if err = runQuiet("apt-get", "install", "-y", "-qq", "postgresql", "postgresql-contrib"); err != nil {
 				return "", false, fmt.Errorf("apt install postgresql: %w", err)
 			}
-			runQuiet("systemctl", "enable", "--now", "postgresql")
-			time.Sleep(2 * time.Second)
+		}
+		// Always ensure the service is enabled and running — handles both fresh
+		// installs and systems where PostgreSQL was already installed but stopped.
+		runQuiet("systemctl", "enable", "postgresql")
+		runQuiet("systemctl", "start", "postgresql")
+		// Wait up to 20 s for postgres to accept connections.
+		ready := false
+		for i := 0; i < 20; i++ {
+			if _, e := runSilent("pg_isready", "-q"); e == nil {
+				ready = true
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		if !ready {
+			return "", false, fmt.Errorf("postgresql did not become ready within 20s — check: sudo systemctl status postgresql")
 		}
 		// Install pgvector for the installed PostgreSQL major version.
 		// The versioned package (postgresql-<maj>-pgvector) lives in the PGDG
@@ -1551,16 +1565,16 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		out, _ := runSilent("sudo", "-u", "postgres", "psql", "-tAc",
 			"SELECT 1 FROM pg_database WHERE datname='qorven'")
 		if strings.TrimSpace(out) != "1" {
-			if _, err = runSilent("sudo", "-u", "postgres", "createdb", "qorven"); err != nil {
-				return "", false, fmt.Errorf("createdb: %w", err)
+			if dbOut, dbErr := runSilent("sudo", "-u", "postgres", "createdb", "qorven"); dbErr != nil {
+				return "", false, fmt.Errorf("createdb: %w — %s", dbErr, strings.TrimSpace(dbOut))
 			}
 		}
 		out, _ = runSilent("sudo", "-u", "postgres", "psql", "-tAc",
 			"SELECT 1 FROM pg_roles WHERE rolname='qorven'")
 		if strings.TrimSpace(out) != "1" {
-			if _, err = runSilent("sudo", "-u", "postgres", "createuser",
-				"--no-superuser", "--no-createdb", "--no-createrole", "qorven"); err != nil {
-				return "", false, fmt.Errorf("createuser: %w", err)
+			if cuOut, cuErr := runSilent("sudo", "-u", "postgres", "createuser",
+				"--no-superuser", "--no-createdb", "--no-createrole", "qorven"); cuErr != nil {
+				return "", false, fmt.Errorf("createuser: %w — %s", cuErr, strings.TrimSpace(cuOut))
 			}
 		}
 		runSilent("sudo", "-u", "postgres", "psql", "-c",
