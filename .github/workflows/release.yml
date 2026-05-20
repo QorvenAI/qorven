@@ -170,7 +170,7 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: release/*
           draft: false
-          make_latest: false
+          make_latest: true
           fail_on_unmatched_files: false
           prerelease: ${{ contains(steps.version.outputs.tag, '-rc') || contains(steps.version.outputs.tag, '-beta') || contains(steps.version.outputs.tag, '-alpha') }}
 
