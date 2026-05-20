@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 # dev.sh — start backend (air hot-reload) + Next.js in a tmux session.
 #
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  DEV ENVIRONMENT — ONE SOURCE OF TRUTH                                  │
+# │                                                                          │
+# │  USE THIS URL:  http://localhost:3000  ← always, for everything          │
+# │                                                                          │
+# │  Port :4200  = Go backend (air hot-reload). API + WS only. No UI.       │
+# │  Port :3000  = Next.js dev server. Proxies /api/* → :4200 automatically. │
+# │                                                                          │
+# │  DO NOT open :4200 directly — it serves the OLD embedded UI (no HMR,    │
+# │  no live code changes). DO NOT use the tailscale IP for dev testing.     │
+# │                                                                          │
+# │  Tailscale / nginx :80 → proxies to :4200 (Go binary, no live UI).      │
+# │  Only use the tailscale IP after deploying a release binary to EC2.      │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
 # Usage:
 #   ./dev.sh          — start (or attach if already running)
 #   ./dev.sh stop     — kill the session and all processes
@@ -10,7 +25,6 @@
 #   /tmp/qorven-backend.log
 #   /tmp/qorven-next.log
 #
-# Ports: backend=4200  Next.js=3000
 # The session name is "qorven-dev" — tmux attach-session -t qorven-dev to re-attach.
 
 set -euo pipefail
@@ -91,4 +105,6 @@ echo "  Attach  : tmux attach-session -t $SESSION"
 echo "  Stop    : ./dev.sh stop"
 echo "  Logs    : ./dev.sh logs"
 echo ""
-echo "Both services starting in background — open http://localhost:3000"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  DEV URL  →  http://localhost:3000  (use this only)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
