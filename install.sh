@@ -70,6 +70,50 @@ if [ "$UNINSTALL" = "1" ]; then
   exit 0
 fi
 
+# ── detect existing install ───────────────────────────────────────────────────
+EXISTING_VERSION=""
+if command -v qorven >/dev/null 2>&1; then
+  EXISTING_VERSION="$(qorven version 2>/dev/null | grep -oP 'v[\d.]+[^\s]*' | head -1 || true)"
+fi
+
+if [ -n "$EXISTING_VERSION" ]; then
+  printf "\n"
+  printf "  ${BOLD}Qorven is already installed${NC} (${EXISTING_VERSION})\n\n"
+
+  # Resolve latest release for comparison
+  LATEST_TAG="$(curl --proto '=https' --tlsv1.2 -fsSLm10 \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases" \
+    | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": "\(.*\)".*/\1/' 2>/dev/null || echo "")"
+
+  if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$EXISTING_VERSION" ]; then
+    printf "  A newer version is available: ${GREEN}${BOLD}${LATEST_TAG}${NC}\n\n"
+    printf "  What would you like to do?\n\n"
+    printf "    ${BOLD}1)${NC} Update to ${LATEST_TAG}  ${GREEN}(recommended)${NC}\n"
+    printf "    ${BOLD}2)${NC} Reinstall ${EXISTING_VERSION}  (repair / reconfigure)\n"
+    printf "    ${BOLD}3)${NC} Cancel\n\n"
+    printf "  Choice [1]: "
+    read -r CHOICE </dev/tty || CHOICE="1"
+    CHOICE="${CHOICE:-1}"
+    case "$CHOICE" in
+      2) info "reinstalling ${EXISTING_VERSION}…"; RELEASE_TAG="$EXISTING_VERSION" ;;
+      3) printf "\n  Cancelled.\n\n"; exit 0 ;;
+      *) info "updating to ${LATEST_TAG}…"; RELEASE_TAG="$LATEST_TAG" ;;
+    esac
+  else
+    printf "  What would you like to do?\n\n"
+    printf "    ${BOLD}1)${NC} Reinstall / repair current version  ${GREEN}(recommended)${NC}\n"
+    printf "    ${BOLD}2)${NC} Cancel\n\n"
+    printf "  Choice [1]: "
+    read -r CHOICE </dev/tty || CHOICE="1"
+    CHOICE="${CHOICE:-1}"
+    [ "$CHOICE" = "2" ] && { printf "\n  Cancelled.\n\n"; exit 0; }
+    info "reinstalling ${EXISTING_VERSION}…"
+    RELEASE_TAG="${EXISTING_VERSION}"
+  fi
+  printf "\n"
+fi
+
 # ── download or use provided binary ───────────────────────────────────────────
 if [ -n "$QORVEN_BINARY" ]; then
   info "using provided binary: $QORVEN_BINARY"

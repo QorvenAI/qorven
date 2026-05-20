@@ -173,6 +173,7 @@ func New(cfg Config) *Model {
 			{label: "Setup database"},
 			{label: "Install binary to /usr/local/bin"},
 			{label: "Install & start systemd service"},
+			{label: "Configure nginx reverse proxy"},
 			{label: "Install Tailscale"},
 		},
 	}
@@ -1405,7 +1406,65 @@ WantedBy=multi-user.target
 		runQuiet("systemctl", "start", "qorven")
 		return "enabled", false, nil
 
-	case 10: // Tailscale
+	case 10: // nginx reverse proxy
+		nginxConf := `map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    # WebSocket paths → backend
+    location ~ ^/(ws|api/ws) {
+        proxy_pass http://127.0.0.1:4200;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+    }
+
+    # Health and API → backend
+    location ~ ^/(health|api/) {
+        proxy_pass http://127.0.0.1:4200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Everything else → Go binary (serves embedded Next.js static export)
+    location / {
+        proxy_pass http://127.0.0.1:4200;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+`
+		if !commandExists("nginx") {
+			if _, err = runSilent("apt-get", "install", "-y", "-qq", "nginx"); err != nil {
+				return "skipped (nginx install failed)", true, nil
+			}
+		}
+		confPath := "/etc/nginx/conf.d/qorven.conf"
+		if err = os.WriteFile(confPath, []byte(nginxConf), 0644); err != nil {
+			return "", false, fmt.Errorf("write nginx config: %w", err)
+		}
+		// Remove default nginx site that conflicts on port 80
+		os.Remove("/etc/nginx/sites-enabled/default")
+		if _, err = runSilent("nginx", "-t"); err != nil {
+			return "", false, fmt.Errorf("nginx config test failed: %w", err)
+		}
+		runSilent("systemctl", "enable", "nginx")
+		runSilent("systemctl", "reload", "nginx")
+		return confPath, false, nil
+
+	case 11: // Tailscale
 		if cfg.SkipTailscale {
 			return "skipped (--skip-tailscale)", true, nil
 		}
