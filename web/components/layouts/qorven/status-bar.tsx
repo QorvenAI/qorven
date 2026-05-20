@@ -30,7 +30,7 @@ interface StatsBar {
   mem_total_gb: number;
   disk_used_gb: number;
   disk_total_gb: number;
-  uptime: string;
+  uptime_sec: number;
   db_ok: boolean;
   cost_month_usd: number;
   tokens_in_today: number;
@@ -72,6 +72,17 @@ export function StatusBar() {
   const [changelogMd, setChangelogMd] = useState<string>('');
   const modalRef = useRef<HTMLDivElement>(null);
   const stats = useStatsBar();
+  const [displaySec, setDisplaySec] = useState(0);
+
+  useEffect(() => {
+    if (stats?.uptime_sec == null) return;
+    setDisplaySec(stats.uptime_sec);
+  }, [stats?.uptime_sec]);
+
+  useEffect(() => {
+    const t = setInterval(() => setDisplaySec(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     fetch('/api/health/detailed')
@@ -176,8 +187,8 @@ export function StatusBar() {
               />
 
               {/* Uptime */}
-              <StatusChip title={`Uptime: ${stats.uptime} · ${stats.goroutines} goroutines`}>
-                {stats.uptime}
+              <StatusChip title={`Uptime: ${fmtUptime(displaySec)} · ${stats.goroutines} goroutines`}>
+                {fmtUptime(displaySec)}
               </StatusChip>
 
               <StatusDivider />
@@ -291,6 +302,15 @@ function StatusChip({ children, title }: { children: React.ReactNode; title?: st
 
 function StatusDivider() {
   return <span className="h-3 w-px bg-border mx-0.5" />;
+}
+
+function fmtUptime(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 function fmtK(n: number): string {
