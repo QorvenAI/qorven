@@ -3,7 +3,6 @@ package gateway
 
 import (
 	"net/http"
-	"os"
 	"runtime"
 	"syscall"
 	"time"
@@ -21,11 +20,7 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 	// --- system: disk (statvfs on the binary's directory) ---
 	var diskUsedGB, diskTotalGB float64
 	var stat syscall.Statfs_t
-	dir := "/"
-	if exe, err := os.Executable(); err == nil {
-		dir = exe
-	}
-	if err := syscall.Statfs(dir, &stat); err == nil {
+	if err := syscall.Statfs("/", &stat); err == nil {
 		total := stat.Blocks * uint64(stat.Bsize)
 		free := stat.Bavail * uint64(stat.Bsize)
 		diskTotalGB = float64(total) / 1e9
