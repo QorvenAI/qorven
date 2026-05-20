@@ -802,6 +802,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Put("/tasks/{id}", gw.handleUpdateTask)
 
 		// System + Voice
+		r.Get("/stats/bar", gw.handleStatsBar)
 		r.Get("/changelog", gw.handleGetChangelog)
 		r.Get("/system/specs", gw.handleSystemSpecs)
 		r.Get("/system/info", gw.handleSystemSpecs)
