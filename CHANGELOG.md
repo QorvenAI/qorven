@@ -4,6 +4,15 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.8-alpha — 2026-05-20
+
+### Fixed
+- **Update now works from the UI** — clicking "Install" in Settings → Software Update no longer fails with a read-only filesystem error on systemd installs. Existing installs are patched automatically on next startup.
+- **CLI update finds the latest version** — `qorven update` was picking up an older release instead of the newest. Now correctly finds the most recent release including pre-releases.
+- **Version chip shows clean version** — local dev builds showed extra build info in the status bar version chip. Release builds now always show a clean version number.
+
+---
+
 ## v0.1.7-alpha — 2026-05-20
 
 ### Added
