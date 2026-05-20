@@ -16,11 +16,11 @@ name: release
 
 on:
   push:
-    tags: ["qorven-v*"]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag (e.g. qorven-v0.2.0-alpha)"
+        description: "Version tag (e.g. v0.2.0-alpha)"
         required: true
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "version=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
           else
-            TAG="${REF#refs/tags/}"; echo "version=${TAG#qorven-v}" >> "$GITHUB_OUTPUT"
+            TAG="${REF#refs/tags/}"; echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build web UI (static export)
@@ -152,7 +152,7 @@ jobs:
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          VER="${TAG#qorven-}"
+          VER="$TAG"
           if [ -f CHANGELOG.md ]; then
             awk -v tag="$VER" 'BEGIN{f=0} $0=="## "tag{f=1;next} /^## /{f=0} f' CHANGELOG.md > RELEASE_NOTES.md
             [ -s RELEASE_NOTES.md ] || echo "Release $TAG." > RELEASE_NOTES.md
