@@ -277,22 +277,22 @@ function IconBadge({
           <span
             data-slot="icon-badge-dot"
             className={cn(
-              'absolute top-1 right-1 size-1.5 rounded-full',
+              'absolute top-0.5 end-0.5 size-1.5 rounded-full',
               bg,
               pulse && 'animate-pulse',
               className,
             )}
           />
         ) : (
+          // Metronic pattern: absolute top-0.5 end-0.5 — sits at the inner
+          // corner of the button, never overflows the viewport edge.
           <span
             data-slot="icon-badge-count"
             className={cn(
-              // Anchored fully inside the button — no negative translate so it
-              // never overflows a fixed/sticky container at the viewport edge.
-              'absolute top-[3px] right-[3px]',
+              'absolute top-0.5 end-0.5',
               'inline-flex items-center justify-center',
-              'min-w-[14px] h-[14px] px-[3px] rounded-full',
-              'text-[0.575rem] font-bold leading-none text-white ring-1 ring-background',
+              'h-4 min-w-4 px-[0.25rem] rounded-full',
+              'text-[0.625rem] leading-[0.5rem] font-bold text-white',
               bg,
               pulse && 'animate-pulse',
               className,
