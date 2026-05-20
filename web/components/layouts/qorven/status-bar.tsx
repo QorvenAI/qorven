@@ -23,7 +23,16 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { X, ExternalLink, MemoryStick, HardDrive, Bot, Circle } from 'lucide-react';
+import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2 } from 'lucide-react';
+
+interface UpdateInfo {
+  current: string;
+  latest: string;
+  up_to_date: boolean;
+  release_url: string;
+}
+
+type UpdateState = 'idle' | 'checking' | 'available' | 'up_to_date' | 'installing' | 'restarting' | 'error';
 
 interface StatsBar {
   mem_used_gb: number;
@@ -72,6 +81,8 @@ export function StatusBar() {
   const [changelogMd, setChangelogMd] = useState<string>('');
   const modalRef = useRef<HTMLDivElement>(null);
   const stats = useStatsBar();
+  const [updateState, setUpdateState] = useState<UpdateState>('idle');
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [displaySec, setDisplaySec] = useState(0);
 
   useEffect(() => {
@@ -115,33 +126,92 @@ export function StatusBar() {
 
   const openChangelog = async () => {
     setChangelogOpen(true);
-    if (changelogMd) return; // already loaded
-    try {
-      const r = await fetch('/api/v1/changelog');
-      const d = await r.json();
-      setChangelogMd(d.changelog ?? '');
-    } catch {
-      setChangelogMd('Failed to load changelog.');
+    // Load changelog markdown
+    if (!changelogMd) {
+      try {
+        const r = await fetch('/api/v1/changelog');
+        const d = await r.json();
+        setChangelogMd(d.changelog ?? '');
+      } catch {
+        setChangelogMd('Failed to load changelog.');
+      }
+    }
+    // Check for updates (once per modal open, skip if already checked)
+    if (updateState === 'idle') {
+      setUpdateState('checking');
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('qorven_token') : '';
+        const r = await fetch('/api/v1/admin/update/check', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (r.ok) {
+          const d: UpdateInfo = await r.json();
+          setUpdateInfo(d);
+          setUpdateState(d.up_to_date ? 'up_to_date' : 'available');
+        } else {
+          setUpdateState('idle');
+        }
+      } catch {
+        setUpdateState('idle');
+      }
     }
   };
 
-  // Parse the first version section from the markdown.
-  // Returns the heading + body up to (but not including) the next ## heading.
-  const currentSection = (() => {
-    if (!changelogMd || !version) return changelogMd;
-    const lines = changelogMd.split('\n');
+  const triggerUpdate = async () => {
+    setUpdateState('installing');
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('qorven_token') : '';
+      const r = await fetch('/api/v1/admin/update/install', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (r.ok) {
+        setUpdateState('restarting');
+        // Poll /health until the new version comes up
+        const target = updateInfo?.latest;
+        const poll = setInterval(async () => {
+          try {
+            const hr = await fetch('/api/health/detailed');
+            const hd = await hr.json();
+            const newVer = (hd.version ?? '').replace(/^v/, '');
+            if (target && newVer === target) {
+              clearInterval(poll);
+              window.location.reload();
+            }
+          } catch { /* server still restarting */ }
+        }, 2000);
+      } else {
+        setUpdateState('error');
+      }
+    } catch {
+      setUpdateState('error');
+    }
+  };
+
+  // When an update is available show the new version's changelog section.
+  // Otherwise show the currently installed version's section.
+  const displayVersion = (updateState === 'available' && updateInfo?.latest) ? updateInfo.latest : version;
+
+  const extractSection = (md: string, ver: string) => {
+    if (!md || !ver) return md;
+    const lines = md.split('\n');
     let inSection = false;
     const out: string[] = [];
     for (const line of lines) {
       if (line.startsWith('## ')) {
-        if (inSection) break; // hit next version section
-        // Match flexibly: "v0.1.11-alpha" anywhere in the heading
-        if (line.includes(version)) { inSection = true; out.push(line); }
+        if (inSection) break;
+        if (line.includes(ver)) { inSection = true; out.push(line); }
       } else if (inSection) {
         out.push(line);
       }
     }
-    return out.join('\n').trim() || changelogMd;
+    return out.join('\n').trim() || '';
+  };
+
+  const currentSection = (() => {
+    if (!changelogMd) return '';
+    const section = extractSection(changelogMd, displayVersion);
+    return section || changelogMd;
   })();
 
   if (hide) return null;
@@ -163,14 +233,17 @@ export function StatusBar() {
           Qorven
         </Link>
 
-        {/* Version chip — opens changelog lightbox */}
+        {/* Version chip — opens changelog + update check */}
         {version ? (
           <button
             onClick={openChangelog}
-            title="View current changelog"
-            className="flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground/50 hover:text-muted-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer"
+            title={updateState === 'available' ? `Update available: v${updateInfo?.latest}` : 'View changelog & check for updates'}
+            className="relative flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground/50 hover:text-muted-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer"
           >
             v{version}
+            {updateState === 'available' && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-muted" />
+            )}
           </button>
         ) : null}
 
@@ -253,7 +326,9 @@ export function StatusBar() {
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
               <span className="text-xs font-semibold text-foreground">
-                {version ? `What's new in v${version}` : "What's new"}
+                {updateState === 'available' && updateInfo?.latest
+                  ? `What's new in v${updateInfo.latest}`
+                  : version ? `What's new in v${version}` : "What's new"}
               </span>
               <div className="flex items-center gap-2">
                 <Link
@@ -272,6 +347,58 @@ export function StatusBar() {
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
+            </div>
+
+            {/* Update banner */}
+            <div className="shrink-0 px-4 pt-3 pb-1">
+              {updateState === 'checking' && (
+                <div className="flex items-center gap-2 text-2xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                  Checking for updates…
+                </div>
+              )}
+              {updateState === 'up_to_date' && (
+                <div className="flex items-center gap-2 text-2xs text-emerald-500">
+                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                  You're on the latest version.
+                </div>
+              )}
+              {updateState === 'available' && updateInfo && (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ArrowUpCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <span className="text-2xs text-foreground font-medium">
+                      v{updateInfo.latest} available
+                    </span>
+                    <span className="text-2xs text-muted-foreground truncate">
+                      — currently v{updateInfo.current || version}
+                    </span>
+                  </div>
+                  <button
+                    onClick={triggerUpdate}
+                    className="shrink-0 rounded-md bg-emerald-500 px-2.5 py-1 text-2xs font-semibold text-white hover:bg-emerald-600 transition-colors"
+                  >
+                    Update now
+                  </button>
+                </div>
+              )}
+              {updateState === 'installing' && (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                  <span className="text-2xs text-foreground font-medium">Downloading update…</span>
+                </div>
+              )}
+              {updateState === 'restarting' && (
+                <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500 shrink-0" />
+                  <span className="text-2xs text-amber-600 dark:text-amber-400 font-medium">Restarting — page will reload automatically…</span>
+                </div>
+              )}
+              {updateState === 'error' && (
+                <div className="flex items-center gap-2 text-2xs text-destructive">
+                  Update failed. Check server logs.
+                </div>
+              )}
             </div>
 
             {/* Body — rendered as plain text / simple markdown */}
