@@ -23,7 +23,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { getToken } from '@/lib/api-core';
+import { request } from '@/lib/api-core';
 import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2, TrendingUp } from 'lucide-react';
 
 interface UpdateInfo {
@@ -65,16 +65,8 @@ function useStatsBar() {
   const [stats, setStats] = useState<StatsBar | null>(null);
   useEffect(() => {
     const fetch_ = () =>
-      fetch('/api/v1/stats/bar', { headers: { Authorization: `Bearer ${getToken()}` } })
-        .then(r => {
-          const v = r.headers.get('X-Qorven-Version');
-          if (v) {
-            if (_loadedVersion === null) { _loadedVersion = v; }
-            else if (_loadedVersion !== v) { window.location.reload(); }
-          }
-          return r.ok ? r.json() : null;
-        })
-        .then(d => d && setStats(d))
+      request<StatsBar>('/stats/bar')
+        .then(d => setStats(d))
         .catch(() => {});
     fetch_();
     const t = setInterval(fetch_, 10_000);
