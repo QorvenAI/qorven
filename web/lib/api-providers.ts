@@ -233,6 +233,7 @@ export const systemInfo = {
 };
 
 export interface NetworkStatus {
+  listen: string;
   tailscale_installed: boolean;
   tailscale_ip: string;
   tailscale_hostname: string;

@@ -2,12 +2,13 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Network, Zap, Lock, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { networkApi, type NetworkStatus } from '@/lib/api';
-import { Card } from './primitives';
+import { request } from '@/lib/api-core';
+import { Card, Row, Input, Btn } from './primitives';
 
 export function NetworkSettings() {
   const [net, setNet] = useState<NetworkStatus | null>(null);
@@ -15,11 +16,44 @@ export function NetworkSettings() {
   const [authKey, setAuthKey] = useState('');
   const [busy, setBusy] = useState<'install' | 'bind' | 'unbind' | null>(null);
 
+  const [portInput, setPortInput] = useState('');
+  const [checkingPort, setCheckingPort] = useState(false);
+  const [portCheckResult, setPortCheckResult] = useState<{ port: number; available: boolean; reason?: string } | null>(null);
+
   const reload = () => {
     setLoading(true);
     networkApi.status().then(setNet).catch(() => setNet(null)).finally(() => setLoading(false));
   };
   useEffect(reload, []);
+
+  const currentPort = useMemo(() => {
+    if (!net?.listen) return 8486;
+    const parts = net.listen.split(':');
+    return Number(parts[parts.length - 1]) || 8486;
+  }, [net?.listen]);
+
+  useEffect(() => {
+    if (net?.listen) {
+      const parts = net.listen.split(':');
+      const port = parts[parts.length - 1] ?? '';
+      setPortInput(port);
+    }
+  }, [net?.listen]);
+
+  const checkPort = async () => {
+    setCheckingPort(true);
+    setPortCheckResult(null);
+    try {
+      const res = await request<{ port: number; available: boolean; reason?: string }>(
+        `/admin/system/check-port?port=${portInput}`
+      );
+      setPortCheckResult(res);
+    } catch {
+      setPortCheckResult({ port: Number(portInput), available: false, reason: 'Request failed' });
+    } finally {
+      setCheckingPort(false);
+    }
+  };
 
   const act = async (action: 'install' | 'bind' | 'unbind') => {
     setBusy(action);
@@ -137,6 +171,49 @@ export function NetworkSettings() {
               </p>
             )}
           </div>
+        )}
+      </Card>
+
+      <Card id="listen-port" title="Listen Port" description="The port Qorven binds to. Default is 8486.">
+        <Row label="Current port">
+          <span className="font-mono text-sm">{currentPort}</span>
+        </Row>
+
+        <Row label="New port">
+          <div className="flex gap-2 items-center">
+            <Input
+              type="number"
+              value={portInput}
+              onChange={v => { setPortInput(v); setPortCheckResult(null); }}
+              placeholder="8486"
+              className="w-24"
+            />
+            <Btn variant="ghost" onClick={checkPort} loading={checkingPort} disabled={!portInput}>
+              Check availability
+            </Btn>
+          </div>
+        </Row>
+
+        {portCheckResult && (
+          <Row label="">
+            {portCheckResult.available
+              ? <span className="text-green-600 text-sm">✓ Port {portCheckResult.port} is available</span>
+              : <span className="text-red-600 text-sm">✗ Port in use: {portCheckResult.reason}</span>
+            }
+          </Row>
+        )}
+
+        {portCheckResult?.available && portInput !== String(currentPort) && (
+          <Row label="Apply change">
+            <div className="flex flex-col gap-2">
+              <p className="text-sm text-muted-foreground">
+                Update <code className="font-mono text-xs bg-muted px-1 rounded">config.toml</code> and restart Qorven to apply the port change.
+              </p>
+              <Btn variant="ghost" onClick={() => navigator.clipboard.writeText(`listen = "0.0.0.0:${portInput}"`)}>
+                Copy config snippet
+              </Btn>
+            </div>
+          </Row>
         )}
       </Card>
     </div>
