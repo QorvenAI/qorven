@@ -86,7 +86,7 @@ func TestDiamond_E2E_SystemPromptObedience(t *testing.T) {
 
 func TestDiamond_E2E_NoAuth(t *testing.T) {
 	requireGateway(t)
-	req, _ := http.NewRequest("POST", "http://localhost:4200/v1/chat/completions",
+	req, _ := http.NewRequest("POST", "http://localhost:8486/v1/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"test"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

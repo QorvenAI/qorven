@@ -18,11 +18,11 @@ import (
 	"time"
 )
 
-// End-to-end HTTP tests against the LIVE gateway at localhost:4200.
+// End-to-end HTTP tests against the LIVE gateway at localhost:8486.
 // These test the full stack: HTTP → router → auth → handler → DB → response.
 // Skipped if gateway is not running.
 
-const testBaseURL = "http://localhost:4200"
+const testBaseURL = "http://localhost:8486"
 
 var testToken = func() string {
 	if t := os.Getenv("QORVEN_TOKEN"); t != "" { return t }

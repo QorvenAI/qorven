@@ -156,7 +156,7 @@ func TestStress_Gateway_ConnectionExhaustion(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			req, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost:4200/health", nil)
+			req, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost:8486/health", nil)
 			req.Header.Set("Authorization", "Bearer test123")
 			resp, err := http.DefaultClient.Do(req)
 			if err == nil {
