@@ -234,9 +234,7 @@ export default function QorDetailPage() {
   // discord_dm) — it returns the existing active session if one
   // already exists, otherwise mints a new one.
   const loadCanonicalSession = useCallback(async (agentID: string) => {
-    const sess = await sessionsApi.create({ agent_id: agentID, channel: 'web' });
-    const full = await sessionsApi.get(sess.id);
-    return full;
+    return sessionsApi.create({ agent_id: agentID, channel: 'web' });
   }, []);
 
   useEffect(() => {
@@ -255,17 +253,17 @@ export default function QorDetailPage() {
         return;
       }
 
+      setSoulChannels(chs);
+      setLoading(false); // show the UI immediately — session loads in background
+
       try {
         const full = await loadCanonicalSession(soulData.id);
         setActiveSession(full);
         setSessionStore(full);
-        setAllSessions([full]); // kept for components that still accept a list prop
+        setAllSessions([full]);
       } catch {
-        // non-fatal; user sees empty-state and can retry
+        // non-fatal
       }
-
-      setSoulChannels(chs);
-      setLoading(false);
     }).catch(async (e) => {
       // Agent not found — redirect to the first available agent rather than
       // showing a dead error page. This handles stale UUIDs from old DB state.
