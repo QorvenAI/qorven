@@ -22,6 +22,9 @@ type MessageBus struct {
 
 	subscribers map[string]EventHandler
 	subMu       sync.RWMutex
+
+	closed chan struct{} // closed by Close(); guards publish-after-close panics
+	once   sync.Once
 }
 
 // New creates a new MessageBus.
@@ -31,12 +34,16 @@ func New() *MessageBus {
 		outbound:    make(chan OutboundMessage, 1000),
 		handlers:    make(map[string]MessageHandler),
 		subscribers: make(map[string]EventHandler),
+		closed:      make(chan struct{}),
 	}
 }
 
 // PublishInbound queues an inbound message from a channel.
 func (mb *MessageBus) PublishInbound(msg InboundMessage) {
-	mb.inbound <- msg
+	select {
+	case <-mb.closed:
+	case mb.inbound <- msg:
+	}
 }
 
 // TryPublishInbound attempts to queue an inbound message without blocking.
@@ -49,11 +56,14 @@ func (mb *MessageBus) TryPublishInbound(msg InboundMessage) bool {
 	}
 }
 
-// ConsumeInbound blocks until an inbound message is available or ctx is cancelled.
+// ConsumeInbound blocks until an inbound message is available, the bus is
+// closed, or ctx is cancelled. Returns ok=false on close or cancellation.
 func (mb *MessageBus) ConsumeInbound(ctx context.Context) (InboundMessage, bool) {
 	select {
-	case msg := <-mb.inbound:
-		return msg, true
+	case msg, ok := <-mb.inbound:
+		return msg, ok
+	case <-mb.closed:
+		return InboundMessage{}, false
 	case <-ctx.Done():
 		return InboundMessage{}, false
 	}
@@ -61,7 +71,10 @@ func (mb *MessageBus) ConsumeInbound(ctx context.Context) (InboundMessage, bool)
 
 // PublishOutbound queues an outbound message to a channel.
 func (mb *MessageBus) PublishOutbound(msg OutboundMessage) {
-	mb.outbound <- msg
+	select {
+	case <-mb.closed:
+	case mb.outbound <- msg:
+	}
 }
 
 // TryPublishOutbound attempts to queue an outbound message without blocking.
@@ -74,11 +87,14 @@ func (mb *MessageBus) TryPublishOutbound(msg OutboundMessage) bool {
 	}
 }
 
-// SubscribeOutbound blocks until an outbound message is available or ctx is cancelled.
+// SubscribeOutbound blocks until an outbound message is available, the bus is
+// closed, or ctx is cancelled. Returns ok=false on close or cancellation.
 func (mb *MessageBus) SubscribeOutbound(ctx context.Context) (OutboundMessage, bool) {
 	select {
-	case msg := <-mb.outbound:
-		return msg, true
+	case msg, ok := <-mb.outbound:
+		return msg, ok
+	case <-mb.closed:
+		return OutboundMessage{}, false
 	case <-ctx.Done():
 		return OutboundMessage{}, false
 	}
@@ -133,8 +149,11 @@ func (mb *MessageBus) Broadcast(event Event) {
 	}
 }
 
-// Close shuts down the message bus.
+// Close shuts down the message bus. Safe to call multiple times.
 func (mb *MessageBus) Close() {
-	close(mb.inbound)
-	close(mb.outbound)
+	mb.once.Do(func() {
+		close(mb.closed)
+		close(mb.inbound)
+		close(mb.outbound)
+	})
 }
