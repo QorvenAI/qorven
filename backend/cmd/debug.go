@@ -135,7 +135,7 @@ func runDebug() error {
 
 	// ── Gateway ──
 	server := os.Getenv("QORVEN_SERVER")
-	if server == "" { server = "http://localhost:4200" }
+	if server == "" { server = "http://localhost:8486" }
 	token := os.Getenv("QORVEN_GATEWAY_TOKEN")
 	if token == "" { token = os.Getenv("QORVEN_TOKEN") }
 

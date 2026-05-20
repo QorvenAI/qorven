@@ -11,6 +11,8 @@ import (
 	osexec "os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/qorvenai/qorven/internal/config"
 )
 
 // networkStatus holds the payload returned by GET /v1/network/status.
@@ -83,7 +85,7 @@ func (gw *Gateway) currentNetworkStatus() networkStatus {
 			apiListen = gw.cfg.Server.Listen
 		}
 		if apiListen == "" {
-			apiListen = "127.0.0.1:4200"
+			apiListen = fmt.Sprintf("0.0.0.0:%d", config.DefaultPort)
 		}
 	}
 

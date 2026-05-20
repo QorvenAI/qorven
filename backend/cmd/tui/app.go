@@ -401,7 +401,7 @@ func Run(agentName, agentID, modelName, sessionID string) error {
 
 	server := os.Getenv("QORVEN_SERVER")
 	if server == "" {
-		server = "http://localhost:4200"
+		server = "http://localhost:8486"
 	}
 	token := os.Getenv("QORVEN_TOKEN")
 	if token == "" {

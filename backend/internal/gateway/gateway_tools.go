@@ -415,7 +415,7 @@ func (gw *Gateway) registerTools() {
 
 	// Rooms — agents can post, list, decide, and assign tasks autonomously
 	{
-		apiBase := "http://localhost:4200"
+		apiBase := "http://localhost:8486"
 		var roomToken func() string
 		if gw.cfg != nil && gw.cfg.Auth.Token != "" {
 			tok := gw.cfg.Auth.Token
@@ -455,7 +455,7 @@ func (gw *Gateway) registerTools() {
 	// Workspace builder tool — Prime (and any agent) can build/modify workspaces through conversation.
 	// This is what makes "tell Prime to build me a CRM" work end-to-end.
 	{
-		apiBase := "http://localhost:4200"
+		apiBase := "http://localhost:8486"
 		if gw.cfg != nil && gw.cfg.Auth.Token != "" {
 			tok := gw.cfg.Auth.Token
 			reg.Register(tools.NewWorkspaceBuilderTool(apiBase, func() string { return tok }))

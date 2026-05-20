@@ -13,7 +13,7 @@ import (
 
 // BlockedPorts are internal service ports that should never be accessed by agents.
 var BlockedPorts = map[string]bool{
-	"4200": true, // Qorven backend
+	"8486": true, // Qorven backend
 	"4100": true, // LiteLLM
 	"5432": true, // PostgreSQL
 	"8881": true, // STT server

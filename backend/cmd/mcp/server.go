@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var apiURL = "http://localhost:4200"
+var apiURL = "http://localhost:8486"
 var apiToken = ""
 
 func init() {

@@ -353,7 +353,7 @@ func New(cfg *config.Config) (*Gateway, error) {
 		// config still uses the legacy Listen field, config.Load
 		// has already copied it into APIListen for us.
 		server: &http.Server{
-			Addr: firstNonEmpty(cfg.Server.APIListen, cfg.Server.Listen, "127.0.0.1:4200"), Handler: r,
+			Addr: firstNonEmpty(cfg.Server.Listen, cfg.Server.APIListen, fmt.Sprintf("0.0.0.0:%d", config.DefaultPort)), Handler: r,
 			ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second,
 		},
 	}
@@ -1026,10 +1026,10 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 		// previous `cfg.Server.Listen[strings.LastIndex(...):]`
 		// expression panicked with a [-1:] slice when Listen was empty
 		// (the normal case once deployments move to APIListen).
-		apiAddr := firstNonEmpty(cfg.Server.APIListen, cfg.Server.Listen, "127.0.0.1:4200")
+		apiAddr := firstNonEmpty(cfg.Server.Listen, cfg.Server.APIListen, fmt.Sprintf("0.0.0.0:%d", config.DefaultPort))
 		apiPort := apiAddr
 		if i := strings.LastIndex(apiAddr, ":"); i >= 0 {
-			apiPort = apiAddr[i:] // e.g. ":4200"
+			apiPort = apiAddr[i:] // e.g. ":8486"
 		}
 		baseURL := "http://localhost" + apiPort
 		gw.a2aServer = a2a.NewServer(gw.agents, baseURL, func(ctx context.Context, agentID, message string) (string, error) {

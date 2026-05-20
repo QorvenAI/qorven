@@ -14,7 +14,7 @@ func buildPlatformKnowledge() []string {
 		"Qorven is an open-source multi-agent AI workspace. Single Go binary, self-hosted.",
 		"",
 		"### Architecture",
-		"- Gateway: HTTP API on port 4200, handles all requests",
+		"- Gateway: HTTP API on port 8486, handles all requests",
 		"- Agents: each has a key, model, system prompt, tools, memory",
 		"- Sessions: conversations stored in PostgreSQL with full history",
 		"- Channels: Telegram, Slack, Discord, WhatsApp, Email, SMS, Teams, Web, CLI",

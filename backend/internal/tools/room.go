@@ -24,12 +24,12 @@ type RoomPostTool struct {
 }
 
 func NewRoomPostTool() *RoomPostTool {
-	return &RoomPostTool{apiBase: "http://localhost:4200"}
+	return &RoomPostTool{apiBase: "http://localhost:8486"}
 }
 
 func NewRoomPostToolWithAuth(apiBase string, getToken func() string) *RoomPostTool {
 	if apiBase == "" {
-		apiBase = "http://localhost:4200"
+		apiBase = "http://localhost:8486"
 	}
 	return &RoomPostTool{apiBase: apiBase, getToken: getToken}
 }

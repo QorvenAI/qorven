@@ -69,7 +69,7 @@ type serviceState struct {
 func runMonitor() error {
 	apiBase := cfg.Server
 	if apiBase == "" {
-		apiBase = "http://localhost:4200"
+		apiBase = "http://localhost:8486"
 	}
 	apiBase = strings.TrimRight(apiBase, "/")
 

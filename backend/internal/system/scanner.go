@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/qorvenai/qorven/internal/config"
 )
 
 // PackageInfo describes a Go package discovered by scanning.
@@ -257,7 +259,7 @@ func ScanServiceHealth() []ServiceHealth {
 		port int
 		path string
 	}{
-		{"Backend", 4200, "/health"},
+		{"Backend", config.DefaultPort, "/health"},
 		{"Frontend", 3000, "/"},
 		{"LiteLLM", 4100, "/health"},
 		{"STT (Whisper)", 8881, "/health"},

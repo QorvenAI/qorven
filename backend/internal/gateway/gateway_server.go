@@ -475,14 +475,13 @@ func (gw *Gateway) Start() error {
 	// or another dev server on the same port used to kill us outright.
 	ln, actualAddr, err := bindListener(gw.server.Addr)
 	if err != nil {
-		// Last-chance fallback: the legacy behaviour was to try 127.0.0.1:4200
-		// when the configured addr couldn't bind (privileged port, bad iface).
-		// Preserve that so users who relied on it still work.
-		slog.Warn("port probe failed, attempting localhost:4200 fallback",
+		// Last-chance fallback: if the configured addr couldn't bind
+		// (privileged port, bad iface), try the default port on all interfaces.
+		slog.Warn("port probe failed, attempting localhost:8486 fallback",
 			"configured", gw.server.Addr, "error", err)
-		ln2, addr2, err2 := bindListener("127.0.0.1:4200")
+		ln2, addr2, err2 := bindListener("0.0.0.0:8486")
 		if err2 != nil {
-			return fmt.Errorf("could not bind any listener (configured=%s, fallback=127.0.0.1:4200): %w",
+			return fmt.Errorf("could not bind any listener (configured=%s, fallback=0.0.0.0:8486): %w",
 				gw.server.Addr, err)
 		}
 		ln, actualAddr = ln2, addr2

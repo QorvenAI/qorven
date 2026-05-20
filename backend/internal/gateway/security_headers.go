@@ -49,7 +49,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		// HSTS only on HTTPS: avoids wedging a localhost dev loop into
-		// HTTPS-only when the user runs plain http://localhost:4200.
+		// HTTPS-only when the user runs plain http://localhost:8486.
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}

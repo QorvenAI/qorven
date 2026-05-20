@@ -29,7 +29,7 @@ type WorkspaceBuilderTool struct {
 
 func NewWorkspaceBuilderTool(apiBase string, getToken func() string) *WorkspaceBuilderTool {
 	if apiBase == "" {
-		apiBase = "http://localhost:4200"
+		apiBase = "http://localhost:8486"
 	}
 	return &WorkspaceBuilderTool{apiBase: apiBase, getToken: getToken}
 }

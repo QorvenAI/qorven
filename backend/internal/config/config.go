@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -73,30 +74,23 @@ type TelegramConfig struct {
 	BotToken string `toml:"bot_token"`
 }
 
+// DefaultPort is Qorven's well-known port — unregistered in IANA, unused by
+// any mainstream software. Single listener serves API + embedded UI together.
+const DefaultPort = 8486
+
 type ServerConfig struct {
 	BaseURL string `toml:"base_url"`
 
-	// Listen is the legacy single-listener address. When non-empty it
-	// still works as a catch-all (serves both API and any static web
-	// handler on the same port). Prefer APIListen and WebListen for new
-	// deployments — the defaults below make the API localhost-only,
-	// which is the safer posture for self-hosted installs.
+	// Listen is the single address Qorven binds — API, WebSocket, and the
+	// embedded UI all share one port. Defaults to 0.0.0.0:8486.
+	// Override with QORVEN_PORT=N or set listen = "addr:port" in config.toml.
 	Listen string `toml:"listen"`
 
-	// APIListen — where /v1/*, /auth/*, /ws, /health live. Defaults to
-	// 127.0.0.1:4200 so a fresh install doesn't accidentally expose
-	// the admin API to the public internet. Docker and reverse-proxy
-	// deployments can override this explicitly.
+	// APIListen / WebListen — kept for backward-compat with existing
+	// config.toml files. When a file has these but no listen = "...",
+	// Load() derives Listen from APIListen's port so old installs keep
+	// working without manual edits.
 	APIListen string `toml:"api_listen"`
-
-	// WebListen — where the user-facing UI lives. Defaults to
-	// 0.0.0.0:4201 so the UI is reachable on the LAN while the API
-	// stays internal. Set to 127.0.0.1:4201 when running behind a
-	// reverse proxy that handles TLS.
-	//
-	// Empty WebListen disables the web listener entirely (headless
-	// mode) — useful when the Go backend is API-only and the web UI
-	// runs from a separate Next.js / static host.
 	WebListen string `toml:"web_listen"`
 
 	// WebDir — override the web UI location. When set, the gateway
@@ -174,17 +168,9 @@ type ProviderConfig struct {
 
 func defaults() *Config {
 	return &Config{
-		// Defaults target the "developer on a laptop, no sudo" shape:
-		//   - API on localhost only (safer posture than 0.0.0.0:80)
-		//   - Web UI on 0.0.0.0:4201 (reachable on LAN, no root needed)
-		//   - TLS in auto mode (self-signed for localhost)
-		//   - Legacy Listen kept empty — config.toml can still override
-		//     with the old single-listener knob.
 		Server: ServerConfig{
-			Listen:    "",
-			APIListen: "127.0.0.1:4200",
-			WebListen: "0.0.0.0:4201",
-			TLS:       TLSConfig{Mode: "auto"},
+			Listen: fmt.Sprintf("0.0.0.0:%d", DefaultPort),
+			TLS:    TLSConfig{Mode: "auto"},
 		},
 		Database: DatabaseConfig{},
 		Auth:     AuthConfig{},
@@ -252,17 +238,17 @@ func Load(path string) (*Config, error) {
 		cfg.Server.Listen = "0.0.0.0:" + v
 	}
 
-	// Backward-compat normalisation. When the user sets only the
-	// legacy Listen field, both API and Web share the same address
-	// (the pre-split behaviour). When they set APIListen/WebListen
-	// we honour those. When they set nothing, defaults() already put
-	// API on localhost and Web on 0.0.0.0:4201.
-	if cfg.Server.Listen != "" && cfg.Server.APIListen == "127.0.0.1:4200" && cfg.Server.WebListen == "0.0.0.0:4201" {
-		// Legacy config (only `listen = "..."` set) — collapse to a
-		// single listener so deployments that pinned the old behaviour
-		// keep working until they opt in to the split.
-		cfg.Server.APIListen = cfg.Server.Listen
-		cfg.Server.WebListen = ""
+	// Backward-compat: old configs have api_listen/web_listen but no listen.
+	// Derive Listen from APIListen's port so existing installs upgrade cleanly.
+	if cfg.Server.Listen == "" && cfg.Server.APIListen != "" {
+		_, port, err := net.SplitHostPort(cfg.Server.APIListen)
+		if err == nil {
+			cfg.Server.Listen = "0.0.0.0:" + port
+		}
+	}
+	// If still empty, use default port.
+	if cfg.Server.Listen == "" {
+		cfg.Server.Listen = fmt.Sprintf("0.0.0.0:%d", DefaultPort)
 	}
 	if os.Getenv("QORVEN_MANAGED") == "true" {
 		cfg.Managed.Enabled = true

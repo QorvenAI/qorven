@@ -42,7 +42,7 @@ type TokenResponse struct {
 type Manager struct {
 	providers   map[string]ProviderConfig
 	vault       *vault.Vault
-	redirectBase string // e.g. "https://app.qorven.ai" or "http://localhost:4200"
+	redirectBase string // e.g. "https://app.qorven.ai" or "http://localhost:8486"
 	client      *http.Client
 }
 

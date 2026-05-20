@@ -79,7 +79,7 @@ func signalNotify(ch chan<- os.Signal) {
 // reports back to the web client.
 //
 // Design goals:
-//   • A user running `qorven start` with port 4200 occupied must NOT
+//   • A user running `qorven start` with port 8486 occupied must NOT
 //     see a crash. The server should walk +1..+10 and bind somewhere.
 //   • The web client must be able to discover the actual bound port
 //     without the user editing NEXT_PUBLIC_API_URL.
@@ -250,7 +250,7 @@ func portFromAddr(addr string) int {
 func (gw *Gateway) handleRuntimeInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	// CORS for dev: web at :3000 polls backend at :4200. Same-origin in
+	// CORS for dev: web at :3000 polls backend at :8486. Same-origin in
 	// prod means this header is harmless there.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	info := runtimeInfo{
