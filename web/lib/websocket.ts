@@ -20,6 +20,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 // the UI can show "Reconnecting… (attempt N)" in the banner.
 let reconnectAttempt = 0;
 let disconnectedAt: number | undefined = undefined;
+// Generation counter — incremented on every successful open. probeDisconnectReason
+// captures the generation at fire time; if it's stale by the time it resolves
+// (i.e. the WS reconnected while the probe was in-flight) its result is dropped.
+let connGeneration = 0;
 // Online listener registered lazily — we don't want to add it during
 // SSR (no window) and we only want one listener no matter how many
 // times connectWebSocket() is called.
@@ -374,23 +378,25 @@ function handleEvent(event: WSEvent) {
 // We try /livez first (cheap, never touches DB — if this fails the
 // process is gone or the network is broken). If /livez is OK we check
 // /readyz to see if the DB is down.
-async function probeDisconnectReason(): Promise<void> {
+async function probeDisconnectReason(gen: number): Promise<void> {
   const store = useStore.getState();
   const base = currentApiUrl;
+  const stale = () => connGeneration !== gen; // WS reconnected while probe in-flight
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
     const livez = await fetch(`${base}/livez`, { signal: ctrl.signal, cache: 'no-store' });
     clearTimeout(t);
+    if (stale()) return;
     if (!livez.ok) {
       store.setWsDisconnectReason('backend_down');
       return;
     }
-    // Process alive — check readiness (DB)
     const ctrl2 = new AbortController();
     const t2 = setTimeout(() => ctrl2.abort(), 3000);
     const readyz = await fetch(`${base}/readyz`, { signal: ctrl2.signal, cache: 'no-store' });
     clearTimeout(t2);
+    if (stale()) return;
     if (!readyz.ok) {
       store.setWsDisconnectReason('db_down');
       store.setServiceHealth({ database: 'unavailable', status: 'degraded' });
@@ -398,8 +404,7 @@ async function probeDisconnectReason(): Promise<void> {
       store.setWsDisconnectReason('degraded');
     }
   } catch {
-    // fetch threw — either the backend is unreachable or network is gone.
-    // Check navigator.onLine to distinguish the two.
+    if (stale()) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       store.setWsDisconnectReason('network');
     } else {
@@ -445,13 +450,11 @@ export async function connectWebSocket() {
     const wasReconnecting = reconnectAttempt > 0;
     reconnectAttempt = 0;
     disconnectedAt = undefined;
+    connGeneration += 1;
     store.setWsConnected(true);
     store.setWsReconnecting(0, undefined);
     store.setWsDisconnectReason(null);
     store.setServiceHealth({ database: 'ok', status: 'healthy' });
-    // Trigger catch-up on any reconnect (not just the ones with a
-    // timer pending — a quick disconnect may resolve before the timer
-    // fires, and we still want to refresh server-side state).
     if (wasReconnecting) store.triggerCatchUp();
   };
 
@@ -478,9 +481,10 @@ export async function connectWebSocket() {
     const delay = nextBackoffMs(reconnectAttempt - 1);
     reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWebSocket(); }, delay);
 
-    // Probe why the connection dropped. Fire-and-forget — the banner
-    // will update when the probe resolves (usually <1s on LAN).
-    probeDisconnectReason().catch(() => {});
+    // Probe why the connection dropped. Drop the result if the WS
+    // reconnected while the probe was in-flight (stale generation).
+    const gen = connGeneration;
+    probeDisconnectReason(gen).catch(() => {});
   };
 
   ws.onerror = () => ws?.close();
