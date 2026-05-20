@@ -172,7 +172,7 @@ jobs:
           draft: false
           make_latest: true
           fail_on_unmatched_files: false
-          prerelease: ${{ contains(steps.version.outputs.tag, '-rc') || contains(steps.version.outputs.tag, '-beta') || contains(steps.version.outputs.tag, '-alpha') }}
+          prerelease: false
 
       - name: Publish install.sh to get.qorven.ai
         env:
