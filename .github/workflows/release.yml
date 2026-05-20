@@ -91,6 +91,7 @@ jobs:
           cp -r web/out/. backend/internal/webui/dist/
           printf '*\n!.gitignore\n!.embedded\n' > backend/internal/webui/dist/.gitignore
           printf 'Release build populated this dir.\n' > backend/internal/webui/dist/.embedded
+          cp CHANGELOG.md backend/cmd/CHANGELOG.md
 
       - name: Build binary
         working-directory: backend

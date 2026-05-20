@@ -92,6 +92,7 @@ jobs:
           cp -r web/out/. backend/internal/webui/dist/
           printf '*\n!.gitignore\n!.embedded\n' > backend/internal/webui/dist/.gitignore
           printf 'CI embed smoke.\n' > backend/internal/webui/dist/.embedded
+          cp CHANGELOG.md backend/cmd/CHANGELOG.md
       - name: Build embedded binary
         working-directory: backend
         env:

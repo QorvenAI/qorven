@@ -28,3 +28,4 @@ Thumbs.db
 *.sqlite
 server.log
 config.toml
+cmd/CHANGELOG.md
