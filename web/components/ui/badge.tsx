@@ -229,4 +229,80 @@ function BadgeDot({ className, ...props }: React.ComponentProps<'span'>) {
   );
 }
 
-export { Badge, BadgeButton, BadgeDot, badgeVariants };
+// IconBadge — wraps any icon button child and overlays a count or dot badge.
+//
+// Usage:
+//   <IconBadge count={5}>
+//     <button>...</button>
+//   </IconBadge>
+//   <IconBadge dot variant="warning" pulse>…</IconBadge>
+//
+// The badge is anchored to the top-right corner of the child using
+// translate so it stays inside the button's visual bounds and never
+// clips out of a parent overflow:hidden container.
+
+interface IconBadgeProps {
+  children: React.ReactNode;
+  count?: number;
+  dot?: boolean;
+  max?: number;
+  variant?: 'destructive' | 'warning' | 'primary' | 'success';
+  pulse?: boolean;
+  className?: string;
+}
+
+function IconBadge({
+  children,
+  count,
+  dot = false,
+  max = 9,
+  variant = 'destructive',
+  pulse = false,
+  className,
+}: IconBadgeProps) {
+  const show = dot || (count !== undefined && count > 0);
+  const colorMap: Record<string, string> = {
+    destructive: 'bg-destructive',
+    warning: 'bg-amber-500',
+    primary: 'bg-primary',
+    success: 'bg-emerald-500',
+  };
+  const bg = colorMap[variant] ?? colorMap.destructive;
+
+  return (
+    <span className="relative inline-flex shrink-0">
+      {children}
+      {show && (
+        dot ? (
+          <span
+            data-slot="icon-badge-dot"
+            className={cn(
+              'absolute top-1 right-1 size-1.5 rounded-full',
+              bg,
+              pulse && 'animate-pulse',
+              className,
+            )}
+          />
+        ) : (
+          <span
+            data-slot="icon-badge-count"
+            className={cn(
+              'absolute top-0.5 right-0.5 translate-x-1/2 -translate-y-1/2',
+              'inline-flex items-center justify-center',
+              'min-w-[1rem] h-4 px-[3px] rounded-full',
+              'text-[0.625rem] font-bold leading-none text-white',
+              bg,
+              pulse && 'animate-pulse',
+              className,
+            )}
+          >
+            {count! > max ? `${max}+` : count}
+          </span>
+        )
+      )}
+    </span>
+  );
+}
+
+export { Badge, BadgeButton, BadgeDot, IconBadge, badgeVariants };
+export type { IconBadgeProps };

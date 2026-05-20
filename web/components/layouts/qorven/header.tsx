@@ -5,6 +5,7 @@
 import { useStore } from '@/store';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { IconBadge } from '@/components/ui/badge';
 import {
   PanelLeftClose, PanelLeft, Bell, MessageSquare, Activity,
   SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio,
@@ -178,19 +179,15 @@ function NotificationBtn({ active, onOpen }: { active: boolean; onOpen: () => vo
     ? `Notifications · ${discoveredCount} new model${discoveredCount !== 1 ? 's' : ''} discovered`
     : 'Notifications';
 
+  const badgeVariant = pendingApprovalCount > 0 || discoveredCount > 0 ? 'warning' : 'destructive';
+
   return (
-    <button title={title} onClick={onOpen}
-      className={cn('h-9 w-9 flex items-center justify-center rounded-md transition-colors cursor-pointer relative',
-        active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-      <Bell className="h-4 w-4" />
-      {total > 0 && (
-        <span className={cn(
-          'absolute -top-1 -right-1 h-4 w-4 rounded-full text-xs font-bold text-white flex items-center justify-center',
-          pendingApprovalCount > 0 ? 'bg-amber-500 animate-pulse' : discoveredCount > 0 ? 'bg-amber-500' : 'bg-destructive',
-        )}>
-          {total > 9 ? '9+' : total}
-        </span>
-      )}
-    </button>
+    <IconBadge count={total} variant={badgeVariant} pulse={pendingApprovalCount > 0}>
+      <button title={title} onClick={onOpen}
+        className={cn('h-9 w-9 flex items-center justify-center rounded-md transition-colors cursor-pointer',
+          active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+        <Bell className="h-4 w-4" />
+      </button>
+    </IconBadge>
   );
 }
