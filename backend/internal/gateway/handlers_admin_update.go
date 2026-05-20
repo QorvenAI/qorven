@@ -458,25 +458,21 @@ func replaceBinarySelf(current, next string) error {
 		next, current, current, current, current, current, current,
 	)
 
-	// Strategy 1: systemd-run scope — escapes ProtectSystem=full sandbox.
-	// The service runs as root so systemd-run doesn't need sudo.
+	// Strategy 1: systemd-run as a transient service (not --scope).
+	// --scope inherits the current cgroup/session and needs a D-Bus session
+	// bus — unavailable inside a service unit. A transient *service* unit
+	// (no --scope flag) runs in a fresh environment with no ProtectSystem
+	// restriction, and works from root with no D-Bus requirement.
 	if _, err := exec.LookPath("systemd-run"); err == nil {
-		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", swapScript)
+		cmd := exec.Command("systemd-run", "--wait", "--quiet", "sh", "-c", swapScript)
 		if out, err := cmd.CombinedOutput(); err == nil {
 			_ = out
 			return nil
 		}
 	}
 
-	// Strategy 2: sudo (passwordless — common cloud VM setup).
-	if _, err := exec.LookPath("sudo"); err == nil {
-		if out, err := exec.Command("sudo", "sh", "-c", swapScript).CombinedOutput(); err == nil {
-			_ = out
-			return nil
-		}
-	}
-
-	// Strategy 3: direct swap (already root or user-writable path).
+	// Strategy 2: direct swap — works when the service already runs as root
+	// and the binary is in a world-writable-by-root path.
 	backup := current + ".bak"
 	if err := os.Rename(current, backup); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
