@@ -1494,7 +1494,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		installPgvector(pgMaj)
 		return "installed — " + strings.TrimSpace(v), false, nil
 
-	case 4: // Docker
+	case 4: // Docker (optional — only needed for run_app tool)
 		if cfg.SkipDocker {
 			return "skipped (--skip-docker)", true, nil
 		}
@@ -1502,13 +1502,22 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			v, _ := runSilent("docker", "--version")
 			return strings.TrimSpace(v), false, nil
 		}
+		// Remove conflicting packages shipped by Ubuntu (docker.io, docker-compose, etc.)
+		// that block the official docker-ce install. Errors are ignored — they may not exist.
+		runQuiet("apt-get", "remove", "-y", "-qq",
+			"docker.io", "docker-compose", "docker-compose-v2",
+			"docker-doc", "podman-docker", "containerd", "runc")
+		// Refresh apt cache so the Docker repo key + packages are current.
+		runQuiet("apt-get", "update", "-qq")
 		scriptPath := "/tmp/get-docker.sh"
 		if _, err = runSilent("curl", "-fsSL", "https://get.docker.com", "-o", scriptPath); err != nil {
-			return "", false, fmt.Errorf("download docker script: %w", err)
+			// Non-fatal: Qorven works without Docker.
+			return "skipped (download failed — install Docker manually)", true, nil
 		}
 		os.Chmod(scriptPath, 0755)
 		if err = runQuiet("sh", scriptPath); err != nil {
-			return "", false, fmt.Errorf("docker install: %w", err)
+			// Non-fatal: Docker is optional. Surface a warning but don't abort install.
+			return "skipped (install failed — run 'curl https://get.docker.com | sh' manually)", true, nil
 		}
 		runQuiet("systemctl", "enable", "--now", "docker")
 		v, _ := runSilent("docker", "--version")
