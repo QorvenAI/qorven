@@ -353,32 +353,50 @@ func verifyChecksum(binPath, shaPath, binName string) error {
 	return nil
 }
 
-// replaceSelf atomically swaps the running binary with the freshly
-// downloaded one. When running under systemd with ProtectSystem=full,
-// /usr/local/bin is read-only inside this process's mount namespace.
-// We escape by delegating the swap to a transient systemd-run scope
-// which runs outside the service sandbox. Falls back to a direct write
-// when not sandboxed (bare root, sudo, macOS, Windows).
+// replaceSelf atomically swaps the running binary with the freshly downloaded
+// one. Strategy (tried in order):
+//  1. Direct write — works when already root or the dir is user-writable
+//  2. sudo cp/mv  — works when the user has passwordless sudo (common on EC2/Ubuntu)
+//  3. systemd-run — escapes ProtectSystem=full sandbox when running as the service
 func replaceSelf(current, next string) error {
-	if _, err := exec.LookPath("systemd-run"); err == nil {
-		script := fmt.Sprintf(
-			"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
-			next, current,
-			current,
-			current, current,
-			current, current,
-		)
-		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", script)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("backup current: %w — %s", err, strings.TrimSpace(string(out)))
-		}
+	// Strategy 1: direct swap (already root, or user-writable path).
+	if err := directSwap(current, next); err == nil {
 		return nil
 	}
 
-	// Fallback: direct swap (bare root, sudo, non-systemd systems).
+	// Strategy 2: sudo (passwordless — common on cloud VMs).
+	if _, err := exec.LookPath("sudo"); err == nil {
+		script := swapScript(current, next)
+		if out, err := exec.Command("sudo", "sh", "-c", script).CombinedOutput(); err == nil {
+			_ = out
+			return nil
+		}
+	}
+
+	// Strategy 3: systemd-run scope (escapes ProtectSystem=full sandbox).
+	if _, err := exec.LookPath("systemd-run"); err == nil {
+		script := swapScript(current, next)
+		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", script)
+		if out, err := cmd.CombinedOutput(); err == nil {
+			_ = out
+			return nil
+		}
+	}
+
+	return fmt.Errorf("permission denied — run with sudo: sudo qorven update")
+}
+
+func swapScript(current, next string) string {
+	return fmt.Sprintf(
+		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
+		next, current, current, current, current, current, current,
+	)
+}
+
+func directSwap(current, next string) error {
 	backup := current + ".bak"
 	if err := os.Rename(current, backup); err != nil {
-		return fmt.Errorf("backup current: %w", err)
+		return err
 	}
 	if err := copyAndChmod(next, current); err != nil {
 		os.Rename(backup, current)

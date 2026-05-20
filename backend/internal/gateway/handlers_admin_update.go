@@ -453,30 +453,30 @@ func verifyGHChecksum(binPath, shaPath string) error {
 }
 
 func replaceBinarySelf(current, next string) error {
-	// When running under systemd with ProtectSystem=full, /usr/local/bin is
-	// read-only inside this process's mount namespace. We escape the sandbox
-	// by delegating the rename+copy to a transient systemd-run scope (which
-	// runs outside the service's namespace). If systemd-run isn't available
-	// we fall back to a direct write (works when not sandboxed, e.g. sudo).
+	swapScript := fmt.Sprintf(
+		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
+		next, current, current, current, current, current, current,
+	)
+
+	// Strategy 1: systemd-run scope — escapes ProtectSystem=full sandbox.
+	// The service runs as root so systemd-run doesn't need sudo.
 	if _, err := exec.LookPath("systemd-run"); err == nil {
-		// Use systemd-run --scope to run cp+chmod outside the sandbox.
-		// We copy directly rather than rename to avoid cross-device issues.
-		// The old binary is moved to .bak first so a running exec is preserved.
-		script := fmt.Sprintf(
-			"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
-			next, current,
-			current,
-			current, current,
-			current, current,
-		)
-		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", script)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("systemd-run swap failed: %w — %s", err, strings.TrimSpace(string(out)))
+		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", swapScript)
+		if out, err := cmd.CombinedOutput(); err == nil {
+			_ = out
+			return nil
 		}
-		return nil
 	}
 
-	// Fallback: direct swap (works when not sandboxed — bare root or sudo).
+	// Strategy 2: sudo (passwordless — common cloud VM setup).
+	if _, err := exec.LookPath("sudo"); err == nil {
+		if out, err := exec.Command("sudo", "sh", "-c", swapScript).CombinedOutput(); err == nil {
+			_ = out
+			return nil
+		}
+	}
+
+	// Strategy 3: direct swap (already root or user-writable path).
 	backup := current + ".bak"
 	if err := os.Rename(current, backup); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
@@ -497,7 +497,7 @@ func replaceBinarySelf(current, next string) error {
 		}
 		return out.Close()
 	}(); err != nil {
-		os.Rename(backup, current) // rollback
+		os.Rename(backup, current)
 		return err
 	}
 	os.Remove(backup)

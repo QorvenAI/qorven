@@ -34,6 +34,7 @@ func (gw *Gateway) registerRoutes() {
 	r.Get("/app-assets/{slug}/bundle.js", gw.handleAppAsset)
 
 	r.Get("/health/detailed", gw.handleDetailedHealth)
+	r.Get("/api/health/detailed", gw.handleDetailedHealth) // alias for embedded Next.js (no rewrite layer in prod)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","version":%q}`, buildInfo.Version)
