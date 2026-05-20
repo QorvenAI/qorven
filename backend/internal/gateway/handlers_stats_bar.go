@@ -77,13 +77,13 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 		).Scan(&tokensInToday, &tokensOutToday)
 	}
 
-	// --- active sessions (last 5 min) ---
-	var activeSessions int
+	// --- active Qors (agents with status='active') ---
+	var activeQors int
 	if gw.db != nil {
 		gw.db.Pool.QueryRow(r.Context(),
-			`SELECT COUNT(*) FROM sessions WHERE tenant_id = $1 AND updated_at >= now() - interval '5 minutes'`,
+			`SELECT COUNT(*) FROM agents WHERE tenant_id = $1 AND status = 'active'`,
 			defaultTenant,
-		).Scan(&activeSessions)
+		).Scan(&activeQors)
 	}
 
 	writeJSON(w, 200, map[string]any{
@@ -96,7 +96,7 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 		"cost_month_usd":   costMonthUSD,
 		"tokens_in_today":  tokensInToday,
 		"tokens_out_today": tokensOutToday,
-		"active_sessions":  activeSessions,
+		"active_qors":      activeQors,
 		"goroutines":       runtime.NumGoroutine(),
 	})
 }
