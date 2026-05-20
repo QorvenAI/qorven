@@ -33,7 +33,7 @@ export const API_AUTH = '/api/auth';
  */
 export function apiBase(): string {
   if (typeof window === 'undefined') {
-    return (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4200') + '/v1';
+    return (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8486') + '/v1';
   }
   return API_V1;
 }
@@ -45,7 +45,7 @@ export function apiBase(): string {
  */
 export function authBase(): string {
   if (typeof window === 'undefined') {
-    return (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4200') + '/auth';
+    return (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8486') + '/auth';
   }
   return API_AUTH;
 }

@@ -40,7 +40,7 @@ let onlineListenerInstalled = false;
 // currentApiUrl is the backend URL used for WebSocket connections.
 //   production : page origin (Go binary serves static + API on same origin)
 //   dev via nginx (port 80): page origin — nginx proxies /ws/* to backend
-//   dev direct (localhost:3000): NEXT_PUBLIC_API_URL (localhost:4200)
+//   dev direct (localhost:3000): NEXT_PUBLIC_API_URL (localhost:8486)
 //
 // When accessed via port 80 (nginx), WS goes through nginx on same origin.
 // When accessed via port 3000 directly, WS must hit backend port directly.
@@ -55,7 +55,7 @@ let currentApiUrl = (() => {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) return envUrl.replace(/\/$/, '');
   if (typeof window !== 'undefined') return window.location.origin.replace(/\/$/, '');
-  return 'http://localhost:4200';
+  return 'http://localhost:8486';
 })();
 
 function getWsToken() { return typeof window !== 'undefined' ? (localStorage.getItem('qorven_token') || process.env.NEXT_PUBLIC_API_TOKEN || '') : ''; }
