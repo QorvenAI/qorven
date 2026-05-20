@@ -453,6 +453,30 @@ func verifyGHChecksum(binPath, shaPath string) error {
 }
 
 func replaceBinarySelf(current, next string) error {
+	// When running under systemd with ProtectSystem=full, /usr/local/bin is
+	// read-only inside this process's mount namespace. We escape the sandbox
+	// by delegating the rename+copy to a transient systemd-run scope (which
+	// runs outside the service's namespace). If systemd-run isn't available
+	// we fall back to a direct write (works when not sandboxed, e.g. sudo).
+	if _, err := exec.LookPath("systemd-run"); err == nil {
+		// Use systemd-run --scope to run cp+chmod outside the sandbox.
+		// We copy directly rather than rename to avoid cross-device issues.
+		// The old binary is moved to .bak first so a running exec is preserved.
+		script := fmt.Sprintf(
+			"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
+			next, current,
+			current,
+			current, current,
+			current, current,
+		)
+		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", script)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("systemd-run swap failed: %w — %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+
+	// Fallback: direct swap (works when not sandboxed — bare root or sudo).
 	backup := current + ".bak"
 	if err := os.Rename(current, backup); err != nil {
 		return fmt.Errorf("backup failed: %w", err)

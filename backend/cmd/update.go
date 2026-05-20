@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -353,19 +354,33 @@ func verifyChecksum(binPath, shaPath, binName string) error {
 }
 
 // replaceSelf atomically swaps the running binary with the freshly
-// downloaded one. Works cross-platform via os.Rename where possible;
-// falls back to copy+rename on filesystems that don't support cross-
-// device rename.
+// downloaded one. When running under systemd with ProtectSystem=full,
+// /usr/local/bin is read-only inside this process's mount namespace.
+// We escape by delegating the swap to a transient systemd-run scope
+// which runs outside the service sandbox. Falls back to a direct write
+// when not sandboxed (bare root, sudo, macOS, Windows).
 func replaceSelf(current, next string) error {
+	if _, err := exec.LookPath("systemd-run"); err == nil {
+		script := fmt.Sprintf(
+			"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
+			next, current,
+			current,
+			current, current,
+			current, current,
+		)
+		cmd := exec.Command("systemd-run", "--scope", "--quiet", "sh", "-c", script)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("backup current: %w — %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+
+	// Fallback: direct swap (bare root, sudo, non-systemd systems).
 	backup := current + ".bak"
-	// Rename current out of the way first — on Linux this is safe
-	// even while the binary is running; the old inode lives on
-	// until the process exits.
 	if err := os.Rename(current, backup); err != nil {
 		return fmt.Errorf("backup current: %w", err)
 	}
 	if err := copyAndChmod(next, current); err != nil {
-		// Rollback — put the old binary back.
 		os.Rename(backup, current)
 		return err
 	}
