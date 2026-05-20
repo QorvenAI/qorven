@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.5-alpha — 2026-05-20
+
+### Changed
+- **UI** — Standardised page headers across all canvas views (~51 pages now use a consistent title/description layout).
+
+---
+
 ## v0.1.4-alpha — 2026-05-19
 
 ### Added
