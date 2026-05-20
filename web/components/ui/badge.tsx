@@ -287,10 +287,12 @@ function IconBadge({
           <span
             data-slot="icon-badge-count"
             className={cn(
-              'absolute top-0.5 right-0.5 translate-x-1/2 -translate-y-1/2',
+              // Anchored fully inside the button — no negative translate so it
+              // never overflows a fixed/sticky container at the viewport edge.
+              'absolute top-[3px] right-[3px]',
               'inline-flex items-center justify-center',
-              'min-w-[1rem] h-4 px-[3px] rounded-full',
-              'text-[0.625rem] font-bold leading-none text-white',
+              'min-w-[14px] h-[14px] px-[3px] rounded-full',
+              'text-[0.575rem] font-bold leading-none text-white ring-1 ring-background',
               bg,
               pulse && 'animate-pulse',
               className,
