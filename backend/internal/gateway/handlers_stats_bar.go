@@ -3,21 +3,46 @@ package gateway
 
 import (
 	"net/http"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/qorvenai/qorven/internal/providers"
 )
 
-func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
-	// --- system: Go runtime memory ---
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	memUsedMB := ms.Sys / 1024 / 1024
-	memHeapMB := ms.HeapInuse / 1024 / 1024
+// readMemInfoGB reads /proc/meminfo for MemTotal and MemAvailable (Linux).
+func readMemInfoGB() (usedGB, totalGB float64) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return
+	}
+	var total, available uint64
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		val, _ := strconv.ParseUint(fields[1], 10, 64)
+		switch fields[0] {
+		case "MemTotal:":
+			total = val
+		case "MemAvailable:":
+			available = val
+		}
+	}
+	totalGB = float64(total) / 1e6
+	usedGB = float64(total-available) / 1e6
+	return
+}
 
-	// --- system: disk (statvfs on the binary's directory) ---
+func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
+	// --- system RAM (from /proc/meminfo) ---
+	memUsedGB, memTotalGB := readMemInfoGB()
+
+	// --- disk (statvfs /) ---
 	var diskUsedGB, diskTotalGB float64
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs("/", &stat); err == nil {
@@ -62,8 +87,8 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]any{
-		"mem_sys_mb":       memUsedMB,
-		"mem_heap_mb":      memHeapMB,
+		"mem_used_gb":      memUsedGB,
+		"mem_total_gb":     memTotalGB,
 		"disk_used_gb":     diskUsedGB,
 		"disk_total_gb":    diskTotalGB,
 		"uptime":           uptime,
