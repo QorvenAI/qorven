@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/qorvenai/qorven/internal/providers"
@@ -42,18 +41,11 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 	// --- system RAM (from /proc/meminfo) ---
 	memUsedGB, memTotalGB := readMemInfoGB()
 
-	// --- disk (statvfs /) ---
-	var diskUsedGB, diskTotalGB float64
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err == nil {
-		total := stat.Blocks * uint64(stat.Bsize)
-		free := stat.Bavail * uint64(stat.Bsize)
-		diskTotalGB = float64(total) / 1e9
-		diskUsedGB = float64(total-free) / 1e9
-	}
+	// --- disk (platform-specific helper) ---
+	diskUsedGB, diskTotalGB := readDiskGB()
 
 	// --- uptime ---
-	uptime := time.Since(gw.startTime).Round(time.Second).String()
+	uptimeSec := int64(time.Since(gw.startTime).Seconds())
 
 	// --- db health ---
 	dbOK := false
@@ -91,7 +83,7 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 		"mem_total_gb":     memTotalGB,
 		"disk_used_gb":     diskUsedGB,
 		"disk_total_gb":    diskTotalGB,
-		"uptime":           uptime,
+		"uptime_sec":       uptimeSec,
 		"db_ok":            dbOK,
 		"cost_month_usd":   costMonthUSD,
 		"tokens_in_today":  tokensInToday,
