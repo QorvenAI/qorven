@@ -270,6 +270,98 @@ func patchServiceRestartPolicy() {
 	slog.Info("update.unit_patched", "restart_policy", "always")
 }
 
+// backgroundUpdateChecker runs at startup and every 6 hours. If a newer
+// release is available it downloads, verifies, and installs it automatically,
+// then triggers a graceful restart via systemd (or self-exit for supervisors).
+// On dev builds (Version == "dev" or empty) the check runs once to populate
+// the version field in the status bar, but skips the install step.
+func (gw *Gateway) backgroundUpdateChecker() {
+	check := func() {
+		release, err := fetchLatestGHRelease()
+		if err != nil {
+			slog.Debug("update.check_failed", "err", err)
+			return
+		}
+		current := buildInfo.Version
+		latest := releaseVersion(release.TagName)
+
+		slog.Info("update.check", "current", current, "latest", latest)
+
+		// On dev builds don't auto-install, just log.
+		if current == "dev" || current == "" {
+			slog.Info("update.dev_build_skip_install", "latest", latest)
+			return
+		}
+		if latest == current {
+			return // already up to date
+		}
+
+		slog.Info("update.installing", "from", current, "to", latest)
+		binName := fmt.Sprintf("qorven-%s-%s", runtime.GOOS, runtime.GOARCH)
+		if runtime.GOOS == "windows" {
+			binName += ".exe"
+		}
+		shaName := binName + ".sha256"
+
+		var binAsset, shaAsset ghAsset
+		for _, a := range release.Assets {
+			switch a.Name {
+			case binName:
+				binAsset = a
+			case shaName:
+				shaAsset = a
+			}
+		}
+		if binAsset.BrowserDownloadURL == "" || shaAsset.BrowserDownloadURL == "" {
+			slog.Warn("update.no_asset", "os", runtime.GOOS, "arch", runtime.GOARCH)
+			return
+		}
+
+		binPath, err := downloadGHAsset(binAsset)
+		if err != nil {
+			slog.Warn("update.download_failed", "err", err)
+			return
+		}
+		defer os.Remove(binPath)
+
+		shaPath, err := downloadGHAsset(shaAsset)
+		if err != nil {
+			slog.Warn("update.sha_download_failed", "err", err)
+			return
+		}
+		defer os.Remove(shaPath)
+
+		if err := verifyGHChecksum(binPath, shaPath); err != nil {
+			slog.Warn("update.checksum_failed", "err", err)
+			return
+		}
+
+		self, err := os.Executable()
+		if err != nil {
+			slog.Warn("update.executable_failed", "err", err)
+			return
+		}
+		if err := replaceBinarySelf(self, binPath); err != nil {
+			slog.Warn("update.replace_failed", "err", err)
+			return
+		}
+		slog.Info("update.installed", "version", latest)
+		time.Sleep(500 * time.Millisecond)
+		triggerSelfRestart()
+	}
+
+	// Initial check on startup (delay slightly so the server is fully up).
+	time.Sleep(30 * time.Second)
+	check()
+
+	// Periodic check every 6 hours.
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		check()
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func downloadGHAsset(a ghAsset) (string, error) {

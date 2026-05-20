@@ -599,6 +599,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 		gw.agentLoop.SmartRouter = providers.NewSmartRouter(gw.db.Pool)
 		gw.agentLoop.SmartRouter.SetRegistry(gw.providerReg)
 		go gw.seedModelDefaults(context.Background())
+		go gw.backgroundUpdateChecker()
 		gw.agentLoop.Events = agent.NewEventBus()
 		gw.agentLoop.ModelSwitchQ = providers.NewModelSwitchQueue()
 		gw.agentLoop.PermGate = gw.permissionGate
