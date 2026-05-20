@@ -77,10 +77,29 @@ func fetchLatestGHRelease() (*ghRelease, error) {
 	return nil, fmt.Errorf("no releases found in %s", repo)
 }
 
-// releaseVersion strips the qorven-v or v prefix to get a bare semver string.
+// releaseVersion returns the bare semver from a tag or build version string.
+// Handles:
+//   - "v0.1.7-alpha"                    → "0.1.7-alpha"
+//   - "qorven-v0.1.7-alpha"             → "0.1.7-alpha"
+//   - "v0.1.6-alpha-12-g0cf0386"        → "0.1.6-alpha"
+//   - "v0.1.6-alpha-12-g0cf0386-dirty"  → "0.1.6-alpha"
 func releaseVersion(tag string) string {
 	tag = strings.TrimPrefix(tag, "qorven-v")
 	tag = strings.TrimPrefix(tag, "v")
+	// git describe format: <tag>-<N>-g<hash>[-dirty]
+	// Walk from the right: skip "dirty", then when we find "g<hash>" strip
+	// it and the commit-count segment immediately before it.
+	parts := strings.Split(tag, "-")
+	for i := len(parts) - 1; i >= 2; i-- {
+		seg := parts[i]
+		if seg == "dirty" {
+			continue
+		}
+		if len(seg) > 1 && seg[0] == 'g' {
+			tag = strings.Join(parts[:i-1], "-")
+		}
+		break
+	}
 	return tag
 }
 
@@ -193,6 +212,9 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Patch unit before swap so /usr/local/bin is writable in this process.
+	patchServiceUnit()
+
 	// Replace binary
 	self, err := os.Executable()
 	if err != nil {
@@ -229,9 +251,8 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 // calls the platform-specific selfExit() to trigger supervisor restart.
 // selfExit is defined in update_restart_unix.go / update_restart_windows.go.
 func triggerSelfRestart() {
-	// Ensure the installed unit has Restart=always so a clean exit triggers
-	// a restart. Older installs shipped with Restart=on-failure.
-	patchServiceRestartPolicy()
+	// Patch the unit: Restart=always + /usr/local/bin in ReadWritePaths.
+	patchServiceUnit()
 
 	// Try systemctl restart first (works when running as root or with sudo).
 	if path, err := exec.LookPath("systemctl"); err == nil {
@@ -246,19 +267,30 @@ func triggerSelfRestart() {
 	selfExit()
 }
 
-// patchServiceRestartPolicy upgrades the installed systemd unit from
-// Restart=on-failure to Restart=always so that a self-update clean exit
-// (exit 0) also causes a restart. Safe to call repeatedly — no-ops when
-// the unit already has Restart=always or doesn't exist.
-func patchServiceRestartPolicy() {
+// patchServiceUnit ensures the installed systemd unit has the settings
+// needed for self-update to work:
+//   - Restart=always   (so a clean exit triggers restart, not just failures)
+//   - ReadWritePaths includes /usr/local/bin  (ProtectSystem=full makes it
+//     read-only otherwise, breaking the binary swap)
+//
+// Safe to call repeatedly — no-ops when already correct or unit doesn't exist.
+func patchServiceUnit() {
 	const unitPath = "/etc/systemd/system/qorven.service"
 	data, err := os.ReadFile(unitPath)
 	if err != nil {
-		return // no unit file (non-systemd install) — nothing to do
+		return
 	}
-	updated := strings.ReplaceAll(string(data), "Restart=on-failure", "Restart=always")
+	updated := string(data)
+	updated = strings.ReplaceAll(updated, "Restart=on-failure", "Restart=always")
+	// Add /usr/local/bin to ReadWritePaths if not already there.
+	if strings.Contains(updated, "ReadWritePaths=") && !strings.Contains(updated, "/usr/local/bin") {
+		updated = strings.ReplaceAll(updated,
+			"ReadWritePaths=",
+			"ReadWritePaths=/usr/local/bin ",
+		)
+	}
 	if updated == string(data) {
-		return // already correct
+		return
 	}
 	if err := os.WriteFile(unitPath, []byte(updated), 0644); err != nil {
 		slog.Warn("update.patch_unit_failed", "err", err)
@@ -267,7 +299,7 @@ func patchServiceRestartPolicy() {
 	if path, err := exec.LookPath("systemctl"); err == nil {
 		exec.Command(path, "daemon-reload").Run()
 	}
-	slog.Info("update.unit_patched", "restart_policy", "always")
+	slog.Info("update.unit_patched")
 }
 
 // backgroundUpdateChecker runs at startup and every 6 hours. If a newer

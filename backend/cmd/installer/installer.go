@@ -1391,7 +1391,7 @@ WorkingDirectory=/var/lib/qorven
 NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/var/lib/qorven /etc/qorven
+ReadWritePaths=/var/lib/qorven /etc/qorven /usr/local/bin
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]

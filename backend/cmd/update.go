@@ -112,7 +112,8 @@ func runUpdate() error {
 		fmt.Println(latest)
 	}
 
-	if updateVersion == "" && (latest == current || latest == "v"+current) {
+	if updateVersion == "" && (latest == current || latest == "v"+current ||
+		latest == "v"+stripBuildMeta(current) || stripBuildMeta(latest) == stripBuildMeta(current)) {
 		fmt.Println("  up to date ✓")
 		return nil
 	}
@@ -171,14 +172,9 @@ func runUpdate() error {
 // ───── GitHub API helpers ─────
 
 func fetchLatestRelease(repo string) (*releaseInfo, error) {
-	// /releases/latest skips pre-releases (alpha/beta/rc). Fall back to
-	// listing all releases and taking the first — which is the newest by
-	// published date, including pre-releases.
-	r, err := githubRelease(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo))
-	if err == nil {
-		return r, nil
-	}
-	return githubReleaseList(fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=1", repo))
+	// Always use the list endpoint — /releases/latest skips pre-releases
+	// (alpha/beta/rc) so it would return an older stable release.
+	return githubReleaseList(fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=10", repo))
 }
 
 func fetchRelease(repo, tag string) (*releaseInfo, error) {
@@ -293,6 +289,24 @@ func downloadAsset(a releaseAsset) (string, error) {
 		return "", err
 	}
 	return tmp.Name(), nil
+}
+
+// stripBuildMeta removes the git-describe suffix from a version string.
+// "v0.1.6-alpha-12-g0cf0386-dirty" → "v0.1.6-alpha"
+// "v0.1.7-alpha" → "v0.1.7-alpha" (unchanged)
+func stripBuildMeta(v string) string {
+	parts := strings.Split(v, "-")
+	for i := len(parts) - 1; i >= 2; i-- {
+		seg := parts[i]
+		if seg == "dirty" {
+			continue
+		}
+		if len(seg) > 1 && seg[0] == 'g' {
+			return strings.Join(parts[:i-1], "-")
+		}
+		break
+	}
+	return v
 }
 
 // extForName preserves the .sha256 or .exe suffix on the temp file —
