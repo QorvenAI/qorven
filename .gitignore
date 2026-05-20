@@ -59,7 +59,6 @@ web/.qorven-nav.mjs
 .superpowers/
 
 .air.toml
-dev.sh
 # Dev tool artifacts
 .playwright-mcp/
 docs/superpowers/
