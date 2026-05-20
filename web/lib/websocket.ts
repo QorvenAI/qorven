@@ -35,11 +35,19 @@ let onlineListenerInstalled = false;
 // is unset so we correctly fall through to window.location.origin.
 // currentApiUrl is the backend URL used for WebSocket connections.
 //   production : page origin (Go binary serves static + API on same origin)
-//   dev        : NEXT_PUBLIC_API_URL (Next.js rewrites proxy REST but NOT WS upgrades)
+//   dev via nginx (port 80): page origin — nginx proxies /ws/* to backend
+//   dev direct (localhost:3000): NEXT_PUBLIC_API_URL (localhost:4200)
 //
-// REST calls in api.ts always use /api/v1 (proxied by Next.js rewrites).
-// Only WebSocket and health probes need to hit the backend directly in dev.
+// When accessed via port 80 (nginx), WS goes through nginx on same origin.
+// When accessed via port 3000 directly, WS must hit backend port directly.
 let currentApiUrl = (() => {
+  if (typeof window !== 'undefined') {
+    // If loaded via port 80 or 443, nginx is in front — WS goes to same origin
+    const port = window.location.port;
+    if (!port || port === '80' || port === '443') {
+      return window.location.origin.replace(/\/$/, '');
+    }
+  }
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) return envUrl.replace(/\/$/, '');
   if (typeof window !== 'undefined') return window.location.origin.replace(/\/$/, '');

@@ -21,6 +21,11 @@ func (gw *Gateway) wsAuth(handler http.HandlerFunc) http.HandlerFunc {
 		if token == "" {
 			token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		}
+		if token == "" {
+			if c, err := r.Cookie("qorven_token"); err == nil {
+				token = c.Value
+			}
+		}
 
 		// Accept static gateway token (fast path)
 		if gw.cfg.Auth.Token != "" && token == gw.cfg.Auth.Token {
@@ -316,6 +321,15 @@ func (rl *IPRateLimit) Allow(ip string) bool {
 	}
 	b.tokens--
 	return true
+}
+
+// versionHeaderMiddleware stamps X-Qorven-Version on every response so the
+// frontend can detect a backend upgrade and reload its stale JS bundle.
+func versionHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Qorven-Version", buildInfo.Version)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (rl *IPRateLimit) Middleware() func(http.Handler) http.Handler {
