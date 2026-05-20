@@ -26,8 +26,8 @@ import { useStore } from '@/store';
 import { X, ExternalLink, MemoryStick, HardDrive } from 'lucide-react';
 
 interface StatsBar {
-  mem_sys_mb: number;
-  mem_heap_mb: number;
+  mem_used_gb: number;
+  mem_total_gb: number;
   disk_used_gb: number;
   disk_total_gb: number;
   uptime: string;
@@ -183,8 +183,8 @@ export function StatusBar() {
               <StatusDivider />
 
               {/* Memory */}
-              <StatusChip title={`Heap: ${stats.mem_heap_mb} MB · Sys: ${stats.mem_sys_mb} MB`}>
-                <MemoryStick className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.mem_heap_mb}MB
+              <StatusChip title={`RAM: ${stats.mem_used_gb.toFixed(1)} / ${stats.mem_total_gb.toFixed(1)} GB`}>
+                <MemoryStick className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
               </StatusChip>
 
               {/* Disk */}
