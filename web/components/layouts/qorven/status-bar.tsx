@@ -25,6 +25,35 @@ import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
 import { X, ExternalLink } from 'lucide-react';
 
+interface StatsBar {
+  mem_sys_mb: number;
+  mem_heap_mb: number;
+  disk_used_gb: number;
+  disk_total_gb: number;
+  uptime: string;
+  db_ok: boolean;
+  cost_month_usd: number;
+  tokens_in_today: number;
+  tokens_out_today: number;
+  active_sessions: number;
+  goroutines: number;
+}
+
+function useStatsBar() {
+  const [stats, setStats] = useState<StatsBar | null>(null);
+  useEffect(() => {
+    const fetch_ = () =>
+      fetch('/api/v1/stats/bar')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => d && setStats(d))
+        .catch(() => {});
+    fetch_();
+    const t = setInterval(fetch_, 10_000);
+    return () => clearInterval(t);
+  }, []);
+  return stats;
+}
+
 export function StatusBar() {
   const pathname = usePathname();
   const wsConnected = useStore((s) => s.wsConnected);
@@ -32,6 +61,7 @@ export function StatusBar() {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [changelogMd, setChangelogMd] = useState<string>('');
   const modalRef = useRef<HTMLDivElement>(null);
+  const stats = useStatsBar();
 
   useEffect(() => {
     fetch('/api/health/detailed')
@@ -125,12 +155,61 @@ export function StatusBar() {
 
         <div className="flex-1" />
 
-        {/* Connection dot — subtle, no text */}
-        {!wsConnected && (
-          <span title="Disconnected — reconnecting" className="relative flex h-1.5 w-1.5 mr-1">
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-destructive/70" />
-          </span>
-        )}
+        {/* Right side — system + cost stats */}
+        <div className="flex items-center gap-0.5 ml-auto">
+          {stats && (
+            <>
+              {/* DB health dot */}
+              <span
+                title={stats.db_ok ? 'Database connected' : 'Database disconnected'}
+                className={`h-1.5 w-1.5 rounded-full mx-1.5 ${stats.db_ok ? 'bg-emerald-500' : 'bg-destructive'}`}
+              />
+
+              {/* Uptime */}
+              <StatusChip title={`Uptime: ${stats.uptime} · ${stats.goroutines} goroutines`}>
+                {stats.uptime}
+              </StatusChip>
+
+              <StatusDivider />
+
+              {/* Memory */}
+              <StatusChip title={`Heap: ${stats.mem_heap_mb} MB · Sys: ${stats.mem_sys_mb} MB`}>
+                MEM {stats.mem_heap_mb}MB
+              </StatusChip>
+
+              {/* Disk */}
+              <StatusChip title={`Disk: ${stats.disk_used_gb.toFixed(1)} / ${stats.disk_total_gb.toFixed(1)} GB`}>
+                DISK {stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
+              </StatusChip>
+
+              <StatusDivider />
+
+              {/* Tokens today */}
+              <StatusChip title={`Tokens today — In: ${stats.tokens_in_today.toLocaleString()} · Out: ${stats.tokens_out_today.toLocaleString()}`}>
+                ↑{fmtK(stats.tokens_in_today)} ↓{fmtK(stats.tokens_out_today)}
+              </StatusChip>
+
+              {/* Cost this month */}
+              <StatusChip title={`Spend this month: $${stats.cost_month_usd.toFixed(4)}`}>
+                ${stats.cost_month_usd.toFixed(4)}
+              </StatusChip>
+
+              <StatusDivider />
+
+              {/* Active sessions */}
+              <StatusChip title="Active sessions (last 5 min)">
+                {stats.active_sessions} sess
+              </StatusChip>
+            </>
+          )}
+
+          {/* Disconnect dot — always last */}
+          {!wsConnected && (
+            <span title="Disconnected — reconnecting" className="relative flex h-1.5 w-1.5 mx-1.5">
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-destructive/70" />
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Changelog lightbox */}
@@ -185,6 +264,27 @@ export function StatusBar() {
       )}
     </>
   );
+}
+
+function StatusChip({ children, title }: { children: React.ReactNode; title?: string }) {
+  return (
+    <span
+      title={title}
+      className="px-1.5 h-full flex items-center font-mono text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
+    >
+      {children}
+    </span>
+  );
+}
+
+function StatusDivider() {
+  return <span className="h-3 w-px bg-border mx-0.5" />;
+}
+
+function fmtK(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 /** Lightweight markdown renderer for changelog content. */
