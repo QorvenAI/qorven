@@ -7,36 +7,18 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
-import { agents, rooms as roomsApi } from '@/lib/api';
+import { agents } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { SoulCardSkeleton } from '@/components/skeletons';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { soulGradient } from '@/components/soul-card';
-import { SoulPulseRing } from '@/components/soul-pulse-ring';
 import { useSoulRun } from '@/hooks/use-soul';
 import { useSelectedModels } from '@/hooks/use-selected-models';
-import { RoomDetail } from '@/app/(app)/rooms/[id]/client';
-import {
-  Plus, X, Search, MessageSquare, Settings, Trash2, MoreHorizontal,
-  Users, Hash, ChevronDown,
-} from 'lucide-react';
-import { SidebarHeader } from '@/components/layouts/qorven/sidebar';
+import { Plus, X, Search, MessageSquare, Settings, Trash2, MoreHorizontal } from 'lucide-react';
 import type { Soul } from '@/types';
 
-interface Room {
-  id: string;
-  name: string;
-  display_name?: string;
-  member_count?: number;
-}
-
-type RightPanel =
-  | { type: 'qors' }
-  | { type: 'room'; roomId: string };
-
 export default function QorsPage() {
-  const [panel, setPanel] = useState<RightPanel>({ type: 'qors' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -45,14 +27,6 @@ export default function QorsPage() {
   const souls = useStore((s) => s.souls);
   const setSouls = useStore((s) => s.setSouls);
 
-  // Hubs (rooms) sidebar state
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [roomsLoading, setRoomsLoading] = useState(true);
-  const [hubsOpen, setHubsOpen] = useState(true);
-  const [newHubName, setNewHubName] = useState('');
-  const [showNewHub, setShowNewHub] = useState(false);
-  const [creatingHub, setCreatingHub] = useState(false);
-
   const load = useCallback(() => {
     setLoading(true);
     agents.list()
@@ -60,17 +34,7 @@ export default function QorsPage() {
       .catch((e) => { setError(e.message); setLoading(false); });
   }, [setSouls]);
 
-  const loadRooms = useCallback(() => {
-    setRoomsLoading(true);
-    roomsApi.list()
-      .then((d: any) => {
-        setRooms(Array.isArray(d?.rooms) ? d.rooms : Array.isArray(d) ? d : []);
-        setRoomsLoading(false);
-      })
-      .catch(() => setRoomsLoading(false));
-  }, []);
-
-  useEffect(() => { load(); loadRooms(); }, [load, loadRooms]);
+  useEffect(() => { load(); }, [load]);
 
   const roles = useMemo(() => {
     const r = new Set(souls.map((s) => s.role).filter(Boolean));
@@ -91,246 +55,95 @@ export default function QorsPage() {
     return list;
   }, [souls, search, roleFilter]);
 
-  const createHub = async () => {
-    if (!newHubName.trim()) return;
-    setCreatingHub(true);
-    try {
-      const created: any = await roomsApi.create({
-        name: newHubName.trim().toLowerCase().replace(/\s+/g, '-'),
-        display_name: newHubName.trim(),
-      });
-      setNewHubName('');
-      setShowNewHub(false);
-      loadRooms();
-      if (created?.id) setPanel({ type: 'room', roomId: created.id });
-    } catch (e: any) {
-      toast.error(e.message ?? 'Failed to create hub');
-    } finally {
-      setCreatingHub(false);
-    }
-  };
-
   return (
     <ErrorBoundary fallbackTitle="Failed to load Qors">
-      {/* Full-height two-panel layout */}
-      <div
-        className="flex overflow-hidden -m-5 lg:-m-6"
-        style={{ height: 'calc(100vh - var(--header-height, 44px) - var(--status-bar-height, 0px))' }}
-      >
-        {/* ── Left sidebar ── */}
-        <div className="flex w-(--sidebar-default-width) shrink-0 flex-col border-r border-border bg-muted overflow-hidden">
-          <SidebarHeader />
-          <div className="flex-1 overflow-y-auto">
-
-          {/* Qors section header */}
-          <div className="flex items-center justify-between px-3 pt-3 pb-1 shrink-0">
-            <button
-              onClick={() => setPanel({ type: 'qors' })}
-              className={cn(
-                'text-xs font-semibold uppercase tracking-wider transition-colors',
-                panel.type === 'qors' ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {brand.agentNamePlural}
-            </button>
-            <button
-              onClick={() => setShowCreate(true)}
-              title="New Qor"
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
+      <div className="p-5 space-y-5">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-lg font-semibold">Your {brand.agentNamePlural}</h1>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+              Pick someone to chat with — they remember your conversations, can help with tasks, and connect to your apps.
+            </p>
           </div>
-
-          {/* Qors list */}
-          <div className="flex flex-col gap-0.5 px-1 pb-2">
-            {loading ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">Loading…</div>
-            ) : souls.map((soul) => (
-              <SidebarSoulRow
-                key={soul.id}
-                soul={soul}
-                active={panel.type === 'qors'}
-              />
-            ))}
-          </div>
-
-          {/* Hubs section header */}
-          <div className="flex items-center justify-between px-3 pt-2 pb-1 shrink-0 border-t border-border mt-1">
-            <button
-              onClick={() => setHubsOpen(v => !v)}
-              className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ChevronDown className={cn('h-3 w-3 transition-transform', !hubsOpen && '-rotate-90')} />
-              Hubs
-            </button>
-            <button
-              onClick={() => setShowNewHub(v => !v)}
-              title="New Hub"
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
-
-          {hubsOpen && (
-            <div className="flex flex-col gap-0.5 px-1 pb-2">
-              {/* New hub inline form */}
-              {showNewHub && (
-                <div className="mx-1 mb-1 rounded-md border border-border bg-card p-2 space-y-1.5">
-                  <input
-                    value={newHubName}
-                    onChange={(e) => setNewHubName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && createHub()}
-                    placeholder="Hub name"
-                    autoFocus
-                    className="w-full rounded border border-input bg-transparent px-2 py-1 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  />
-                  <div className="flex gap-1">
-                    <button
-                      onClick={createHub}
-                      disabled={creatingHub || !newHubName.trim()}
-                      className="flex-1 rounded bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    >
-                      {creatingHub ? '…' : 'Create'}
-                    </button>
-                    <button
-                      onClick={() => { setShowNewHub(false); setNewHubName(''); }}
-                      className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {roomsLoading ? (
-                <div className="px-3 py-2 text-xs text-muted-foreground">Loading…</div>
-              ) : rooms.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground">No hubs yet</p>
-              ) : (
-                rooms.map((room) => (
-                  <button
-                    key={room.id}
-                    onClick={() => setPanel({ type: 'room', roomId: room.id })}
-                    className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
-                      panel.type === 'room' && panel.roomId === room.id
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                    )}
-                  >
-                    <Hash className="h-3 w-3 shrink-0 opacity-60" />
-                    <span className="flex-1 truncate">{room.display_name || room.name}</span>
-                    {(room.member_count ?? 0) > 0 && (
-                      <span className="flex items-center gap-0.5 text-2xs shrink-0 opacity-50">
-                        <Users className="h-2.5 w-2.5" />
-                        {room.member_count}
-                      </span>
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-          </div>
+          <button onClick={() => setShowCreate(true)} className="qr-btn qr-btn-primary qr-btn-lg">
+            <Plus className="h-4 w-4" />
+            {buttons.newAgent}
+          </button>
         </div>
 
-        {/* ── Right panel ── */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
-          {panel.type === 'room' ? (
-            <RoomDetail roomId={panel.roomId} showBack={false} />
-          ) : (
-            <div className="p-5 space-y-5">
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
-                  <h1 className="text-lg font-semibold">Your {brand.agentNamePlural}</h1>
-                  <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-                    Pick someone to chat with — they remember your conversations, can help with tasks, and connect to your apps.
-                  </p>
-                </div>
-                <button onClick={() => setShowCreate(true)} className="qr-btn qr-btn-primary qr-btn-lg">
-                  <Plus className="h-4 w-4" />
-                  {buttons.newAgent}
+        {/* Search + role filter */}
+        {souls.length > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name…"
+                className="qr-input pl-9"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X className="h-3.5 w-3.5" />
                 </button>
-              </div>
-
-              {/* Search + role filter */}
-              {souls.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1 max-w-sm">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search by name…"
-                      className="qr-input pl-9"
-                    />
-                    {search && (
-                      <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  {roles.length > 1 && (
-                    <details className="relative">
-                      <summary className="list-none cursor-pointer rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
-                        Filter: {roleFilter === 'all' ? 'All' : roleFilter}
-                      </summary>
-                      <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-popover shadow-lg z-10 py-1">
-                        {['all', ...roles].map((r) => (
-                          <button
-                            key={r}
-                            onClick={() => setRoleFilter(r)}
-                            className={cn(
-                              'flex w-full items-center px-3 py-1.5 text-xs hover:bg-accent text-left capitalize',
-                              roleFilter === r && 'bg-accent font-medium',
-                            )}
-                          >
-                            {r === 'all' ? 'All roles' : r}
-                          </button>
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </div>
               )}
-
-              {/* Grid */}
-              {loading ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {Array.from({ length: 6 }).map((_, i) => <SoulCardSkeleton key={i} />)}
-                </div>
-              ) : error ? (
-                <EmptyState
-                  icon={emptyStates.souls.icon}
-                  title="Failed to load"
-                  description={error}
-                  actionLabel="Retry"
-                  onAction={load}
-                />
-              ) : souls.length === 0 ? (
-                <EmptyState
-                  {...emptyStates.souls}
-                  onAction={() => setShowCreate(true)}
-                />
-              ) : filtered.length === 0 ? (
-                <EmptyState
-                  icon={emptyStates.souls.icon}
-                  title="No matches"
-                  description={`No ${brand.agentNamePlural.toLowerCase()} match "${search}"`}
-                />
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {filtered.map((soul) => (
-                    <QorCard key={soul.id} soul={soul} onDeleted={load} />
+            </div>
+            {roles.length > 1 && (
+              <details className="relative">
+                <summary className="list-none cursor-pointer rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
+                  Filter: {roleFilter === 'all' ? 'All' : roleFilter}
+                </summary>
+                <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-popover shadow-lg z-10 py-1">
+                  {['all', ...roles].map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setRoleFilter(r)}
+                      className={cn(
+                        'flex w-full items-center px-3 py-1.5 text-xs hover:bg-accent text-left capitalize',
+                        roleFilter === r && 'bg-accent font-medium',
+                      )}
+                    >
+                      {r === 'all' ? 'All roles' : r}
+                    </button>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Grid */}
+        {loading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => <SoulCardSkeleton key={i} />)}
+          </div>
+        ) : error ? (
+          <EmptyState
+            icon={emptyStates.souls.icon}
+            title="Failed to load"
+            description={error}
+            actionLabel="Retry"
+            onAction={load}
+          />
+        ) : souls.length === 0 ? (
+          <EmptyState
+            {...emptyStates.souls}
+            onAction={() => setShowCreate(true)}
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={emptyStates.souls.icon}
+            title="No matches"
+            description={`No ${brand.agentNamePlural.toLowerCase()} match "${search}"`}
+          />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((soul) => (
+              <QorCard key={soul.id} soul={soul} onDeleted={load} />
+            ))}
+          </div>
+        )}
       </div>
 
       {showCreate && (
@@ -340,32 +153,6 @@ export default function QorsPage() {
         />
       )}
     </ErrorBoundary>
-  );
-}
-
-// ─── Sidebar soul row (compact) ───────────────────────────────────────────────
-function SidebarSoulRow({ soul, active }: { soul: Soul; active: boolean }) {
-  const router = useRouter();
-  const { activity } = useSoulRun(soul.id);
-  const dotColor = {
-    idle: 'bg-emerald-400',
-    thinking: 'bg-amber-400',
-    running: 'bg-blue-400',
-    offline: 'bg-muted-foreground/40',
-    error: 'bg-destructive',
-  }[activity] ?? 'bg-muted-foreground/40';
-
-  return (
-    <button
-      onClick={() => router.push(`/qors/${soul.id}`)}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-    >
-      <div className={cn('relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-semibold text-white', soulGradient(soul.display_name))}>
-        {soul.display_name.charAt(0).toUpperCase()}
-        <span className={cn('absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-card', dotColor)} />
-      </div>
-      <span className="flex-1 truncate font-medium">{soul.display_name}</span>
-    </button>
   );
 }
 

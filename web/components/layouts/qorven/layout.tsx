@@ -51,8 +51,7 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const fullBleedPage = pathname?.startsWith('/terminal');
-  // /qors renders its own two-panel layout — suppress the global Sidebar to avoid double sidebar
-  const noSidebarPage = fullBleedPage || pathname === '/qors';
+  const noSidebarPage = fullBleedPage;
   const effectiveCollapsed = sidebarCollapsed || noSidebarPage;
 
   const { left, right } = useToolbar();
