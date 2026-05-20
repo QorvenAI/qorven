@@ -740,6 +740,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/admin/update/check", gw.handleAdminUpdateCheck)
 		r.Post("/admin/update/install", gw.handleAdminUpdateInstall)
 		r.Get("/admin/install-analytics", gw.handleInstallAnalytics)
+		r.Get("/admin/system/check-port", gw.handleCheckPort)
 
 		// Service accounts
 		r.Get("/service-accounts", gw.handleListServiceAccounts)

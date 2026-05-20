@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	osexec "os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/qorvenai/qorven/internal/config"
@@ -21,8 +23,10 @@ type networkStatus struct {
 	TailscaleIP        string `json:"tailscale_ip"`
 	TailscaleHostname  string `json:"tailscale_hostname"`
 	BindMode           string `json:"bind_mode"`
-	WebListen          string `json:"web_listen"`
-	APIListen          string `json:"api_listen"`
+	Listen             string `json:"listen"`
+	// Keep old fields for backward-compat with old frontends.
+	WebListen string `json:"web_listen"`
+	APIListen string `json:"api_listen"`
 }
 
 // tailscaleIP runs `tailscale ip -4` and returns the first IPv4 address, or "".
@@ -51,7 +55,7 @@ func tailscaleHostname() string {
 	return status.Self.HostName
 }
 
-// bindModeFromAddr derives bind_mode from a web listen address.
+// bindModeFromAddr derives bind_mode from a listen address.
 func bindModeFromAddr(addr string) string {
 	switch {
 	case strings.HasPrefix(addr, "100."):
@@ -76,16 +80,11 @@ func (gw *Gateway) currentNetworkStatus() networkStatus {
 		}
 	}
 
-	webListen := ""
-	apiListen := ""
+	listen := ""
 	if gw.cfg != nil {
-		webListen = gw.cfg.Server.WebListen
-		apiListen = gw.cfg.Server.APIListen
-		if apiListen == "" {
-			apiListen = gw.cfg.Server.Listen
-		}
-		if apiListen == "" {
-			apiListen = fmt.Sprintf("0.0.0.0:%d", config.DefaultPort)
+		listen = gw.cfg.Server.Listen
+		if listen == "" {
+			listen = fmt.Sprintf("0.0.0.0:%d", config.DefaultPort)
 		}
 	}
 
@@ -93,15 +92,15 @@ func (gw *Gateway) currentNetworkStatus() networkStatus {
 		TailscaleInstalled: installed,
 		TailscaleIP:        ip,
 		TailscaleHostname:  hostname,
-		BindMode:           bindModeFromAddr(webListen),
-		WebListen:          webListen,
-		APIListen:          apiListen,
+		BindMode:           bindModeFromAddr(listen),
+		Listen:             listen,
+		// Mirror into old fields so old frontends still get valid addresses.
+		WebListen: listen,
+		APIListen: listen,
 	}
 }
 
 // persistWebListen rewrites the web_listen line in config.toml.
-// If the file cannot be updated it logs a warning but does not return an error
-// so the HTTP response still succeeds.
 func (gw *Gateway) persistWebListen(newAddr string) {
 	if gw.cfg == nil || gw.cfg.ConfigPath == "" {
 		slog.Warn("network.persist: no config path — add web_listen manually", "web_listen", newAddr)
@@ -119,7 +118,6 @@ func (gw *Gateway) persistWebListen(newAddr string) {
 	updated := re.ReplaceAllString(string(data), newLine)
 
 	if updated == string(data) {
-		// Line not found — scan for [server] section and append, or just warn.
 		slog.Warn("network.persist: web_listen not found in config — add it manually",
 			"path", gw.cfg.ConfigPath, "suggested", newLine)
 		return
@@ -130,6 +128,32 @@ func (gw *Gateway) persistWebListen(newAddr string) {
 		return
 	}
 	slog.Info("network.persist: web_listen updated", "path", gw.cfg.ConfigPath, "addr", newAddr)
+}
+
+// persistListen rewrites the listen line in config.toml.
+func (gw *Gateway) persistListen(newAddr string) {
+	if gw.cfg == nil || gw.cfg.ConfigPath == "" {
+		slog.Warn("network.persist: no config path — add listen manually", "listen", newAddr)
+		return
+	}
+	data, err := os.ReadFile(gw.cfg.ConfigPath)
+	if err != nil {
+		slog.Warn("network.persist: cannot read config", "path", gw.cfg.ConfigPath, "err", err)
+		return
+	}
+	re := regexp.MustCompile(`(?m)^listen\s*=\s*"[^"]*"`)
+	newLine := fmt.Sprintf(`listen = "%s"`, newAddr)
+	updated := re.ReplaceAllString(string(data), newLine)
+	if updated == string(data) {
+		slog.Warn("network.persist: listen not found in config — add it manually",
+			"path", gw.cfg.ConfigPath, "suggested", newLine)
+		return
+	}
+	if err := os.WriteFile(gw.cfg.ConfigPath, []byte(updated), 0600); err != nil {
+		slog.Warn("network.persist: cannot write config", "path", gw.cfg.ConfigPath, "err", err)
+		return
+	}
+	slog.Info("network.persist: listen updated", "path", gw.cfg.ConfigPath, "addr", newAddr)
 }
 
 // handleNetworkStatus handles GET /v1/network/status.
@@ -150,7 +174,6 @@ func (gw *Gateway) handleNetworkTailscale(w http.ResponseWriter, r *http.Request
 
 	switch req.Action {
 	case "install":
-		// Run the official Tailscale one-liner install script.
 		cmd := osexec.CommandContext(r.Context(), "sh", "-c", "curl -fsSL https://tailscale.com/install.sh | sh")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -186,46 +209,62 @@ func (gw *Gateway) handleNetworkTailscale(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Preserve existing port; default to 443.
+		// Preserve existing port from Listen (canonical), fall back to WebListen; default to 443.
 		port := "443"
-		if gw.cfg != nil && gw.cfg.Server.WebListen != "" {
-			if idx := strings.LastIndex(gw.cfg.Server.WebListen, ":"); idx >= 0 {
-				port = gw.cfg.Server.WebListen[idx+1:]
+		if gw.cfg != nil {
+			listenAddr := gw.cfg.Server.Listen
+			if listenAddr == "" {
+				listenAddr = gw.cfg.Server.WebListen
+			}
+			if listenAddr != "" {
+				if idx := strings.LastIndex(listenAddr, ":"); idx >= 0 {
+					port = listenAddr[idx+1:]
+				}
 			}
 		}
 		newAddr := ip + ":" + port
 		if gw.cfg != nil {
+			gw.cfg.Server.Listen = newAddr
 			gw.cfg.Server.WebListen = newAddr
 		}
 		gw.persistWebListen(newAddr)
+		gw.persistListen(newAddr)
 		slog.Info("network.tailscale: bound", "addr", newAddr)
 
 		st := gw.currentNetworkStatus()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    st,
-			"message":   "restart required to apply bind changes",
+			"status":     st,
+			"message":    "restart required to apply bind changes",
 			"web_listen": newAddr,
 		})
 
 	case "unbind":
-		// Preserve existing port; default to 443.
+		// Preserve existing port from Listen (canonical), fall back to WebListen; default to 443.
 		port := "443"
-		if gw.cfg != nil && gw.cfg.Server.WebListen != "" {
-			if idx := strings.LastIndex(gw.cfg.Server.WebListen, ":"); idx >= 0 {
-				port = gw.cfg.Server.WebListen[idx+1:]
+		if gw.cfg != nil {
+			listenAddr := gw.cfg.Server.Listen
+			if listenAddr == "" {
+				listenAddr = gw.cfg.Server.WebListen
+			}
+			if listenAddr != "" {
+				if idx := strings.LastIndex(listenAddr, ":"); idx >= 0 {
+					port = listenAddr[idx+1:]
+				}
 			}
 		}
 		newAddr := "0.0.0.0:" + port
 		if gw.cfg != nil {
+			gw.cfg.Server.Listen = newAddr
 			gw.cfg.Server.WebListen = newAddr
 		}
 		gw.persistWebListen(newAddr)
+		gw.persistListen(newAddr)
 		slog.Info("network.tailscale: unbound", "addr", newAddr)
 
 		st := gw.currentNetworkStatus()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    st,
-			"message":   "restart required to apply bind changes",
+			"status":     st,
+			"message":    "restart required to apply bind changes",
 			"web_listen": newAddr,
 		})
 
@@ -236,3 +275,31 @@ func (gw *Gateway) handleNetworkTailscale(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// handleCheckPort handles GET /v1/admin/system/check-port?port=N
+// Returns whether the port is available for binding on this machine.
+func (gw *Gateway) handleCheckPort(w http.ResponseWriter, r *http.Request) {
+	portStr := r.URL.Query().Get("port")
+	if portStr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "port parameter required"})
+		return
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid port number"})
+		return
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"port":      port,
+			"available": false,
+			"reason":    err.Error(),
+		})
+		return
+	}
+	ln.Close()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"port":      port,
+		"available": true,
+	})
+}
