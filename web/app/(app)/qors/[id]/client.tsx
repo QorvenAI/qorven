@@ -5,7 +5,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { brand } from '@/lib/branding';
 import { toast } from 'sonner';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { agents, sessions as sessionsApi, channels as channelsApi, tools as toolsApi } from '@/lib/api';
 import { approvals as approvalsApi, permissions as permissionsApi, type ApprovalItem } from '@/lib/api';
 
@@ -86,9 +87,9 @@ function TaskCard({ task }: { task: LiveTask }) {
         )}
       </div>
       {lastLine && <p className="mt-1 text-xs text-muted-foreground/80 truncate">▸ {lastLine}</p>}
-      <a href="/tasks" className="mt-1.5 block text-xs text-primary/70 hover:text-primary transition-colors">
+      <Link href="/tasks" className="mt-1.5 block text-xs text-primary/70 hover:text-primary transition-colors">
         View in Tasks →
-      </a>
+      </Link>
     </div>
   );
 }
@@ -104,6 +105,7 @@ export default function QorDetailPage() {
         : params.id)
     : params.id;
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [soul, setSoul] = useState<Soul | null>(null);
   const [allSessions, setAllSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
@@ -249,7 +251,7 @@ export default function QorDetailPage() {
 
       // Redirect system agents
       if (soulData.agent_key?.startsWith('__') || soulData.model === 'system') {
-        window.location.href = '/qors';
+        router.replace('/qors');
         return;
       }
 
@@ -270,7 +272,7 @@ export default function QorDetailPage() {
       try {
         const list = await agents.list();
         const valid = (Array.isArray(list) ? list : []).filter((a: any) => !a.agent_key?.startsWith('__'));
-        if (valid.length > 0 && valid[0]) { window.location.replace(`/qors/${valid[0].id}`); return; }
+        if (valid.length > 0 && valid[0]) { router.replace(`/qors/${valid[0].id}`); return; }
       } catch { /* fall through to error */ }
       setLoadError(e instanceof Error ? e.message : 'Failed to load agent');
       setLoading(false);
@@ -357,7 +359,7 @@ export default function QorDetailPage() {
       <div className="full-bleed flex h-full flex-col items-center justify-center gap-3" style={{ minHeight: 'calc(100vh - var(--header-height) - var(--toolbar-height))' }}>
         <AlertCircle className="h-8 w-8 text-destructive" />
         <p className="text-sm text-destructive">{loadError || 'Agent not found'}</p>
-        <button onClick={() => window.location.reload()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Retry</button>
+        <button onClick={() => router.refresh()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Retry</button>
       </div>
     );
   }

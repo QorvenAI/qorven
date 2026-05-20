@@ -19,13 +19,14 @@ import { Plus, X, Search, MessageSquare, Settings, Trash2, MoreHorizontal } from
 import type { Soul } from '@/types';
 
 export default function QorsPage() {
-  const [loading, setLoading] = useState(true);
+  const souls = useStore((s) => s.souls);
+  const setSouls = useStore((s) => s.setSouls);
+  // Skip the skeleton flash if the store already has data from a previous visit.
+  const [loading, setLoading] = useState(souls.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  const souls = useStore((s) => s.souls);
-  const setSouls = useStore((s) => s.setSouls);
 
   const load = useCallback(() => {
     setLoading(true);

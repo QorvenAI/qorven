@@ -2,7 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { agents as agentsApi, sessions as sessionsApi } from '@/lib/api';
 import { ChatPlayground } from '@/components/chat-v2/chat-playground';
 import { Loader2, AlertCircle, Bot, ChevronDown } from 'lucide-react';
@@ -17,8 +17,9 @@ export function ChatClient() {
   const [error, setError] = useState<string | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
 
-  // Load agents on mount
-  useEffect(() => {
+  const loadAgents = useCallback(() => {
+    setLoading(true);
+    setError(null);
     let active = true;
     agentsApi.list()
       .then((list) => {
@@ -30,6 +31,11 @@ export function ChatClient() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
+
+  // Load agents on mount
+  useEffect(() => {
+    return loadAgents();
+  }, [loadAgents]);
 
   // Create/get session when agent changes
   useEffect(() => {
@@ -56,7 +62,7 @@ export function ChatClient() {
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
         <AlertCircle className="h-8 w-8 text-destructive" />
         <p className="text-sm text-muted-foreground">{error}</p>
-        <button onClick={() => window.location.reload()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+        <button onClick={loadAgents} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
           Retry
         </button>
       </div>
