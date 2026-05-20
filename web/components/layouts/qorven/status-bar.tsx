@@ -23,7 +23,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { X, ExternalLink, MemoryStick, HardDrive } from 'lucide-react';
+import { X, ExternalLink, MemoryStick, HardDrive, Bot, Circle } from 'lucide-react';
 
 interface StatsBar {
   mem_used_gb: number;
@@ -35,7 +35,7 @@ interface StatsBar {
   cost_month_usd: number;
   tokens_in_today: number;
   tokens_out_today: number;
-  active_sessions: number;
+  active_qors: number;
   goroutines: number;
 }
 
@@ -183,33 +183,35 @@ export function StatusBar() {
               <StatusDivider />
 
               {/* Memory */}
-              <StatusChip title={`RAM: ${stats.mem_used_gb.toFixed(1)} / ${stats.mem_total_gb.toFixed(1)} GB`}>
+              <StatusChip title={`RAM used: ${stats.mem_used_gb.toFixed(2)} GB · Available: ${(stats.mem_total_gb - stats.mem_used_gb).toFixed(2)} GB · Total: ${stats.mem_total_gb.toFixed(1)} GB`}>
                 <MemoryStick className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
               </StatusChip>
 
+              <StatusDivider />
+
               {/* Disk */}
-              <StatusChip title={`Disk: ${stats.disk_used_gb.toFixed(1)} / ${stats.disk_total_gb.toFixed(1)} GB`}>
+              <StatusChip title={`Disk used: ${stats.disk_used_gb.toFixed(2)} GB · Free: ${(stats.disk_total_gb - stats.disk_used_gb).toFixed(2)} GB · Total: ${stats.disk_total_gb.toFixed(1)} GB`}>
                 <HardDrive className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
               </StatusChip>
 
               <StatusDivider />
 
               {/* Tokens today */}
-              <StatusChip title={`Tokens today — In: ${stats.tokens_in_today.toLocaleString()} · Out: ${stats.tokens_out_today.toLocaleString()}`}>
+              <StatusChip title={`Tokens today — Prompt: ${stats.tokens_in_today.toLocaleString()} · Completion: ${stats.tokens_out_today.toLocaleString()} · Total: ${(stats.tokens_in_today + stats.tokens_out_today).toLocaleString()}`}>
                 ↑{fmtK(stats.tokens_in_today)} ↓{fmtK(stats.tokens_out_today)}
               </StatusChip>
 
+              <StatusDivider />
+
               {/* Cost this month */}
-              <StatusChip title={`Spend this month: $${stats.cost_month_usd.toFixed(4)}`}>
+              <StatusChip title={`Total spend this month across all Qors: $${stats.cost_month_usd.toFixed(6)}`}>
                 ${stats.cost_month_usd.toFixed(4)}
               </StatusChip>
 
               <StatusDivider />
 
-              {/* Active sessions */}
-              <StatusChip title="Active sessions (last 5 min)">
-                {stats.active_sessions} sess
-              </StatusChip>
+              {/* Active Qors */}
+              <ActiveQorsChip count={stats.active_qors} />
             </>
           )}
 
@@ -295,6 +297,35 @@ function fmtK(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+function ActiveQorsChip({ count }: { count: number }) {
+  const soulStates = useStore((s) => s.soulStates);
+  const thinking = Object.values(soulStates).filter(s => s.activity === 'thinking').length;
+  const running  = Object.values(soulStates).filter(s => s.activity === 'running').length;
+  const active   = thinking + running;
+
+  let dotClass = 'bg-muted-foreground/40';
+  if (running > 0)  dotClass = 'bg-emerald-500';
+  else if (thinking > 0) dotClass = 'bg-amber-400';
+
+  const tooltip = [
+    `Active Qors (DB): ${count}`,
+    thinking > 0 ? `Thinking: ${thinking}` : '',
+    running  > 0 ? `Running: ${running}`   : '',
+    active === 0 ? 'All Qors idle' : '',
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <span
+      title={tooltip}
+      className="px-1.5 h-full flex items-center gap-1 font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
+    >
+      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotClass}`} />
+      <Bot className="h-2.5 w-2.5 shrink-0" />
+      {active > 0 ? active : count}
+    </span>
+  );
 }
 
 /** Lightweight markdown renderer for changelog content. */
