@@ -98,6 +98,25 @@ else
   mv "$TMP_BIN" "$INSTALL_DIR/qorven"
 fi
 
+# ── install telemetry (fire-and-forget, never blocks install) ─────────────────
+_track_install() {
+  local ver="${RELEASE_TAG}"
+  local os="${OS:-linux}"
+  local arch="${ARCH:-amd64}"
+  local kernel; kernel="$(uname -r 2>/dev/null | cut -d- -f1 || echo unknown)"
+  local distro; distro="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}-${VERSION_ID:-}" || echo unknown)"
+  local cpu_cores; cpu_cores="$(nproc 2>/dev/null || echo 0)"
+  local mem_gb; mem_gb="$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+  local hostname_hash; hostname_hash="$(hostname 2>/dev/null | sha256sum 2>/dev/null | cut -c1-8 || echo unknown)"
+  local provider; provider="$(curl -sfm2 http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null && echo aws || \
+                               curl -sfm2 http://metadata.google.internal/computeMetadata/v1/project/project-id -H 'Metadata-Flavor:Google' 2>/dev/null && echo gcp || \
+                               curl -sfm2 http://169.254.169.254/hetzner/v1/metadata 2>/dev/null && echo hetzner || echo bare)"
+  curl -fsSLm5 \
+    "https://get.qorven.ai/t?v=${ver}&os=${os}&arch=${arch}&kernel=${kernel}&distro=${distro}&cores=${cpu_cores}&mem=${mem_gb}&host=${hostname_hash}&cloud=${provider}" \
+    -o /dev/null 2>/dev/null || true
+}
+_track_install &
+
 ok "binary ready: $INSTALL_DIR/qorven  ($(du -sh "$INSTALL_DIR/qorven" 2>/dev/null | cut -f1))"
 printf "\n"
 
