@@ -130,6 +130,10 @@ func runUpdate() error {
 		return nil
 	}
 
+	// Migrate binary to /opt/qorven/bin/ on existing installs before the swap.
+	// This runs outside the systemd sandbox (CLI context), so sudo works.
+	ensureOptBin()
+
 	// 1. Download binary + sha256 sidecar
 	fmt.Printf("  Downloading %s… ", binAsset.Name)
 	binPath, err := downloadAsset(binAsset)

@@ -9,6 +9,9 @@ import (
 	"os/exec"
 )
 
+// ensureOptBin is a no-op on Windows — binary lives in Program Files.
+func ensureOptBin() {}
+
 // stopService stops the Qorven Windows service before a binary swap.
 // On Windows, a running executable cannot be overwritten — the service must
 // be stopped first. net stop is available on all Windows versions.
