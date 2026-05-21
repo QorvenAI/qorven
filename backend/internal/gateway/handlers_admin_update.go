@@ -282,12 +282,20 @@ func patchServiceUnit() {
 	}
 	updated := string(data)
 	updated = strings.ReplaceAll(updated, "Restart=on-failure", "Restart=always")
-	// Add /usr/local/bin to ReadWritePaths if not already there.
-	if strings.Contains(updated, "ReadWritePaths=") && !strings.Contains(updated, "/usr/local/bin") {
-		updated = strings.ReplaceAll(updated,
-			"ReadWritePaths=",
-			"ReadWritePaths=/usr/local/bin ",
-		)
+	// Ensure /usr/local/bin is in ReadWritePaths so ProtectSystem=full allows
+	// the binary swap. Add or extend the directive as needed.
+	if !strings.Contains(updated, "/usr/local/bin") {
+		if strings.Contains(updated, "ReadWritePaths=") {
+			updated = strings.ReplaceAll(updated,
+				"ReadWritePaths=",
+				"ReadWritePaths=/usr/local/bin ",
+			)
+		} else if strings.Contains(updated, "ProtectSystem=") {
+			updated = strings.ReplaceAll(updated,
+				"ProtectSystem=",
+				"ReadWritePaths=/usr/local/bin\nProtectSystem=",
+			)
+		}
 	}
 	if updated == string(data) {
 		return
@@ -453,49 +461,73 @@ func verifyGHChecksum(binPath, shaPath string) error {
 }
 
 func replaceBinarySelf(current, next string) error {
-	swapScript := fmt.Sprintf(
-		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
-		next, current, current, current, current, current, current,
-	)
-
-	// Strategy 1: systemd-run as a transient service (not --scope).
-	// --scope inherits the current cgroup/session and needs a D-Bus session
-	// bus — unavailable inside a service unit. A transient *service* unit
-	// (no --scope flag) runs in a fresh environment with no ProtectSystem
-	// restriction, and works from root with no D-Bus requirement.
-	if _, err := exec.LookPath("systemd-run"); err == nil {
-		cmd := exec.Command("systemd-run", "--wait", "--quiet", "sh", "-c", swapScript)
-		if out, err := cmd.CombinedOutput(); err == nil {
-			_ = out
-			return nil
-		}
+	// Stage the new binary in /run — writable and shared across all mount
+	// namespaces. PrivateTmp=yes (common in systemd units) isolates /tmp and
+	// /var/tmp but does NOT affect /run, so the file is visible to any child
+	// process regardless of its namespace.
+	staged := "/run/qorven-update-pending"
+	if err := copyFileTo(next, staged); err != nil {
+		staged = next // fall back to original temp path
+	} else {
+		_ = os.Chmod(staged, 0755)
+		defer os.Remove(staged)
 	}
 
-	// Strategy 2: direct swap — works when the service already runs as root
-	// and the binary is in a world-writable-by-root path.
+	// Atomic swap: copy to .new, chmod, then mv into place (mv is atomic on
+	// the same filesystem). No .bak step — if cp fails, current is untouched.
+	swapScript := fmt.Sprintf(
+		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s.new %s",
+		staged, current, current, current, current,
+	)
+
+	// Strategy 1: systemd-run — creates a transient service unit that runs
+	// outside ProtectSystem=full's read-only bind mounts.
+	if _, err := exec.LookPath("systemd-run"); err == nil {
+		if _, err := exec.Command("systemd-run", "--wait", "--quiet", "sh", "-c", swapScript).CombinedOutput(); err == nil {
+			return nil
+		}
+		slog.Debug("update.systemd_run_failed", "err", err)
+	}
+
+	// Strategy 2: nsenter into the host (PID 1) mount namespace.
+	// ProtectSystem=full only restricts THIS service's mount namespace; the
+	// root namespace has /usr/local/bin writable. nsenter is part of
+	// util-linux and present on all standard Ubuntu installs.
+	if _, err := exec.LookPath("nsenter"); err == nil {
+		if _, err := exec.Command("nsenter", "--mount=/proc/1/ns/mnt", "--", "sh", "-c", swapScript).CombinedOutput(); err == nil {
+			return nil
+		}
+		slog.Debug("update.nsenter_failed", "err", err)
+	}
+
+	// Strategy 3: direct swap — works when running outside systemd sandboxing
+	// (dev environment, manual install without ProtectSystem).
 	backup := current + ".bak"
 	if err := os.Rename(current, backup); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
 	}
-	if err := func() error {
-		in, err := os.Open(next)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		out, err := os.OpenFile(current, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(out, in); err != nil {
-			out.Close()
-			return err
-		}
-		return out.Close()
-	}(); err != nil {
-		os.Rename(backup, current)
+	if err := copyFileTo(next, current); err != nil {
+		_ = os.Rename(backup, current)
 		return err
 	}
+	_ = os.Chmod(current, 0755)
 	os.Remove(backup)
 	return nil
+}
+
+func copyFileTo(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
