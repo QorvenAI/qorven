@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { request } from '@/lib/api-core';
+import { wsBase } from '@/lib/api-url';
 
 export function TaskCountBadge() {
   const [count, setCount] = useState(0);
@@ -15,8 +16,9 @@ export function TaskCountBadge() {
   }, []);
 
   useEffect(() => {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${window.location.host}/ws/realtime`);
+    const url = wsBase('/ws/realtime');
+    if (!url) return;
+    const ws = new WebSocket(url);
     ws.onmessage = (e) => {
       try {
         const evt = JSON.parse(e.data);

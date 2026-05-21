@@ -82,6 +82,12 @@ function useStatsBar() {
 export function StatusBar() {
   const pathname = usePathname();
   const wsConnected = useStore((s) => s.wsConnected);
+  // Don't show the disconnect dot during the initial connection window.
+  const [wsGracePeriod, setWsGracePeriod] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setWsGracePeriod(false), 3000);
+    return () => clearTimeout(t);
+  }, []);
   const [version, setVersion] = useState<string>('');
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [changelogMd, setChangelogMd] = useState<string>('');
@@ -303,8 +309,8 @@ export function StatusBar() {
             </>
           )}
 
-          {/* Disconnect dot — always last */}
-          {!wsConnected && (
+          {/* Disconnect dot — only after grace period so initial connect doesn't flash */}
+          {!wsConnected && !wsGracePeriod && (
             <span title="Disconnected — reconnecting" className="relative flex h-1.5 w-1.5 mx-1.5">
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-destructive/70" />
             </span>
