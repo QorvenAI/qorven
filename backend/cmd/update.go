@@ -364,20 +364,20 @@ func verifyChecksum(binPath, shaPath, binName string) error {
 }
 
 // replaceSelf atomically swaps the running binary.
-// On standard installs the binary lives in /opt/qorven/bin/ which is owned by
-// the qorven user, so a plain rename always works. sudo is kept as a fallback
-// for manual installs where the binary may still be root-owned.
+// Tries a direct rename first (works when the caller owns the directory, e.g.
+// the service user running as qorven). Falls back to sudo for installs where
+// the binary directory is owned by root or another user (CLI running as ubuntu).
 func replaceSelf(current, next string) error {
 	staged := current + ".new"
-	if err := copyAndChmod(next, staged); err != nil {
-		return fmt.Errorf("stage failed: %w", err)
+	stageErr := copyAndChmod(next, staged)
+	if stageErr == nil {
+		if err := os.Rename(staged, current); err == nil {
+			return nil
+		}
+		os.Remove(staged)
 	}
-	if err := os.Rename(staged, current); err == nil {
-		return nil
-	}
-	os.Remove(staged)
 
-	// Fallback: sudo for root-owned paths (manual installs, legacy locations).
+	// Fallback: sudo — works for non-root CLI users with passwordless sudo.
 	script := fmt.Sprintf(
 		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s.new %s && chown qorven:qorven %s 2>/dev/null; true",
 		next, current, current, current, current, current,
