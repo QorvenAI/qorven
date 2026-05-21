@@ -69,6 +69,15 @@ build-backend:  ## Build the Go binary for the current arch → dist/qorven
 		echo "  Unset GOARCH to build natively (fast)."; \
 		echo ""; \
 	fi
+	@if echo "$(VERSION)" | grep -qE '\-[0-9]+-g[0-9a-f]+'; then \
+	  echo ""; \
+	  echo "  ERROR: Version '$(VERSION)' contains git-describe metadata."; \
+	  echo "  This means the tag does not point to HEAD — commits exist after the tag."; \
+	  echo "  Create or move the tag to HEAD before building a release:"; \
+	  echo "    git tag -f vX.Y.Z-alpha && git push origin vX.Y.Z-alpha --force"; \
+	  echo ""; \
+	  exit 1; \
+	fi
 	@EMBED_TS=$$(stat -c %Y $(EMBED_DIR)/.embedded 2>/dev/null || echo 0); \
 	WEB_TS=$$(find $(WEB_DIR)/app $(WEB_DIR)/components $(WEB_DIR)/lib \
 	  -name "*.tsx" -o -name "*.ts" -o -name "*.css" 2>/dev/null \
