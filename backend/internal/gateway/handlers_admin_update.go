@@ -121,7 +121,7 @@ func (gw *Gateway) handleAdminUpdateCheck(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	current := buildInfo.Version
+	current := releaseVersion(buildInfo.Version)
 	latest := releaseVersion(release.TagName)
 	upToDate := latest == current
 
@@ -158,7 +158,7 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	current := buildInfo.Version
+	current := releaseVersion(buildInfo.Version)
 	latest := releaseVersion(release.TagName)
 	if latest == current {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "already up to date", "version": current})
