@@ -216,12 +216,10 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 	// file can be overwritten. NSSM restarts it after selfExit() below.
 	stopWindowsService()
 
-	// Replace binary
-	self, err := os.Executable()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot locate running binary: " + err.Error()})
-		return
-	}
+	// Resolve the canonical install path — do NOT rely on os.Executable() which
+	// may return a deleted inode path (e.g. qorven.bak) when the binary was
+	// previously replaced by the background updater while the process was live.
+	self := canonicalInstallPath()
 	if err := replaceBinarySelf(self, binPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "install failed: " + err.Error()})
 		return
@@ -377,12 +375,7 @@ func (gw *Gateway) backgroundUpdateChecker() {
 			return
 		}
 
-		self, err := os.Executable()
-		if err != nil {
-			slog.Warn("update.executable_failed", "err", err)
-			return
-		}
-		if err := replaceBinarySelf(self, binPath); err != nil {
+		if err := replaceBinarySelf(canonicalInstallPath(), binPath); err != nil {
 			slog.Warn("update.replace_failed", "err", err)
 			return
 		}
@@ -459,6 +452,25 @@ func verifyGHChecksum(binPath, shaPath string) error {
 		return fmt.Errorf("want %s got %s", want, got)
 	}
 	return nil
+}
+
+// canonicalInstallPath returns the authoritative path of the Qorven binary,
+// independent of how the current process was started. os.Executable() can
+// return a deleted-inode path (e.g. /opt/qorven/bin/qorven.bak) when the
+// background updater renamed the file while the process was live. We always
+// prefer the well-known install location if it exists.
+func canonicalInstallPath() string {
+	for _, p := range []string{
+		"/opt/qorven/bin/qorven",
+		"/usr/local/bin/qorven",
+		"/usr/bin/qorven",
+	} {
+		if fi, err := os.Lstat(p); err == nil && !fi.Mode().IsDir() {
+			return p
+		}
+	}
+	self, _ := os.Executable()
+	return self
 }
 
 func replaceBinarySelf(current, next string) error {

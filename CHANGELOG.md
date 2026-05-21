@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.19-alpha — 2026-05-21
+
+### Fixed
+- **GUI update no longer fails after an auto-update has run** — `os.Executable()` returns a deleted-inode path (e.g. `qorven.bak`) when the background updater replaced the binary while the process was live. The update handler now resolves the canonical install path (`/opt/qorven/bin/qorven`) directly instead of trusting `os.Executable()`, so clicking Install always targets the correct file regardless of how many times the binary has been swapped.
+
+---
+
 ## v0.1.18-alpha — 2026-05-21
 
 ### Fixed
