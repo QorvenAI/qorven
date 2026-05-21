@@ -23,9 +23,10 @@ func (m *ManageAgents) Parameters() map[string]any {
 		"action":        map[string]any{"type": "string", "description": "create, update, delete, or list"},
 		"name":          map[string]any{"type": "string", "description": "agent name (for create)"},
 		"id":            map[string]any{"type": "string", "description": "agent ID (for update/delete)"},
-		"model":         map[string]any{"type": "string", "description": "LLM model"},
-		"role":          map[string]any{"type": "string", "description": "agent role"},
-		"system_prompt": map[string]any{"type": "string", "description": "system prompt"},
+		"model":         map[string]any{"type": "string", "description": "explicit LLM model ID (optional; if omitted, model is chosen from budget_cents and role)"},
+		"role":          map[string]any{"type": "string", "description": "agent role — one of: chief, code, architect, reviewer, devops, qa, researcher, analyst, designer, product, writer, marketer, sales, support, legal, social, general, worker"},
+		"system_prompt": map[string]any{"type": "string", "description": "custom system prompt (optional; if omitted, archetype soul is used)"},
+		"budget_cents":  map[string]any{"type": "number", "description": "per-agent spend cap in cents; auto-selects model tier when model is not specified (e.g. 500=simple/cheap, 2000=standard, 6000=complex/coding)"},
 	}, "required": []string{"action"}}
 }
 
@@ -49,6 +50,16 @@ func (m *ManageAgents) Execute(ctx context.Context, args map[string]any) *Result
 		prompt, _ := args["system_prompt"].(string)
 		if name == "" { return ErrorResult("name required") }
 		if OnAgentCreate == nil { return ErrorResult("agent creation not available") }
+		// Auto-select model from budget_cents when no explicit model given.
+		if model == "" && OnModelForTier != nil {
+			if rawBudget, ok := args["budget_cents"]; ok {
+				budgetCents := int64(manageToFloat64(rawBudget))
+				if budgetCents > 0 {
+					tier := spawnTierForBudget(budgetCents, role)
+					model = OnModelForTier(tier)
+				}
+			}
+		}
 		id, err := OnAgentCreate(ctx, name, model, role, prompt)
 		if err != nil { return ErrorResult(err.Error()) }
 		return TextResult(fmt.Sprintf("Agent created: %s (id: %s)", name, id))
@@ -77,4 +88,16 @@ func (m *ManageAgents) Execute(ctx context.Context, args map[string]any) *Result
 	default:
 		return ErrorResult("actions: create (name, model, role), update (id, fields), delete (id), list")
 	}
+}
+
+func manageToFloat64(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	}
+	return 0
 }
