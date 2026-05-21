@@ -98,23 +98,16 @@ func (gw *Gateway) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Write soul bundle — either from system_prompt or seeded from role defaults
+	// Write soul bundle and seed identity/tools from archetype library.
 	if gw.bundleStore != nil {
+		role := string(body.CreateAgentInput.Role)
 		soulContent := body.SystemPrompt
 		if soulContent == "" {
-			switch body.CreateAgentInput.Role {
-			case "chief", "prime":
-				soulContent = fmt.Sprintf("You are %s, a Chief of Staff AI assistant. You have full access to all tools and can delegate tasks to specialist agents.", body.DisplayName)
-			case "developer":
-				soulContent = fmt.Sprintf("You are %s, a software development specialist. You excel at writing, reviewing, and debugging code across all languages and frameworks.", body.DisplayName)
-			case "researcher":
-				soulContent = fmt.Sprintf("You are %s, a research specialist. You excel at finding accurate information, synthesizing sources, and producing clear research reports.", body.DisplayName)
-			case "writer":
-				soulContent = fmt.Sprintf("You are %s, a creative writing specialist. You excel at producing compelling content, copy, and communications in any voice or style.", body.DisplayName)
-			default:
+			if seed, ok := agent.AgentSeeds[role]; ok && seed.Soul != "" {
+				soulContent = seed.Soul
+			} else {
 				soulContent = fmt.Sprintf("You are %s, an AI specialist. Execute tasks efficiently and report back with clear, concise results.", body.DisplayName)
 			}
-			gw.bundleStore.SeedDefaults(r.Context(), a.ID, string(body.CreateAgentInput.Role))
 		}
 		gw.bundleStore.Upsert(r.Context(), agent.Bundle{
 			AgentID:    a.ID,
@@ -124,6 +117,7 @@ func (gw *Gateway) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			Priority:   200,
 			Enabled:    true,
 		})
+		gw.bundleStore.SeedDefaults(r.Context(), a.ID, role)
 	}
 
 	result := map[string]any{"id": a.ID, "agent_key": a.AgentKey, "display_name": a.DisplayName}
@@ -357,8 +351,42 @@ func (gw *Gateway) handleGetChief(w http.ResponseWriter, r *http.Request) {
 
 func (gw *Gateway) ensureChief(ctx context.Context) (*agent.Agent, error) {
 	existing, err := gw.agents.GetByKey(ctx, "chief")
+	var chief *agent.Agent
 	if err == nil && existing != nil {
-		return existing, nil
+		chief = existing
+	} else {
+		chief, err = gw.agents.Create(ctx, defaultTenant, agent.ChiefSpec())
+		if err != nil {
+			return nil, err
+		}
 	}
-	return gw.agents.Create(ctx, defaultTenant, agent.ChiefSpec())
+	// Seed Prime's bundles if not already present, so fresh installs get
+	// all archetype content pre-filled without overwriting user edits.
+	if gw.bundleStore != nil {
+		seed := agent.AgentSeeds["chief"]
+		bundles, _ := gw.bundleStore.ListAll(ctx, chief.ID)
+		hasSoul := false
+		hasIdentity := false
+		hasTools := false
+		for _, b := range bundles {
+			switch b.BundleType {
+			case "soul":
+				hasSoul = true
+			case "identity":
+				hasIdentity = true
+			case "tools":
+				hasTools = true
+			}
+		}
+		if !hasSoul {
+			gw.bundleStore.Upsert(ctx, agent.Bundle{AgentID: chief.ID, BundleType: "soul", Name: "soul", Content: seed.Soul, Priority: 200, Enabled: true})
+		}
+		if !hasIdentity {
+			gw.bundleStore.Upsert(ctx, agent.Bundle{AgentID: chief.ID, BundleType: "identity", Name: "identity", Content: seed.Identity, Priority: 100, Enabled: true})
+		}
+		if !hasTools {
+			gw.bundleStore.Upsert(ctx, agent.Bundle{AgentID: chief.ID, BundleType: "tools", Name: "tools", Content: seed.Tools, Priority: 90, Enabled: true})
+		}
+	}
+	return chief, nil
 }

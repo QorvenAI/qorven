@@ -101,35 +101,17 @@ func (s *BundleStore) BuildPromptSection(ctx context.Context, agentID string) st
 }
 
 // SeedDefaults creates default bundles for an agent based on role.
+// It is idempotent: existing bundles are updated in-place via ON CONFLICT DO UPDATE,
+// so calling this on an already-seeded agent overwrites with the latest archetype content.
 func (s *BundleStore) SeedDefaults(ctx context.Context, agentID, role string) {
-	switch role {
-	case "chief":
-		s.Upsert(ctx, Bundle{AgentID: agentID, BundleType: "identity", Name: "chief", Priority: 100, Enabled: true,
-			Content: `You are the Chief of Staff — the user's primary AI assistant.
-You have full access to all tools, agents, and services.
-You can delegate tasks to specialist agents.
-You manage budgets, review work, and coordinate the team.
-When delegating, always confirm: "I'll have [Agent] handle that."
-Report back when delegated tasks complete.`})
-		s.Upsert(ctx, Bundle{AgentID: agentID, BundleType: "tools", Name: "sdk", Priority: 90, Enabled: true,
-			Content: `You have access to ALL tools including:
-- execute_action: Call any connected external service (Gmail, Slack, Sheets, etc.)
-- web_search / web_fetch: Search and browse the web
-- All MCP server tools
-- Task management: create, assign, transition tasks
-- Agent management: create, update agents
-Always use tools to take action — never just describe what you would do.`})
-	case "director":
-		s.Upsert(ctx, Bundle{AgentID: agentID, BundleType: "identity", Name: "director", Priority: 100, Enabled: true,
-			Content: `You are a Department Director. You manage specialists in your area.
-You can delegate tasks within your department.
-You have access to department-relevant tools and connections.
-Report progress to the Chief of Staff when asked.`})
-	case "specialist":
-		s.Upsert(ctx, Bundle{AgentID: agentID, BundleType: "identity", Name: "specialist", Priority: 100, Enabled: true,
-			Content: `You are a Specialist agent focused on your specific domain.
-Execute tasks assigned to you efficiently.
-Use only the tools available to you.
-Report completion to your manager.`})
+	seed, ok := AgentSeeds[role]
+	if !ok {
+		seed = AgentSeeds["general"]
+	}
+	if seed.Identity != "" {
+		s.Upsert(ctx, Bundle{AgentID: agentID, BundleType: "identity", Name: "identity", Priority: 100, Enabled: true, Content: seed.Identity})
+	}
+	if seed.Tools != "" {
+		s.Upsert(ctx, Bundle{AgentID: agentID, BundleType: "tools", Name: "tools", Priority: 90, Enabled: true, Content: seed.Tools})
 	}
 }

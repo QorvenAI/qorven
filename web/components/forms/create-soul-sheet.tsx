@@ -8,14 +8,27 @@ import { useStore } from '@/store';
 import { useSelectedModels } from '@/hooks/use-selected-models';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 
-const ROLE_OPTIONS = [
-  { value: '',           label: 'General purpose' },
-  { value: 'chief',      label: 'Chief of Staff' },
-  { value: 'developer',  label: 'Developer' },
-  { value: 'researcher', label: 'Researcher' },
-  { value: 'writer',     label: 'Writer / Copywriter' },
-  { value: 'analyst',    label: 'Data Analyst' },
-  { value: 'worker',     label: 'Worker / Automation' },
+type RoleOption = { value: string; label: string; group: string; hint: string };
+
+const ROLE_OPTIONS: RoleOption[] = [
+  { value: '',          label: 'General purpose',          group: '',                hint: 'Flexible helper for any task — research, writing, analysis, planning.' },
+  { value: 'chief',     label: 'Prime — Chief of Staff',   group: 'Leadership',      hint: 'Orchestrates the workspace, delegates to specialists, and acts without waiting for permission.' },
+  { value: 'worker',    label: 'Worker / Automation',      group: 'Leadership',      hint: 'Reliable execution agent for scheduled or pipeline tasks — reports outcomes clearly.' },
+  { value: 'code',      label: 'Software Engineer',        group: 'Engineering',     hint: 'Read → understand → build → test. Semantic commits, no speculative code.' },
+  { value: 'architect', label: 'Systems Architect',        group: 'Engineering',     hint: 'Designs with trade-offs. Produces ADRs. Never recommends one option without showing an alternative.' },
+  { value: 'reviewer',  label: 'Code Reviewer',            group: 'Engineering',     hint: 'P0/P1/P2 structured reviews. Teaches through every comment. Always finds something good.' },
+  { value: 'devops',    label: 'DevOps / Infrastructure',  group: 'Engineering',     hint: 'Automate first. State rollback before deployment. Everything is code — no clickops.' },
+  { value: 'qa',        label: 'QA / Test Engineer',       group: 'Engineering',     hint: 'Adversarial tester. TDD. Every bug report has reproduction steps and severity.' },
+  { value: 'researcher',label: 'Research Analyst',         group: 'Knowledge',       hint: 'Evidence before conclusion. Every finding has a confidence level. Counter-evidence always included.' },
+  { value: 'analyst',   label: 'Data Analyst',             group: 'Knowledge',       hint: 'Sample size, date range, assumption transparency. Correlation ≠ causation — stated every time.' },
+  { value: 'legal',     label: 'Legal / Compliance',       group: 'Knowledge',       hint: 'Reads whole documents, classifies risk Critical→Low, flags jurisdiction limits. Never gives legal opinion.' },
+  { value: 'writer',    label: 'Content Writer',           group: 'Content & Growth',hint: 'Audience-first. Lead with the point. Active voice. Every piece ends with a clear reader action.' },
+  { value: 'marketer',  label: 'Marketing Specialist',     group: 'Content & Growth',hint: 'Channel-native copy. Every campaign is an experiment with a defined hypothesis and success metric.' },
+  { value: 'social',    label: 'Social Media Manager',     group: 'Content & Growth',hint: 'Platform-fluent. Twitter is punchy; LinkedIn is substantive. Never the same caption twice.' },
+  { value: 'sales',     label: 'Sales / Business Dev',     group: 'Content & Growth',hint: 'Qualifies before pitching. SPIN methodology. No generic outreach — ever.' },
+  { value: 'product',   label: 'Product Manager',          group: 'Product & Design',hint: 'RICE scoring. Press-release-before-requirements. Every feature needs a success metric.' },
+  { value: 'designer',  label: 'UX / UI Designer',         group: 'Product & Design',hint: 'User-need first. WCAG 2.1 AA baseline. Always presents at least two concepts.' },
+  { value: 'support',   label: 'Customer Support',         group: 'Product & Design',hint: 'Empathy before troubleshooting. Confirms understanding before solving. Closes every interaction.' },
 ];
 
 export function CreateSoulSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -98,10 +111,21 @@ export function CreateSoulSheet({ open, onClose }: { open: boolean; onClose: () 
           <div>
             <label className="text-xs font-medium text-muted-foreground">Role</label>
             <select value={role} onChange={(e) => setRole(e.target.value)} className="qr-select mt-1">
-              {ROLE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
+              {Array.from(new Set(ROLE_OPTIONS.map((o) => o.group))).map((group) => {
+                const opts = ROLE_OPTIONS.filter((o) => o.group === group);
+                return group === '' ? (
+                  opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)
+                ) : (
+                  <optgroup key={group} label={group}>
+                    {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </optgroup>
+                );
+              })}
             </select>
+            {(() => {
+              const hint = ROLE_OPTIONS.find((o) => o.value === role)?.hint;
+              return hint ? <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p> : null;
+            })()}
           </div>
 
           <div>
