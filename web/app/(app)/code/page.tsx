@@ -38,7 +38,6 @@ import { EditorTabBar } from '@/components/code/editor-tab-bar';
 import { CodeEditor } from '@/components/code/code-editor';
 import { TerminalPane } from '@/components/code/terminal-pane';
 import { BuildLog } from '@/components/code/build-log';
-import { ProjectDiscoveryChat } from '@/components/code/project-discovery-chat';
 import { CodeChatSidebar } from '@/components/code/code-chat-sidebar';
 import type { FileNode, FileTab, ChatMsg, CodeProject, BuildEntry } from '@/components/code/code-types';
 
@@ -690,49 +689,7 @@ export default function CodePage() {
   if (!activeProject) {
     return (
       <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 min-w-0 overflow-y-auto bg-background">
-            <div className="mx-auto max-w-3xl px-6 py-10 space-y-8">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
-                    <Code className="h-5 w-5 text-primary" />
-                  </div>
-                  <h1 className="text-lg font-semibold">Code</h1>
-                </div>
-                <p className="text-sm text-muted-foreground max-w-xl">
-                  Describe your project in the chat — Prime will prepare a detailed plan, team, and budget estimate for your approval before any work starts.
-                </p>
-              </div>
-
-              {projects.length > 0 && (
-                <div>
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Recent projects</h2>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {projects.slice(0, 6).map(p => (
-                      <button key={p.id} onClick={() => switchProject(p)}
-                        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-left hover:border-primary/30 hover:bg-accent transition-colors">
-                        <FolderOpen className="h-4 w-4 text-amber-500/80 shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{p.display_name || p.name}</p>
-                          <p className="text-xs text-muted-foreground font-mono truncate">{p.path}</p>
-                        </div>
-                        {p.build_phase === 'building' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <aside className="w-[380px] shrink-0 border-l border-border bg-muted/10 flex flex-col overflow-hidden">
-            <ProjectDiscoveryChat
-              onReady={() => {}}
-              onNameGenerated={(name) => setCodeProjectName(name)}
-            />
-          </aside>
-        </div>
+        <InceptionTab />
       </div>
     );
   }

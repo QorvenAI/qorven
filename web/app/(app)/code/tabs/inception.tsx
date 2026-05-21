@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Loader2, FolderOpen } from 'lucide-react';
 import { projectBriefs as api } from '@/lib/api';
 import { InceptionChat } from '@/components/code/inception-chat';
-import { TeamProposalCard } from '@/components/code/team-proposal-card';
+import { ProjectStudio } from '@/components/code/project-studio';
 import type { ProjectBrief } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -14,7 +14,6 @@ export function InceptionTab() {
   const [briefs, setBriefs] = useState<ProjectBrief[]>([]);
   const [active, setActive] = useState<ProjectBrief | null>(null);
   const [loading, setLoading] = useState(true);
-  const [approveResult, setApproveResult] = useState<{ agents: Record<string, string>; tickets: Record<string, string> } | null>(null);
 
   const load = useCallback(async (keepActiveId?: string) => {
     setLoading(true);
@@ -49,18 +48,11 @@ export function InceptionTab() {
     const brief = await api.create({ title: 'New Project', idea: '', quality: 'mvp' });
     setBriefs(prev => [brief, ...prev]);
     setActive(brief);
-    setApproveResult(null);
   };
 
   const onBriefUpdate = (updated: ProjectBrief) => {
     setActive(updated);
     setBriefs(prev => prev.map(b => b.id === updated.id ? updated : b));
-  };
-
-  const onApprove = (result: { brief: ProjectBrief; agents: Record<string, string>; tickets: Record<string, string> }) => {
-    setActive(result.brief);
-    setBriefs(prev => prev.map(b => b.id === result.brief.id ? result.brief : b));
-    setApproveResult({ agents: result.agents, tickets: result.tickets });
   };
 
   return (
@@ -92,7 +84,7 @@ export function InceptionTab() {
             briefs.map(b => (
               <button
                 key={b.id}
-                onClick={() => { setActive(b); setApproveResult(null); }}
+                onClick={() => setActive(b)}
                 className={cn(
                   'w-full text-left px-3 py-2 text-xs transition-colors',
                   active?.id === b.id
@@ -125,12 +117,12 @@ export function InceptionTab() {
       ) : (
         <div className="flex flex-1 overflow-hidden">
           {/* Chat panel */}
-          <div className="flex flex-col w-[420px] shrink-0 border-r border-border">
+          <div className="flex flex-col w-[360px] shrink-0 border-r border-border">
             <InceptionChat brief={active} onBriefUpdate={onBriefUpdate} />
           </div>
-          {/* Proposal panel */}
-          <div className="flex-1 overflow-y-auto p-5">
-            <TeamProposalCard brief={active} approveResult={approveResult} onApprove={onApprove} />
+          {/* Studio panel */}
+          <div className="flex-1 overflow-y-auto">
+            <ProjectStudio brief={active} onBriefUpdate={onBriefUpdate} />
           </div>
         </div>
       )}
