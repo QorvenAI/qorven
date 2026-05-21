@@ -316,8 +316,8 @@ func (gw *Gateway) backgroundUpdateChecker() {
 
 		slog.Info("update.check", "current", current, "latest", latest)
 
-		// On dev builds don't auto-install, just log.
-		if current == "dev" || current == "" {
+		// On dev builds (dirty, local, or untagged) don't auto-install.
+		if current == "dev" || current == "" || strings.Contains(buildInfo.Version, "dirty") || strings.Contains(buildInfo.Version, "-g") {
 			slog.Info("update.dev_build_skip_install", "latest", latest)
 			return
 		}
