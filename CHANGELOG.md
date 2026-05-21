@@ -4,6 +4,21 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.15-alpha — 2026-05-21
+
+### Added
+- **New project landing on /code** — the Code section now opens with a centred canvas letting you choose between Vibe, Spec, and Ship modes before starting, with a prominent chat input and quick-start suggestions. Once you submit your first message the workspace transitions into the full plan and execution view.
+- **Project brief sidebar** — active and past projects are listed in the sidebar under a dedicated Inception tab, with live status indicators showing where each project is in the pipeline.
+- **Spec, team, and task approval flow** — after describing a project Prime presents the architecture spec, proposed team, and task breakdown in three sequential steps, each requiring your approval before continuing.
+- **Execution canvas** — once approved, the canvas shows real-time task completion and budget usage with a live task feed and per-agent progress bars.
+- **Budget-aware agent spawning** — Prime selects model tiers (standard, fast, mini) automatically based on your budget and deadline, keeping costs predictable.
+- **Prime asks for budget and timeline** — rather than a form, Prime collects project requirements through conversation before proposing a team.
+
+### Fixed
+- **Project list no longer creates a second sidebar** — the project navigator is integrated into the existing Code sidebar, consistent with the rest of the layout.
+
+---
+
 ## v0.1.14-alpha — 2026-05-21
 
 ### Fixed
