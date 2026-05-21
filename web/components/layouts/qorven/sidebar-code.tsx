@@ -2,22 +2,28 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { apiBase } from '@/lib/api-url';
+import { projectBriefs as briefsApi } from '@/lib/api';
+import type { ProjectBrief } from '@/types';
 import {
   FolderOpen, Search, X, ChevronDown, ChevronRight, GitBranch, Loader2,
-  Code, Plus, Globe, Check, FilePlus, FolderPlus,
+  Code, Plus, Globe, Check, FilePlus, FolderPlus, Lightbulb,
+  Rocket, Circle,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 export function CodeSidebar() {
   const router = useRouter();
+  const pathname = usePathname();
   const tab = useStore((s) => s.codeSidebarTab);
   const setTab = useStore((s) => s.setCodeSidebarTab);
+  const activeBriefId = useStore((s) => s.activeBriefId);
+  const setActiveBriefId = useStore((s) => s.setActiveBriefId);
   const projects = useStore((s) => s.codeProjects);
   const activeProjectId = useStore((s) => s.codeActiveProjectId);
   const codeProjectName = useStore((s) => s.codeProjectName);
@@ -69,6 +75,13 @@ export function CodeSidebar() {
     setGhLoading(false);
   };
 
+  // Switch to inception tab automatically when on /code with no active project
+  useEffect(() => {
+    if (pathname === '/code' && !activeProject && !codeProjectName) {
+      setTab('inception');
+    }
+  }, [pathname, activeProject, codeProjectName, setTab]);
+
   return (
     <>
       {(codeProjectName || activeProject) && (
@@ -114,6 +127,18 @@ export function CodeSidebar() {
             </button>
           ))}
         </div>
+      )}
+
+      {/* Inception tab — shown when no active code project */}
+      {tab === 'inception' && !activeProject && !codeProjectName && (
+        <InceptionSidebarPanel
+          activeBriefId={activeBriefId}
+          onSelect={setActiveBriefId}
+          onNew={async () => {
+            const brief = await briefsApi.create({ title: 'New Project', idea: '', quality: 'mvp' });
+            setActiveBriefId(brief.id);
+          }}
+        />
       )}
 
       {(tab === 'explorer' || !(codeProjectName || activeProject)) && (
@@ -491,6 +516,93 @@ function NewItemButton({ activeProjectId }: { activeProjectId: string | null }) 
         )}
       </PopoverContent>
     </Popover>
+  );
+}
+
+// ── InceptionSidebarPanel ────────────────────────────────────────────────────
+
+const BRIEF_STATUS_DOT: Record<string, string> = {
+  intake:   'bg-muted-foreground/40',
+  proposed: 'bg-amber-500',
+  approved: 'bg-primary',
+  active:   'bg-emerald-500 animate-pulse',
+  done:     'bg-emerald-500',
+  cancelled:'bg-muted-foreground/20',
+};
+
+function InceptionSidebarPanel({
+  activeBriefId, onSelect, onNew,
+}: {
+  activeBriefId: string | null;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+}) {
+  const [briefs, setBriefs] = useState<ProjectBrief[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await briefsApi.list();
+      setBriefs(list);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleNew = async () => {
+    setCreating(true);
+    try { await onNew(); await load(); } finally { setCreating(false); }
+  };
+
+  return (
+    <>
+      {/* Section header */}
+      <div className="flex h-[44px] shrink-0 items-center gap-1.5 border-b border-border px-2.5">
+        <span className="flex-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground/60">Projects</span>
+        <button
+          onClick={handleNew}
+          disabled={creating}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          title="New project"
+        >
+          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-1">
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : briefs.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 px-3 text-center">
+            <Rocket className="h-6 w-6 text-muted-foreground/30" />
+            <p className="text-xs text-muted-foreground/60">No projects yet</p>
+            <button onClick={handleNew} className="text-xs text-primary hover:underline">Start one</button>
+          </div>
+        ) : (
+          briefs.map(b => (
+            <button
+              key={b.id}
+              onClick={() => onSelect(b.id)}
+              className={cn(
+                'flex w-full items-center gap-2.5 h-8.5 rounded-md px-2.5 text-2sm text-left transition-colors',
+                activeBriefId === b.id
+                  ? 'bg-accent text-foreground font-medium'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )}
+            >
+              <span className={cn('h-2 w-2 rounded-full shrink-0', BRIEF_STATUS_DOT[b.status] ?? 'bg-muted-foreground/40')} />
+              <span className="truncate flex-1">{b.title || 'Untitled'}</span>
+              <span className="text-2xs text-muted-foreground/50 shrink-0 capitalize">{b.status}</span>
+            </button>
+          ))
+        )}
+      </div>
+    </>
   );
 }
 

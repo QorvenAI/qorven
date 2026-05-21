@@ -187,8 +187,10 @@ interface Store {
   setCodeTree: (t: any[]) => void;
   codeProjectPath: string;
   setCodeProjectPath: (p: string) => void;
-  codeSidebarTab: 'explorer' | 'github';
-  setCodeSidebarTab: (t: 'explorer' | 'github') => void;
+  codeSidebarTab: 'explorer' | 'github' | 'inception';
+  setCodeSidebarTab: (t: 'explorer' | 'github' | 'inception') => void;
+  activeBriefId: string | null;
+  setActiveBriefId: (id: string | null) => void;
 
   // Right panel (Chat / Notifications / Activity / Tasks)
   rightPanelOpen: boolean;
@@ -535,6 +537,8 @@ export const useStore = create<Store>((set) => ({
   setCodeProjectPath: (p) => set({ codeProjectPath: p }),
   codeSidebarTab: 'explorer',
   setCodeSidebarTab: (t) => set({ codeSidebarTab: t }),
+  activeBriefId: null,
+  setActiveBriefId: (id) => set({ activeBriefId: id }),
 
   // Right panel
   rightPanelOpen: false,

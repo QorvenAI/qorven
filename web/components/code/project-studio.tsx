@@ -122,7 +122,7 @@ function IntakeCanvas({ brief, onBriefUpdate }: Props) {
         <button
           onClick={propose}
           disabled={proposing || (!budget && !brief.idea)}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          className="qr-btn qr-btn-primary qr-btn-lg w-full justify-center"
         >
           {proposing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
           {proposing ? 'Generating proposal…' : 'Generate Team Proposal'}
@@ -230,17 +230,16 @@ function ApprovalCanvas({ brief, onBriefUpdate }: Props) {
       )}
 
       {allApproved && (
-        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+        <div className="qr-card p-4 space-y-3 border-primary/30">
           <p className="text-sm font-medium">All sections approved — ready to launch.</p>
           <p className="text-xs text-muted-foreground">
             Prime will spawn the team, assign tasks, and begin working autonomously.
-            You can monitor progress and intervene at any time.
           </p>
           {err && <p className="text-xs text-destructive">{err}</p>}
           <button
             onClick={launch}
             disabled={launching}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            className="qr-btn qr-btn-primary qr-btn-lg w-full justify-center"
           >
             {launching
               ? <><Loader2 className="h-4 w-4 animate-spin" /> Launching…</>
@@ -314,7 +313,7 @@ function ExecutionCanvas({ brief, onBriefUpdate: _onBriefUpdate }: Props) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ── Stats header ──────────────────────────────────────────────────── */}
-      <div className="shrink-0 border-b border-border bg-muted/10 px-5 py-3">
+      <div className="shrink-0 border-b border-border bg-muted/10 px-4 py-2.5">
         <div className="flex items-center gap-4 flex-wrap">
           {/* Status badge */}
           <div className={cn('flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
@@ -377,7 +376,7 @@ function ExecutionCanvas({ brief, onBriefUpdate: _onBriefUpdate }: Props) {
 
           <button
             onClick={() => { setTeamLoading(true); refresh(); }}
-            className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
+            className="qr-btn qr-btn-ghost qr-btn-icon ml-auto shrink-0"
             title="Refresh"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', teamLoading && 'animate-spin')} />
@@ -391,16 +390,14 @@ function ExecutionCanvas({ brief, onBriefUpdate: _onBriefUpdate }: Props) {
         {/* Left: live task feed */}
         <div className="flex flex-col flex-1 min-w-0 border-r border-border overflow-hidden">
           {/* Task filter bar */}
-          <div className="shrink-0 flex items-center gap-1 px-4 py-2 border-b border-border bg-muted/5">
+          <div className="shrink-0 flex items-center gap-0.5 px-3 py-1.5 border-b border-border bg-muted/5">
             {(['all', 'active', 'done', 'failed'] as const).map(f => (
               <button
                 key={f}
                 onClick={() => setTaskFilter(f)}
                 className={cn(
-                  'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
-                  taskFilter === f
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-foreground'
+                  'qr-btn qr-btn-xs capitalize',
+                  taskFilter === f ? 'qr-btn-primary' : 'qr-btn-ghost'
                 )}
               >
                 {f}
@@ -476,11 +473,10 @@ function LiveTaskRow({ task, agentName }: { task: DaemonTask; agentName?: string
 
   return (
     <div className={cn(
-      'rounded-xl border bg-card transition-colors',
+      'qr-card transition-colors',
       task.status === 'in_progress' && 'border-amber-500/30',
       task.status === 'done'        && 'border-emerald-500/20',
       task.status === 'failed'      && 'border-red-500/30',
-      task.status === 'queued'      && 'border-border',
     )}>
       <button
         className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left"
@@ -550,7 +546,7 @@ function AgentStatusCard({ agent }: { agent: BriefAgent }) {
 
   return (
     <div className={cn(
-      'rounded-xl border bg-card p-3 space-y-2 transition-colors',
+      'qr-card p-3 space-y-2 transition-colors',
       agent.status === 'done'   && 'border-emerald-500/20',
       agent.status === 'paused' && 'border-amber-500/20',
       agent.status !== 'done' && agent.status !== 'paused' && 'border-primary/20',
@@ -616,18 +612,21 @@ interface SectionProps {
 function ApprovalSection({ step, title, icon: Icon, approved, onApprove, onRevise, children }: SectionProps) {
   return (
     <div className={cn(
-      'rounded-xl border p-4 space-y-3 transition-colors',
-      approved ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border bg-card',
+      'qr-card p-4 space-y-3 transition-colors',
+      approved && 'border-emerald-500/30',
     )}>
       <div className="flex items-center gap-2">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
-          {approved ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : step}
+        <span className={cn(
+          'flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold',
+          approved ? 'text-emerald-500' : 'bg-muted text-muted-foreground',
+        )}>
+          {approved ? <CheckCircle2 className="h-4 w-4" /> : step}
         </span>
         <Icon className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-semibold">{title}</span>
         {approved && (
-          <button onClick={onRevise} className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors">
-            Request changes
+          <button onClick={onRevise} className="qr-btn qr-btn-ghost qr-btn-xs ml-auto">
+            Revise
           </button>
         )}
       </div>
@@ -635,10 +634,7 @@ function ApprovalSection({ step, title, icon: Icon, approved, onApprove, onRevis
       <div>{children}</div>
 
       {!approved && (
-        <button
-          onClick={onApprove}
-          className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-500 hover:bg-emerald-500/20 transition-colors"
-        >
+        <button onClick={onApprove} className="qr-btn qr-btn-outline qr-btn-sm text-emerald-500 border-emerald-500/40">
           <CheckCircle2 className="h-4 w-4" /> Approve
         </button>
       )}
@@ -650,7 +646,7 @@ function ApprovalSection({ step, title, icon: Icon, approved, onApprove, onRevis
 
 function StepperHeader({ steps }: { steps: { label: string; done: boolean }[] }) {
   return (
-    <div className="flex items-center gap-1 rounded-xl border border-border bg-muted/20 p-3">
+    <div className="flex items-center gap-1 qr-card px-3 py-2.5">
       {steps.map((s, i) => (
         <div key={s.label} className="flex items-center gap-1 flex-1 justify-center">
           <span className={cn('text-xs font-medium', s.done ? 'text-emerald-500' : 'text-muted-foreground')}>
@@ -679,10 +675,10 @@ function Chip({ label, value, wide }: { label: string; value: string; wide?: boo
 function ProposedAgentRow({ agent }: { agent: ProposedAgent }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl border border-border bg-muted/20 overflow-hidden">
+    <div className="qr-card overflow-hidden">
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/40 transition-colors"
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-accent/50 transition-colors"
       >
         <Bot className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
