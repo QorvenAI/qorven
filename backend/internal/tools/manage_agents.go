@@ -35,6 +35,10 @@ var OnAgentUpdate func(ctx context.Context, id string, fields map[string]any) er
 var OnAgentDelete func(ctx context.Context, id string) error
 var OnAgentList func(ctx context.Context) ([]map[string]string, error)
 
+// OnModelForTier resolves a model ID for a given tier string.
+// Wired by gateway to SmartRouter.BestModelForTier.
+var OnModelForTier func(tier string) string
+
 func (m *ManageAgents) Execute(ctx context.Context, args map[string]any) *Result {
 	action, _ := args["action"].(string)
 	switch action {

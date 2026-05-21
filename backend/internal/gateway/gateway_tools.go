@@ -690,6 +690,20 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewSelfImprove(selfRepo))
 	reg.Register(tools.NewManageAgents())
 
+	// spawn_team — budget- and timeline-aware team provisioning for Prime.
+	{
+		modelForTier := func(tier string) string {
+			if gw.agentLoop == nil || gw.agentLoop.SmartRouter == nil {
+				return ""
+			}
+			return gw.agentLoop.SmartRouter.BestModelForTier(tier)
+		}
+		tools.OnModelForTier = modelForTier
+		if tools.OnAgentCreate != nil {
+			reg.Register(tools.NewSpawnTeam(tools.OnAgentCreate, modelForTier))
+		}
+	}
+
 	// Native flight search.
 	reg.Register(tools.NewFlightSearchTool())
 
