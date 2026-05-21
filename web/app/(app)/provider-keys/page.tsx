@@ -2,6 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { Key, Plus, Trash2, CheckCircle, Eye, EyeOff, Loader2, GitBranch, ExternalLink } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
@@ -277,7 +278,7 @@ function ProviderKeysSection() {
         <Key className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
         <p className="text-sm text-muted-foreground">No LLM providers configured yet</p>
         <p className="text-xs text-muted-foreground/60 mt-1">
-          Go to <a href="/models-hub" className="underline">Models Hub</a> to add a provider first
+          Go to <Link href="/models-hub" className="underline">Models Hub</Link> to add a provider first
         </p>
       </div>
     );

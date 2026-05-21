@@ -2,6 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import Link from 'next/link';
 import { useState, useMemo } from 'react';
 import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -104,7 +105,7 @@ function SoulProfile({ soul, tab, setTab, onClose }: { soul: Soul; tab: PanelTab
             <Row label="Memory" value={soul.memory_enabled ? 'Enabled' : 'Disabled'} />
             <Row label="Tools" value={soul.tool_profile || 'full'} />
             <Row label="Skills" value={`${soul.skills?.length ?? 0} installed`} />
-            <a href={`/qors/${soul.id}`} className="block mt-4 text-xs text-primary hover:underline text-center">Open Full Config →</a>
+            <Link href={`/qors/${soul.id}`} className="block mt-4 text-xs text-primary hover:underline text-center">Open Full Config →</Link>
           </>
         )}
         {tab === 'activity' && (

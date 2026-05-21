@@ -2,6 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { BlockRenderer } from '@/components/blocks';
@@ -117,7 +118,7 @@ export default function DashboardPage() {
 
   if (!config) return (
     <div className="mx-auto max-w-3xl p-8 text-center">
-      <p className="text-muted-foreground">Dashboard not found. <a href="/marketplace" className="text-primary hover:underline">Install a template first.</a></p>
+      <p className="text-muted-foreground">Dashboard not found. <Link href="/marketplace" className="text-primary hover:underline">Install a template first.</Link></p>
     </div>
   );
 
@@ -125,7 +126,7 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-6xl p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">{templateName || 'Dashboard'}</h1>
-        <a href="/marketplace" className="text-xs text-muted-foreground hover:text-foreground">← Marketplace</a>
+        <Link href="/marketplace" className="text-xs text-muted-foreground hover:text-foreground">← Marketplace</Link>
       </div>
       <BlockRenderer config={config} />
     </div>

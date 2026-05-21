@@ -2,6 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { BarChart3, Loader2, Check, Zap, Trophy, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -175,9 +176,9 @@ function ModelRankingsPanel({ onSelectModel }: { onSelectModel: (id: string) => 
         <div className="text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Model rankings unavailable.</span>{' '}
           Add your Artificial Analysis API key in{' '}
-          <a href="/models-hub/integrations" className="text-primary hover:underline">
+          <Link href="/models-hub/integrations" className="text-primary hover:underline">
             Models → Integrations
-          </a>{' '}
+          </Link>{' '}
           to show live benchmark scores and rankings that improve auto-routing.{' '}
           <a
             href="https://artificialanalysis.ai"

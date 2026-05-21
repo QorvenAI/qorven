@@ -6,6 +6,7 @@
 // Four tabs: Chat (Prime), Notifications, Activity, Tasks
 // Opened/closed by header icon buttons via Zustand store
 
+import Link from 'next/link';
 import { useStore } from '@/store';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
@@ -306,9 +307,9 @@ function NotificationsTab() {
               </div>
             ))}
             {discovered.length > 5 && (
-              <a href="/models-hub?tab=generative" className="block text-2xs text-amber-400 hover:underline text-center pt-0.5">
+              <Link href="/models-hub?tab=generative" className="block text-2xs text-amber-400 hover:underline text-center pt-0.5">
                 +{discovered.length - 5} more — open Models Hub
-              </a>
+              </Link>
             )}
           </div>
         </div>

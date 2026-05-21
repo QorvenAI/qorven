@@ -2,6 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import Link from 'next/link';
 import { useStore } from '@/store';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -86,16 +87,16 @@ export function Header() {
           {soul ? (
             <div className="flex flex-col justify-center min-w-0">
               <div className="flex items-center gap-1.5 text-2sm text-muted-foreground leading-none">
-                <a href="/qors" className="hover:text-foreground transition-colors">Qors</a>
+                <Link href="/qors" className="hover:text-foreground transition-colors">Qors</Link>
                 <span className="text-muted-foreground/50">/</span>
                 <span className="text-foreground font-medium truncate max-w-[160px]">{soul.display_name}</span>
               </div>
             </div>
           ) : isCodePage ? (
             <nav className="flex items-center gap-1.5 text-2sm">
-              <a href="/" className="text-muted-foreground hover:text-foreground transition-colors">Home</a>
+              <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">Home</Link>
               <span className="text-muted-foreground/50">/</span>
-              <a href="/code" className="text-muted-foreground hover:text-foreground transition-colors">Code</a>
+              <Link href="/code" className="text-muted-foreground hover:text-foreground transition-colors">Code</Link>
               {codeProjectName && (<>
                 <span className="text-muted-foreground/50">/</span>
                 <button className="flex items-center gap-1 text-foreground font-medium hover:text-primary transition-colors">
@@ -105,7 +106,7 @@ export function Header() {
             </nav>
           ) : (
             <nav className="flex items-center gap-1.5 text-2sm">
-              <a href="/" className="text-muted-foreground hover:text-foreground transition-colors">Home</a>
+              <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">Home</Link>
               <span className="text-muted-foreground/50">/</span>
               <span className="text-foreground font-medium">{title}</span>
             </nav>
