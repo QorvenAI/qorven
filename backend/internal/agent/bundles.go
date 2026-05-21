@@ -55,9 +55,36 @@ func (s *BundleStore) List(ctx context.Context, agentID string) ([]Bundle, error
 	return out, nil
 }
 
-// Delete removes a bundle.
+// ListAll returns every bundle for an agent regardless of enabled state (used by the editor UI).
+func (s *BundleStore) ListAll(ctx context.Context, agentID string) ([]Bundle, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, agent_id, bundle_type, name, content, priority, enabled
+		 FROM agent_bundles WHERE agent_id=$1 ORDER BY priority DESC, name`,
+		agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Bundle{}
+	for rows.Next() {
+		var b Bundle
+		rows.Scan(&b.ID, &b.AgentID, &b.BundleType, &b.Name, &b.Content, &b.Priority, &b.Enabled)
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+// Delete removes a bundle by row ID.
 func (s *BundleStore) Delete(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, "DELETE FROM agent_bundles WHERE id=$1", id)
+	return err
+}
+
+// DeleteByType removes all bundles of a given type for an agent.
+func (s *BundleStore) DeleteByType(ctx context.Context, agentID, bundleType string) error {
+	_, err := s.pool.Exec(ctx,
+		"DELETE FROM agent_bundles WHERE agent_id=$1 AND bundle_type=$2",
+		agentID, bundleType)
 	return err
 }
 

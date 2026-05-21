@@ -74,6 +74,16 @@ export interface DreamingConfig {
   next_dream_at?: string;
 }
 
+export interface AgentBundle {
+  id: string;
+  agent_id: string;
+  bundle_type: string;
+  name: string;
+  content: string;
+  priority: number;
+  enabled: boolean;
+}
+
 export const agents = {
   list: () => listRequest<Soul>('/agents'),
   get: (id: string) => request<Soul>(`/agents/${id}`),
@@ -102,6 +112,15 @@ export const agents = {
     request<{ status: string }>(`/agents/${id}/runtime/override`, { method: 'POST', body: JSON.stringify({ message }) }),
   generateSoul: (name: string, role: string, description: string) =>
     request<{ soul: string }>('/agents/generate-soul', { method: 'POST', body: JSON.stringify({ name, role, description }) }),
+  listBundles: (id: string) =>
+    request<{ bundles: AgentBundle[] }>(`/agents/${id}/bundles`),
+  upsertBundle: (id: string, type: string, content: string, polish = false) =>
+    request<{ content: string; polished: boolean }>(`/agents/${id}/bundles/${type}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content, polish }),
+    }),
+  deleteBundle: (id: string, type: string) =>
+    request<{ status: string }>(`/agents/${id}/bundles/${type}`, { method: 'DELETE' }),
 };
 
 export const sessions = {

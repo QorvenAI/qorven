@@ -244,6 +244,104 @@ func (gw *Gateway) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 
+// handleListBundles returns all bundles for an agent (including disabled ones for the editor).
+func (gw *Gateway) handleListBundles(w http.ResponseWriter, r *http.Request) {
+	if gw.bundleStore == nil {
+		writeJSON(w, 200, map[string]any{"bundles": []any{}})
+		return
+	}
+	agentID := chi.URLParam(r, "id")
+	bundles, err := gw.bundleStore.ListAll(r.Context(), agentID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"bundles": bundles})
+}
+
+// handleUpsertBundle creates or updates a single bundle. If polish=true, runs the content
+// through the default LLM to fix spelling/grammar before storing.
+func (gw *Gateway) handleUpsertBundle(w http.ResponseWriter, r *http.Request) {
+	if gw.bundleStore == nil {
+		writeJSON(w, 503, map[string]string{"error": "database not configured"})
+		return
+	}
+	agentID := chi.URLParam(r, "id")
+	bundleType := chi.URLParam(r, "type")
+
+	var req struct {
+		Content  string `json:"content"`
+		Priority int    `json:"priority"`
+		Enabled  *bool  `json:"enabled"`
+		Polish   bool   `json:"polish"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	content := strings.TrimSpace(req.Content)
+
+	// AI polish — fix spelling/grammar using the fast default model.
+	if req.Polish && content != "" && gw.providerReg != nil {
+		if p := gw.providerReg.Default(); p != nil {
+			var model string
+			if gw.agentLoop != nil && gw.agentLoop.SmartRouter != nil {
+				model = gw.agentLoop.SmartRouter.BestModelForTier(providers.TierSimple)
+			}
+			polishPrompt := fmt.Sprintf(`Fix any spelling mistakes, grammar errors, and awkward phrasing in the following instruction text. Preserve the meaning, tone, and all technical terms exactly. Return only the corrected text with no commentary, no markdown, no explanation.
+
+Text to fix:
+%s`, content)
+			resp, err := p.Chat(r.Context(), providers.ChatRequest{
+				Model:    model,
+				Messages: []providers.Message{{Role: "user", Content: polishPrompt}},
+			})
+			if err == nil {
+				content = strings.TrimSpace(resp.Content)
+			}
+		}
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	priority := req.Priority
+	if priority == 0 {
+		priority = 100
+	}
+
+	b := agent.Bundle{
+		AgentID:    agentID,
+		BundleType: bundleType,
+		Name:       bundleType,
+		Content:    content,
+		Priority:   priority,
+		Enabled:    enabled,
+	}
+	if err := gw.bundleStore.Upsert(r.Context(), b); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"content": content, "polished": req.Polish})
+}
+
+// handleDeleteBundle removes a bundle by type (name=type for the three core bundles).
+func (gw *Gateway) handleDeleteBundle(w http.ResponseWriter, r *http.Request) {
+	if gw.bundleStore == nil {
+		writeJSON(w, 503, map[string]string{"error": "database not configured"})
+		return
+	}
+	agentID := chi.URLParam(r, "id")
+	bundleType := chi.URLParam(r, "type")
+	if err := gw.bundleStore.DeleteByType(r.Context(), agentID, bundleType); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted"})
+}
+
 func (gw *Gateway) handleGetChief(w http.ResponseWriter, r *http.Request) {
 	if gw.agents == nil {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})

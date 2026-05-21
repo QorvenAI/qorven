@@ -8,7 +8,7 @@ import { soulGradient } from '@/components/soul-card';
 import { useStore } from '@/store';
 import { agents as agentsApi } from '@/lib/api';
 import { ActivityTab } from '@/components/tabs/activity-tab';
-import { MapPin, Briefcase, Cpu, Shield, Wallet, Sparkles, Activity, User, Loader2, Save } from 'lucide-react';
+import { MapPin, Briefcase, Cpu, Shield, Wallet, Sparkles, Activity, User, Loader2, Save, Wand2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Soul } from '@/types';
 import { modelDisplayName } from '@/lib/model-names';
@@ -101,20 +101,7 @@ export function SoulSettingsPage({ soul }: Props) {
               </div>
             </div>
           )}
-          {activeSub === 'bundles' && (
-            <div className="space-y-4">
-              <p className="text-sm font-medium">Instruction Bundles</p>
-              <p className="text-xs text-muted-foreground">Custom instructions injected into this Qor's system prompt.</p>
-              {['identity', 'tools', 'soul'].map(type => (
-                <div key={type} className="rounded-xl border border-border p-4">
-                  <p className="text-xs font-medium mb-2 capitalize">{type}.md</p>
-                  <textarea defaultValue="" placeholder={`${type} instructions for this Qor...`}
-                    className="w-full rounded border border-input bg-transparent px-3 py-2 text-xs font-mono h-24 resize-y" />
-                  <button className="mt-2 rounded bg-primary px-3 py-1 text-xs text-primary-foreground cursor-pointer">Save</button>
-                </div>
-              ))}
-            </div>
-          )}
+          {activeSub === 'bundles' && <BundlesSubPage soul={soul} />}
 
         {activeSub === 'activity' && <ActivityTab agentId={soul.id} />}
       </div>
@@ -127,6 +114,130 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="text-center">
       <p className="text-sm font-semibold">{value}</p>
       <p className="text-2xs text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+// ─── Bundles Sub-Page ───
+
+const BUNDLE_TYPES = [
+  { type: 'identity', label: 'identity.md', placeholder: 'Define who this Qor is — its role, personality, and how it introduces itself.' },
+  { type: 'tools',    label: 'tools.md',    placeholder: 'Describe which tools this Qor may use, when to use them, and any usage constraints.' },
+  { type: 'soul',     label: 'soul.md',     placeholder: 'Core values, communication style, and principles this Qor always follows.' },
+];
+
+function BundlesSubPage({ soul }: { soul: Soul }) {
+  const [bundles, setBundles] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [polishing, setPolishing] = useState<Record<string, boolean>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    agentsApi.listBundles(soul.id)
+      .then(({ bundles: list }) => {
+        const map: Record<string, string> = {};
+        list.forEach(b => { map[b.bundle_type] = b.content; });
+        setBundles(map);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [soul.id]);
+
+  const handleSave = async (type: string) => {
+    setSaving(s => ({ ...s, [type]: true }));
+    try {
+      await agentsApi.upsertBundle(soul.id, type, bundles[type] ?? '');
+      toast.success(`${type}.md saved`);
+    } catch {
+      toast.error(`Failed to save ${type}.md`);
+    } finally {
+      setSaving(s => ({ ...s, [type]: false }));
+    }
+  };
+
+  const handlePolish = async (type: string) => {
+    const content = bundles[type] ?? '';
+    if (!content.trim()) { toast.error('Nothing to polish — write some content first'); return; }
+    setPolishing(s => ({ ...s, [type]: true }));
+    try {
+      const { content: polished } = await agentsApi.upsertBundle(soul.id, type, content, true);
+      setBundles(b => ({ ...b, [type]: polished }));
+      toast.success('Spelling and grammar polished');
+    } catch {
+      toast.error('Polish failed');
+    } finally {
+      setPolishing(s => ({ ...s, [type]: false }));
+    }
+  };
+
+  const handleClear = async (type: string) => {
+    try {
+      await agentsApi.deleteBundle(soul.id, type);
+      setBundles(b => ({ ...b, [type]: '' }));
+      toast.success(`${type}.md cleared`);
+    } catch {
+      toast.error(`Failed to clear ${type}.md`);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-sm font-medium">Instruction Bundles</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          These blocks are injected into this Qor's system prompt before every conversation.
+          Write in plain text or markdown. Use "Polish" to auto-fix spelling and grammar.
+        </p>
+      </div>
+
+      {!loaded ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-6">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading bundles…
+        </div>
+      ) : (
+        BUNDLE_TYPES.map(({ type, label, placeholder }) => (
+          <div key={type} className="rounded-xl border border-border bg-card p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium font-mono text-foreground">{label}</p>
+              <button
+                onClick={() => handleClear(type)}
+                className="text-muted-foreground hover:text-destructive transition-colors"
+                title={`Clear ${label}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <textarea
+              value={bundles[type] ?? ''}
+              onChange={e => setBundles(b => ({ ...b, [type]: e.target.value }))}
+              placeholder={placeholder}
+              rows={6}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleSave(type)}
+                disabled={saving[type]}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {saving[type] ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                {saving[type] ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => handlePolish(type)}
+                disabled={polishing[type] || saving[type]}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 disabled:opacity-50 cursor-pointer transition-colors"
+                title="Fix spelling and grammar with AI"
+              >
+                {polishing[type] ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                {polishing[type] ? 'Polishing…' : 'Polish with AI'}
+              </button>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }

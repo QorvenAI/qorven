@@ -91,6 +91,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/agents/{id}/subconscious", gw.handleRunSubconscious)
 		r.Put("/agents/{id}", gw.handleUpdateAgent)
 		r.Delete("/agents/{id}", gw.handleDeleteAgent)
+		r.Get("/agents/{id}/bundles", gw.handleListBundles)
+		r.Put("/agents/{id}/bundles/{type}", gw.handleUpsertBundle)
+		r.Delete("/agents/{id}/bundles/{type}", gw.handleDeleteBundle)
 		r.Get("/agents/chief", gw.handleGetChief)
 
 		// Discussion history — list grouped conversations + label editing
