@@ -212,8 +212,9 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Patch unit before swap so /usr/local/bin is writable in this process.
-	patchServiceUnit()
+	// On Windows the binary is locked while running; stop the service so the
+	// file can be overwritten. NSSM restarts it after selfExit() below.
+	stopWindowsService()
 
 	// Replace binary
 	self, err := os.Executable()
@@ -461,57 +462,25 @@ func verifyGHChecksum(binPath, shaPath string) error {
 }
 
 func replaceBinarySelf(current, next string) error {
-	// Stage the new binary in /run — writable and shared across all mount
-	// namespaces. PrivateTmp=yes (common in systemd units) isolates /tmp and
-	// /var/tmp but does NOT affect /run, so the file is visible to any child
-	// process regardless of its namespace.
-	staged := "/run/qorven-update-pending"
+	// The installer places the binary in /opt/qorven/bin/ and sets
+	// chown qorven:qorven on both the directory and the file. The service user
+	// therefore has full write access to that directory, so a plain atomic
+	// rename is all we need — no sudo, no nsenter, no sandbox escaping.
+	//
+	// For installs that haven't migrated yet (binary still at /usr/local/bin/),
+	// the startup migration in migrate_binary.go moves the binary first.
+	staged := current + ".new"
 	if err := copyFileTo(next, staged); err != nil {
-		staged = next // fall back to original temp path
-	} else {
-		_ = os.Chmod(staged, 0755)
-		defer os.Remove(staged)
+		return fmt.Errorf("stage failed: %w", err)
 	}
-
-	// Atomic swap: copy to .new, chmod, then mv into place (mv is atomic on
-	// the same filesystem). No .bak step — if cp fails, current is untouched.
-	swapScript := fmt.Sprintf(
-		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s.new %s",
-		staged, current, current, current, current,
-	)
-
-	// Strategy 1: systemd-run — creates a transient service unit that runs
-	// outside ProtectSystem=full's read-only bind mounts.
-	if _, err := exec.LookPath("systemd-run"); err == nil {
-		if _, err := exec.Command("systemd-run", "--wait", "--quiet", "sh", "-c", swapScript).CombinedOutput(); err == nil {
-			return nil
-		}
-		slog.Debug("update.systemd_run_failed", "err", err)
+	if err := os.Chmod(staged, 0755); err != nil {
+		os.Remove(staged)
+		return fmt.Errorf("chmod failed: %w", err)
 	}
-
-	// Strategy 2: nsenter into the host (PID 1) mount namespace.
-	// ProtectSystem=full only restricts THIS service's mount namespace; the
-	// root namespace has /usr/local/bin writable. nsenter is part of
-	// util-linux and present on all standard Ubuntu installs.
-	if _, err := exec.LookPath("nsenter"); err == nil {
-		if _, err := exec.Command("nsenter", "--mount=/proc/1/ns/mnt", "--", "sh", "-c", swapScript).CombinedOutput(); err == nil {
-			return nil
-		}
-		slog.Debug("update.nsenter_failed", "err", err)
+	if err := os.Rename(staged, current); err != nil {
+		os.Remove(staged)
+		return fmt.Errorf("install failed: %w", err)
 	}
-
-	// Strategy 3: direct swap — works when running outside systemd sandboxing
-	// (dev environment, manual install without ProtectSystem).
-	backup := current + ".bak"
-	if err := os.Rename(current, backup); err != nil {
-		return fmt.Errorf("backup failed: %w", err)
-	}
-	if err := copyFileTo(next, current); err != nil {
-		_ = os.Rename(backup, current)
-		return err
-	}
-	_ = os.Chmod(current, 0755)
-	os.Remove(backup)
 	return nil
 }
 

@@ -58,18 +58,19 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("done")
 
-	// 2. Remove binary
+	// 2. Remove binary, symlink, and opt dir
 	fmt.Print("  Removing binary... ")
-	for _, p := range []string{"/usr/local/bin/qorven", "/usr/bin/qorven"} {
-		if _, err := os.Stat(p); err == nil {
+	for _, p := range []string{"/opt/qorven/bin/qorven", "/usr/local/bin/qorven", "/usr/bin/qorven"} {
+		if _, err := os.Lstat(p); err == nil {
 			if err := os.Remove(p); err != nil {
 				fmt.Printf("warn: %v\n", err)
 			} else {
 				fmt.Printf("removed %s\n", p)
-				break
 			}
 		}
 	}
+	os.Remove("/usr/local/bin/qorven") // remove symlink if binary was in /opt
+	os.RemoveAll("/opt/qorven/bin")
 
 	if purge {
 		// 3. Remove config + data

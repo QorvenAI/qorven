@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -183,7 +184,7 @@ func New(cfg Config) *Model {
 			{label: "Create OS user  qorven"},
 			{label: "Create data directories"},
 			{label: "Setup database"},
-			{label: "Install binary to /usr/local/bin"},
+			{label: "Install binary to /opt/qorven/bin"},
 			{label: "Install & start systemd service"},
 			{label: "Configure nginx reverse proxy"},
 			{label: "Install Tailscale"},
@@ -546,7 +547,7 @@ mode = "disabled"
 		"env",
 		"QORVEN_CONFIG="+filepath.Join(etcDir, "config.toml"),
 		"QORVEN_POSTGRES_DSN="+probeSocketDSN(),
-		"/usr/local/bin/qorven", "migrate", "up",
+		"/opt/qorven/bin/qorven", "migrate", "up",
 	)
 	// Retry up to 3 times — pg socket may need a moment to become ready
 	for i := 0; i < 3; i++ {
@@ -558,7 +559,7 @@ mode = "disabled"
 			"env",
 			"QORVEN_CONFIG="+filepath.Join(etcDir, "config.toml"),
 			"QORVEN_POSTGRES_DSN="+probeSocketDSN(),
-			"/usr/local/bin/qorven", "migrate", "up",
+			"/opt/qorven/bin/qorven", "migrate", "up",
 		)
 	}
 
@@ -1586,8 +1587,10 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			"CREATE EXTENSION IF NOT EXISTS vector;")
 		return "ready", false, nil
 
-	case 8: // Binary — stop service first, use atomic rename to avoid "text file busy"
-		target := "/usr/local/bin/qorven"
+	case 8: // Binary — install to /opt/qorven/bin/ (owned by service user) + symlink into PATH
+		binDir := "/opt/qorven/bin"
+		target := binDir + "/qorven"
+		symlink := "/usr/local/bin/qorven"
 		self, _ := os.Executable()
 		selfReal, _ := filepath.EvalSymlinks(self)
 		targetReal, evalErr := filepath.EvalSymlinks(target)
@@ -1596,6 +1599,12 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		}
 		// Stop the running service so the binary file is not in use
 		runQuiet("systemctl", "stop", "qorven")
+		// Create /opt/qorven/bin owned by the qorven service user so that
+		// self-updates can rename files inside this directory without sudo.
+		if err = os.MkdirAll(binDir, 0755); err != nil {
+			return "", false, fmt.Errorf("create bin dir: %w", err)
+		}
+		runQuiet("chown", "qorven:qorven", binDir)
 		data, readErr := os.ReadFile(self)
 		if readErr != nil {
 			return "", false, fmt.Errorf("read binary: %w", readErr)
@@ -1608,6 +1617,13 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		if err = os.Rename(tmp, target); err != nil {
 			os.Remove(tmp)
 			return "", false, fmt.Errorf("rename binary: %w", err)
+		}
+		runQuiet("chown", "qorven:qorven", target)
+		// Symlink /usr/local/bin/qorven → /opt/qorven/bin/qorven so it stays on PATH.
+		os.Remove(symlink)
+		if err = os.Symlink(target, symlink); err != nil {
+			// Non-fatal — binary is usable via /opt/qorven/bin/qorven directly.
+			slog.Warn("install.symlink_failed", "err", err)
 		}
 		return target, false, nil
 
@@ -1626,7 +1642,7 @@ User=qorven
 Group=qorven
 Environment=QORVEN_CONFIG=/etc/qorven/config.toml
 EnvironmentFile=-/etc/qorven/.env
-ExecStart=/usr/local/bin/qorven start
+ExecStart=/opt/qorven/bin/qorven start
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -1635,7 +1651,7 @@ WorkingDirectory=/var/lib/qorven
 NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/var/lib/qorven /etc/qorven /usr/local/bin
+ReadWritePaths=/var/lib/qorven /etc/qorven /opt/qorven/bin
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]

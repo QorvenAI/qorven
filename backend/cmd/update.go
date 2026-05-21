@@ -158,9 +158,15 @@ func runUpdate() error {
 		return fmt.Errorf("locate current binary: %w", err)
 	}
 	fmt.Printf("  Installing to %s… ", currentBin)
+	// On Windows the running binary is locked; stop the service first.
+	if err := stopService(); err != nil {
+		return fmt.Errorf("stop service: %w", err)
+	}
 	if err := replaceSelf(currentBin, binPath); err != nil {
+		_ = startService() // best-effort restart even on failure
 		return fmt.Errorf("%w\n  (try again with sudo if this is /usr/local/bin)", err)
 	}
+	_ = startService()
 	fmt.Println("ok")
 
 	fmt.Printf("\n  ✓ Updated: %s → %s\n", current, latest)
@@ -353,44 +359,32 @@ func verifyChecksum(binPath, shaPath, binName string) error {
 	return nil
 }
 
-// replaceSelf atomically swaps the running binary. Strategy (tried in order):
-//  1. sudo cp/mv           — works for non-root users with passwordless sudo (EC2/Ubuntu default)
-//  2. systemd-run --wait   — escapes ProtectSystem=full when running as the service (no D-Bus needed)
-//  3. Direct write         — works when already root
+// replaceSelf atomically swaps the running binary.
+// On standard installs the binary lives in /opt/qorven/bin/ which is owned by
+// the qorven user, so a plain rename always works. sudo is kept as a fallback
+// for manual installs where the binary may still be root-owned.
 func replaceSelf(current, next string) error {
-	script := fmt.Sprintf(
-		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s %s.bak && mv -f %s.new %s",
-		next, current, current, current, current, current, current,
-	)
+	staged := current + ".new"
+	if err := copyAndChmod(next, staged); err != nil {
+		return fmt.Errorf("stage failed: %w", err)
+	}
+	if err := os.Rename(staged, current); err == nil {
+		return nil
+	}
+	os.Remove(staged)
 
-	// Strategy 1: sudo — most common path for non-root users on cloud VMs.
+	// Fallback: sudo for root-owned paths (manual installs, legacy locations).
+	script := fmt.Sprintf(
+		"cp -f %s %s.new && chmod 0755 %s.new && mv -f %s.new %s && chown qorven:qorven %s 2>/dev/null; true",
+		next, current, current, current, current, current,
+	)
 	if _, err := exec.LookPath("sudo"); err == nil {
 		if out, err := exec.Command("sudo", "sh", "-c", script).CombinedOutput(); err == nil {
 			_ = out
 			return nil
 		}
 	}
-
-	// Strategy 2: systemd-run transient service (no --scope — avoids D-Bus session requirement).
-	if _, err := exec.LookPath("systemd-run"); err == nil {
-		cmd := exec.Command("systemd-run", "--wait", "--quiet", "sh", "-c", script)
-		if out, err := cmd.CombinedOutput(); err == nil {
-			_ = out
-			return nil
-		}
-	}
-
-	// Strategy 3: direct swap (already root or user-writable path).
-	backup := current + ".bak"
-	if err := os.Rename(current, backup); err != nil {
-		return fmt.Errorf("permission denied — run with: sudo qorven update")
-	}
-	if err := copyAndChmod(next, current); err != nil {
-		os.Rename(backup, current)
-		return err
-	}
-	os.Remove(backup)
-	return nil
+	return fmt.Errorf("permission denied — run with: sudo qorven update")
 }
 
 func copyAndChmod(src, dst string) error {
