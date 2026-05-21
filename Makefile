@@ -69,6 +69,20 @@ build-backend:  ## Build the Go binary for the current arch → dist/qorven
 		echo "  Unset GOARCH to build natively (fast)."; \
 		echo ""; \
 	fi
+	@EMBED_TS=$$(stat -c %Y $(EMBED_DIR)/.embedded 2>/dev/null || echo 0); \
+	WEB_TS=$$(find $(WEB_DIR)/app $(WEB_DIR)/components $(WEB_DIR)/lib \
+	  -name "*.tsx" -o -name "*.ts" -o -name "*.css" 2>/dev/null \
+	  | xargs stat -c %Y 2>/dev/null | sort -rn | head -1); \
+	WEB_TS=$${WEB_TS:-0}; \
+	if [ "$$WEB_TS" -gt "$$EMBED_TS" ]; then \
+	  echo ""; \
+	  echo "  ERROR: Frontend source is newer than the embedded build."; \
+	  echo "  Run 'make build-web' first, then retry."; \
+	  echo "  (Last embed: $$(date -d @$$EMBED_TS 2>/dev/null || date -r $$EMBED_TS 2>/dev/null || echo unknown))"; \
+	  echo "  (Last web change: $$(date -d @$$WEB_TS 2>/dev/null || date -r $$WEB_TS 2>/dev/null || echo unknown))"; \
+	  echo ""; \
+	  exit 1; \
+	fi
 	@mkdir -p $(DIST_DIR)
 	cd $(BACKEND_DIR) && CGO_ENABLED=0 $(GO_CMD) build \
 		-trimpath \
