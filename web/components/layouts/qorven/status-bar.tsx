@@ -240,7 +240,7 @@ export function StatusBar() {
           target="_blank"
           rel="noopener noreferrer"
           title="Visit qorven.ai"
-          className="flex items-center px-1.5 h-full font-medium text-muted-foreground/60 hover:text-muted-foreground transition-colors rounded-sm hover:bg-accent"
+          className="flex items-center px-1.5 h-full font-medium text-muted-foreground hover:text-foreground transition-colors rounded-sm hover:bg-accent"
         >
           Qorven
         </Link>
@@ -250,7 +250,7 @@ export function StatusBar() {
           <button
             onClick={openChangelog}
             title={updateState === 'available' ? `Update available: v${updateInfo?.latest}` : 'View changelog & check for updates'}
-            className="relative flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground/50 hover:text-muted-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer"
+            className="relative flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground hover:text-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer"
           >
             v{version}
           </button>
@@ -277,14 +277,14 @@ export function StatusBar() {
 
               {/* Memory */}
               <StatusChip title={`RAM used: ${stats.mem_used_gb.toFixed(2)} GB · Available: ${(stats.mem_total_gb - stats.mem_used_gb).toFixed(2)} GB · Total: ${stats.mem_total_gb.toFixed(1)} GB`}>
-                <MemoryStick className="h-3 w-3 mr-0.5 shrink-0" />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
+                <MemoryStick className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.5} />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
               </StatusChip>
 
               <StatusDivider />
 
               {/* Disk */}
               <StatusChip title={`Disk used: ${stats.disk_used_gb.toFixed(2)} GB · Free: ${(stats.disk_total_gb - stats.disk_used_gb).toFixed(2)} GB · Total: ${stats.disk_total_gb.toFixed(1)} GB`}>
-                <HardDrive className="h-3 w-3 mr-0.5 shrink-0" />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
+                <HardDrive className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.5} />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
               </StatusChip>
 
               <StatusDivider />
@@ -345,13 +345,13 @@ export function StatusBar() {
                   className="flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Full changelog
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-3 w-3" strokeWidth={2.5} />
                 </Link>
                 <button
                   onClick={() => setChangelogOpen(false)}
                   className="flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-3.5 w-3.5" strokeWidth={2.5} />
                 </button>
               </div>
             </div>
@@ -360,20 +360,20 @@ export function StatusBar() {
             <div className="shrink-0 px-4 pt-3 pb-1">
               {updateState === 'checking' && (
                 <div className="flex items-center gap-2 text-2xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" strokeWidth={2.5} />
                   Checking for updates…
                 </div>
               )}
               {updateState === 'up_to_date' && (
                 <div className="flex items-center gap-2 text-2xs text-emerald-500">
-                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                  <CheckCircle2 className="h-3 w-3 shrink-0" strokeWidth={2.5} />
                   You're on the latest version.
                 </div>
               )}
               {updateState === 'available' && updateInfo && (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <ArrowUpCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <ArrowUpCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" strokeWidth={2.5} />
                     <span className="text-2xs text-foreground font-medium">
                       v{updateInfo.latest} available
                     </span>
@@ -391,13 +391,13 @@ export function StatusBar() {
               )}
               {updateState === 'installing' && (
                 <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" strokeWidth={2.5} />
                   <span className="text-2xs text-foreground font-medium">Downloading update…</span>
                 </div>
               )}
               {updateState === 'restarting' && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500 shrink-0" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500 shrink-0" strokeWidth={2.5} />
                   <span className="text-2xs text-amber-600 dark:text-amber-400 font-medium">Restarting — page will reload automatically…</span>
                 </div>
               )}
@@ -440,10 +440,10 @@ function CostChip({ cost, topAgents }: { cost: number; topAgents: AgentSpend[] }
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="px-1.5 h-6 flex items-center gap-0.5 font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-pointer tabular-nums"
+        className="px-1.5 h-6 flex items-center gap-0.5 font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors rounded-sm cursor-pointer tabular-nums"
         title={`Total spend this month: $${cost.toFixed(6)}`}
       >
-        <TrendingUp className="h-3 w-3 mr-0.5 shrink-0" />
+        <TrendingUp className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.5} />
         ${cost.toFixed(4)}
       </button>
       {open && (
@@ -484,7 +484,7 @@ function StatusChip({ children, title }: { children: React.ReactNode; title?: st
   return (
     <span
       title={title}
-      className="px-1.5 h-full flex items-center font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
+      className="px-1.5 h-full flex items-center font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
     >
       {children}
     </span>
@@ -500,10 +500,11 @@ function fmtUptime(sec: number): string {
   const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  if (d > 0) return `${d}d ${h}h ${m}m ${s}s`;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+  const hh = String(h).padStart(2, '0');
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  if (d > 0) return `${d}d ${hh}:${mm}:${ss}`;
+  return `${hh}:${mm}:${ss}`;
 }
 
 function fmtK(n: number): string {
@@ -532,10 +533,10 @@ function ActiveQorsChip({ count }: { count: number }) {
   return (
     <span
       title={tooltip}
-      className="px-1.5 h-full flex items-center gap-1 font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
+      className="px-1.5 h-full flex items-center gap-1 font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
     >
       <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotClass}`} />
-      <Bot className="h-3 w-3 shrink-0" />
+      <Bot className="h-3 w-3 shrink-0" strokeWidth={2.5} />
       {active > 0 ? active : count}
     </span>
   );

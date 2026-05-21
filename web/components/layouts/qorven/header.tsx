@@ -96,7 +96,7 @@ export function Header() {
             <nav className="flex items-center gap-1.5 text-2sm">
               <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">Home</Link>
               <span className="text-muted-foreground/50">/</span>
-              <Link href="/code" className="text-muted-foreground hover:text-foreground transition-colors">Code</Link>
+              <Link href="/code" className={cn('transition-colors', codeProjectName ? 'text-muted-foreground hover:text-foreground' : 'text-foreground font-medium')}>Code</Link>
               {codeProjectName && (<>
                 <span className="text-muted-foreground/50">/</span>
                 <button className="flex items-center gap-1 text-foreground font-medium hover:text-primary transition-colors">
@@ -137,7 +137,7 @@ function IconBtn({ icon: Icon, label, active, onClick }: { icon: typeof PanelRig
     <button title={label} onClick={onClick}
       className={cn('h-9 w-9 flex items-center justify-center rounded-md transition-colors cursor-pointer',
         active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-      <Icon className="h-[18px] w-[18px]" />
+      <Icon className="h-[18px] w-[18px]" strokeWidth={2.5} />
     </button>
   );
 }

@@ -58,7 +58,7 @@ export function Rail() {
               : 'text-muted-foreground hover:text-foreground hover:bg-accent',
           )}
         >
-          <Icon className="h-[18px] w-[18px]" />
+          <Icon className="h-[18px] w-[18px]" strokeWidth={2.5} />
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={8}>{label}</TooltipContent>
