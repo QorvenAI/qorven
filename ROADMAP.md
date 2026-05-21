@@ -1,13 +1,12 @@
 # Qorven Roadmap
 
-> Current release: **v0.1.0-alpha** — running well on single-node Linux deployments.  
-> This roadmap covers the path to v1.0 stable. Priorities shift based on community feedback — [open an issue](https://github.com/QorvenAI/qorven/issues/new) or [start a Discussion](https://github.com/QorvenAI/qorven/discussions) to influence what ships next.
+Path to v1.0 stable. Priorities are adjusted based on community feedback — [open an issue](https://github.com/QorvenAI/qorven/issues/new) or [start a Discussion](https://github.com/QorvenAI/qorven/discussions) to weigh in.
 
 ---
 
-## Now — v0.1.x patch releases
+## Now — v0.1.x
 
-Ongoing bugfixes and small improvements as the alpha stabilises:
+Ongoing fixes and improvements:
 
 - [ ] Channel setup in-app guides (per-channel credential walkthroughs)
 - [ ] Self-update polish — rollback on failure, progress feedback
@@ -67,14 +66,14 @@ Ongoing bugfixes and small improvements as the alpha stabilises:
 
 ---
 
-## Always in scope
+## Continuous
 
-- Reduce binary size and cold-start time
-- Improve agent reasoning reliability and transparency
-- Expand model provider coverage
-- Better documentation, more examples, smoother contributor onboarding
-- Accessibility improvements to the web UI
+- Binary size and cold-start optimisation
+- Agent reasoning reliability and transparency
+- Model provider coverage
+- Documentation depth and contributor onboarding
+- Web UI accessibility
 
 ---
 
-> Want to sponsor a specific roadmap item? [Contact us](mailto:hello@qorven.ai).
+> To sponsor a specific roadmap item, [contact us](mailto:hello@qorven.ai).

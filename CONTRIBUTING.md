@@ -1,14 +1,12 @@
 # Contributing to Qorven
 
-Thanks for wanting to contribute. Bug fixes, new channel integrations, doc improvements, and "good first issues" are all welcome. If anything here is unclear, open a GitHub Discussion — "the docs confused me" is a valid bug report.
+Bug fixes, channel integrations, documentation improvements, and issues tagged [`good first issue`](https://github.com/QorvenAI/qorven/issues?q=is%3Aopen+label%3A%22good+first+issue%22) are all welcome. If anything here is unclear, open a GitHub Discussion.
 
 ---
 
 ## Good first issues
 
-Look for the [`good first issue`](https://github.com/QorvenAI/qorven/issues?q=is%3Aopen+label%3A%22good+first+issue%22) label. Good starting points:
-
-- Adding a new OpenAI-compatible AI provider (usually a catalog entry + wizard option — ~20 lines)
+- Adding a new OpenAI-compatible AI provider (catalog entry + wizard option — ~20 lines)
 - Writing or improving a godoc comment on an exported package
 - Adding a missing CLI flag or improving an error message
 - Writing a setup guide for a specific channel
@@ -180,7 +178,7 @@ web/
 
 ## Recognition
 
-Every merged contribution is credited in the release changelog. We follow the [All Contributors](https://allcontributors.org/) spec — code, docs, design, bug reports, and community support all count.
+Every merged contribution is credited in the release changelog, following the [All Contributors](https://allcontributors.org/) spec — code, docs, design, bug reports, and community support all count.
 
 ---
 

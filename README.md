@@ -5,11 +5,11 @@
 [![Go](https://img.shields.io/badge/go-1.26-00ADD8)](./backend/go.mod)
 [![CI](https://github.com/QorvenAI/qorven/actions/workflows/backend.yml/badge.svg)](https://github.com/QorvenAI/qorven/actions/workflows/backend.yml)
 
-**Open-source, self-hosted AI workspace. A team of agents that works while you do.**
+**Open-source, self-hosted AI workspace. Deploy a team of agents on your own infrastructure.**
 
-For developers, teams, and businesses that want powerful AI automation without sending data to a third-party cloud. One binary. Your server. Full control.
+Purpose-built for developers and teams that require full data control, model flexibility, and the ability to extend the platform without a vendor dependency.
 
-> **Status: v0.1.14-alpha** — running well on single-node Linux deployments. APIs and config schema may change before v1.0. Not yet recommended for critical workloads without a backup strategy.
+> **Alpha.** API and configuration schema are subject to change before v1.0. Suitable for development and non-critical production workloads. Maintain a current database backup for any persistent deployment.
 
 ---
 
@@ -20,9 +20,9 @@ For developers, teams, and businesses that want powerful AI automation without s
 curl -fsSL https://get.qorven.ai | sudo bash
 ```
 
-**Windows** — coming soon. Native Windows installer is in progress.
+The installer provisions PostgreSQL, installs the binary, runs migrations, and opens the setup wizard. No manual config file editing required. Minimum: 2 GB RAM.
 
-The installer sets up PostgreSQL, downloads the binary, runs migrations, and opens the setup wizard in your browser — no config file editing required. Requires 2 GB RAM.
+**Windows** — native installer in progress.
 
 **Docs:** [docs.qorven.ai](https://docs.qorven.ai) &nbsp;·&nbsp; **Discussions:** [GitHub Discussions](https://github.com/QorvenAI/qorven/discussions)
 
@@ -72,15 +72,13 @@ Each channel has inbound routing rules, keyword triggers, approval gates, and re
 
 ### Social media management
 
-Qorven includes a full social media management layer — similar to Postiz or Buffer, but agent-driven and self-hosted:
+Agent-driven social media publishing, scheduling, and monitoring — fully self-hosted:
 
 - **10-platform publisher** — Twitter/X, LinkedIn, Facebook, Instagram, Threads, TikTok, YouTube, Bluesky, Mastodon, Pinterest
-- **Scheduling** — ISO datetime scheduling with automatic publish at the scheduled time
 - **Content calendar** — month view with scheduled, published, and draft posts
-- **AutoPost rules** — cron-driven posting from RSS feeds or webhooks
-- **Trend monitoring** — Twitter, YouTube, Reddit, HackerNews trend signals
-- **Topic monitoring** — continuous tracking with change detection and agent notifications
-- **Human approval gate** — agent-drafted posts go to `/outbound` for review before publishing
+- **AutoPost** — cron-driven publishing from RSS feeds or webhooks
+- **Trend and topic monitoring** — Twitter, YouTube, Reddit, HackerNews signals with agent notifications
+- **Approval gate** — agent-drafted posts queue in `/outbound` for human review before publishing
 
 ### Automation
 
@@ -171,11 +169,11 @@ See [`ROADMAP.md`](./ROADMAP.md) for what's planned toward v1.0.
 
 ## Sponsor Qorven
 
-Qorven is free and open source. Sponsorship funds core development, integrations, documentation, and long-term maintenance.
+Sponsorship funds core development, integrations, documentation, and long-term maintenance.
 
 - **GitHub Sponsors:** [github.com/sponsors/QorvenAI](https://github.com/sponsors/QorvenAI)
 - **Ko-fi:** [ko-fi.com/qorvenai](https://ko-fi.com/qorvenai)
-- **Razorpay** (Indian supporters): [qorven.ai/sponsor](https://qorven.ai/sponsor)
+- **Razorpay** (India): [qorven.ai/sponsor](https://qorven.ai/sponsor)
 
 Enterprise sponsors receive logo placement and priority issue handling. [Contact us](mailto:hello@qorven.ai).
 
