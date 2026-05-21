@@ -4,6 +4,21 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.14-alpha — 2026-05-21
+
+### Fixed
+- **System status chips now render** — RAM, disk, cost, and active agent chips in the status bar were blank after login. Now display correctly on every page load.
+- **Status bar version is always current** — the version chip no longer showed a stale value after a restart; it now reflects the running version at all times.
+- **No full-page reload when navigating to Chat or Qors** — clicking those items in the sidebar no longer triggered a hard browser navigation.
+- **Changelog popup shows release notes** — the in-app changelog lightbox was showing a spinner instead of the release notes.
+- **Disconnect indicator no longer flashes on load** — the offline dot in the top bar briefly appeared on every page load before the WebSocket connected; it now only appears after a sustained disconnect.
+
+### Improved
+- **Icons are thicker and crisper** — sidebar rail, top bar, and status bar icons now render at a consistent weight that is more legible, especially on high-DPI displays.
+- **Design system centralised** — typography scale, icon weight, and toast notifications are now controlled from single shared components. Visual changes apply everywhere at once without touching individual pages.
+
+---
+
 ## v0.1.13-alpha — 2026-05-20
 
 ### Fixed
