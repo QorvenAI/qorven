@@ -28,14 +28,14 @@ export default function QorsPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
-  const load = useCallback(() => {
-    setLoading(true);
+  const load = useCallback((showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     agents.list()
       .then((data) => { setSouls(data); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
   }, [setSouls]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(souls.length === 0); }, [load, souls.length]);
 
   const roles = useMemo(() => {
     const r = new Set(souls.map((s) => s.role).filter(Boolean));
