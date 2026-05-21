@@ -246,25 +246,12 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 	}()
 }
 
-// triggerSelfRestart hands the restart to systemd if available, otherwise
-// calls the platform-specific selfExit() to trigger supervisor restart.
+// triggerSelfRestart exits cleanly so systemd's Restart=always policy brings
+// the new binary up. systemctl restart is intentionally NOT called here —
+// systemd silently ignores self-restart requests from sandboxed processes
+// (NoNewPrivileges=yes), returning exit 0 without actually restarting.
 // selfExit is defined in update_restart_unix.go / update_restart_windows.go.
 func triggerSelfRestart() {
-	// Patch the unit: Restart=always + /usr/local/bin in ReadWritePaths.
-	patchServiceUnit()
-
-	// Try systemctl restart (only works when the process has permission to restart
-	// itself — i.e. running as root or unit has ExecReload). On standard installs
-	// the qorven user cannot restart via systemctl, so this will fail and we fall
-	// through to selfExit() which triggers the Restart=always policy.
-	if path, err := exec.LookPath("systemctl"); err == nil {
-		cmd := exec.Command(path, "restart", "qorven")
-		if err := cmd.Run(); err == nil {
-			slog.Info("update.restart", "method", "systemctl")
-			return
-		}
-	}
-	// Fallback: clean exit — systemd Restart=always brings up the new binary.
 	slog.Info("update.restart", "method", "self_exit")
 	selfExit()
 }
