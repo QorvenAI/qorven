@@ -9,7 +9,7 @@
 
 For developers, teams, and businesses that want powerful AI automation without sending data to a third-party cloud. One binary. Your server. Full control.
 
-> **Status: v0.1.3-alpha** — running well on single-node Linux deployments. APIs and config schema may change before v1.0. Not yet recommended for critical workloads without a backup strategy.
+> **Status: v0.1.14-alpha** — running well on single-node Linux deployments. APIs and config schema may change before v1.0. Not yet recommended for critical workloads without a backup strategy.
 
 ---
 
@@ -20,10 +20,7 @@ For developers, teams, and businesses that want powerful AI automation without s
 curl -fsSL https://get.qorven.ai | sudo bash
 ```
 
-**Windows (PowerShell — run as Administrator):**
-```powershell
-iwr -useb https://get.qorven.ai/install.ps1 | iex
-```
+**Windows** — coming soon. Native Windows installer is in progress.
 
 The installer sets up PostgreSQL, downloads the binary, runs migrations, and opens the setup wizard in your browser — no config file editing required. Requires 2 GB RAM.
 
