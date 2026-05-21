@@ -253,9 +253,6 @@ export function StatusBar() {
             className="relative flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground/50 hover:text-muted-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer"
           >
             v{version}
-            {updateState === 'available' && (
-              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-muted" />
-            )}
           </button>
         ) : null}
 
@@ -280,14 +277,14 @@ export function StatusBar() {
 
               {/* Memory */}
               <StatusChip title={`RAM used: ${stats.mem_used_gb.toFixed(2)} GB · Available: ${(stats.mem_total_gb - stats.mem_used_gb).toFixed(2)} GB · Total: ${stats.mem_total_gb.toFixed(1)} GB`}>
-                <MemoryStick className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
+                <MemoryStick className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.25} />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
               </StatusChip>
 
               <StatusDivider />
 
               {/* Disk */}
               <StatusChip title={`Disk used: ${stats.disk_used_gb.toFixed(2)} GB · Free: ${(stats.disk_total_gb - stats.disk_used_gb).toFixed(2)} GB · Total: ${stats.disk_total_gb.toFixed(1)} GB`}>
-                <HardDrive className="h-2.5 w-2.5 mr-0.5 shrink-0" />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
+                <HardDrive className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.25} />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
               </StatusChip>
 
               <StatusDivider />
@@ -446,7 +443,7 @@ function CostChip({ cost, topAgents }: { cost: number; topAgents: AgentSpend[] }
         className="px-1.5 h-6 flex items-center gap-0.5 font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-pointer tabular-nums"
         title={`Total spend this month: $${cost.toFixed(6)}`}
       >
-        <TrendingUp className="h-2.5 w-2.5 mr-0.5 shrink-0" />
+        <TrendingUp className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.25} />
         ${cost.toFixed(4)}
       </button>
       {open && (
@@ -538,7 +535,7 @@ function ActiveQorsChip({ count }: { count: number }) {
       className="px-1.5 h-full flex items-center gap-1 font-mono text-muted-foreground/75 hover:text-muted-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
     >
       <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotClass}`} />
-      <Bot className="h-2.5 w-2.5 shrink-0" />
+      <Bot className="h-3 w-3 shrink-0" strokeWidth={2.25} />
       {active > 0 ? active : count}
     </span>
   );
