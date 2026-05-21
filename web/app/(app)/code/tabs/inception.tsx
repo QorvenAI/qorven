@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { projectBriefs as api } from '@/lib/api';
 import { InceptionChat } from '@/components/code/inception-chat';
 import { ProjectStudio } from '@/components/code/project-studio';
+import { CodeLanding } from '@/components/code/code-landing';
 import { useStore } from '@/store';
 import type { ProjectBrief } from '@/types';
 
@@ -54,20 +55,13 @@ export function InceptionTab() {
 
   if (!active) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center space-y-2">
-          <p className="text-sm text-muted-foreground">Select a project from the sidebar or create one</p>
-          <button
-            onClick={async () => {
-              const brief = await api.create({ title: 'New Project', idea: '', quality: 'mvp' });
-              setActiveBriefId(brief.id);
-            }}
-            className="text-xs text-primary hover:underline"
-          >
-            + New project
-          </button>
-        </div>
-      </div>
+      <CodeLanding
+        onCreate={(brief) => {
+          setActive(brief);
+          activeRef.current = brief;
+          setActiveBriefId(brief.id);
+        }}
+      />
     );
   }
 
