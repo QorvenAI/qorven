@@ -96,7 +96,7 @@ kill-builds:  ## Kill any stale background go build / go run processes
 # Windows gets the .exe suffix automatically.
 define RELEASE_template
 .PHONY: release-$(1)-$(2)
-release-$(1)-$(2):
+release-$(1)-$(2): build-web
 	@mkdir -p $(DIST_DIR)
 	@OUT=$(DIST_DIR)/qorven-$(1)-$(2); \
 	if [ "$(1)" = "windows" ]; then OUT=$$$$OUT.exe; fi; \
