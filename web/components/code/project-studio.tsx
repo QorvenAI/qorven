@@ -1,13 +1,16 @@
 'use client';
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   CheckCircle2, Loader2, ChevronDown, ChevronRight,
   Rocket, Users, ListChecks, FileText, Zap, Bot, RefreshCw,
+  Clock, AlertCircle, File, DollarSign, CheckCheck, Activity,
 } from 'lucide-react';
 import { projectBriefs as api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useStore } from '@/store';
+import type { DaemonTask } from '@/hooks/use-agents-stream';
 import type { ProjectBrief, ProposedAgent, ProposedTask, BriefAgent } from '@/types';
 
 interface Props {
@@ -16,8 +19,16 @@ interface Props {
 }
 
 export function ProjectStudio({ brief, onBriefUpdate }: Props) {
-  if (brief.status === 'intake') return <IntakeCanvas brief={brief} onBriefUpdate={onBriefUpdate} />;
-  if (brief.status === 'proposed') return <ApprovalCanvas brief={brief} onBriefUpdate={onBriefUpdate} />;
+  if (brief.status === 'intake') return (
+    <div className="h-full overflow-y-auto">
+      <IntakeCanvas brief={brief} onBriefUpdate={onBriefUpdate} />
+    </div>
+  );
+  if (brief.status === 'proposed') return (
+    <div className="h-full overflow-y-auto">
+      <ApprovalCanvas brief={brief} onBriefUpdate={onBriefUpdate} />
+    </div>
+  );
   return <ExecutionCanvas brief={brief} onBriefUpdate={onBriefUpdate} />;
 }
 
@@ -246,7 +257,12 @@ function ApprovalCanvas({ brief, onBriefUpdate }: Props) {
 
 function ExecutionCanvas({ brief, onBriefUpdate: _onBriefUpdate }: Props) {
   const [team, setTeam] = useState<BriefAgent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [teamLoading, setTeamLoading] = useState(true);
+  const [taskFilter, setTaskFilter] = useState<'all' | 'active' | 'done' | 'failed'>('all');
+
+  // Pull live daemon tasks from SSE store
+  const allDaemonTasks = useStore(s => s.daemonTasks);
+  const daemonAgents = useStore(s => s.daemonAgents);
 
   const refresh = useCallback(async () => {
     try {
@@ -255,7 +271,7 @@ function ExecutionCanvas({ brief, onBriefUpdate: _onBriefUpdate }: Props) {
     } catch {
       // non-fatal
     } finally {
-      setLoading(false);
+      setTeamLoading(false);
     }
   }, [brief.id]);
 
@@ -265,65 +281,322 @@ function ExecutionCanvas({ brief, onBriefUpdate: _onBriefUpdate }: Props) {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const done = team.filter(a => a.status === 'done').length;
-  const working = team.filter(a => a.status !== 'done' && a.status !== 'paused').length;
+  // Live tasks from SSE (DaemonTask[]) sorted by status priority
+  const liveTasks = useMemo(() => {
+    const STATUS_ORDER: Record<string, number> = { in_progress: 0, queued: 1, failed: 2, done: 3, cancelled: 4 };
+    return Object.values(allDaemonTasks).sort((a, b) =>
+      (STATUS_ORDER[a.status] ?? 5) - (STATUS_ORDER[b.status] ?? 5)
+    );
+  }, [allDaemonTasks]);
+
+  const filteredTasks = useMemo(() => {
+    if (taskFilter === 'all') return liveTasks;
+    if (taskFilter === 'active') return liveTasks.filter(t => t.status === 'in_progress' || t.status === 'queued');
+    if (taskFilter === 'done') return liveTasks.filter(t => t.status === 'done');
+    if (taskFilter === 'failed') return liveTasks.filter(t => t.status === 'failed');
+    return liveTasks;
+  }, [liveTasks, taskFilter]);
+
+  // Stats derived from live data
+  const taskDone = liveTasks.filter(t => t.status === 'done').length;
+  const taskTotal = liveTasks.length;
+  const taskActive = liveTasks.filter(t => t.status === 'in_progress').length;
+  const taskPct = taskTotal > 0 ? Math.round((taskDone / taskTotal) * 100) : 0;
+
+  const budgetUsed = team.reduce((s, a) => s + (a.credit_used_cents ?? 0), 0);
+  const budgetTotal = team.reduce((s, a) => s + (a.credit_budget_cents ?? 0), 0) || brief.budget_cents;
+  const budgetPct = budgetTotal > 0 ? Math.min(100, Math.round((budgetUsed / budgetTotal) * 100)) : 0;
+
+  const agentDone = team.filter(a => a.status === 'done').length;
+  const agentWorking = team.filter(a => a.status !== 'done' && a.status !== 'paused').length;
+  const isDone = brief.status === 'done';
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4 space-y-5">
-      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10">
-            <Rocket className="h-5 w-5 text-emerald-500" />
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Stats header ──────────────────────────────────────────────────── */}
+      <div className="shrink-0 border-b border-border bg-muted/10 px-5 py-3">
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Status badge */}
+          <div className={cn('flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
+            isDone ? 'bg-emerald-500/15 text-emerald-500' : 'bg-primary/10 text-primary'
+          )}>
+            {isDone
+              ? <CheckCheck className="h-3.5 w-3.5" />
+              : <Activity className="h-3.5 w-3.5 animate-pulse" />
+            }
+            {isDone ? 'Complete' : `${agentWorking} agent${agentWorking !== 1 ? 's' : ''} working`}
           </div>
-          <div>
-            <p className="text-sm font-semibold text-emerald-500">
-              {brief.status === 'done' ? 'Project complete' : 'Team working'}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {working > 0 ? `${working} agent${working > 1 ? 's' : ''} active` : `${done} agents done`}
-              {team.length > 0 && ` — ${done}/${team.length} finished`}
-            </p>
+
+          <div className="h-4 w-px bg-border" />
+
+          {/* Task completion */}
+          <div className="flex items-center gap-2 min-w-[160px]">
+            <CheckCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-muted-foreground">Tasks</span>
+                <span className="text-xs font-semibold tabular-nums">
+                  {taskDone}/{taskTotal} <span className="text-muted-foreground font-normal">({taskPct}%)</span>
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn('h-full rounded-full transition-all duration-700',
+                    taskPct === 100 ? 'bg-emerald-500' : 'bg-primary'
+                  )}
+                  style={{ width: `${taskPct}%` }}
+                />
+              </div>
+            </div>
           </div>
+
+          {/* Budget usage */}
+          {budgetTotal > 0 && (
+            <div className="flex items-center gap-2 min-w-[160px]">
+              <DollarSign className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs text-muted-foreground">Budget</span>
+                  <span className="text-xs font-semibold tabular-nums">
+                    ${(budgetUsed / 100).toFixed(2)}
+                    <span className="text-muted-foreground font-normal"> / ${(budgetTotal / 100).toFixed(2)}</span>
+                    <span className="text-muted-foreground font-normal"> ({budgetPct}%)</span>
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all duration-700',
+                      budgetPct >= 90 ? 'bg-red-500' : budgetPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
+                    )}
+                    style={{ width: `${budgetPct}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
-            onClick={() => { setLoading(true); refresh(); }}
-            className="ml-auto text-muted-foreground hover:text-foreground"
+            onClick={() => { setTeamLoading(true); refresh(); }}
+            className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
+            title="Refresh"
           >
-            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+            <RefreshCw className={cn('h-3.5 w-3.5', teamLoading && 'animate-spin')} />
           </button>
         </div>
       </div>
 
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-          Team — {team.length} agent{team.length !== 1 ? 's' : ''}
-        </h3>
-        <div className="space-y-2">
-          {team.map(a => (
-            <div key={a.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
-              <div className={cn('h-2 w-2 rounded-full shrink-0',
-                a.status === 'done'   ? 'bg-emerald-500' :
-                a.status === 'paused' ? 'bg-amber-500' :
-                'bg-primary animate-pulse'
-              )} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{a.display_name}</p>
-                <p className="text-xs text-muted-foreground capitalize">{a.role} · {a.model}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs font-medium">${(a.credit_used_cents / 100).toFixed(2)}</p>
-                {a.credit_budget_cents != null && (
-                  <p className="text-xs text-muted-foreground">of ${(a.credit_budget_cents / 100).toFixed(2)}</p>
+      {/* ── Two-column body ───────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden min-h-0">
+
+        {/* Left: live task feed */}
+        <div className="flex flex-col flex-1 min-w-0 border-r border-border overflow-hidden">
+          {/* Task filter bar */}
+          <div className="shrink-0 flex items-center gap-1 px-4 py-2 border-b border-border bg-muted/5">
+            {(['all', 'active', 'done', 'failed'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setTaskFilter(f)}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+                  taskFilter === f
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
                 )}
+              >
+                {f}
+                {f === 'active' && taskActive > 0 && (
+                  <span className="ml-1 rounded-full bg-amber-500/20 text-amber-500 px-1 text-[10px]">{taskActive}</span>
+                )}
+                {f === 'done' && taskDone > 0 && (
+                  <span className="ml-1 rounded-full bg-emerald-500/20 text-emerald-500 px-1 text-[10px]">{taskDone}</span>
+                )}
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-muted-foreground">{filteredTasks.length} task{filteredTasks.length !== 1 ? 's' : ''}</span>
+          </div>
+
+          {/* Task list */}
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+            {filteredTasks.length === 0 && (
+              liveTasks.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
+                  <Clock className="h-6 w-6 opacity-30" />
+                  <p className="text-sm">Waiting for tasks to start…</p>
+                  <p className="text-xs opacity-60">Tasks appear as agents begin work</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
+                  <CheckCheck className="h-6 w-6 opacity-30" />
+                  <p className="text-sm">No tasks match this filter</p>
+                </div>
+              )
+            )}
+            {filteredTasks.map(task => (
+              <LiveTaskRow key={task.id} task={task} agentName={daemonAgents[task.owner]?.name} />
+            ))}
+          </div>
+        </div>
+
+        {/* Right: agent cards */}
+        <div className="w-64 shrink-0 flex flex-col overflow-hidden">
+          <div className="shrink-0 px-4 py-2 border-b border-border bg-muted/5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Agents — {agentDone}/{team.length} done
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            {team.map(a => <AgentStatusCard key={a.id} agent={a} />)}
+            {teamLoading && team.length === 0 && (
+              <div className="flex items-center gap-2 py-6 justify-center text-muted-foreground text-xs">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
               </div>
-            </div>
-          ))}
-          {loading && team.length === 0 && (
-            <div className="flex items-center gap-2 py-6 text-muted-foreground text-sm justify-center">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading team…
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ── LiveTaskRow ───────────────────────────────────────────────────────────────
+
+const TASK_STATUS_ICON = {
+  queued:      <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />,
+  in_progress: <Loader2 className="h-3.5 w-3.5 text-amber-400 animate-spin shrink-0" />,
+  done:        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />,
+  failed:      <AlertCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />,
+  cancelled:   <Clock className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />,
+};
+
+function LiveTaskRow({ task, agentName }: { task: DaemonTask; agentName?: string }) {
+  const [open, setOpen] = useState(false);
+  const icon = TASK_STATUS_ICON[task.status as keyof typeof TASK_STATUS_ICON] ?? TASK_STATUS_ICON.queued;
+  const files = task.files_changed ?? [];
+
+  return (
+    <div className={cn(
+      'rounded-xl border bg-card transition-colors',
+      task.status === 'in_progress' && 'border-amber-500/30',
+      task.status === 'done'        && 'border-emerald-500/20',
+      task.status === 'failed'      && 'border-red-500/30',
+      task.status === 'queued'      && 'border-border',
+    )}>
+      <button
+        className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left"
+        onClick={() => (task.summary || task.error || files.length > 0) && setOpen(v => !v)}
+      >
+        <span className="mt-0.5">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium truncate">{task.title}</p>
+          {agentName && <p className="text-[10px] text-muted-foreground mt-0.5">{agentName}</p>}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {files.length > 0 && (
+            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+              <File className="h-3 w-3" />{files.length}
+            </span>
+          )}
+          {(task.summary || task.error || files.length > 0) && (
+            open ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />
+          )}
+        </div>
+      </button>
+
+      {/* Progress bar for in-progress tasks */}
+      {task.status === 'in_progress' && typeof task.percent === 'number' && task.percent > 0 && (
+        <div className="px-3 pb-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-muted-foreground">Progress</span>
+            <span className="text-[10px] font-medium tabular-nums">{task.percent}%</span>
+          </div>
+          <div className="h-1 rounded-full bg-muted overflow-hidden">
+            <div className="h-full rounded-full bg-amber-400 transition-all" style={{ width: `${task.percent}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Expanded detail */}
+      {open && (
+        <div className="border-t border-border px-3 py-2 space-y-1.5 bg-muted/10">
+          {task.summary && (
+            <p className="text-[10px] text-emerald-400 leading-relaxed">{task.summary}</p>
+          )}
+          {task.error && (
+            <p className="text-[10px] text-red-400 leading-relaxed">{task.error}</p>
+          )}
+          {files.length > 0 && (
+            <div className="space-y-0.5">
+              {files.slice(0, 8).map(f => (
+                <p key={f} className="text-[10px] text-muted-foreground font-mono truncate">{f}</p>
+              ))}
+              {files.length > 8 && (
+                <p className="text-[10px] text-muted-foreground">+{files.length - 8} more files</p>
+              )}
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── AgentStatusCard ───────────────────────────────────────────────────────────
+
+function AgentStatusCard({ agent }: { agent: BriefAgent }) {
+  const budgetPct = agent.credit_budget_cents
+    ? Math.min(100, Math.round((agent.credit_used_cents / agent.credit_budget_cents) * 100))
+    : null;
+
+  return (
+    <div className={cn(
+      'rounded-xl border bg-card p-3 space-y-2 transition-colors',
+      agent.status === 'done'   && 'border-emerald-500/20',
+      agent.status === 'paused' && 'border-amber-500/20',
+      agent.status !== 'done' && agent.status !== 'paused' && 'border-primary/20',
+    )}>
+      <div className="flex items-center gap-2">
+        <div className={cn('h-2 w-2 rounded-full shrink-0',
+          agent.status === 'done'   ? 'bg-emerald-500' :
+          agent.status === 'paused' ? 'bg-amber-500' :
+          'bg-primary animate-pulse'
+        )} />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium truncate">{agent.display_name}</p>
+          <p className="text-[10px] text-muted-foreground capitalize">{agent.role}</p>
+        </div>
+        <span className={cn(
+          'text-[10px] font-medium rounded-full px-1.5 py-0.5',
+          agent.status === 'done'   ? 'bg-emerald-500/10 text-emerald-500' :
+          agent.status === 'paused' ? 'bg-amber-500/10 text-amber-500' :
+          'bg-primary/10 text-primary'
+        )}>
+          {agent.status}
+        </span>
       </div>
+
+      {/* Budget bar */}
+      {budgetPct !== null && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-muted-foreground">Budget used</span>
+            <span className="text-[10px] font-medium tabular-nums">
+              ${(agent.credit_used_cents / 100).toFixed(2)} / ${((agent.credit_budget_cents ?? 0) / 100).toFixed(2)}
+            </span>
+          </div>
+          <div className="h-1 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn('h-full rounded-full transition-all',
+                budgetPct >= 90 ? 'bg-red-500' : budgetPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
+              )}
+              style={{ width: `${budgetPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {budgetPct === null && agent.credit_used_cents > 0 && (
+        <p className="text-[10px] text-muted-foreground">${(agent.credit_used_cents / 100).toFixed(2)} used</p>
+      )}
     </div>
   );
 }

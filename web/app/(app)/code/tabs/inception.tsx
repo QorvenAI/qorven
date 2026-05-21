@@ -121,7 +121,7 @@ export function InceptionTab() {
             <InceptionChat brief={active} onBriefUpdate={onBriefUpdate} />
           </div>
           {/* Studio panel */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-hidden min-h-0">
             <ProjectStudio brief={active} onBriefUpdate={onBriefUpdate} />
           </div>
         </div>
