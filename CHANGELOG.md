@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.20-alpha — 2026-05-21
+
+### Fixed
+- **"Update available" no longer re-appears after a successful update** — the background update checker was comparing raw version strings (`v0.1.19-alpha` vs `0.1.19-alpha`) which never matched, causing the checker to re-install on every 6-hour tick. Both sides are now normalised before comparison.
+- **Auto-update now restarts the service correctly** — `triggerSelfRestart` used `cmd.Start()` which returns nil even when `systemctl restart` is blocked by the sandbox, so the service never exited and systemd never launched the new binary. Changed to `cmd.Run()` so failed systemctl falls through to `selfExit()`, which triggers `Restart=always` cleanly.
+
+---
+
 ## v0.1.19-alpha — 2026-05-21
 
 ### Fixed

@@ -253,15 +253,18 @@ func triggerSelfRestart() {
 	// Patch the unit: Restart=always + /usr/local/bin in ReadWritePaths.
 	patchServiceUnit()
 
-	// Try systemctl restart first (works when running as root or with sudo).
+	// Try systemctl restart (only works when the process has permission to restart
+	// itself — i.e. running as root or unit has ExecReload). On standard installs
+	// the qorven user cannot restart via systemctl, so this will fail and we fall
+	// through to selfExit() which triggers the Restart=always policy.
 	if path, err := exec.LookPath("systemctl"); err == nil {
 		cmd := exec.Command(path, "restart", "qorven")
-		if err := cmd.Start(); err == nil {
+		if err := cmd.Run(); err == nil {
 			slog.Info("update.restart", "method", "systemctl")
 			return
 		}
 	}
-	// Fallback: platform-specific clean exit — supervisor/NSSM/launchd restarts us.
+	// Fallback: clean exit — systemd Restart=always brings up the new binary.
 	slog.Info("update.restart", "method", "self_exit")
 	selfExit()
 }
@@ -321,7 +324,7 @@ func (gw *Gateway) backgroundUpdateChecker() {
 			slog.Debug("update.check_failed", "err", err)
 			return
 		}
-		current := buildInfo.Version
+		current := releaseVersion(buildInfo.Version)
 		latest := releaseVersion(release.TagName)
 
 		slog.Info("update.check", "current", current, "latest", latest)
