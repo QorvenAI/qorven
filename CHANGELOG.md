@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.23-alpha — 2026-05-21
+
+### Fixed
+- **Background updater no longer overwrites dev builds** — when running a locally-compiled binary (dirty working tree or untagged commit), the auto-updater now skips installation entirely rather than downloading and replacing the binary. Dev sessions stay on the local build.
+
+---
+
 ## v0.1.22-alpha — 2026-05-21
 
 ### Fixed
