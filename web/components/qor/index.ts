@@ -27,4 +27,6 @@ export * from './table';
 export * from './tabs';
 export * from './textarea';
 export * from './toggle';
+export * from './text';
+export * from './toaster';
 export * from './tooltip';

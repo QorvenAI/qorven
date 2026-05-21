@@ -80,7 +80,7 @@ export function Header() {
         <div className="flex items-stretch gap-2.5">
           <button onClick={toggleSidebar}
             className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 self-center">
-            {sidebarCollapsed ? <PanelLeft className="h-[18px] w-[18px]" strokeWidth={2.25} /> : <PanelLeftClose className="h-[18px] w-[18px]" strokeWidth={2.25} />}
+            {sidebarCollapsed ? <PanelLeft className="h-[18px] w-[18px]" /> : <PanelLeftClose className="h-[18px] w-[18px]" />}
           </button>
 
           {soul ? (
@@ -124,7 +124,7 @@ export function Header() {
           <NotificationBtn active={rightPanelOpen && rightPanelTab === 'notifications'} onOpen={() => handlePanelIcon('notifications')} />
           <IconBtn icon={Activity} label="Activity" active={rightPanelOpen && rightPanelTab === 'activity'} onClick={() => handlePanelIcon('activity')} />
           <ConnectionStatus connected={wsConnected} />
-          <button title={rightPanelOpen ? "Close panel" : "Expand panel"} onClick={() => rightPanelOpen ? closeRightPanel() : openRightPanel(rightPanelTab ?? "activity")} className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent shrink-0 self-center">{rightPanelOpen ? <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={2.25} /> : <PanelRight className="h-[18px] w-[18px]" strokeWidth={2.25} />}</button>
+          <button title={rightPanelOpen ? "Close panel" : "Expand panel"} onClick={() => rightPanelOpen ? closeRightPanel() : openRightPanel(rightPanelTab ?? "activity")} className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent shrink-0 self-center">{rightPanelOpen ? <PanelRightClose className="h-[18px] w-[18px]" /> : <PanelRight className="h-[18px] w-[18px]" />}</button>
         </nav>
       </div>
     </header>
@@ -136,7 +136,7 @@ function IconBtn({ icon: Icon, label, active, onClick }: { icon: typeof PanelRig
     <button title={label} onClick={onClick}
       className={cn('h-9 w-9 flex items-center justify-center rounded-md transition-colors cursor-pointer',
         active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-      <Icon className="h-[18px] w-[18px]" strokeWidth={2.25} />
+      <Icon className="h-[18px] w-[18px]" />
     </button>
   );
 }
@@ -186,7 +186,7 @@ function NotificationBtn({ active, onOpen }: { active: boolean; onOpen: () => vo
       <button title={title} onClick={onOpen}
         className={cn('h-9 w-9 flex items-center justify-center rounded-md transition-colors cursor-pointer',
           active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-        <Bell className="h-[18px] w-[18px]" strokeWidth={2.25} />
+        <Bell className="h-[18px] w-[18px]" />
       </button>
     </IconBadge>
   );

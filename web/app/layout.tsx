@@ -5,7 +5,7 @@ import { Inter, JetBrains_Mono } from 'next/font/google';
 import { cn } from '@/lib/utils';
 import { ThemeProvider } from '@/providers/theme-provider';
 import { WebSocketProvider } from '@/providers/websocket-provider';
-import { Toaster } from 'sonner';
+import { Toaster } from '@/components/qor/toaster';
 import { CommandPalette } from '@/components/modals/command-palette';
 import type { Metadata } from 'next';
 

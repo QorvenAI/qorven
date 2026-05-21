@@ -120,6 +120,11 @@
   --radius-sm: calc(var(--radius) - 4px);
 }
 
+/** Global icon stroke weight — change once, applies to all Lucide icons everywhere **/
+svg.lucide {
+  stroke-width: 2.25;
+}
+
 /** Custom Font Sizes — Qorven type scale (mirrors Metronic v9) **/
 @theme {
   --text-2sm: 0.8125rem;
