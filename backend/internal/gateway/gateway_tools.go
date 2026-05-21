@@ -379,6 +379,26 @@ func (gw *Gateway) registerTools() {
 			if err != nil {
 				return "", err
 			}
+			// Seed archetype bundles so the agent has soul/identity/tools from day one.
+			if gw.bundleStore != nil {
+				soulContent := prompt
+				if soulContent == "" {
+					if seed, ok := agent.AgentSeeds[role]; ok && seed.Soul != "" {
+						soulContent = seed.Soul
+					} else {
+						soulContent = fmt.Sprintf("You are %s, an AI specialist.", name)
+					}
+				}
+				gw.bundleStore.Upsert(ctx, agent.Bundle{
+					AgentID: a.ID, BundleType: "soul", Name: "soul",
+					Content: soulContent, Priority: 200, Enabled: true,
+				})
+				gw.bundleStore.SeedDefaults(ctx, a.ID, role)
+			}
+			// Activate runtime so the agent can receive delegated tasks immediately.
+			if gw.runtimeMgr != nil {
+				gw.runtimeMgr.EnsureRuntime(a.ID, defaultTenant)
+			}
 			return a.ID, nil
 		}
 		tools.OnAgentList = func(ctx context.Context) ([]map[string]string, error) {
