@@ -201,46 +201,52 @@ jobs:
         run: |
           $pgVer = (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
           Write-Host "Found PostgreSQL $pgVer"
-          # Try known data dir locations — GitHub runner images vary between versions
+          $pgBin  = "C:\Program Files\PostgreSQL\$pgVer\bin"
+          # Locate data dir — runner images vary; check all known locations
           $dataDirs = @(
             "C:\Program Files\PostgreSQL\$pgVer\data",
             "C:\PostgreSQL\$pgVer\data",
             "D:\PostgreSQL\$pgVer\data"
           )
-          $pgConf = $null
+          $pgData = $null
           foreach ($d in $dataDirs) {
-            $candidate = Join-Path $d 'postgresql.conf'
-            if (Test-Path $candidate) { $pgConf = $candidate; break }
+            if (Test-Path (Join-Path $d 'postgresql.conf')) { $pgData = $d; break }
           }
-          if ($pgConf) {
-            Write-Host "Editing $pgConf to enable TCP"
+          if ($pgData) {
+            Write-Host "Data dir: $pgData"
+            $pgConf = Join-Path $pgData 'postgresql.conf'
             (Get-Content $pgConf) -replace "^#?listen_addresses\s*=.*", "listen_addresses = '127.0.0.1'" | Set-Content $pgConf
+            Write-Host "listen_addresses patched"
           } else {
-            Write-Host "postgresql.conf not found in known paths — TCP may already be enabled, continuing"
+            Write-Host "Data dir not found — TCP may already be configured, continuing"
           }
-          $svcName = "postgresql-x64-$pgVer"
-          $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
-          if ($null -eq $svc) {
-            $svcName = (Get-Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1).Name
-          }
+          # Try Windows service first
+          $svcName = (Get-Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1).Name
+          $started = $false
           if ($svcName) {
-            $svcObj = Get-Service -Name $svcName -ErrorAction SilentlyContinue
-            if ($svcObj.Status -eq 'Running') {
-              Restart-Service $svcName -ErrorAction SilentlyContinue
-            } else {
-              Start-Service $svcName -ErrorAction SilentlyContinue
-            }
-            # Wait up to 30s for the service to reach Running
-            $deadline = (Get-Date).AddSeconds(30)
-            while ((Get-Service $svcName).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
-              Start-Sleep -Seconds 2
-            }
-            Write-Host "PostgreSQL service status: $((Get-Service $svcName).Status)"
+            Write-Host "Service name: $svcName"
+            $svc = Get-Service -Name $svcName
+            if ($svc.Status -eq 'Running') { Restart-Service $svcName } else { Start-Service $svcName }
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Get-Service $svcName).Status -ne 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+            $started = (Get-Service $svcName).Status -eq 'Running'
+            Write-Host "Service status after start attempt: $((Get-Service $svcName).Status)"
           }
-          # Verify TCP is listening
+          # Fallback: pg_ctl start directly (more reliable than service on CI runners)
+          if (-not $started -and $pgData) {
+            Write-Host "Service start failed — trying pg_ctl directly"
+            $logFile = Join-Path $pgData 'pg_ctl_ci.log'
+            & "$pgBin\pg_ctl.exe" start -D $pgData -w -t 30 -l $logFile
+            if ($LASTEXITCODE -ne 0) { Write-Host "pg_ctl log:"; Get-Content $logFile -ErrorAction SilentlyContinue }
+            $started = $LASTEXITCODE -eq 0
+          }
+          # Verify TCP connection (non-fatal — job has continue-on-error)
           $env:PGPASSWORD = 'root'
-          $pgBin = "C:\Program Files\PostgreSQL\$pgVer\bin"
-          & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -tAc "SELECT 1" 2>&1 | Write-Host
+          $result = & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -tAc "SELECT 1" 2>&1
+          Write-Host "psql probe: $result"
+          if ($result -notmatch '1') {
+            Write-Warning "PostgreSQL TCP not reachable — subsequent steps may fail"
+          }
 
       - name: Create stub qorven.exe
         shell: pwsh
