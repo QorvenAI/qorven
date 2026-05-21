@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.22-alpha — 2026-05-21
+
+### Fixed
+- **Qors list no longer flashes a skeleton on every visit** — navigating to Qors always triggered a full loading skeleton even when agents were already cached in the store. The list now refreshes silently in the background on revisit; the skeleton only appears on the very first load.
+
+---
+
 ## v0.1.21-alpha — 2026-05-21
 
 ### Fixed
