@@ -70,6 +70,27 @@ const PRESETS: ProviderPreset[] = [
   { id: 'custom',      name: 'Custom / Self-hosted',  type: 'custom',           base: '',                                                         description: 'Any OpenAI-compatible endpoint' },
 ];
 
+const PROVIDER_HELP: Record<string, { keyFormat: string; getKeyUrl: string }> = {
+  openai:      { keyFormat: 'sk-proj-… or sk-…',          getKeyUrl: 'https://platform.openai.com/api-keys' },
+  anthropic:   { keyFormat: 'sk-ant-…',                    getKeyUrl: 'https://console.anthropic.com/settings/keys' },
+  gemini:      { keyFormat: 'AIza…',                       getKeyUrl: 'https://aistudio.google.com/app/apikey' },
+  deepseek:    { keyFormat: 'sk-…',                        getKeyUrl: 'https://platform.deepseek.com/api_keys' },
+  xai:         { keyFormat: 'xai-…',                       getKeyUrl: 'https://console.x.ai/team/default/api-keys' },
+  mistral:     { keyFormat: 'alphanumeric string',         getKeyUrl: 'https://console.mistral.ai/api-keys' },
+  cohere:      { keyFormat: 'alphanumeric string',         getKeyUrl: 'https://dashboard.cohere.com/api-keys' },
+  groq:        { keyFormat: 'gsk_…',                       getKeyUrl: 'https://console.groq.com/keys' },
+  openrouter:  { keyFormat: 'sk-or-…',                     getKeyUrl: 'https://openrouter.ai/settings/keys' },
+  together:    { keyFormat: 'hex string',                  getKeyUrl: 'https://api.together.xyz/settings/api-keys' },
+  fireworks:   { keyFormat: 'fw_…',                        getKeyUrl: 'https://fireworks.ai/api-keys' },
+  deepinfra:   { keyFormat: 'hex string',                  getKeyUrl: 'https://deepinfra.com/dash/api_keys' },
+  perplexity:  { keyFormat: 'pplx-…',                      getKeyUrl: 'https://www.perplexity.ai/settings/api' },
+  huggingface: { keyFormat: 'hf_…',                        getKeyUrl: 'https://huggingface.co/settings/tokens' },
+  nvidia:      { keyFormat: 'nvapi-…',                     getKeyUrl: 'https://build.nvidia.com/settings/api-keys' },
+  sambanova:   { keyFormat: 'alphanumeric string',         getKeyUrl: 'https://cloud.sambanova.ai/apis' },
+  anyscale:    { keyFormat: 'esecret_…',                   getKeyUrl: 'https://console.anyscale.com/credentials' },
+  replicate:   { keyFormat: 'r8_…',                        getKeyUrl: 'https://replicate.com/account/api-tokens' },
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ProviderItem = { id: string; name: string; display_name?: string; provider_type: string; api_base?: string; enabled?: boolean };
@@ -511,6 +532,21 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
                 </div>
               </div>
 
+              {(() => { const ph = preset ? PROVIDER_HELP[preset.id] : undefined; return ph ? (
+                <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-2.5">
+                  <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                  <div className="text-xs text-muted-foreground min-w-0">
+                    <span className="font-medium text-foreground">Format: </span>
+                    <span className="font-mono">{ph.keyFormat}</span>
+                    <span className="mx-2">·</span>
+                    <a href={ph.getKeyUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-primary hover:underline inline-flex items-center gap-0.5">
+                      Get key ↗
+                    </a>
+                  </div>
+                </div>
+              ) : null; })()}
+
               {(isLocal || isBedrock) ? (
                 <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
                   <p className="text-xs text-muted-foreground">
@@ -695,6 +731,9 @@ function KeyPoolSheet({ provider, open, onOpenChange }: {
   const [poolConfig, setPoolConfig]     = useState({ strategy: 'priority', failover_mode: 'on_error' });
   const [savingPool, setSavingPool]     = useState(false);
 
+  const presetId = PRESETS.find(p => p.name.toLowerCase() === provider?.name.toLowerCase() || p.id === provider?.name.toLowerCase())?.id ?? provider?.name.toLowerCase() ?? '';
+  const help = PROVIDER_HELP[presetId];
+
   const loadData = useCallback(async () => {
     if (!provider) return;
     setLoading(true);
@@ -829,6 +868,20 @@ function KeyPoolSheet({ provider, open, onOpenChange }: {
             {/* New key form */}
             {showAdd && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
+                {help && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-2.5">
+                    <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <div className="text-xs text-muted-foreground min-w-0">
+                      <span className="font-medium text-foreground">Format: </span>
+                      <span className="font-mono">{help.keyFormat}</span>
+                      <span className="mx-2">·</span>
+                      <a href={help.getKeyUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5">
+                        Get key ↗
+                      </a>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   {addEntries.map((entry, i) => (
                     <KeyRow key={entry.uid} entry={entry}
@@ -876,10 +929,22 @@ function KeyPoolSheet({ provider, open, onOpenChange }: {
             ) : (
               <div className="space-y-1.5">
                 {existingKeys.map(k => (
-                  <div key={k.id} className="rounded-lg border border-border bg-background overflow-hidden">
+                  <div key={k.id} className={cn(
+                    'rounded-lg border bg-background overflow-hidden',
+                    k.status === 'verified' ? 'border-emerald-500/30' :
+                    k.status === 'invalid'  ? 'border-destructive/30' :
+                                               'border-border',
+                  )}>
                     <div className="flex items-center gap-3 px-3.5 py-2.5">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-muted shrink-0">
-                        <Key className="h-3 w-3 text-muted-foreground" />
+                      <div className={cn(
+                        'flex h-7 w-7 items-center justify-center rounded-md shrink-0',
+                        k.status === 'verified' ? 'bg-emerald-500/10' :
+                        k.status === 'invalid'  ? 'bg-destructive/10'  : 'bg-muted',
+                      )}>
+                        <Key className={cn('h-3 w-3',
+                          k.status === 'verified' ? 'text-emerald-400' :
+                          k.status === 'invalid'  ? 'text-destructive'  : 'text-muted-foreground',
+                        )} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium truncate">{k.label || `Key …${k.id.slice(-6)}`}</p>
@@ -956,6 +1021,7 @@ function ModelDiscoveryDialog({ provider, selectedModels, open, onOpenChange, on
   const [liveModels, setLiveModels] = useState<LiveModel[]>([]);
   const [loading, setLoading]       = useState(false);
   const [picked, setPicked]         = useState<Set<string>>(new Set());
+  const [search, setSearch]         = useState('');
 
   const provSelected = provider ? selectedModels.filter(m => m.provider_id === provider.id) : [];
 
@@ -974,6 +1040,10 @@ function ModelDiscoveryDialog({ provider, selectedModels, open, onOpenChange, on
   }, [provider?.id]);
 
   useEffect(() => { if (open && provider) discover(); }, [open, discover]);
+
+  const filtered = search.trim()
+    ? liveModels.filter(m => m.id.toLowerCase().includes(search.toLowerCase()) || (m.name ?? '').toLowerCase().includes(search.toLowerCase()))
+    : liveModels;
 
   const apply = async () => {
     if (!provider) return;
@@ -1014,15 +1084,23 @@ function ModelDiscoveryDialog({ provider, selectedModels, open, onOpenChange, on
           </div>
         ) : (
           <>
+            <div className="px-4 py-2 border-b border-border/40">
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search models…"
+                className="qr-input text-xs h-7"
+              />
+            </div>
             <div className="px-4 py-2.5 border-b border-border/40 bg-muted/10 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">{liveModels.length} available · {picked.size} selected</span>
+              <span className="text-xs text-muted-foreground">{filtered.length} shown · {picked.size} selected</span>
               <div className="flex gap-3 text-xs">
                 <button onClick={() => setPicked(new Set(liveModels.map(m => m.id)))} className="text-primary hover:underline">All</button>
                 <button onClick={() => setPicked(new Set())} className="text-muted-foreground hover:text-foreground hover:underline">None</button>
               </div>
             </div>
             <div className="overflow-y-auto max-h-[50vh]">
-              {liveModels.map(m => (
+              {filtered.map(m => (
                 <label key={m.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/40 cursor-pointer border-b border-border/30 last:border-0">
                   <div className={cn('h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors',
                     picked.has(m.id) ? 'bg-primary border-primary' : 'border-border bg-background')}>
@@ -1073,21 +1151,34 @@ function SCard({ title, description, headerRight, children }: {
   );
 }
 
-function ProviderRow({ provider, selectedModels, onToggle, onDelete, onVerify, onManageKeys, onManageModels }: {
-  provider: ProviderItem; selectedModels: SelModel[];
+function ProviderRow({ provider, selectedModels, keyCount, onToggle, onDelete, onVerify, onManageKeys, onManageModels }: {
+  provider: ProviderItem; selectedModels: SelModel[]; keyCount: number;
   onToggle: () => void; onDelete: () => void; onVerify: () => void;
   onManageKeys: () => void; onManageModels: () => void;
 }) {
   const provSelected = selectedModels.filter(m => m.provider_id === provider.id);
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 group hover:border-border/80 transition-colors">
-      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted border border-border/50 shrink-0">
+      <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-muted border border-border/50 shrink-0">
         <ProviderIcon provider={provider.name} size={20} />
+        <span className={cn(
+          'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background',
+          provider.enabled ? (keyCount > 0 ? 'bg-emerald-400' : 'bg-amber-400') : 'bg-muted-foreground/40',
+        )} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{provider.display_name || provider.name}</p>
         <p className="text-xs text-muted-foreground font-mono truncate">{provider.api_base || provider.provider_type.replace(/_/g, ' ')}</p>
       </div>
+      {keyCount > 0 ? (
+        <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground shrink-0">
+          <Key className="h-3 w-3" />{keyCount}
+        </span>
+      ) : (
+        <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-destructive/10 text-destructive shrink-0">
+          <Key className="h-3 w-3" />No keys
+        </span>
+      )}
       <button onClick={onManageModels} className={cn(
         'hidden sm:inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors shrink-0',
         provSelected.length > 0 ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'bg-muted text-muted-foreground hover:bg-accent',
@@ -1115,13 +1206,24 @@ export default function GenerativePage() {
   const [showAdd, setShowAdd]               = useState(false);
   const [keysProvider, setKeysProvider]     = useState<ProviderItem | null>(null);
   const [modelsProvider, setModelsProvider] = useState<ProviderItem | null>(null);
+  const [keyCounts, setKeyCounts]           = useState<Record<string, number>>({});
 
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
-      providersApi.list().then(d => setProviderList(Array.isArray(d) ? d : [])).catch(() => {}),
-      providersApi.selectedModels().then(d => setSelectedModels(Array.isArray(d) ? d : [])).catch(() => {}),
-    ]).finally(() => setLoading(false));
+      providersApi.list().catch(() => [] as ProviderItem[]),
+      providersApi.selectedModels().catch(() => [] as SelModel[]),
+    ]).then(async ([provs, mods]) => {
+      setProviderList(Array.isArray(provs) ? provs : []);
+      setSelectedModels(Array.isArray(mods) ? mods : []);
+      // Fetch key counts
+      const counts: Record<string, number> = {};
+      await Promise.allSettled((Array.isArray(provs) ? provs : []).map(async p => {
+        const keys = await providersApi.listKeys(p.id).catch(() => []);
+        counts[p.id] = Array.isArray(keys) ? keys.length : 0;
+      }));
+      setKeyCounts(counts);
+    }).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -1197,7 +1299,7 @@ export default function GenerativePage() {
             <div className="space-y-2">
               {providerList.map(p => (
                 <ProviderRow
-                  key={p.id} provider={p} selectedModels={selectedModels}
+                  key={p.id} provider={p} selectedModels={selectedModels} keyCount={keyCounts[p.id] ?? 0}
                   onToggle={() => toggleProvider(p)} onDelete={() => deleteProvider(p)}
                   onVerify={() => verifyProvider(p)} onManageKeys={() => setKeysProvider(p)}
                   onManageModels={() => setModelsProvider(p)}
