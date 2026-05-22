@@ -776,6 +776,68 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 				slog.Info("gateway.gap_reporter.wired", "prime", primeID)
 			}
 
+			// Wire capability gap handler — Prime resolves gaps autonomously.
+			// For model_pricing gaps: Prime fetches the price via web_fetch or
+			// asks the user, then calls PUT /v1/gateway/pricing/{modelId} which
+			// triggers a backfill of all past calls at $0 cost.
+			if gw.supervisor != nil && gw.agentLoop != nil {
+				primeIDCopy := primeID
+				gw.supervisor.SetCapabilityGapHandler(func(ctx context.Context, msg supervisorpkg.Message) {
+					gapType, _ := msg.Context["gap_type"].(string)
+					modelID, _  := msg.Context["model_id"].(string)
+					providerID, _ := msg.Context["provider_id"].(string)
+					apiHint, _  := msg.Context["api_hint"].(string)
+					tokensIn, _  := msg.Context["tokens_in"].(int)
+					tokensOut, _ := msg.Context["tokens_out"].(int)
+
+					if gapType != "model_pricing" || modelID == "" {
+						return
+					}
+
+					task := fmt.Sprintf(
+						`A capability gap has been detected in the AI Gateway:
+
+**Model without pricing data:** %s (provider: %s)
+**Tokens recorded at $0 cost:** %d input, %d output
+
+Your task:
+1. Use web_fetch to look up the current input and output token prices (USD per 1M tokens) for model %q.
+   - Check the provider's official pricing page, or https://qorven.ai/data/model-pricing.json
+   - Look for "input price per 1M tokens" and "output price per 1M tokens"
+2. Once you have the prices, call this API to register them:
+   %s
+   Body: {"input_per_1m": <number>, "output_per_1m": <number>}
+   Use shell_exec with: curl -s -X PUT -H "Content-Type: application/json" -d '<body>' http://localhost:4200/v1/gateway/pricing/%s
+   Include the Authorization header if needed (use the admin token from config).
+3. After setting the price, the system will automatically reprice all past calls that recorded $0.
+4. If you cannot find the price, reply with a message to the user explaining what you found and asking them to provide the correct price via the Gateway admin UI.
+
+Do not skip this task — accurate pricing is required for budget enforcement to work correctly.`,
+						modelID, providerID, tokensIn, tokensOut, modelID, apiHint, modelID,
+					)
+
+					slog.Info("supervisor.capability_gap.resolving",
+						"gap_type", gapType, "model", modelID, "prime", primeIDCopy)
+
+					result, err := gw.agentLoop.Run(ctx, agent.RunRequest{
+						AgentID:     primeIDCopy,
+						UserMessage: task,
+						Channel:     "capability_gap",
+						NoPersist:   true,
+					}, func(agent.StreamEvent) {})
+					if err != nil {
+						slog.Warn("supervisor.capability_gap.run_failed",
+							"model", modelID, "err", err)
+						return
+					}
+					if result != nil {
+						slog.Info("supervisor.capability_gap.resolved",
+							"model", modelID, "output_len", len(result.Content))
+					}
+				})
+				slog.Info("supervisor.capability_gap_handler.wired", "prime", primeID)
+			}
+
 			// Wire Prime delegation — allows Prime to execute specialist agents
 			pd := agent.NewPrimeDelegation(primeID, gw.agents)
 			pd.SetRunAgent(func(ctx context.Context, agentID, message string) (string, error) {

@@ -64,8 +64,9 @@ type Supervisor struct {
 	primeID  string // Prime's agent ID
 
 	// External dependencies
-	listAgents   func(ctx context.Context) ([]AgentInfo, error)
+	listAgents     func(ctx context.Context) ([]AgentInfo, error)
 	evaluateOutput func(ctx context.Context, agentID, output string) (*EvalResult, error)
+	onCapabilityGap func(ctx context.Context, msg Message)
 
 	stopCh chan struct{}
 }
@@ -108,6 +109,12 @@ func (s *Supervisor) SetListAgents(fn func(ctx context.Context) ([]AgentInfo, er
 // SetEvaluator sets the function Prime uses to evaluate agent outputs.
 func (s *Supervisor) SetEvaluator(fn func(ctx context.Context, agentID, output string) (*EvalResult, error)) {
 	s.evaluateOutput = fn
+}
+
+// SetCapabilityGapHandler sets the callback invoked when a CAPABILITY_GAP message arrives.
+// The handler runs in a goroutine and should not block.
+func (s *Supervisor) SetCapabilityGapHandler(fn func(ctx context.Context, msg Message)) {
+	s.onCapabilityGap = fn
 }
 
 // Start begins the supervisor loop.
@@ -255,6 +262,15 @@ func (s *Supervisor) handleMessage(ctx context.Context, msg Message) *Message {
 
 	case IntentACK:
 		return nil // ACK is terminal, never respond
+
+	case IntentCapabilityGap:
+		if s.onCapabilityGap != nil {
+			go s.onCapabilityGap(ctx, msg)
+		} else {
+			slog.Info("supervisor.capability_gap.unhandled",
+				"gap_type", msg.Context["gap_type"], "subject", msg.Context["subject"])
+		}
+		return nil
 
 	default:
 		slog.Warn("supervisor.unexpected_intent", "intent", msg.Intent, "from", msg.From)
