@@ -12,7 +12,7 @@ import type { LucideIcon } from 'lucide-react';
 
 const MEDIA_KIND_META: Record<MediaKind, { title: string; description: string; Icon: LucideIcon }> = {
   image:     { title: 'Image Generation', description: 'DALL-E 3, Stability AI, FLUX — generates images from text prompts. Used by the create_image tool.', Icon: ImageIcon },
-  video:     { title: 'Video Generation', description: 'Sora, Runway, Kling — generates videos from text. Used by the create_video tool (coming soon).', Icon: Film },
+  video:     { title: 'Video Generation', description: 'Sora, Runway, Kling — generates videos from text. Used by the create_video tool.', Icon: Film },
   audio_gen: { title: 'Audio Generation', description: 'Music, sound effects, and ambient audio generation.', Icon: Music },
 };
 

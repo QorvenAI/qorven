@@ -484,41 +484,148 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]any) *Result {
 
 // --- team_tasks ---
 
-type TeamTasksTool struct{}
+// TeamTasksBackend is the narrow interface this tool needs from tasks.Store.
+type TeamTasksBackend interface {
+	ListAll(ctx context.Context, tenantID, status string, limit int) ([]TeamTaskRow, error)
+	CreateTask(ctx context.Context, tenantID, title string) (string, error)
+	Transition(ctx context.Context, id, newStatus string) error
+	CompleteTask(ctx context.Context, id, result string) error
+}
 
-func NewTeamTasksTool() *TeamTasksTool  { return &TeamTasksTool{} }
-func (t *TeamTasksTool) Name() string   { return "team_tasks" }
+// TeamTaskRow is the minimal shape this tool reads from the store.
+type TeamTaskRow struct {
+	ID         string
+	Title      string
+	Status     string
+	AssignedTo *string
+}
+
+type TeamTasksTool struct {
+	backend  TeamTasksBackend
+	tenantID string
+}
+
+func NewTeamTasksTool(backend TeamTasksBackend, tenantID string) *TeamTasksTool {
+	return &TeamTasksTool{backend: backend, tenantID: tenantID}
+}
+func (t *TeamTasksTool) Name() string { return "team_tasks" }
 func (t *TeamTasksTool) Description() string {
-	return "Team task board — track progress, manage dependencies."
+	return "Team task board — list, create, update status, or complete tasks."
 }
 func (t *TeamTasksTool) Parameters() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"action": map[string]any{"type": "string", "enum": []string{"list", "create", "update", "complete"}, "description": "Action"},
-		"title":  map[string]any{"type": "string", "description": "Task title (for create)"},
-		"status": map[string]any{"type": "string", "description": "New status (for update)"},
+		"action":  map[string]any{"type": "string", "enum": []string{"list", "create", "update", "complete"}, "description": "Action to perform"},
+		"task_id": map[string]any{"type": "string", "description": "Task ID (required for update/complete)"},
+		"title":   map[string]any{"type": "string", "description": "Task title (required for create)"},
+		"status":  map[string]any{"type": "string", "description": "New status for update (e.g. in_progress, blocked)"},
+		"result":  map[string]any{"type": "string", "description": "Result summary (for complete)"},
+		"filter":  map[string]any{"type": "string", "description": "Status filter for list (e.g. pending, in_progress — omit for all)"},
 	}, "required": []string{"action"}}
 }
 
 func (t *TeamTasksTool) Execute(ctx context.Context, args map[string]any) *Result {
-	return ErrorResult("team_tasks: not yet implemented")
+	if t.backend == nil {
+		return ErrorResult("team_tasks: task store not available")
+	}
+	action, _ := args["action"].(string)
+	switch action {
+	case "list":
+		filter, _ := args["filter"].(string)
+		rows, err := t.backend.ListAll(ctx, t.tenantID, filter, 50)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("team_tasks.list: %v", err))
+		}
+		if len(rows) == 0 {
+			return TextResult("No tasks found.")
+		}
+		var sb strings.Builder
+		for _, row := range rows {
+			assignee := "(unassigned)"
+			if row.AssignedTo != nil && *row.AssignedTo != "" {
+				assignee = *row.AssignedTo
+			}
+			id := row.ID
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			fmt.Fprintf(&sb, "- [%s] %s — %s (assignee: %s)\n", row.Status, id, row.Title, assignee)
+		}
+		return TextResult(sb.String())
+
+	case "create":
+		title, _ := args["title"].(string)
+		if title == "" {
+			return ErrorResult("team_tasks.create: title is required")
+		}
+		id, err := t.backend.CreateTask(ctx, t.tenantID, title)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("team_tasks.create: %v", err))
+		}
+		return TextResult(fmt.Sprintf("Task created: %s", id))
+
+	case "update":
+		taskID, _ := args["task_id"].(string)
+		status, _ := args["status"].(string)
+		if taskID == "" || status == "" {
+			return ErrorResult("team_tasks.update: task_id and status are required")
+		}
+		if err := t.backend.Transition(ctx, taskID, status); err != nil {
+			return ErrorResult(fmt.Sprintf("team_tasks.update: %v", err))
+		}
+		return TextResult(fmt.Sprintf("Task %s transitioned to %s.", taskID, status))
+
+	case "complete":
+		taskID, _ := args["task_id"].(string)
+		result, _ := args["result"].(string)
+		if taskID == "" {
+			return ErrorResult("team_tasks.complete: task_id is required")
+		}
+		if err := t.backend.CompleteTask(ctx, taskID, result); err != nil {
+			return ErrorResult(fmt.Sprintf("team_tasks.complete: %v", err))
+		}
+		return TextResult(fmt.Sprintf("Task %s marked complete.", taskID))
+
+	default:
+		return ErrorResult(fmt.Sprintf("team_tasks: unknown action %q", action))
+	}
 }
 
 // --- team_message ---
 
-type TeamMessageTool struct{}
+// TeamMessageRuntime is the narrow interface this tool needs from RuntimeManager.
+type TeamMessageRuntime interface {
+	WakeAgentWithMessage(agentID, message string) bool
+}
 
-func NewTeamMessageTool() *TeamMessageTool { return &TeamMessageTool{} }
-func (t *TeamMessageTool) Name() string    { return "team_message" }
+type TeamMessageTool struct {
+	runtime TeamMessageRuntime
+}
+
+func NewTeamMessageTool(_ TeamTasksBackend, runtime TeamMessageRuntime) *TeamMessageTool {
+	return &TeamMessageTool{runtime: runtime}
+}
+func (t *TeamMessageTool) Name() string { return "team_message" }
 func (t *TeamMessageTool) Description() string {
-	return "Send messages to teammates (progress updates, questions)."
+	return "Send a message to a teammate agent (progress updates, questions, handoffs)."
 }
 func (t *TeamMessageTool) Parameters() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"agent_key": map[string]any{"type": "string", "description": "Target agent"},
-		"text":      map[string]any{"type": "string", "description": "Message text"},
-	}, "required": []string{"agent_key", "text"}}
+		"agent_id": map[string]any{"type": "string", "description": "Target agent ID (UUID)"},
+		"text":     map[string]any{"type": "string", "description": "Message text"},
+	}, "required": []string{"agent_id", "text"}}
 }
 
 func (t *TeamMessageTool) Execute(ctx context.Context, args map[string]any) *Result {
-	return ErrorResult("team_message: not yet implemented")
+	agentID, _ := args["agent_id"].(string)
+	text, _ := args["text"].(string)
+	if agentID == "" || text == "" {
+		return ErrorResult("team_message: agent_id and text are required")
+	}
+	if t.runtime == nil {
+		return ErrorResult("team_message: runtime not available")
+	}
+	if !t.runtime.WakeAgentWithMessage(agentID, text) {
+		return ErrorResult(fmt.Sprintf("team_message: agent %s is not running or unavailable", agentID))
+	}
+	return TextResult(fmt.Sprintf("Message sent to agent %s.", agentID))
 }

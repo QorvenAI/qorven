@@ -11,12 +11,52 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/channels"
 	"github.com/qorvenai/qorven/internal/memory"
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/realtime"
+	"github.com/qorvenai/qorven/internal/tasks"
 	"github.com/qorvenai/qorven/internal/tools"
 )
+
+// taskStoreAdapter wraps tasks.Store to satisfy tools.TeamTasksBackend.
+type taskStoreAdapter struct{ store *tasks.Store }
+
+func (a *taskStoreAdapter) ListAll(ctx context.Context, tenantID, status string, limit int) ([]tools.TeamTaskRow, error) {
+	rows, err := a.store.ListAll(ctx, tenantID, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tools.TeamTaskRow, len(rows))
+	for i, r := range rows {
+		out[i] = tools.TeamTaskRow{ID: r.ID, Title: r.Title, Status: r.Status, AssignedTo: r.AssignedTo}
+	}
+	return out, nil
+}
+
+func (a *taskStoreAdapter) CreateTask(ctx context.Context, tenantID, title string) (string, error) {
+	return a.store.Create(ctx, tenantID, tasks.Task{Title: title})
+}
+
+func (a *taskStoreAdapter) Transition(ctx context.Context, id, newStatus string) error {
+	return a.store.Transition(ctx, id, newStatus)
+}
+
+func (a *taskStoreAdapter) CompleteTask(ctx context.Context, id, result string) error {
+	return a.store.Complete(ctx, id, result, 0)
+}
+
+// runtimeMgrAdapter wraps agent.RuntimeManager to satisfy tools.TeamMessageRuntime.
+type runtimeMgrAdapter struct{ mgr *agent.RuntimeManager }
+
+func (a *runtimeMgrAdapter) WakeAgentWithMessage(agentID, message string) bool {
+	return a.mgr.WakeAgent(agentID, agent.WakeupSignal{
+		Source:  agent.WakeupChannelMessage,
+		Message: message,
+		Context: map[string]any{"type": "team_message", "content": message},
+	})
+}
 
 // lazyChannelSender wraps the gateway's chanMgr, which is set after the
 // TaskCoordinator is created. Using a closure/lazy wrapper avoids a nil pointer

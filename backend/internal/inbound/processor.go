@@ -47,16 +47,21 @@ type ReplyFunc func(ctx context.Context, agentID, channelType, chatID, content s
 // messages can trigger threshold/event rules set by Prime.
 type RuleEventFn func(ctx context.Context, eventName string, data map[string]any)
 
+// NotifySenderFunc delivers a message to a named channel (e.g. "telegram") at
+// the given chatID. Used by notifyDraft to ping operators about pending drafts.
+type NotifySenderFunc func(ctx context.Context, channelName, chatID, content string) error
+
 // Processor is the intelligence layer between channel receipt and agent loop.
 type Processor struct {
-	pool       *pgxpool.Pool
-	sessions   *session.Store
-	agentLoop  *agent.Loop
-	classifier *Classifier
-	draftQueue *DraftQueue
-	pluginMgr  *plugin.Manager // nil-safe; set via SetPluginManager after construction
-	reply      ReplyFunc       // nil-safe; set via SetReplyFunc after construction
-	fireRule   RuleEventFn     // nil-safe; set via SetRuleEventFn after construction
+	pool         *pgxpool.Pool
+	sessions     *session.Store
+	agentLoop    *agent.Loop
+	classifier   *Classifier
+	draftQueue   *DraftQueue
+	pluginMgr    *plugin.Manager    // nil-safe; set via SetPluginManager after construction
+	reply        ReplyFunc          // nil-safe; set via SetReplyFunc after construction
+	fireRule     RuleEventFn        // nil-safe; set via SetRuleEventFn after construction
+	notifySender NotifySenderFunc   // nil-safe; set via SetNotifySender after construction
 }
 
 // SetPluginManager injects the plugin manager so apps can hook into the pipeline.
@@ -68,6 +73,10 @@ func (p *Processor) SetReplyFunc(fn ReplyFunc) { p.reply = fn }
 // SetRuleEventFn wires the rule engine event hook so inbound messages can
 // trigger threshold/event rules.
 func (p *Processor) SetRuleEventFn(fn RuleEventFn) { p.fireRule = fn }
+
+// SetNotifySender wires the channel delivery function used to ping operators
+// when a draft reply is waiting for approval.
+func (p *Processor) SetNotifySender(fn NotifySenderFunc) { p.notifySender = fn }
 
 // NewProcessor creates a Processor.
 func NewProcessor(pool *pgxpool.Pool, sessions *session.Store, agentLoop *agent.Loop) *Processor {

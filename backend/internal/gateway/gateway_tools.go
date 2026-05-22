@@ -501,8 +501,16 @@ func (gw *Gateway) registerTools() {
 	// Messaging + Teams
 	reg.Register(tools.NewMessageTool())
 	reg.Register(tools.NewSpawnTool())
-	reg.Register(tools.NewTeamTasksTool())
-	reg.Register(tools.NewTeamMessageTool())
+	var teamTasksBackend tools.TeamTasksBackend
+	if gw.taskStore != nil {
+		teamTasksBackend = &taskStoreAdapter{store: gw.taskStore}
+	}
+	var teamMsgRuntime tools.TeamMessageRuntime
+	if gw.runtimeMgr != nil {
+		teamMsgRuntime = &runtimeMgrAdapter{mgr: gw.runtimeMgr}
+	}
+	reg.Register(tools.NewTeamTasksTool(teamTasksBackend, defaultTenant))
+	reg.Register(tools.NewTeamMessageTool(teamTasksBackend, teamMsgRuntime))
 
 	// ── GitHub Tools — autonomous dev loop ──────────────────────────────────
 	// Token lookup: env GITHUB_TOKEN → vault credential "github" → empty (tools return helpful error).

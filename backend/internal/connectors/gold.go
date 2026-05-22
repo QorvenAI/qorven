@@ -310,7 +310,47 @@ func (c *JiraConnector) TestConnection(ctx context.Context, creds map[string]str
 	return nil
 }
 func (c *JiraConnector) Execute(ctx context.Context, action string, creds map[string]string, params map[string]any) (any, error) {
-	return nil, fmt.Errorf("action %s: not yet implemented", action)
+	domain := creds["domain"]
+	if domain == "" { return nil, fmt.Errorf("jira domain required") }
+	base := "https://" + domain + "/rest/api/3"
+	h := map[string]string{}
+	// Jira Cloud: Basic auth is base64(email:api_token)
+	if email := creds["email"]; email != "" {
+		h["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(email+":"+creds["api_key"]))
+	}
+	h["Accept"] = "application/json"
+	h["Content-Type"] = "application/json"
+	switch action {
+	case "create_issue":
+		project, _ := params["project"].(string)
+		summary, _ := params["summary"].(string)
+		issueType, _ := params["issue_type"].(string)
+		if issueType == "" { issueType = "Task" }
+		body := map[string]any{
+			"fields": map[string]any{
+				"project":   map[string]any{"key": project},
+				"summary":   summary,
+				"issuetype": map[string]any{"name": issueType},
+			},
+		}
+		if desc, ok := params["description"].(string); ok && desc != "" {
+			body["fields"].(map[string]any)["description"] = map[string]any{
+				"type": "doc", "version": 1,
+				"content": []any{map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": desc}}}},
+			}
+		}
+		return apiCall(ctx, "POST", base+"/issue", h, body)
+	case "search_issues":
+		jql, _ := params["jql"].(string)
+		if jql == "" { jql = "ORDER BY created DESC" }
+		return apiCall(ctx, "POST", base+"/issue/search", h, map[string]any{"jql": jql, "maxResults": 20})
+	case "get_issue":
+		key, _ := params["issue_key"].(string)
+		if key == "" { return nil, fmt.Errorf("issue_key required") }
+		return apiCall(ctx, "GET", base+"/issue/"+key, h, nil)
+	default:
+		return nil, fmt.Errorf("unknown action: %s", action)
+	}
 }
 
 type StripeConnector struct{}
@@ -371,7 +411,32 @@ func (c *GoogleSheetsConnector) TestConnection(ctx context.Context, creds map[st
 	return nil
 }
 func (c *GoogleSheetsConnector) Execute(ctx context.Context, action string, creds map[string]string, params map[string]any) (any, error) {
-	return nil, fmt.Errorf("action %s: not yet implemented", action)
+	token := creds["access_token"]
+	if token == "" { return nil, fmt.Errorf("google access_token required") }
+	h := map[string]string{"Authorization": "Bearer " + token}
+	spreadsheetID, _ := params["spreadsheet_id"].(string)
+	if spreadsheetID == "" { return nil, fmt.Errorf("spreadsheet_id required") }
+	base := "https://sheets.googleapis.com/v4/spreadsheets/" + spreadsheetID
+	switch action {
+	case "read_range":
+		rangeA1, _ := params["range"].(string)
+		if rangeA1 == "" { rangeA1 = "Sheet1" }
+		return apiCall(ctx, "GET", base+"/values/"+rangeA1, h, nil)
+	case "append_row":
+		rangeA1, _ := params["range"].(string)
+		if rangeA1 == "" { rangeA1 = "Sheet1" }
+		values, _ := params["values"].([]any)
+		body := map[string]any{"values": []any{values}}
+		return apiCall(ctx, "POST", base+"/values/"+rangeA1+":append?valueInputOption=USER_ENTERED", h, body)
+	case "update_range":
+		rangeA1, _ := params["range"].(string)
+		if rangeA1 == "" { return nil, fmt.Errorf("range required") }
+		values, _ := params["values"].([]any)
+		body := map[string]any{"range": rangeA1, "values": []any{values}, "majorDimension": "ROWS"}
+		return apiCall(ctx, "PUT", base+"/values/"+rangeA1+"?valueInputOption=USER_ENTERED", h, body)
+	default:
+		return nil, fmt.Errorf("unknown action: %s", action)
+	}
 }
 
 type WeatherConnector struct{}

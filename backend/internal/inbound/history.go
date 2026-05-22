@@ -151,11 +151,59 @@ func (p *Processor) dispatch(ctx context.Context, msg channels.InboundMessage, m
 	}
 }
 
-// notifyDraft sends approval notification to the configured channel (stub — full wiring is a follow-up).
+// notifyDraft sends an approval notification to cfg.NotificationChannel so the
+// operator can review and approve/edit/reject the pending draft reply.
 func (p *Processor) notifyDraft(ctx context.Context, cfg AgentConfig, msg channels.InboundMessage, draftContent, draftID, historySummary string) {
 	slog.Info("inbound.draft.notify",
 		"channel", cfg.NotificationChannel,
 		"agent", msg.AgentID,
 		"draft_id", draftID,
 	)
+
+	if p.notifySender == nil || cfg.NotificationChannel == "" {
+		return
+	}
+
+	target := cfg.NotificationTarget // chat_id / channel_id configured by the operator
+	if target == "" {
+		return
+	}
+
+	// Truncate draft preview to keep the notification readable.
+	preview := draftContent
+	if len(preview) > 300 {
+		preview = preview[:300] + "…"
+	}
+
+	senderLabel := msg.SenderName
+	if senderLabel == "" {
+		senderLabel = msg.SenderID
+	}
+
+	notification := fmt.Sprintf(
+		"📬 *Draft reply pending approval*\n\n"+
+			"*From:* %s (via %s)\n"+
+			"*Message:* %s\n\n"+
+			"*Draft:*\n%s\n\n"+
+			"Approve or edit in the Qorven dashboard → Drafts (ID: `%s`)",
+		senderLabel, msg.ChannelType,
+		truncateDraft(msg.Content, 150),
+		preview,
+		draftID,
+	)
+
+	if err := p.notifySender(ctx, cfg.NotificationChannel, target, notification); err != nil {
+		slog.Warn("inbound.draft.notify_failed",
+			"channel", cfg.NotificationChannel,
+			"draft_id", draftID,
+			"error", err,
+		)
+	}
+}
+
+func truncateDraft(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

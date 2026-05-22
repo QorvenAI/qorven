@@ -51,7 +51,6 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 		switch task.Status {
 		case tasks.StatusDone:
 			slog.Info("task_worker: task already done", "task", taskID)
-			// TODO(071): trigger synthesis when TaskCoordinator is available
 			if gw.taskCoordinator != nil {
 				gw.taskCoordinator.onTaskComplete(ctx, *task)
 			}
@@ -115,7 +114,6 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 		switch signal {
 		case SignalDone:
 			slog.Info("task_worker: task completed", "task", taskID)
-			// TODO(071): trigger synthesis when TaskCoordinator is available
 			if gw.taskCoordinator != nil {
 				// Re-fetch to get final state with result populated.
 				if finalTask, err := gw.taskStore.Get(ctx, taskID); err == nil {

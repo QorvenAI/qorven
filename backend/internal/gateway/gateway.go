@@ -1296,6 +1296,12 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			gw.sendToChannelByTypeWithMeta(ctx, agentID, channelType, chatID, content, "", metadata["message_id"], nil, metadata)
 		})
 		gw.inbound.SetRuleEventFn(gw.FireRuleEvent)
+		gw.inbound.SetNotifySender(func(ctx context.Context, channelName, chatID, content string) error {
+			if gw.chanMgr == nil {
+				return fmt.Errorf("channel manager not available")
+			}
+			return gw.chanMgr.SendToChannel(ctx, channelName, chatID, content)
+		})
 	}
 
 	// Channel manager — routes inbound messages to the right Soul's agent loop
