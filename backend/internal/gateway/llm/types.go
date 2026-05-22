@@ -78,6 +78,18 @@ type StreamChunk struct {
 	ProviderID string
 }
 
+// buildCachedGatewayResponse constructs a GatewayResponse from a cached
+// content string. Used by the semantic cache tier to materialise a hit.
+func buildCachedGatewayResponse(content, model, providerID, keyID string) *GatewayResponse {
+	return &GatewayResponse{
+		ChatResponse:  &providers.ChatResponse{Content: content},
+		ProviderID:    providerID,
+		KeyID:         keyID,
+		ModelResolved: model,
+		CacheHit:      true,
+	}
+}
+
 // ErrBudgetExceeded is returned by the budget engine when an agent has
 // exceeded its monthly or daily spend cap.
 var ErrBudgetExceeded = &gatewayError{"budget exceeded"}

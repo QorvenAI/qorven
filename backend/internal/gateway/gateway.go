@@ -650,6 +650,14 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 		// Wire AI Gateway pipeline into the agent loop.
 		if gw.llmPipeline != nil {
 			gw.agentLoop.LLMPipeline = gw.llmPipeline
+			// Enable semantic cache tier 2 now that providers are loaded.
+			if cacheLayer := gw.llmPipeline.Cache(); cacheLayer != nil {
+				embedder := gw.resolveEmbeddingClient()
+				if embedder != nil {
+					cacheLayer.WithSemanticBackend(gw.db.Pool, embedder, defaultTenant)
+					slog.Info("gateway.cache.semantic: enabled", "tenant", defaultTenant)
+				}
+			}
 		}
 
 		// Wire project registry after tools are registered (deferred)
