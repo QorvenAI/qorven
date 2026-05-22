@@ -139,6 +139,12 @@ func (a *Aggregator) Refresh(ctx context.Context) (int, error) {
 	// Persist to DB if available.
 	if a.db != nil {
 		a.persistToDB(ctx, feed.Models)
+		// Backfill any calls recorded while pricing was unknown.
+		if result, err := gatewayllm.BackfillMissingPrices(ctx, a.db); err != nil {
+			slog.Warn("pricing.backfill_failed", "error", err)
+		} else if result.RowsUpdated > 0 {
+			slog.Info("pricing.backfill_ok", "rows", result.RowsUpdated, "models", result.ModelsFixed)
+		}
 	}
 
 	return len(feed.Models), nil

@@ -267,7 +267,40 @@ export const gatewayAdmin = {
     request<{ status: string }>(`/gateway/budgets/${encodeURIComponent(agentId)}`, { method: 'PUT', body: JSON.stringify(body) }),
   cacheStats: () => request<{ size: number; capacity: number }>('/gateway/cache/stats'),
   cacheFlush: () => request<{ status: string }>('/gateway/cache', { method: 'DELETE' }),
+  // Pricing
+  pricingGaps: () => request<{ gaps: PricingGap[]; total: number }>('/gateway/pricing/gaps'),
+  pricingList: (opts?: { source?: string; missing?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.source)  q.set('source',  opts.source);
+    if (opts?.missing) q.set('missing', 'true');
+    const qs = q.toString() ? `?${q}` : '';
+    return request<{ pricing: PricingRow[]; total: number }>(`/gateway/pricing${qs}`);
+  },
+  pricingSet: (modelId: string, body: { input_per_1m: number; output_per_1m: number; cache_write_per_1m?: number; cache_read_per_1m?: number }) =>
+    request<{ model_id: string; saved: boolean; backfill: { rows_updated: number; models_fixed: number } }>(
+      `/gateway/pricing/${encodeURIComponent(modelId)}`,
+      { method: 'PUT', body: JSON.stringify(body) }
+    ),
+  pricingBackfill: () => request<{ rows_updated: number; models_fixed: number }>('/gateway/pricing/backfill', { method: 'POST' }),
 };
+
+export interface PricingGap {
+  model_id:   string;
+  provider_id: string;
+  call_count:  number;
+  tokens_in:   number;
+  tokens_out:  number;
+  oldest_at:   string;
+}
+
+export interface PricingRow {
+  model_id:     string;
+  provider:     string;
+  input_per_1m: number;
+  output_per_1m: number;
+  source:       string;
+  updated_at:   string;
+}
 
 export const systemInfo = {
   get: () => request<any>('/system/info'),

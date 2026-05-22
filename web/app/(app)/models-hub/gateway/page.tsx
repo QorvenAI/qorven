@@ -5,13 +5,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   RefreshCw, Trash2, Check, Loader2, AlertCircle, Plus, X,
-  Activity, Cpu, Database, DollarSign, Zap, Server,
+  Activity, Cpu, Database, DollarSign, Zap, Server, Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { Button } from '@/components/qor/button';
 import { Badge } from '@/components/qor/badge';
-import { gatewayAdmin } from '@/lib/api-providers';
+import { gatewayAdmin, type PricingGap } from '@/lib/api-providers';
 import { toast } from 'sonner';
 
 // ─── Shared card ─────────────────────────────────────────────────────────────
@@ -258,33 +258,140 @@ function CacheStatsSection({ stats, onFlush }: {
   );
 }
 
+// ─── Pricing gaps ─────────────────────────────────────────────────────────────
+
+function PricingGapsSection({ gaps, onSet, onBackfill, backfilling }: {
+  gaps: PricingGap[];
+  onSet: (modelId: string, input: number, output: number) => Promise<void>;
+  onBackfill: () => Promise<void>;
+  backfilling: boolean;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [inputVal,  setInputVal]  = useState('');
+  const [outputVal, setOutputVal] = useState('');
+  const [saving, setSaving] = useState<string | null>(null);
+
+  if (gaps.length === 0) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-xs text-emerald-500">
+        <Check className="h-3.5 w-3.5" />
+        All model calls have pricing data — no gaps detected.
+      </div>
+    );
+  }
+
+  const save = async (modelId: string) => {
+    const input  = parseFloat(inputVal);
+    const output = parseFloat(outputVal);
+    if (isNaN(input) || isNaN(output) || (input === 0 && output === 0)) {
+      toast.error('Enter at least one non-zero price');
+      return;
+    }
+    setSaving(modelId);
+    await onSet(modelId, input, output);
+    setEditing(null);
+    setSaving(null);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-amber-500 flex items-center gap-1.5">
+          <AlertCircle className="h-3.5 w-3.5" />
+          {gaps.length} model{gaps.length !== 1 ? 's' : ''} with unpriced calls — tokens recorded but cost is $0
+        </p>
+        <Button variant="outline" size="sm" onClick={onBackfill} disabled={backfilling}>
+          {backfilling ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          Re-run backfill
+        </Button>
+      </div>
+      <div className="rounded-lg border border-amber-500/30 overflow-hidden">
+        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 border-b border-border/50 bg-amber-500/5 text-xs font-medium text-muted-foreground">
+          <span>Model</span>
+          <span className="text-right">Calls</span>
+          <span className="text-right">Tokens In</span>
+          <span className="text-right">Tokens Out</span>
+          <span />
+        </div>
+        {gaps.map(g => (
+          <div key={g.model_id} className="border-b border-border/20 last:border-0">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2.5 items-center">
+              <span className="text-xs font-mono truncate text-amber-600 dark:text-amber-400">{g.model_id}</span>
+              <span className="text-xs text-right text-muted-foreground">{g.call_count}</span>
+              <span className="text-xs text-right text-muted-foreground">{g.tokens_in.toLocaleString()}</span>
+              <span className="text-xs text-right text-muted-foreground">{g.tokens_out.toLocaleString()}</span>
+              <Button variant="ghost" size="sm" onClick={() => { setEditing(g.model_id); setInputVal(''); setOutputVal(''); }}>
+                Set price
+              </Button>
+            </div>
+            {editing === g.model_id && (
+              <div className="px-4 pb-3 flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-1">
+                  <label className="text-xs text-muted-foreground whitespace-nowrap">Input $/1M</label>
+                  <input
+                    value={inputVal}
+                    onChange={e => setInputVal(e.target.value)}
+                    placeholder="3.00"
+                    type="number" step="0.01" min="0"
+                    className="qr-input text-xs py-1 w-24"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 flex-1">
+                  <label className="text-xs text-muted-foreground whitespace-nowrap">Output $/1M</label>
+                  <input
+                    value={outputVal}
+                    onChange={e => setOutputVal(e.target.value)}
+                    placeholder="15.00"
+                    type="number" step="0.01" min="0"
+                    className="qr-input text-xs py-1 w-24"
+                  />
+                </div>
+                <Button variant="primary" size="sm" onClick={() => save(g.model_id)} disabled={saving === g.model_id}>
+                  {saving === g.model_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                  Save & backfill
+                </Button>
+                <Button variant="ghost" mode="icon" size="sm" onClick={() => setEditing(null)}><X className="h-3 w-3" /></Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function GatewayPage() {
-  const [loading,   setLoading]   = useState(true);
-  const [stats,     setStats]     = useState<{ uptime_seconds: number; pipeline: boolean } | null>(null);
-  const [circuit,   setCircuit]   = useState<Breaker[]>([]);
-  const [queue,     setQueue]     = useState<{ interactive: number; background: number; batch: number; capacities: { interactive: number; background: number; batch: number } } | null>(null);
-  const [aliases,   setAliases]   = useState<AliasRow[]>([]);
-  const [budgets,   setBudgets]   = useState<BudgetRow[]>([]);
-  const [cacheStats, setCacheStats] = useState<{ size: number; capacity: number } | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [stats,        setStats]        = useState<{ uptime_seconds: number; pipeline: boolean } | null>(null);
+  const [circuit,      setCircuit]      = useState<Breaker[]>([]);
+  const [queue,        setQueue]        = useState<{ interactive: number; background: number; batch: number; capacities: { interactive: number; background: number; batch: number } } | null>(null);
+  const [aliases,      setAliases]      = useState<AliasRow[]>([]);
+  const [budgets,      setBudgets]      = useState<BudgetRow[]>([]);
+  const [cacheStats,   setCacheStats]   = useState<{ size: number; capacity: number } | null>(null);
+  const [pricingGaps,  setPricingGaps]  = useState<PricingGap[]>([]);
+  const [backfilling,  setBackfilling]  = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [s, c, q, a, b, cs] = await Promise.allSettled([
+    const [s, c, q, a, b, cs, pg] = await Promise.allSettled([
       gatewayAdmin.stats(),
       gatewayAdmin.circuit(),
       gatewayAdmin.queue(),
       gatewayAdmin.aliases(),
       gatewayAdmin.budgets(),
       gatewayAdmin.cacheStats(),
+      gatewayAdmin.pricingGaps(),
     ]);
-    if (s.status === 'fulfilled' && s.value) setStats(s.value);
-    if (c.status === 'fulfilled' && c.value) setCircuit(c.value.breakers ?? []);
-    if (q.status === 'fulfilled' && q.value) setQueue(q.value);
-    if (a.status === 'fulfilled' && Array.isArray(a.value)) setAliases(a.value);
-    if (b.status === 'fulfilled' && Array.isArray(b.value)) setBudgets(b.value);
-    if (cs.status === 'fulfilled' && cs.value) setCacheStats(cs.value);
+    if (s.status  === 'fulfilled' && s.value)              setStats(s.value);
+    if (c.status  === 'fulfilled' && c.value)              setCircuit(c.value.breakers ?? []);
+    if (q.status  === 'fulfilled' && q.value)              setQueue(q.value);
+    if (a.status  === 'fulfilled' && Array.isArray(a.value)) setAliases(a.value);
+    if (b.status  === 'fulfilled' && Array.isArray(b.value)) setBudgets(b.value);
+    if (cs.status === 'fulfilled' && cs.value)             setCacheStats(cs.value);
+    if (pg.status === 'fulfilled' && pg.value)             setPricingGaps(pg.value.gaps ?? []);
     setLoading(false);
   }, []);
 
@@ -312,6 +419,29 @@ export default function GatewayPage() {
       toast.success('Cache flushed');
       load();
     } catch { toast.error('Failed to flush cache'); }
+  };
+
+  const setPricing = async (modelId: string, input: number, output: number) => {
+    try {
+      const result = await gatewayAdmin.pricingSet(modelId, { input_per_1m: input, output_per_1m: output });
+      const backfilled = result?.backfill?.rows_updated ?? 0;
+      toast.success(`Price saved for ${modelId}${backfilled > 0 ? ` — ${backfilled} past call${backfilled !== 1 ? 's' : ''} repriced` : ''}`);
+      load();
+    } catch { toast.error('Failed to save price'); }
+  };
+
+  const runBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const result = await gatewayAdmin.pricingBackfill();
+      if (result && result.rows_updated > 0) {
+        toast.success(`Backfill complete — ${result.rows_updated} call${result.rows_updated !== 1 ? 's' : ''} repriced across ${result.models_fixed} model${result.models_fixed !== 1 ? 's' : ''}`);
+      } else {
+        toast.info('Nothing to backfill — all gaps remain unresolvable with current pricing data');
+      }
+      load();
+    } catch { toast.error('Backfill failed'); }
+    setBackfilling(false);
   };
 
   return (
@@ -375,6 +505,26 @@ export default function GatewayPage() {
           <div className="space-y-2">{[0,1].map(i => <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />)}</div>
         ) : (
           <BudgetsSection budgets={budgets} />
+        )}
+      </Card>
+
+      {/* Row 5: Pricing Gaps */}
+      <Card
+        title="Pricing Gaps"
+        icon={Tag}
+        headerRight={pricingGaps.length > 0 ? (
+          <Badge variant="warning" appearance="light" size="sm">{pricingGaps.length} unpriced</Badge>
+        ) : undefined}
+      >
+        {loading ? (
+          <div className="space-y-1.5">{[0,1].map(i => <div key={i} className="h-9 rounded-lg bg-muted animate-pulse" />)}</div>
+        ) : (
+          <PricingGapsSection
+            gaps={pricingGaps}
+            onSet={setPricing}
+            onBackfill={runBackfill}
+            backfilling={backfilling}
+          />
         )}
       </Card>
     </div>

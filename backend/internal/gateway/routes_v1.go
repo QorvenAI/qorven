@@ -165,6 +165,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Put("/gateway/budgets/{agentId}", gw.handleGatewayBudgetsUpsert)
 		r.Get("/gateway/cache/stats", gw.handleGatewayCacheStats)
 		r.Delete("/gateway/cache", gw.handleGatewayCacheFlush)
+		r.Get("/gateway/pricing", gw.handleGatewayPricingList)
+		r.Get("/gateway/pricing/gaps", gw.handleGatewayPricingGaps)
+		r.Post("/gateway/pricing/backfill", gw.handleGatewayPricingBackfill)
+		r.Put("/gateway/pricing/{modelId}", gw.handleGatewayPricingSet)
 
 		// OAuth provider flows (Claude Code, GitHub Copilot, Google Vertex AI)
 		r.Get("/providers/oauth", gw.handleOAuthProvidersList)

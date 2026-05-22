@@ -89,6 +89,7 @@ import (
 	"github.com/qorvenai/qorven/internal/apps"
 	"github.com/qorvenai/qorven/internal/inbound"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
+	"github.com/qorvenai/qorven/internal/pricing"
 )
 
 // embeddedMigrations holds the migrations FS injected by SetEmbeddedMigrations.
@@ -271,8 +272,10 @@ type Gateway struct {
 
 	// AI Gateway pipeline — routes all agent LLM calls through middleware
 	// (budget, priority queue, cache, alias resolution, circuit breaker, cost).
-	llmPipeline  *gatewayllm.Pipeline
-	llmOAuthMgr  *gatewayllm.OAuthManager
+	llmPipeline    *gatewayllm.Pipeline
+	llmCostLedger  *gatewayllm.CostLedger
+	llmOAuthMgr    *gatewayllm.OAuthManager
+	pricingAgg     *pricing.Aggregator
 }
 
 func New(cfg *config.Config) (*Gateway, error) {
@@ -430,9 +433,10 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			// priority queue, exact cache, alias resolution, circuit breaker,
 			// cost ledger.
 			{
-				budgetEngine := gatewayllm.NewBudgetEngine(db.Pool)
-				costLedger   := gatewayllm.NewCostLedger(db.Pool, budgetEngine)
-				gw.llmPipeline = gatewayllm.NewPipeline(
+				budgetEngine    := gatewayllm.NewBudgetEngine(db.Pool)
+				costLedger      := gatewayllm.NewCostLedger(db.Pool, budgetEngine)
+				gw.llmCostLedger = costLedger
+				gw.llmPipeline   = gatewayllm.NewPipeline(
 					gw.providerReg,
 					providers.NewKeyPoolStore(db.Pool, cfg.Auth.EncryptionKey),
 					defaultTenant,
@@ -763,6 +767,14 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			// Wire supervisor bus into agent loop
 			gw.agentLoop.SupervisorBus = gw.supervisorBus
 			gw.agentLoop.PrimeID = primeID
+
+			// Wire capability gap reporter — cost ledger notifies Prime when
+			// a model has no pricing data so Prime can request it from the user.
+			if gw.llmCostLedger != nil {
+				gapReporter := NewCapabilityGapReporter(gw.supervisorBus, primeID)
+				gw.llmCostLedger.WithGapReporter(gapReporter)
+				slog.Info("gateway.gap_reporter.wired", "prime", primeID)
+			}
 
 			// Wire Prime delegation — allows Prime to execute specialist agents
 			pd := agent.NewPrimeDelegation(primeID, gw.agents)

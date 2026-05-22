@@ -104,6 +104,10 @@ type CallCost struct {
 	CostCacheWUUSD   int64
 	CostCacheRUUSD   int64
 	TotalUUSD        int64 // exact integer sum of all components
+
+	// PricingMissing is true when no rate was found for this model.
+	// Tokens are still recorded; cost is 0. Callers should log/alert on this.
+	PricingMissing bool
 }
 
 // TotalUSD converts the integer µUSD total to float64 for display only.
@@ -148,7 +152,11 @@ func ComputeCost(model string, usage *providers.Usage, providerID ...string) Cal
 		TokensCacheRead:  usage.CacheReadTokens,
 	}
 	if !ok {
-		// Unknown model — tokens recorded, cost is 0. Never overcharge.
+		// Unknown model — tokens recorded, cost is 0.
+		// PricingMissing lets callers emit warnings and update the feed.
+		c.PricingMissing = true
+		slog.Warn("gateway.cost: pricing not found, tokens recorded but cost is zero",
+			"model", model)
 		return c
 	}
 
@@ -178,10 +186,19 @@ type spendEntry struct {
 	modelID    string
 	cost       CallCost
 	cacheHit   bool
+	// pricingMissing mirrors cost.PricingMissing — duplicated here so
+	// flush() can write it to DB without deriving it from cost again.
+	pricingMissing bool
 }
 
 // writeBufSize is the primary channel buffer depth.
 const writeBufSize = 8192
+
+// GapReporter is implemented by gateway.CapabilityGapReporter.
+// The interface lives here to keep the llm package free of gateway imports.
+type GapReporter interface {
+	ReportPricingGap(ctx context.Context, modelID, providerID string, tokensIn, tokensOut int)
+}
 
 // CostLedger records per-request cost to gateway_spend_raw (immutable) and
 // gateway_spend (daily aggregate) asynchronously. It also notifies the
@@ -195,6 +212,7 @@ const writeBufSize = 8192
 type CostLedger struct {
 	db      *pgxpool.Pool
 	budget  *BudgetEngine
+	gaps    GapReporter // optional — notifies Prime of unknown model prices
 	writes  chan spendEntry
 	retries chan spendEntry
 	stopCh  chan struct{}
@@ -215,26 +233,42 @@ func NewCostLedger(db *pgxpool.Pool, budget *BudgetEngine) *CostLedger {
 	return l
 }
 
+// WithGapReporter attaches a CapabilityGapReporter so Prime is notified
+// whenever a model with unknown pricing is encountered.
+func (l *CostLedger) WithGapReporter(r GapReporter) {
+	l.gaps = r
+}
+
 // Record is called after every LLM call. Non-blocking — enqueues for async write.
 func (l *CostLedger) Record(ctx context.Context, req GatewayRequest, resp *GatewayResponse) {
 	if l.db == nil || resp == nil || resp.ChatResponse == nil {
 		return
 	}
-	cost := ComputeCost(resp.ModelResolved, resp.Usage)
-	// Skip zero-cost calls with no tokens (e.g. gateway cache hits with no
-	// provider charge). Still record if cacheHit is true so the raw table
-	// has a complete picture, but skip the aggregate write path.
-	if cost.TotalUUSD == 0 && cost.TokensIn == 0 && cost.TokensOut == 0 && !resp.CacheHit {
+	cost := ComputeCost(resp.ModelResolved, resp.Usage, resp.ProviderID)
+	// Skip only calls with zero tokens and no cost — nothing to record.
+	// Calls with tokens but missing pricing still go through so the raw
+	// audit log captures the token consumption even when we can't price it.
+	if cost.TotalUUSD == 0 && cost.TokensIn == 0 && cost.TokensOut == 0 &&
+		cost.TokensThinking == 0 && !resp.CacheHit && !cost.PricingMissing {
 		return
 	}
+	if cost.PricingMissing {
+		slog.Warn("gateway.cost_ledger: unknown model price, tokens recorded with zero cost",
+			"model", resp.ModelResolved, "provider", resp.ProviderID,
+			"tokens_in", cost.TokensIn, "tokens_out", cost.TokensOut)
+		if l.gaps != nil {
+			go l.gaps.ReportPricingGap(ctx, resp.ModelResolved, resp.ProviderID, cost.TokensIn, cost.TokensOut)
+		}
+	}
 	entry := spendEntry{
-		tenantID:   req.TenantID,
-		agentID:    req.AgentID,
-		sessionID:  req.SessionID,
-		providerID: resp.ProviderID,
-		modelID:    resp.ModelResolved,
-		cost:       cost,
-		cacheHit:   resp.CacheHit,
+		tenantID:       req.TenantID,
+		agentID:        req.AgentID,
+		sessionID:      req.SessionID,
+		providerID:     resp.ProviderID,
+		modelID:        resp.ModelResolved,
+		cost:           cost,
+		cacheHit:       resp.CacheHit,
+		pricingMissing: cost.PricingMissing,
 	}
 	select {
 	case l.writes <- entry:
@@ -314,15 +348,15 @@ func (l *CostLedger) flush(e spendEntry) {
 			tenant_id, agent_id, session_id, provider_id, model_id,
 			tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
 			cost_input_uusd, cost_output_uusd, cost_thinking_uusd, cost_cache_w_uusd, cost_cache_r_uusd,
-			cost_total_uusd, cache_hit
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			cost_total_uusd, cache_hit, pricing_missing
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 	`,
 		e.tenantID, agentIDPtr, sessionIDPtr, e.providerID, e.modelID,
 		e.cost.TokensIn, e.cost.TokensOut, e.cost.TokensThinking,
 		e.cost.TokensCacheWrite, e.cost.TokensCacheRead,
 		e.cost.CostInputUUSD, e.cost.CostOutputUUSD, e.cost.CostThinkingUUSD,
 		e.cost.CostCacheWUUSD, e.cost.CostCacheRUUSD,
-		e.cost.TotalUUSD, e.cacheHit,
+		e.cost.TotalUUSD, e.cacheHit, e.pricingMissing,
 	)
 	if err != nil {
 		slog.Error("gateway.cost_ledger: raw insert failed",
@@ -375,4 +409,181 @@ func (l *CostLedger) flush(e spendEntry) {
 // Stop halts the background writers. Called on gateway shutdown.
 func (l *CostLedger) Stop() {
 	l.once.Do(func() { close(l.stopCh) })
+}
+
+// PricingGap is one model whose calls were recorded without a known price.
+type PricingGap struct {
+	ModelID    string `json:"model_id"`
+	ProviderID string `json:"provider_id"`
+	CallCount  int    `json:"call_count"`
+	TokensIn   int64  `json:"tokens_in"`
+	TokensOut  int64  `json:"tokens_out"`
+	OldestAt   string `json:"oldest_at"`
+}
+
+// QueryPricingGaps returns a list of models that have gateway_spend_raw rows
+// with pricing_missing=true, ordered by token volume descending.
+func QueryPricingGaps(ctx context.Context, db *pgxpool.Pool) ([]PricingGap, error) {
+	rows, err := db.Query(ctx, `
+		SELECT
+			model_id,
+			COALESCE(provider_id, '') AS provider_id,
+			COUNT(*)                  AS call_count,
+			SUM(tokens_in)            AS tokens_in,
+			SUM(tokens_out)           AS tokens_out,
+			MIN(created_at)::text     AS oldest_at
+		FROM gateway_spend_raw
+		WHERE pricing_missing = true
+		GROUP BY model_id, provider_id
+		ORDER BY (SUM(tokens_in) + SUM(tokens_out)) DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var gaps []PricingGap
+	for rows.Next() {
+		var g PricingGap
+		if err := rows.Scan(&g.ModelID, &g.ProviderID, &g.CallCount, &g.TokensIn, &g.TokensOut, &g.OldestAt); err != nil {
+			return nil, err
+		}
+		gaps = append(gaps, g)
+	}
+	return gaps, rows.Err()
+}
+
+// BackfillResult summarises what BackfillMissingPrices did.
+type BackfillResult struct {
+	RowsUpdated int `json:"rows_updated"`
+	ModelsFixed int `json:"models_fixed"`
+}
+
+// BackfillMissingPrices reprices every gateway_spend_raw row that has
+// pricing_missing=true, using the current in-process pricingTable.
+//
+// For each such row it recalculates all five cost components using the
+// same integer µUSD arithmetic as ComputeCost, then:
+//  1. Updates gateway_spend_raw in place (flips pricing_missing=false, sets costs).
+//  2. Adds the delta cost to the matching gateway_spend aggregate row.
+//
+// Safe to call at any time — rows that still have no rate are left untouched.
+// Called automatically by the pricing aggregator after every successful Refresh.
+func BackfillMissingPrices(ctx context.Context, db *pgxpool.Pool) (BackfillResult, error) {
+	if db == nil {
+		return BackfillResult{}, nil
+	}
+
+	// Fetch all distinct (model_id, provider_id) combos that need backfill.
+	type rawRow struct {
+		id             string
+		modelID        string
+		providerID     string
+		tokensIn       int
+		tokensOut      int
+		tokensThinking int
+		tokensCacheW   int
+		tokensCacheR   int
+		agentID        *string
+		tenantID       string
+		period         string
+	}
+
+	rows, err := db.Query(ctx, `
+		SELECT id, model_id, COALESCE(provider_id,''),
+		       tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
+		       agent_id, tenant_id::text,
+		       created_at::date::text
+		FROM gateway_spend_raw
+		WHERE pricing_missing = true
+		ORDER BY created_at
+	`)
+	if err != nil {
+		return BackfillResult{}, err
+	}
+	defer rows.Close()
+
+	var pending []rawRow
+	for rows.Next() {
+		var r rawRow
+		if err := rows.Scan(
+			&r.id, &r.modelID, &r.providerID,
+			&r.tokensIn, &r.tokensOut, &r.tokensThinking, &r.tokensCacheW, &r.tokensCacheR,
+			&r.agentID, &r.tenantID, &r.period,
+		); err != nil {
+			return BackfillResult{}, err
+		}
+		pending = append(pending, r)
+	}
+	if err := rows.Err(); err != nil {
+		return BackfillResult{}, err
+	}
+
+	fixedModels := map[string]struct{}{}
+	updated := 0
+
+	for _, r := range pending {
+		usage := &providers.Usage{
+			PromptTokens:        r.tokensIn,
+			CompletionTokens:    r.tokensOut,
+			ThinkingTokens:      r.tokensThinking,
+			CacheCreationTokens: r.tokensCacheW,
+			CacheReadTokens:     r.tokensCacheR,
+		}
+		cost := ComputeCost(r.modelID, usage, r.providerID)
+		if cost.PricingMissing {
+			// Rate still not known — skip.
+			continue
+		}
+
+		// 1. Update raw row.
+		_, err := db.Exec(ctx, `
+			UPDATE gateway_spend_raw SET
+				cost_input_uusd    = $2,
+				cost_output_uusd   = $3,
+				cost_thinking_uusd = $4,
+				cost_cache_w_uusd  = $5,
+				cost_cache_r_uusd  = $6,
+				cost_total_uusd    = $7,
+				pricing_missing    = false
+			WHERE id = $1
+		`,
+			r.id,
+			cost.CostInputUUSD, cost.CostOutputUUSD, cost.CostThinkingUUSD,
+			cost.CostCacheWUUSD, cost.CostCacheRUUSD, cost.TotalUUSD,
+		)
+		if err != nil {
+			slog.Error("gateway.backfill: raw update failed", "id", r.id, "model", r.modelID, "err", err)
+			continue
+		}
+
+		// 2. Add cost delta to daily aggregate (if the row has an agent).
+		if r.agentID != nil && *r.agentID != "" && cost.TotalUUSD > 0 {
+			_, err = db.Exec(ctx, `
+				INSERT INTO gateway_spend
+					(tenant_id, agent_id, provider_id, model_id,
+					 tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
+					 cost_usd, cost_total_uusd, period)
+				VALUES ($1,$2,$3,$4, 0,0,0,0,0, $5,$6, $7::date)
+				ON CONFLICT (tenant_id, agent_id, period)
+				DO UPDATE SET
+					cost_usd        = gateway_spend.cost_usd        + $5,
+					cost_total_uusd = gateway_spend.cost_total_uusd + $6
+			`,
+				r.tenantID, *r.agentID, r.providerID, r.modelID,
+				cost.TotalUSD(), cost.TotalUUSD, r.period,
+			)
+			if err != nil {
+				slog.Error("gateway.backfill: aggregate update failed", "agent", *r.agentID, "model", r.modelID, "err", err)
+			}
+		}
+
+		fixedModels[r.modelID] = struct{}{}
+		updated++
+	}
+
+	result := BackfillResult{RowsUpdated: updated, ModelsFixed: len(fixedModels)}
+	if updated > 0 {
+		slog.Info("gateway.backfill: repriced rows", "rows", updated, "models", len(fixedModels))
+	}
+	return result, nil
 }

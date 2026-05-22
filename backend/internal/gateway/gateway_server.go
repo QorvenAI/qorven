@@ -253,19 +253,20 @@ func (gw *Gateway) Start() error {
 		selfBuild.Start()
 
 		// Auto-refresh model pricing on startup and daily via the canonical feed.
+		gw.pricingAgg = pricing.NewAggregator(gw.db.Pool)
 		go func() {
-			agg := pricing.NewAggregator(gw.db.Pool)
 			// Seed from built-in registry immediately (zero network, instant)
-			agg.SeedFromBuiltin()
+			gw.pricingAgg.SeedFromBuiltin()
 			// Then fetch live pricing from qorven.ai/data/model-pricing.json
-			if n, err := agg.Refresh(context.Background()); err != nil {
+			// (also triggers backfill of any pricing_missing rows)
+			if n, err := gw.pricingAgg.Refresh(context.Background()); err != nil {
 				slog.Warn("pricing.startup_refresh_failed", "error", err)
 			} else {
 				slog.Info("pricing.startup_refresh_ok", "models", n)
 			}
 			ticker := time.NewTicker(24 * time.Hour)
 			for range ticker.C {
-				if n, err := agg.Refresh(context.Background()); err != nil {
+				if n, err := gw.pricingAgg.Refresh(context.Background()); err != nil {
 					slog.Warn("pricing.daily_refresh_failed", "error", err)
 				} else {
 					slog.Info("pricing.daily_refresh_ok", "models", n)

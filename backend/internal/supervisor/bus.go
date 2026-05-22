@@ -27,6 +27,7 @@ const (
 	IntentEscalationNotice Intent = "ESCALATION_NOTICE" // Prime → Human: "I can't resolve this."
 	IntentAutoFix          Intent = "AUTO_FIX"          // Prime → Qor: "Apply this fix" (low-risk)
 	IntentHeartbeat        Intent = "HEARTBEAT"         // Qor → Prime: "I'm alive." Informational.
+	IntentCapabilityGap    Intent = "CAPABILITY_GAP"    // System → Prime: "Something is missing — act on it."
 )
 
 // RiskLevel classifies the severity of an issue or proposed change.
