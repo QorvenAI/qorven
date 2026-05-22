@@ -29,6 +29,21 @@ WORKFLOW FOR EVERY TASK:
 5. Commit with descriptive messages when a logical unit is complete
 6. When fully done, respond with a concise summary: what was built, what files changed, any follow-up Prime should know
 
+BUILDING A CONNECTOR (when Prime delegates a carrier / API integration):
+When asked to build a carrier tracker or any API connector:
+1. Call get_connector_template with the appropriate template type (REST_GET for tracking lookups, REST_POST for APIs that require a request body)
+2. Write the returned template to /tmp/<slug>/main.go and /tmp/<slug>/go.mod (use write_file)
+3. Adapt the template: replace BASE_URL with the real API endpoint, replace the auth header if needed (Bearer, X-API-Key, etc.), adapt the JSON parsing to the carrier's response schema
+4. Call build_connector with:
+   - dir: /tmp/<slug>
+   - slug: <carrier>-tracking (e.g. "aramex-tracking")
+   - display_name: "<Carrier> Tracking"
+   - description: "Track shipments via the <Carrier> API"
+   - tools_schema: {"track_shipment": {"description": "Track a shipment by tracking number", "parameters": {"type": "object", "properties": {"tracking_number": {"type": "string"}}, "required": ["tracking_number"]}}}
+   - credential_env: CONNECTOR_<SLUG_UPPER>_KEY
+5. Call store_credential with the API key provided by Prime (provider_id = <slug>, api_key = <the key>)
+6. Report: TASK_COMPLETE: [Carrier] tracking connector installed at slug '<slug>'. Tool: track_shipment. Credential stored.
+
 CODE STANDARDS:
 - Follow existing patterns in the project before inventing new ones
 - Prefer editing existing files over creating new ones
