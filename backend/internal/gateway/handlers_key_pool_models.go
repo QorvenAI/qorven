@@ -382,18 +382,46 @@ func (gw *Gateway) handleSoulUsage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
+	ctx := r.Context()
 	soulID := chi.URLParam(r, "soul_id")
-	ps := providers.NewPricingStore(gw.db.Pool)
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
-	monthCost, monthCalls, monthTokens := ps.GetSoulSpend(r.Context(), soulID, monthStart)
-	allCost, allCalls, allTokens := ps.GetSoulSpend(r.Context(), soulID, time.Time{})
+	type spendRow struct {
+		cost   float64
+		calls  int
+		tokens int
+	}
+	querySpend := func(since *time.Time) spendRow {
+		var row spendRow
+		var q string
+		var args []any
+		if since != nil {
+			q = `SELECT COALESCE(SUM(cost_total_uusd::float8 / 1000000), 0), COUNT(*),
+			            COALESCE(SUM(tokens_in + tokens_out + tokens_thinking), 0)
+			     FROM gateway_spend_raw WHERE agent_id = $1 AND created_at >= $2`
+			args = []any{soulID, *since}
+		} else {
+			q = `SELECT COALESCE(SUM(cost_total_uusd::float8 / 1000000), 0), COUNT(*),
+			            COALESCE(SUM(tokens_in + tokens_out + tokens_thinking), 0)
+			     FROM gateway_spend_raw WHERE agent_id = $1`
+			args = []any{soulID}
+		}
+		gw.db.Pool.QueryRow(ctx, q, args...).Scan(&row.cost, &row.calls, &row.tokens)
+		return row
+	}
 
-	// Top models
-	rows, _ := gw.db.Pool.Query(r.Context(),
-		`SELECT model_id, COUNT(*), COALESCE(SUM(cost_usd), 0), COALESCE(SUM(input_tokens + output_tokens), 0)
-		 FROM soul_usage WHERE soul_id = $1 AND called_at >= $2 GROUP BY model_id ORDER BY 3 DESC LIMIT 5`, soulID, monthStart)
+	month := querySpend(&monthStart)
+	all := querySpend(nil)
+
+	// Top models this month from raw log
+	rows, _ := gw.db.Pool.Query(ctx,
+		`SELECT model_id, COUNT(*),
+		        COALESCE(SUM(cost_total_uusd::float8 / 1000000), 0),
+		        COALESCE(SUM(tokens_in + tokens_out + tokens_thinking), 0)
+		 FROM gateway_spend_raw
+		 WHERE agent_id = $1 AND created_at >= $2
+		 GROUP BY model_id ORDER BY 3 DESC LIMIT 5`, soulID, monthStart)
 	topModels := []map[string]any{}
 	if rows != nil {
 		defer rows.Close()
@@ -408,8 +436,8 @@ func (gw *Gateway) handleSoulUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
-		"this_month": map[string]any{"cost": monthCost, "calls": monthCalls, "tokens": monthTokens},
-		"all_time":   map[string]any{"cost": allCost, "calls": allCalls, "tokens": allTokens},
+		"this_month": map[string]any{"cost": month.cost, "calls": month.calls, "tokens": month.tokens},
+		"all_time":   map[string]any{"cost": all.cost, "calls": all.calls, "tokens": all.tokens},
 		"top_models": topModels,
 	})
 }
@@ -419,23 +447,34 @@ func (gw *Gateway) handleAccountUsage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
-	ps := providers.NewPricingStore(gw.db.Pool)
-	totalCost := ps.GetAccountSpend(r.Context(), defaultTenant)
+	ctx := r.Context()
 
-	// Per-soul breakdown
-	rows, _ := gw.db.Pool.Query(r.Context(),
-		`SELECT a.id, a.display_name, COALESCE(SUM(u.cost_usd), 0), COUNT(u.id)
-		 FROM agents a LEFT JOIN soul_usage u ON a.id = u.soul_id AND u.called_at >= date_trunc('month', now())
-		 WHERE a.tenant_id = $1 AND a.deleted_at IS NULL GROUP BY a.id, a.display_name ORDER BY 3 DESC`, defaultTenant)
+	var totalCost float64
+	gw.db.Pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(cost_total_uusd::float8 / 1000000), 0)
+		 FROM gateway_spend_raw WHERE tenant_id = $1 AND created_at >= date_trunc('month', now())`,
+		defaultTenant).Scan(&totalCost)
+
+	// Per-soul breakdown from daily aggregate (fast)
+	rows, _ := gw.db.Pool.Query(ctx,
+		`SELECT a.id, a.display_name,
+		        COALESCE(SUM(gs.cost_usd), 0),
+		        COALESCE(SUM(gs.tokens_in + gs.tokens_out + gs.tokens_thinking), 0)
+		 FROM agents a
+		 LEFT JOIN gateway_spend gs ON gs.agent_id = a.id
+		     AND gs.tenant_id = $1
+		     AND gs.period >= date_trunc('month', now())::date
+		 WHERE a.tenant_id = $1 AND a.deleted_at IS NULL
+		 GROUP BY a.id, a.display_name ORDER BY 3 DESC`, defaultTenant)
 	souls := []map[string]any{}
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
 			var id, name string
 			var cost float64
-			var calls int
-			rows.Scan(&id, &name, &cost, &calls)
-			souls = append(souls, map[string]any{"id": id, "name": name, "cost": cost, "calls": calls})
+			var tokens int
+			rows.Scan(&id, &name, &cost, &tokens)
+			souls = append(souls, map[string]any{"id": id, "name": name, "cost": cost, "tokens": tokens})
 		}
 	}
 
