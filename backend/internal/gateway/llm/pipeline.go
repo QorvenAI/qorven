@@ -141,6 +141,7 @@ func (p *Pipeline) ChatStream(
 ) error {
 	// 1. Budget check
 	if err := p.budget.Check(ctx, req); err != nil {
+		Metrics.BudgetDenials.Add(1)
 		return err
 	}
 
@@ -153,6 +154,7 @@ func (p *Pipeline) ChatStream(
 	// 3. Cache lookup
 	if !req.SkipCache {
 		if hit, ok := p.cache.Lookup(ctx, req); ok {
+			recordRequest(hit, true, nil)
 			if onChunk != nil && hit.Content != "" {
 				onChunk(StreamChunk{StreamChunk: providers.StreamChunk{Content: hit.Content, Done: true}})
 			}
@@ -197,6 +199,11 @@ func (p *Pipeline) ChatStream(
 		return e
 	})
 	if dispatchErr != nil {
+		// Track circuit trips separately from generic errors
+		if isCircuitOpenError(dispatchErr) {
+			Metrics.CircuitTrips.Add(1)
+		}
+		recordRequest(nil, false, dispatchErr)
 		return dispatchErr
 	}
 
@@ -218,6 +225,9 @@ func (p *Pipeline) ChatStream(
 	if !req.SkipCache {
 		go p.cache.Store(ctx, req, gResp)
 	}
+
+	// 9. Metrics
+	recordRequest(gResp, false, nil)
 
 	if onDone != nil {
 		onDone(gResp)

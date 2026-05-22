@@ -3,6 +3,7 @@
 package llm
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -81,6 +82,11 @@ func CircuitStateName(s gobreaker.State) string {
 	default:
 		return "unknown"
 	}
+}
+
+// isCircuitOpenError returns true if the error is a gobreaker open-state error.
+func isCircuitOpenError(err error) bool {
+	return errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests)
 }
 
 func (b *CircuitBreakerBank) get(keyID string) *gobreaker.CircuitBreaker {

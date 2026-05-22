@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/plugins/wasm"
 )
 
@@ -93,6 +94,9 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP qorven_active_agents Number of active agents\n")
 	fmt.Fprintf(w, "# TYPE qorven_active_agents gauge\n")
 	fmt.Fprintf(w, "qorven_active_agents %d\n", m.ActiveAgents.Load())
+
+	// AI Gateway pipeline metrics (tokens, cost, cache, circuit breakers).
+	gatewayllm.WriteMetrics(w)
 
 	// Wasm plugin metrics (Phase 5.2 Gap #6 closure). The wasm
 	// package owns its counters; we just delegate the exposition so
