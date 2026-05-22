@@ -404,6 +404,46 @@ func (l *CostLedger) flush(e spendEntry) {
 	if l.budget != nil && e.cost.TotalUUSD > 0 {
 		l.budget.AddSpend(ctx, e.tenantID, e.agentID, e.cost.TotalUSD())
 	}
+
+	// 3. Upsert a trace row (one per session) and append a span (one per LLM call).
+	// Traces aggregate token + cost totals; spans are the individual call records.
+	if e.sessionID != "" && e.agentID != "" {
+		costCents := int(e.cost.TotalUSD() * 100)
+		// Upsert trace: create on first call in a session, accumulate on subsequent ones.
+		_, err = l.db.Exec(ctx, `
+			INSERT INTO traces (tenant_id, agent_id, session_key, total_input_tokens, total_output_tokens, total_cost_cents, status)
+			VALUES ($1, $2::uuid, $3, $4, $5, $6, 'ok')
+			ON CONFLICT (tenant_id, session_key)
+			DO UPDATE SET
+				total_input_tokens  = traces.total_input_tokens  + $4,
+				total_output_tokens = traces.total_output_tokens + $5,
+				total_cost_cents    = traces.total_cost_cents    + $6,
+				end_time            = now(),
+				duration_ms         = EXTRACT(EPOCH FROM (now() - traces.start_time)) * 1000
+		`,
+			e.tenantID, e.agentID, e.sessionID,
+			e.cost.TokensIn, e.cost.TokensOut, costCents,
+		)
+		if err != nil {
+			slog.Warn("gateway.cost_ledger: trace upsert failed", "error", err, "session", e.sessionID)
+		}
+
+		// Insert span — look up the trace id we just upserted.
+		var traceID string
+		qerr := l.db.QueryRow(ctx,
+			`SELECT id FROM traces WHERE tenant_id = $1 AND session_key = $2 LIMIT 1`,
+			e.tenantID, e.sessionID,
+		).Scan(&traceID)
+		if qerr == nil && traceID != "" {
+			_, _ = l.db.Exec(ctx, `
+				INSERT INTO spans (tenant_id, trace_id, span_type, model, provider, input_tokens, output_tokens, cost_cents, status)
+				VALUES ($1, $2::uuid, 'llm', $3, $4, $5, $6, $7, 'ok')
+			`,
+				e.tenantID, traceID, e.modelID, e.providerID,
+				e.cost.TokensIn, e.cost.TokensOut, costCents,
+			)
+		}
+	}
 }
 
 // Stop halts the background writers. Called on gateway shutdown.
