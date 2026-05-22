@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/qorvenai/qorven/internal/billing"
 	"github.com/qorvenai/qorven/internal/connectors"
+	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/mcp"
 	"github.com/qorvenai/qorven/internal/memory"
 	"github.com/qorvenai/qorven/internal/permissions"
@@ -64,6 +65,11 @@ type Loop struct {
 	promptCache     *PromptCache                                    // system prompt cache
 	projectReg      *tools.ProjectRegistry                          // code project registry
 	auditFn         func(agent, tool, session string, isError bool) // tool execution audit callback
+	// LLMPipeline is the AI Gateway middleware chain. When set, every LLM
+	// call routes through it for budget enforcement, circuit breaking,
+	// caching, and cost recording. nil = direct provider dispatch.
+	LLMPipeline *gatewayllm.Pipeline
+
 	// PIIRedactor is invoked on inbound user messages and outbound
 	// assistant content. nil = disabled (default). Set via
 	// SetPIIRedactor from the gateway after reading the tenant config.
@@ -914,7 +920,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			result.Content = "Request cancelled."
 			break
 		}
-		llmResp, err = provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
+		chunkHandler := func(chunk providers.StreamChunk) {
 			if chunk.Content != "" {
 				streamedChars += len(chunk.Content)
 				accumulated.WriteString(chunk.Content)
@@ -973,7 +979,27 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			if chunk.Thinking != "" {
 				onEvent(ThinkingDelta(chunk.Thinking))
 			}
-		})
+		}
+		if l.LLMPipeline != nil {
+			gwReq := gatewayllm.GatewayRequest{
+				AgentID:    ag.ID,
+				TenantID:   l.tenantID,
+				SessionID:  req.SessionID,
+				Priority:   gatewayllm.PriorityBackground,
+				Model:      chatReq.Model,
+				Messages:   chatReq.Messages,
+				Tools:      chatReq.Tools,
+				ToolChoice: chatReq.ToolChoice,
+				Options:    chatReq.Options,
+			}
+			gwErr := l.LLMPipeline.ChatStream(ctx, gwReq,
+				func(sc gatewayllm.StreamChunk) { chunkHandler(sc.StreamChunk) },
+				func(gr *gatewayllm.GatewayResponse) { llmResp = gr.ChatResponse },
+			)
+			err = gwErr
+		} else {
+			llmResp, err = provider.ChatStream(ctx, chatReq, chunkHandler)
+		}
 		// Per-turn token telemetry — visible in structured logs for cost/cache dashboards.
 		if llmResp != nil && llmResp.Usage != nil {
 			u := llmResp.Usage

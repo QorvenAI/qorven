@@ -647,6 +647,11 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			})
 		}
 
+		// Wire AI Gateway pipeline into the agent loop.
+		if gw.llmPipeline != nil {
+			gw.agentLoop.LLMPipeline = gw.llmPipeline
+		}
+
 		// Wire project registry after tools are registered (deferred)
 		defer func() {
 			if gw.projectReg != nil {
