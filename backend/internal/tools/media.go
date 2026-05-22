@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -233,7 +234,87 @@ func (t *ReadAudioTool) Execute(ctx context.Context, args map[string]any) *Resul
 	}
 	return TextResult(transcript)
 }
-func NewReadVideoTool() Tool   { return newMediaStub("read_video", "Analyze video files.") }
+func NewReadVideoTool(reg *providers.Registry) Tool { return &ReadVideoTool{reg: reg} }
+
+type ReadVideoTool struct{ reg *providers.Registry }
+
+func (t *ReadVideoTool) Name() string        { return "read_video" }
+func (t *ReadVideoTool) Description() string { return "Analyze a video file by extracting a key frame and asking a vision-capable LLM about it. Requires ffmpeg on the system path." }
+func (t *ReadVideoTool) Parameters() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{
+		"video_path": map[string]any{"type": "string", "description": "Path to the video file (mp4, mkv, mov, avi, webm)"},
+		"question":   map[string]any{"type": "string", "description": "What to analyze or describe (default: describe the video scene)"},
+		"timestamp":  map[string]any{"type": "string", "description": "Timestamp to extract frame from (HH:MM:SS or seconds, default: 00:00:01)"},
+	}, "required": []string{"video_path"}}
+}
+
+func (t *ReadVideoTool) Execute(ctx context.Context, args map[string]any) *Result {
+	if t.reg == nil {
+		return ErrorResult("read_video: no provider registry available")
+	}
+	p := t.reg.Default()
+	if p == nil {
+		return ErrorResult("read_video: no LLM provider configured — add one in Settings → Provider Keys")
+	}
+	videoPath, _ := args["video_path"].(string)
+	if videoPath == "" {
+		return ErrorResult("read_video: video_path is required")
+	}
+	if _, err := os.Stat(videoPath); err != nil {
+		return ErrorResult(fmt.Sprintf("read_video: cannot access %q: %v", videoPath, err))
+	}
+	question, _ := args["question"].(string)
+	if question == "" {
+		question = "Describe what is happening in this video frame in detail."
+	}
+	timestamp, _ := args["timestamp"].(string)
+	if timestamp == "" {
+		timestamp = "00:00:01"
+	}
+
+	// Extract a single frame with ffmpeg.
+	frameFile, err := os.CreateTemp("", "qorven-video-frame-*.jpg")
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("read_video: failed to create temp file: %v", err))
+	}
+	framePath := frameFile.Name()
+	frameFile.Close()
+	defer os.Remove(framePath)
+
+	// #nosec G204 — args are validated above (file exists, timestamp is caller-supplied but not shell-expanded)
+	ffmpegOut, execErr := execContext(ctx, "ffmpeg",
+		"-y", "-ss", timestamp, "-i", videoPath, "-vframes", "1", "-q:v", "2", framePath,
+	)
+	if execErr != nil {
+		return ErrorResult(fmt.Sprintf("read_video: ffmpeg frame extraction failed: %v\n%s", execErr, string(ffmpegOut)))
+	}
+
+	data, err := os.ReadFile(framePath)
+	if err != nil || len(data) == 0 {
+		return ErrorResult("read_video: frame extraction produced no output — check that ffmpeg is installed and the file is a valid video")
+	}
+
+	resp, err := p.Chat(ctx, providers.ChatRequest{
+		Messages: []providers.Message{
+			{
+				Role:    "user",
+				Content: question,
+				Images:  []providers.ImageContent{{MimeType: "image/jpeg", Data: base64.StdEncoding.EncodeToString(data)}},
+			},
+		},
+	})
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("read_video: vision call failed: %v", err))
+	}
+	return TextResult(fmt.Sprintf("[Frame at %s] %s", timestamp, resp.Content))
+}
+
+func execContext(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204
+	return cmd.CombinedOutput()
+}
+
+
 func NewCreateAudioTool() Tool { return newMediaStub("create_audio", "Generate music or sound effects.") }
 
 // NewCreateVideoTool wires create_video to a mediagen.Manager video provider.

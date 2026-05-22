@@ -413,7 +413,15 @@ func (e *Engine) Process(ctx context.Context, req Request) (*Response, error) {
 		e.Budget.RecordSpend("agent", req.AgentID, costCents)
 	}
 
-	// 10. TODO: check for completed team tasks → dispatch dependents
+	// 10. Dispatch any team tasks that became unblocked by tools this run used.
+	if len(result.ToolsUsed) > 0 && e.Tasks != nil && e.Wakeup != nil {
+		for _, toolName := range result.ToolsUsed {
+			if toolName == "team_task_complete" || toolName == "team_task_update" {
+				go e.dispatchUnblockedTasks(context.Background(), req.AgentID)
+				break
+			}
+		}
+	}
 
 	return &Response{
 		Content:      result.Content,
@@ -445,4 +453,37 @@ func truncateEngine(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// dispatchUnblockedTasks finds team tasks whose blockers are all complete and
+// wakes their assignees. Called after any run that used a task-completion tool.
+func (e *Engine) dispatchUnblockedTasks(ctx context.Context, completedByAgentID string) {
+	// Scan all completed tasks owned by this agent to find newly unblocked dependents.
+	completed := e.Tasks.List(ctx, "", string(agent.TaskCompleted))
+	seen := make(map[string]bool)
+	for _, ct := range completed {
+		if seen[ct.ID] {
+			continue
+		}
+		seen[ct.ID] = true
+		dependents := e.Tasks.PendingDependents(ctx, ct.ID)
+		for _, dep := range dependents {
+			if dep.AssigneeID == "" {
+				continue
+			}
+			if err := e.Wakeup.WakeAgent(ctx, dep.AssigneeID, agent.WakeupOpts{
+				Source:    agent.WakeupAssignment,
+				ActorType: agent.ActorAgent,
+				ActorID:   completedByAgentID,
+				Reason:    "blocked task unblocked: " + dep.Subject,
+				Context:   map[string]any{"task_id": dep.ID, "task_subject": dep.Subject},
+			}); err != nil {
+				slog.Warn("engine.dispatch_unblocked: wakeup failed",
+					"task", dep.ID, "assignee", dep.AssigneeID, "error", err)
+			} else {
+				slog.Info("engine.dispatch_unblocked: woke assignee",
+					"task", dep.ID, "assignee", dep.AssigneeID)
+			}
+		}
+	}
 }

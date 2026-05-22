@@ -466,7 +466,7 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewTTSTool(gw.voiceMgr))
 	reg.Register(tools.NewReadAudioTool(gw.voiceMgr))
 	reg.Register(tools.NewCreateAudioTool())
-	reg.Register(tools.NewReadVideoTool())
+	reg.Register(tools.NewReadVideoTool(gw.providerReg))
 	reg.Register(tools.NewCreateVideoTool(gw.mediaMgr))
 	reg.Register(tools.NewScrapeTool())
 	reg.Register(tools.NewCrawlTool())

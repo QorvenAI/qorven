@@ -104,6 +104,9 @@ func (gw *Gateway) loadChannels() {
 				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
 					ch.Transcribe = gw.voicePipeline.TranscribeAudio
 				}
+				if gw.db != nil {
+					ch.DB = gw.db.Pool
+				}
 				gw.chanMgr.Register(id, ch)
 				count++
 			}

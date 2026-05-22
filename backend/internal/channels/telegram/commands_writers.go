@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -41,21 +42,53 @@ func (t *TelegramChannel) handleWriterCommand(ctx context.Context, b *bot.Bot, m
 }
 
 func (t *TelegramChannel) handleListWriters(ctx context.Context, chatID int64) {
-	// Writers are stored per-agent in the database
-	// For now, show the concept — full implementation needs DB wiring
+	if t.DB == nil {
+		t.sendFormatted(ctx, chatID, 0, "⚠️ Database not available.")
+		return
+	}
+
+	rows, err := t.DB.Query(ctx,
+		`SELECT username, display_name, created_at FROM agent_writers WHERE agent_id = $1 ORDER BY created_at`,
+		t.cfg.AgentID,
+	)
+	if err != nil {
+		t.sendFormatted(ctx, chatID, 0, "⚠️ Could not load writers: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	var lines []string
+	for rows.Next() {
+		var username, displayName string
+		var createdAt time.Time
+		if rows.Scan(&username, &displayName, &createdAt) == nil {
+			name := "@" + username
+			if displayName != "" && displayName != username {
+				name = displayName + " (@" + username + ")"
+			}
+			lines = append(lines, "• "+name)
+		}
+	}
+
 	text := "📝 **File Writers**\n\n"
-	text += "Writers can edit this Soul's workspace files (SOUL.md, TOOLS.md, etc.) from this group.\n\n"
+	if len(lines) == 0 {
+		text += "_No writers yet._\n\n"
+	} else {
+		text += strings.Join(lines, "\n") + "\n\n"
+	}
 	text += "Commands:\n"
 	text += "• `/writer_add @username` — Grant write access\n"
 	text += "• `/writer_remove @username` — Revoke access\n"
-	text += "• `/writers` — List current writers\n\n"
-	text += "_Currently managed via the Qorven dashboard. Telegram-based writer management coming soon._"
+	text += "• `/writers` — List current writers"
 	t.sendFormatted(ctx, chatID, 0, text)
 }
 
 func (t *TelegramChannel) handleAddWriter(ctx context.Context, b *bot.Bot, msg *models.Message) {
 	chatID := msg.Chat.ID
-	// Extract mentioned user
+	if t.DB == nil {
+		t.sendFormatted(ctx, chatID, 0, "⚠️ Database not available.")
+		return
+	}
 	if msg.Entities == nil {
 		t.sendFormatted(ctx, chatID, 0, "Usage: `/writer_add @username`")
 		return
@@ -63,12 +96,33 @@ func (t *TelegramChannel) handleAddWriter(ctx context.Context, b *bot.Bot, msg *
 	for _, entity := range msg.Entities {
 		if entity.Type == "mention" {
 			username := msg.Text[entity.Offset+1 : entity.Offset+entity.Length] // strip @
-			t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("✅ Added **@%s** as a writer for this Soul.\n\n_They can now edit workspace files from this group._", username))
+			_, err := t.DB.Exec(ctx,
+				`INSERT INTO agent_writers (agent_id, username, display_name, granted_by)
+				 VALUES ($1::uuid, $2, $2, $3)
+				 ON CONFLICT (agent_id, username) DO NOTHING`,
+				t.cfg.AgentID, username, fmt.Sprintf("%d", chatID),
+			)
+			if err != nil {
+				t.sendFormatted(ctx, chatID, 0, "⚠️ Failed to add writer: "+err.Error())
+				return
+			}
+			t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("✅ Added **@%s** as a writer.", username))
 			return
 		}
 		if entity.Type == "text_mention" && entity.User != nil {
 			name := buildUserName(entity.User)
-			t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("✅ Added **%s** as a writer for this Soul.", name))
+			username := fmt.Sprintf("id%d", entity.User.ID)
+			_, err := t.DB.Exec(ctx,
+				`INSERT INTO agent_writers (agent_id, username, user_id, display_name, granted_by)
+				 VALUES ($1::uuid, $2, $3, $4, $5)
+				 ON CONFLICT (agent_id, username) DO UPDATE SET display_name = $4`,
+				t.cfg.AgentID, username, entity.User.ID, name, fmt.Sprintf("%d", chatID),
+			)
+			if err != nil {
+				t.sendFormatted(ctx, chatID, 0, "⚠️ Failed to add writer: "+err.Error())
+				return
+			}
+			t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("✅ Added **%s** as a writer.", name))
 			return
 		}
 	}
@@ -77,6 +131,10 @@ func (t *TelegramChannel) handleAddWriter(ctx context.Context, b *bot.Bot, msg *
 
 func (t *TelegramChannel) handleRemoveWriter(ctx context.Context, b *bot.Bot, msg *models.Message) {
 	chatID := msg.Chat.ID
+	if t.DB == nil {
+		t.sendFormatted(ctx, chatID, 0, "⚠️ Database not available.")
+		return
+	}
 	if msg.Entities == nil {
 		t.sendFormatted(ctx, chatID, 0, "Usage: `/writer_remove @username`")
 		return
@@ -84,7 +142,37 @@ func (t *TelegramChannel) handleRemoveWriter(ctx context.Context, b *bot.Bot, ms
 	for _, entity := range msg.Entities {
 		if entity.Type == "mention" {
 			username := msg.Text[entity.Offset+1 : entity.Offset+entity.Length]
+			tag, err := t.DB.Exec(ctx,
+				`DELETE FROM agent_writers WHERE agent_id = $1::uuid AND username = $2`,
+				t.cfg.AgentID, username,
+			)
+			if err != nil {
+				t.sendFormatted(ctx, chatID, 0, "⚠️ Failed to remove writer: "+err.Error())
+				return
+			}
+			if tag.RowsAffected() == 0 {
+				t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("@%s is not a writer.", username))
+				return
+			}
 			t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("🗑 Removed **@%s** from writers.", username))
+			return
+		}
+		if entity.Type == "text_mention" && entity.User != nil {
+			username := fmt.Sprintf("id%d", entity.User.ID)
+			name := buildUserName(entity.User)
+			tag, err := t.DB.Exec(ctx,
+				`DELETE FROM agent_writers WHERE agent_id = $1::uuid AND username = $2`,
+				t.cfg.AgentID, username,
+			)
+			if err != nil {
+				t.sendFormatted(ctx, chatID, 0, "⚠️ Failed to remove writer: "+err.Error())
+				return
+			}
+			if tag.RowsAffected() == 0 {
+				t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("%s is not a writer.", name))
+				return
+			}
+			t.sendFormatted(ctx, chatID, 0, fmt.Sprintf("🗑 Removed **%s** from writers.", name))
 			return
 		}
 	}

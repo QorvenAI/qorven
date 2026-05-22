@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qorvenai/qorven/internal/channels"
 )
 
@@ -54,6 +55,7 @@ type TelegramChannel struct {
 	dedup         sync.Map // "chatID:msgID" → time.Time — prevents double-fire on platform retries
 	typingCancels sync.Map // int64 chatID → context.CancelFunc
 	Transcribe    func(ctx context.Context, audio []byte, format string) (string, error) // optional STT
+	DB            *pgxpool.Pool // optional — enables DB-backed writer management
 }
 
 func New(cfg Config, handler channels.InboundHandler) *TelegramChannel {
