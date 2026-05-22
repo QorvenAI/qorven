@@ -275,6 +275,37 @@ export default function CodePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeActiveProjectId]);
 
+  // Auto-navigate when Prime delegates a build task from any other tab
+  useEffect(() => {
+    function onNavigate(e: Event) {
+      const url = (e as CustomEvent<{ url: string }>).detail?.url;
+      if (!url || !url.startsWith('/code')) return;
+      const params = new URLSearchParams(url.split('?')[1] ?? '');
+      const tab = params.get('tab');
+      const projectId = params.get('project');
+      if (tab) router.push(`/code?tab=${tab}${projectId ? `&project=${projectId}` : ''}`);
+    }
+    window.addEventListener('qorven:page.navigate', onNavigate);
+    return () => window.removeEventListener('qorven:page.navigate', onNavigate);
+  }, [router]);
+
+  // Subscribe to global daemon stream — when Coder is assigned a task, open its project
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('qorven_token') || '') : '';
+    if (!token) return;
+    const es = new EventSource(`${apiBase()}/v1/daemon/stream?token=${token}`);
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data) as { type: string; data: Record<string, string> };
+        if (evt.type === 'task_assigned' && evt.data?.agent_key === 'coder') {
+          const projectId = evt.data?.project_id || '';
+          router.push(`/code?tab=build${projectId ? `&project=${projectId}` : ''}`);
+        }
+      } catch { /* ignore malformed */ }
+    };
+    return () => es.close();
+  }, [router]);
+
   const parseSSEStream = useCallback(async (
     reader: ReadableStreamDefaultReader<Uint8Array>,
     projectPath: string,
