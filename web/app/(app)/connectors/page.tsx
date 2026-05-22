@@ -20,11 +20,11 @@
 // the card flips to a "Connected" state with Disconnect + Configure
 // actions.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plug, Search, Check, ExternalLink, Shield, AlertCircle,
   Loader2, X, RefreshCw, Package, Trash2, Bot, Bell,
-  Clock, Activity, ToggleLeft, ToggleRight,
+  Clock, Activity, ToggleLeft, ToggleRight, Truck, KeyRound,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { toast } from 'sonner';
@@ -38,6 +38,8 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { OAuthAppsSettings } from '@/components/settings/oauth-apps-settings';
 import { cn } from '@/lib/utils';
 import { BASE, request } from '@/lib/api-core';
+import { agents, chat } from '@/lib/api-agents';
+import { ensureCanonicalSessionId } from '@/lib/session';
 
 // --- Types & constants -------------------------------------------
 
@@ -117,6 +119,7 @@ export default function ConnectorsPage() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeAuth, setActiveAuth] = useState<string | null>(null);
   const [connectTarget, setConnectTarget] = useState<CatalogEntry | null>(null);
+  const [showAddCarrier, setShowAddCarrier] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -215,14 +218,25 @@ export default function ConnectorsPage() {
           }
           actions={
             (view === 'catalog' || view === 'installed') ? (
-              <button
-                onClick={load}
-                disabled={loading}
-                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-              >
-                <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-                Refresh
-              </button>
+              <div className="flex items-center gap-2">
+                {view === 'installed' && (
+                  <button
+                    onClick={() => setShowAddCarrier(true)}
+                    className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    <Truck className="h-3.5 w-3.5" />
+                    Add Carrier
+                  </button>
+                )}
+                <button
+                  onClick={load}
+                  disabled={loading}
+                  className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+                  Refresh
+                </button>
+              </div>
             ) : undefined
           }
         />
@@ -396,6 +410,15 @@ export default function ConnectorsPage() {
           />
         )}
         </>)}
+        {showAddCarrier && (
+          <AddCarrierDialog
+            onClose={() => setShowAddCarrier(false)}
+            onDone={() => {
+              setShowAddCarrier(false);
+              setView('installed');
+            }}
+          />
+        )}
       </div>
     </ErrorBoundary>
   );
@@ -880,6 +903,239 @@ function RulesView() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// --- Add Carrier dialog ------------------------------------------
+
+const CARRIER_EXAMPLES = ['Aramex', 'FedEx', 'UPS', 'DHL', 'SF Express', 'Ninja Van', 'DTDC', 'Blue Dart'];
+
+function AddCarrierDialog({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [carrier, setCarrier] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [docsUrl, setDocsUrl] = useState('');
+  const [status, setStatus] = useState<'idle' | 'building' | 'done' | 'error'>('idle');
+  const [log, setLog] = useState<string[]>([]);
+  const sessionRef = useRef<{ current: string }>({ current: '' });
+
+  const appendLog = (msg: string) => setLog((prev) => [...prev, msg]);
+
+  const handleBuild = async () => {
+    if (!carrier.trim()) return;
+    setStatus('building');
+    setLog([]);
+
+    try {
+      // 1. Find Prime (chief agent)
+      const prime = await agents.chief().catch(() => null);
+      if (!prime) throw new Error('Prime agent not found. Make sure your workspace is set up.');
+
+      appendLog(`Connecting to ${prime.display_name ?? 'Prime'}…`);
+
+      // 2. Ensure a session exists
+      const sid = await ensureCanonicalSessionId(sessionRef.current, {
+        agentId: prime.id,
+        channel: 'web',
+        label: `carrier-builder-${carrier.toLowerCase().replace(/\s+/g, '-')}`,
+      });
+
+      appendLog('Session ready. Sending build request to Prime…');
+
+      // 3. Build the instruction message
+      const slug = carrier.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+      const docsNote = docsUrl.trim() ? `Docs URL: ${docsUrl.trim()}.` : 'Search the web for the API docs.';
+      const keyNote = apiKey.trim() ? `API key: ${apiKey.trim()}.` : 'No API key provided yet — ask the user for it when needed.';
+      const instruction = [
+        `Build a ${carrier.trim()} shipment tracking connector.`,
+        keyNote,
+        docsNote,
+        `Connector slug: ${slug}-tracking.`,
+        'Use get_connector_template to scaffold, adapt the BASE_URL and auth for this carrier, compile with build_connector, then store the credential with store_credential.',
+      ].join(' ');
+
+      appendLog('Prime is building the connector — this may take a minute…');
+
+      // 4. Send message (non-streaming for simplicity; Prime will work in background)
+      const resp = await chat.send({
+        session_id: sid,
+        agent_id: prime.id,
+        message: instruction,
+        stream: false,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Agent error: ${err}`);
+      }
+
+      const result = await resp.json();
+      const reply: string = result?.content ?? result?.message ?? '';
+
+      if (reply.includes('TASK_COMPLETE') || reply.includes('installed')) {
+        appendLog('Connector installed successfully.');
+        setStatus('done');
+        toast.success(`${carrier.trim()} tracking connector installed`);
+        setTimeout(onDone, 1200);
+      } else if (reply.includes('TASK_BLOCKED')) {
+        appendLog(`Prime is blocked: ${reply}`);
+        appendLog('Check the chat with Prime for details.');
+        setStatus('done');
+        toast.warning('Prime needs more information — check the chat');
+        setTimeout(onDone, 1500);
+      } else {
+        appendLog('Prime acknowledged. The connector will appear in Installed once complete.');
+        appendLog('Check your chat with Prime for live progress.');
+        setStatus('done');
+        toast.success('Build request sent to Prime');
+        setTimeout(onDone, 1500);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      appendLog(`Error: ${msg}`);
+      setStatus('error');
+      toast.error(msg);
+    }
+  };
+
+  const busy = status === 'building';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
+      onClick={!busy ? onClose : undefined}
+    >
+      <div
+        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-border bg-card p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start gap-3 mb-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Truck className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <h2 className="text-base font-semibold">Add Carrier Tracker</h2>
+            <p className="text-xs text-muted-foreground">
+              Prime will build and install a custom tracking connector for any carrier.
+            </p>
+          </div>
+          {!busy && (
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        {status === 'idle' || status === 'error' ? (
+          <div className="space-y-3">
+            {/* Carrier name */}
+            <label className="block">
+              <span className="text-xs font-medium text-foreground/90">Carrier name</span>
+              <input
+                type="text"
+                value={carrier}
+                onChange={(e) => setCarrier(e.target.value)}
+                placeholder={`e.g. ${CARRIER_EXAMPLES[Math.floor(Math.random() * CARRIER_EXAMPLES.length)]}`}
+                className="mt-1 qr-input"
+                autoFocus
+                disabled={busy}
+              />
+            </label>
+
+            {/* API key */}
+            <label className="block">
+              <span className="text-xs font-medium text-foreground/90">
+                API key <span className="text-muted-foreground font-normal">(optional — Prime will ask if missing)</span>
+              </span>
+              <div className="relative mt-1">
+                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Paste your carrier API key"
+                  className="qr-input pl-8"
+                  autoComplete="new-password"
+                  disabled={busy}
+                />
+              </div>
+            </label>
+
+            {/* Docs URL */}
+            <label className="block">
+              <span className="text-xs font-medium text-foreground/90">
+                API docs URL <span className="text-muted-foreground font-normal">(optional — Prime will search if missing)</span>
+              </span>
+              <input
+                type="url"
+                value={docsUrl}
+                onChange={(e) => setDocsUrl(e.target.value)}
+                placeholder="https://developer.carrier.com/docs/tracking"
+                className="mt-1 qr-input"
+                disabled={busy}
+              />
+            </label>
+
+            <div className="flex items-start gap-2 rounded-md bg-muted/30 p-2 text-2xs text-muted-foreground">
+              <Shield className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>
+                Prime compiles a real Go binary, installs it, and encrypts your key in the vault. It never leaves your instance.
+              </span>
+            </div>
+
+            {status === 'error' && log.length > 0 && (
+              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2 text-xs text-destructive font-mono">
+                {log[log.length - 1]}
+              </div>
+            )}
+
+            <button
+              onClick={handleBuild}
+              disabled={!carrier.trim()}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              <Truck className="h-4 w-4" />
+              Build connector
+            </button>
+          </div>
+        ) : (
+          /* Building / done state */
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5 min-h-[120px] font-mono text-xs">
+              {log.map((line, i) => (
+                <div key={i} className={cn(
+                  'leading-relaxed',
+                  line.startsWith('Error') ? 'text-destructive' : 'text-muted-foreground',
+                )}>
+                  {i === log.length - 1 && status === 'building' ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      {line}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2">
+                      <Check className={cn('h-3 w-3 shrink-0', line.startsWith('Error') ? 'text-destructive' : 'text-emerald-500')} />
+                      {line}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {status === 'done' && (
+              <p className="text-xs text-center text-muted-foreground">
+                Redirecting to Installed…
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
