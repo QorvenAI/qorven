@@ -73,6 +73,7 @@ type SoulDesk struct {
 type RTHub interface {
 	BroadcastSoulActivity(agentID, soulKey, status, detail string)
 	BroadcastSoulCompleted(agentID, soulName, taskTitle, result string)
+	BroadcastPageNavigate(url, projectID, taskID string)
 }
 
 func (d *SoulDesk) SetTaskIntegration(ti *TaskIntegration) { d.taskInteg = ti }
@@ -236,6 +237,11 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *tools.
 	sessionID := tools.SessionIDFromCtx(ctx)
 	if t.desk.taskInteg != nil {
 		taskID, _ = t.desk.taskInteg.CreateDelegationTask(ctx, soul.ID, soulKey, primeID, task)
+	}
+
+	// When delegating to Coder, navigate the browser to the /code IDE immediately.
+	if soulKey == "coder" && t.desk.rtHub != nil {
+		t.desk.rtHub.BroadcastPageNavigate("/code?tab=build", "", taskID)
 	}
 
 	// Run async — fire and forget

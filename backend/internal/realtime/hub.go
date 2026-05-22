@@ -43,6 +43,10 @@ const (
 	EventTaskDone            = "task_done"
 	EventTaskBlocked         = "task_blocked"
 	EventSynthesisTriggered  = "synthesis_triggered"
+
+	// EventPageNavigate tells any open browser tab to navigate to the given URL.
+	// Payload: { "url": "/code?tab=build&project=<id>", "project_id": "<id>", "task_id": "<id>" }
+	EventPageNavigate = "page.navigate"
 )
 
 // Event is a real-time event pushed to all connected clients.
@@ -202,6 +206,20 @@ func (h *Hub) BroadcastSoulActivity(agentID, soulKey, status, detail string) {
 			"soul_key": soulKey,
 			"status":   status,
 			"detail":   detail,
+		},
+	})
+}
+
+// BroadcastPageNavigate tells all open browser tabs to navigate to the given URL.
+// Used when Prime delegates a build task to Coder so the user is redirected to /code.
+func (h *Hub) BroadcastPageNavigate(url, projectID, taskID string) {
+	h.Broadcast(Event{
+		Type:      EventPageNavigate,
+		Timestamp: time.Now().UnixMilli(),
+		Data: map[string]any{
+			"url":        url,
+			"project_id": projectID,
+			"task_id":    taskID,
 		},
 	})
 }

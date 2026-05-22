@@ -42,10 +42,12 @@ type DelegatedTask struct {
 	Status        TaskStatus `json:"status"`
 	Result        string    `json:"result,omitempty"`
 	Error         string    `json:"error,omitempty"`
-	OriginChannel string    `json:"origin_channel"`
-	OriginChatID  string    `json:"origin_chat_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	OriginChannel string         `json:"origin_channel"`
+	OriginChatID  string         `json:"origin_chat_id"`
+	TargetURL     string         `json:"target_url,omitempty"`
+	Context       map[string]any `json:"context,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	CompletedAt   *time.Time     `json:"completed_at,omitempty"`
 }
 
 

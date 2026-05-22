@@ -901,6 +901,17 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			pd.SetOnComplete(func(task *agent.DelegatedTask) {
 				slog.Info("delegation.complete", "task", task.ID, "specialist", task.SpecialistKey,
 					"status", task.Status)
+				if task.TargetURL != "" && gw.rtHub != nil {
+					gw.rtHub.Broadcast(realtime.Event{
+						Type:      realtime.EventPageNavigate,
+						Timestamp: time.Now().UnixMilli(),
+						Data: map[string]any{
+							"url":        task.TargetURL,
+							"project_id": task.Context["project_id"],
+							"task_id":    task.ID,
+						},
+					})
+				}
 			})
 			gw.agentLoop.SetPrimeDelegation(pd)
 			slog.Info("prime.delegation.enabled", "prime", primeID)
