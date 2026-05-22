@@ -4,6 +4,19 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.24-alpha — 2026-05-22
+
+### Added
+- **Telegram group writer management** — agents can now maintain a whitelist of Telegram users who are permitted to trigger file-write operations. Admins manage the list via `/writers list`, `/writers add @user`, and `/writers remove @user` commands within the group. Permissions persist across restarts.
+- **Video analysis tool** — agents can now analyse video files directly: the system extracts a representative frame and sends it to a vision-capable model, returning a structured description. No external service required.
+- **Team task orchestration** — the `team_tasks` tool is fully operational: agents can create, list, transition, and complete tasks assigned to teammates. Completing or updating a task automatically wakes any agent whose work was blocked on it.
+- **Team messaging** — agents can send direct messages to other agents at runtime via the `team_message` tool, waking the recipient immediately with the provided content.
+- **Draft approval notifications** — when an inbound message is held for human review, the requesting channel now receives a formatted notification with message preview and draft ID, so approvers are never left waiting silently.
+- **Jira integration** — the Jira connector now executes `create_issue`, `search_issues`, and `get_issue` actions against Jira Cloud, with proper ADF body formatting and Basic auth.
+- **Google Sheets integration** — the Google Sheets connector now executes `read_range`, `append_row`, and `update_range` actions against the Sheets API v4.
+
+---
+
 ## v0.1.23-alpha — 2026-05-21
 
 ### Fixed
