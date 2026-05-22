@@ -12,6 +12,8 @@ import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { Button } from '@/components/qor/button';
 import { Badge } from '@/components/qor/badge';
 import { gatewayAdmin, type PricingGap } from '@/lib/api-providers';
+import { agents } from '@/lib/api-agents';
+import type { Soul } from '@/types';
 import { toast } from 'sonner';
 
 // ─── Shared card ─────────────────────────────────────────────────────────────
@@ -190,21 +192,134 @@ function AliasesSection({ aliases, onSave, onDelete }: {
 
 type BudgetRow = { id: string; agent_id?: string; monthly_usd?: number; daily_usd?: number; spent_month_usd: number; spent_today_usd: number };
 
-function BudgetsSection({ budgets }: { budgets: BudgetRow[] }) {
-  if (budgets.length === 0) {
-    return <p className="text-xs text-muted-foreground py-2">No budgets configured. Use the API to set per-agent limits.</p>;
-  }
+function BudgetsSection({ budgets, agentList, onSave, onReload }: {
+  budgets: BudgetRow[];
+  agentList: Soul[];
+  onSave: (agentId: string, monthly: number | null, daily: number | null) => Promise<void>;
+  onReload: () => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editing,  setEditing]  = useState<string | null>(null);
+  const [agentId,  setAgentId]  = useState('');
+  const [monthly,  setMonthly]  = useState('');
+  const [daily,    setDaily]    = useState('');
+  const [saving,   setSaving]   = useState(false);
+
+  const openAdd = () => {
+    setEditing(null);
+    setAgentId('');
+    setMonthly('');
+    setDaily('');
+    setShowForm(true);
+  };
+
+  const openEdit = (b: BudgetRow) => {
+    setEditing(b.agent_id ?? '');
+    setAgentId(b.agent_id ?? '');
+    setMonthly(b.monthly_usd != null ? String(b.monthly_usd) : '');
+    setDaily(b.daily_usd != null ? String(b.daily_usd) : '');
+    setShowForm(true);
+  };
+
+  const close = () => { setShowForm(false); setEditing(null); };
+
+  const submit = async () => {
+    if (!agentId) { toast.error('Select an agent'); return; }
+    const m = monthly.trim() ? parseFloat(monthly) : null;
+    const d = daily.trim()   ? parseFloat(daily)   : null;
+    if ((m !== null && (isNaN(m) || m < 0)) || (d !== null && (isNaN(d) || d < 0))) {
+      toast.error('Enter valid non-negative amounts');
+      return;
+    }
+    setSaving(true);
+    await onSave(agentId, m, d);
+    setSaving(false);
+    close();
+  };
+
+  const agentName = (id: string) => agentList.find(a => a.id === id)?.display_name ?? id.slice(-8);
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{budgets.length} budget{budgets.length !== 1 ? 's' : ''} configured</span>
+        <Button variant="outline" size="sm" onClick={openAdd}>
+          <Plus className="h-3.5 w-3.5" /> Set budget
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="rounded-lg border border-border px-4 py-3 space-y-3 bg-muted/10">
+          <p className="text-xs font-medium">{editing ? `Edit budget — ${agentName(editing)}` : 'Add budget'}</p>
+          {!editing && (
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Agent</label>
+              <select
+                value={agentId}
+                onChange={e => setAgentId(e.target.value)}
+                className="qr-input text-xs py-1.5 w-full"
+              >
+                <option value="">— Select agent —</option>
+                {agentList.map(a => (
+                  <option key={a.id} value={a.id}>{a.display_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Monthly cap (USD)</label>
+              <input
+                value={monthly}
+                onChange={e => setMonthly(e.target.value)}
+                placeholder="e.g. 10.00 (blank = unlimited)"
+                type="number" step="0.01" min="0"
+                className="qr-input text-xs py-1.5 w-full"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Daily cap (USD)</label>
+              <input
+                value={daily}
+                onChange={e => setDaily(e.target.value)}
+                placeholder="e.g. 1.00 (blank = unlimited)"
+                type="number" step="0.01" min="0"
+                className="qr-input text-xs py-1.5 w-full"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <Button variant="ghost" size="sm" onClick={close}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={submit} disabled={saving}>
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {budgets.length === 0 && !showForm && (
+        <p className="text-xs text-muted-foreground py-1">No budgets configured yet. Use "Set budget" to add per-agent spend caps.</p>
+      )}
+
       {budgets.map(b => {
         const pct = b.monthly_usd ? Math.min(100, Math.round((b.spent_month_usd / b.monthly_usd) * 100)) : null;
+        const name = b.agent_id ? agentName(b.agent_id) : 'Team';
         return (
           <div key={b.id} className="rounded-lg border border-border px-4 py-3">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-mono text-muted-foreground truncate">{b.agent_id ?? 'team'}</p>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                <span>${b.spent_month_usd.toFixed(4)} / {b.monthly_usd != null ? `$${b.monthly_usd}` : '∞'} mo</span>
-                <span>${b.spent_today_usd.toFixed(4)} today</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-xs font-medium truncate">{name}</p>
+                {b.agent_id && (
+                  <span className="text-xs font-mono text-muted-foreground/60 shrink-0">{b.agent_id.slice(-6)}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="text-xs text-muted-foreground text-right">
+                  <span className="block">${b.spent_month_usd.toFixed(4)} / {b.monthly_usd != null ? `$${b.monthly_usd}` : '∞'} mo</span>
+                  <span className="block">${b.spent_today_usd.toFixed(4)} / {b.daily_usd != null ? `$${b.daily_usd}` : '∞'} today</span>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => openEdit(b)}>Edit</Button>
               </div>
             </div>
             {pct !== null && (
@@ -370,13 +485,14 @@ export default function GatewayPage() {
   const [queue,        setQueue]        = useState<{ interactive: number; background: number; batch: number; capacities: { interactive: number; background: number; batch: number } } | null>(null);
   const [aliases,      setAliases]      = useState<AliasRow[]>([]);
   const [budgets,      setBudgets]      = useState<BudgetRow[]>([]);
+  const [agentList,    setAgentList]    = useState<Soul[]>([]);
   const [cacheStats,   setCacheStats]   = useState<{ size: number; capacity: number } | null>(null);
   const [pricingGaps,  setPricingGaps]  = useState<PricingGap[]>([]);
   const [backfilling,  setBackfilling]  = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [s, c, q, a, b, cs, pg] = await Promise.allSettled([
+    const [s, c, q, a, b, cs, pg, al] = await Promise.allSettled([
       gatewayAdmin.stats(),
       gatewayAdmin.circuit(),
       gatewayAdmin.queue(),
@@ -384,6 +500,7 @@ export default function GatewayPage() {
       gatewayAdmin.budgets(),
       gatewayAdmin.cacheStats(),
       gatewayAdmin.pricingGaps(),
+      agents.list(),
     ]);
     if (s.status  === 'fulfilled' && s.value)              setStats(s.value);
     if (c.status  === 'fulfilled' && c.value)              setCircuit(c.value.breakers ?? []);
@@ -392,6 +509,7 @@ export default function GatewayPage() {
     if (b.status  === 'fulfilled' && Array.isArray(b.value)) setBudgets(b.value);
     if (cs.status === 'fulfilled' && cs.value)             setCacheStats(cs.value);
     if (pg.status === 'fulfilled' && pg.value)             setPricingGaps(pg.value.gaps ?? []);
+    if (al.status === 'fulfilled' && Array.isArray(al.value)) setAgentList(al.value);
     setLoading(false);
   }, []);
 
@@ -411,6 +529,14 @@ export default function GatewayPage() {
       toast.success(`Alias "${alias}" removed`);
       load();
     } catch { toast.error('Failed to remove alias'); }
+  };
+
+  const saveBudget = async (agentId: string, monthly: number | null, daily: number | null) => {
+    try {
+      await gatewayAdmin.upsertBudget(agentId, { monthly_usd: monthly, daily_usd: daily });
+      toast.success('Budget saved');
+      load();
+    } catch { toast.error('Failed to save budget'); }
   };
 
   const flushCache = async () => {
@@ -504,7 +630,7 @@ export default function GatewayPage() {
         {loading ? (
           <div className="space-y-2">{[0,1].map(i => <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />)}</div>
         ) : (
-          <BudgetsSection budgets={budgets} />
+          <BudgetsSection budgets={budgets} agentList={agentList} onSave={saveBudget} onReload={load} />
         )}
       </Card>
 
