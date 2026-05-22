@@ -24,6 +24,7 @@ import (
 	"github.com/qorvenai/qorven/internal/channels"
 	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/heartbeat"
+	"github.com/qorvenai/qorven/internal/pricing"
 	"github.com/qorvenai/qorven/internal/providers"
 	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/session"
@@ -251,18 +252,23 @@ func (gw *Gateway) Start() error {
 		})
 		selfBuild.Start()
 
-		// Auto-refresh model pricing on startup and daily
+		// Auto-refresh model pricing on startup and daily via the canonical feed.
 		go func() {
-			ps := providers.NewPricingStore(gw.db.Pool)
-			// Refresh on startup
-			if err := ps.FetchAndCacheModelPricing(context.Background()); err != nil {
+			agg := pricing.NewAggregator(gw.db.Pool)
+			// Seed from built-in registry immediately (zero network, instant)
+			agg.SeedFromBuiltin()
+			// Then fetch live pricing from qorven.ai/data/model-pricing.json
+			if n, err := agg.Refresh(context.Background()); err != nil {
 				slog.Warn("pricing.startup_refresh_failed", "error", err)
+			} else {
+				slog.Info("pricing.startup_refresh_ok", "models", n)
 			}
-			// Refresh daily
 			ticker := time.NewTicker(24 * time.Hour)
 			for range ticker.C {
-				if err := ps.FetchAndCacheModelPricing(context.Background()); err != nil {
+				if n, err := agg.Refresh(context.Background()); err != nil {
 					slog.Warn("pricing.daily_refresh_failed", "error", err)
+				} else {
+					slog.Info("pricing.daily_refresh_ok", "models", n)
 				}
 			}
 		}()
