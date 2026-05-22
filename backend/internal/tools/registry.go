@@ -22,6 +22,7 @@ type Registry struct {
 	scrubbing   bool
 	rateLimiter *RateLimiter
 	metrics     *ToolMetrics
+	onUnknown   func(ctx context.Context, toolName, agentID string)
 }
 
 func NewRegistry() *Registry {
@@ -35,6 +36,13 @@ func NewRegistry() *Registry {
 
 func (r *Registry) Register(t Tool)    { r.mu.Lock(); r.tools[t.Name()] = t; r.mu.Unlock() }
 func (r *Registry) Unregister(name string) { r.mu.Lock(); delete(r.tools, name); r.mu.Unlock() }
+
+// SetOnUnknownTool sets a callback invoked when Execute is called with a tool name
+// that is not registered. The callback receives the tool name and the agent ID from
+// context (empty string if not set). Use this to report capability gaps to Prime.
+func (r *Registry) SetOnUnknownTool(fn func(ctx context.Context, toolName, agentID string)) {
+	r.mu.Lock(); r.onUnknown = fn; r.mu.Unlock()
+}
 
 // Disable marks a tool as disabled (still registered but hidden from LLM tool lists).
 func (r *Registry) Disable(name string) { r.mu.Lock(); r.disabled[name] = true; r.mu.Unlock() }
@@ -60,6 +68,13 @@ func (r *Registry) Get(name string) (Tool, bool) {
 func (r *Registry) Execute(ctx context.Context, name string, args map[string]any) *Result {
 	t, ok := r.Get(name)
 	if !ok {
+		r.mu.RLock()
+		fn := r.onUnknown
+		r.mu.RUnlock()
+		if fn != nil {
+			agentID := AgentIDFromCtx(ctx)
+			go fn(ctx, name, agentID)
+		}
 		return ErrorResult("unknown tool: " + name)
 	}
 

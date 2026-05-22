@@ -2,15 +2,20 @@
 
 package gateway
 
-// capability_gaps.go — detects missing capabilities (starting with unknown
-// model pricing) and routes them to Prime so it can self-resolve or ask the user.
+// capability_gaps.go — detects missing capabilities and routes them to Prime
+// so it can self-resolve or ask the user.
+//
+// Gap types:
+//   - model_pricing: model price unknown — can't track spend
+//   - connector:     an agent requested a tool that no connector provides
+//   - tool_missing:  an agent called a tool name that is not registered
 //
 // Design:
-//   - CapabilityGapReporter is a thin shim between CostLedger and the supervisor bus.
+//   - CapabilityGapReporter is a thin shim between any system component and the supervisor bus.
 //   - Each unique (gap_type, subject) is reported at most once per reportInterval
-//     (default 1h) — no spam if the same unknown model is called 1000 times.
+//     (default 1h) — no spam if the same unknown tool is called 1000 times.
 //   - Prime receives a CAPABILITY_GAP message with structured Context so it can
-//     decide: look up the price autonomously, or escalate to the user.
+//     scaffold the connector autonomously, or escalate to the user.
 
 import (
 	"context"
@@ -30,7 +35,9 @@ const reportInterval = time.Hour
 type GapType string
 
 const (
-	GapTypePricing GapType = "model_pricing" // model price unknown — can't track spend
+	GapTypePricing    GapType = "model_pricing" // model price unknown — can't track spend
+	GapTypeConnector  GapType = "connector"     // no connector provides the requested tool
+	GapTypeToolMissing GapType = "tool_missing"  // tool name called but not registered in the system
 )
 
 // CapabilityGap describes a single missing capability the system detected.
@@ -124,6 +131,52 @@ func (r *CapabilityGapReporter) ReportPricingGap(ctx context.Context, modelID, p
 			"tokens_out":  tokensOut,
 			"action":      "set_price",
 			"api_hint":    fmt.Sprintf("PUT /v1/gateway/pricing/%s  {\"input_per_1m\": X, \"output_per_1m\": Y}", modelID),
+		},
+		DetectedAt: time.Now(),
+	})
+}
+
+// ReportConnectorGap reports that no installed connector provides toolName.
+// agentID is the agent that requested the tool; docsURL is an optional hint
+// pointing to the API documentation Prime can use to scaffold the connector.
+func (r *CapabilityGapReporter) ReportConnectorGap(ctx context.Context, toolName, agentID, docsURL string) {
+	detail := fmt.Sprintf(
+		"Agent %q called tool %q which is not provided by any installed connector. "+
+			"A new connector needs to be scaffolded and installed to handle this tool.",
+		agentID, toolName,
+	)
+	r.Report(ctx, CapabilityGap{
+		Type:    GapTypeConnector,
+		Subject: toolName,
+		Detail:  detail,
+		Context: map[string]any{
+			"tool_name": toolName,
+			"agent_id":  agentID,
+			"docs_url":  docsURL,
+			"action":    "build_connector",
+		},
+		DetectedAt: time.Now(),
+	})
+}
+
+// ReportToolMissing reports that an agent called a tool name that is not registered
+// in the tool registry (and is not a connector tool). This fires once per tool name
+// per hour so repeated calls by a busy agent don't flood the supervisor bus.
+func (r *CapabilityGapReporter) ReportToolMissing(ctx context.Context, toolName, agentID string) {
+	detail := fmt.Sprintf(
+		"Agent %q called unknown tool %q. "+
+			"If this is a real capability that should exist, provide the API documentation URL "+
+			"and Prime will scaffold a connector for it.",
+		agentID, toolName,
+	)
+	r.Report(ctx, CapabilityGap{
+		Type:    GapTypeToolMissing,
+		Subject: toolName,
+		Detail:  detail,
+		Context: map[string]any{
+			"tool_name": toolName,
+			"agent_id":  agentID,
+			"action":    "investigate",
 		},
 		DetectedAt: time.Now(),
 	})

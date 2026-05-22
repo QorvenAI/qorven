@@ -768,13 +768,20 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.agentLoop.SupervisorBus = gw.supervisorBus
 			gw.agentLoop.PrimeID = primeID
 
-			// Wire capability gap reporter — cost ledger notifies Prime when
-			// a model has no pricing data so Prime can request it from the user.
+			// Wire capability gap reporter — notifies Prime when the system
+			// encounters a missing capability (unknown model price, unknown tool, etc.).
+			gapReporter := NewCapabilityGapReporter(gw.supervisorBus, primeID)
 			if gw.llmCostLedger != nil {
-				gapReporter := NewCapabilityGapReporter(gw.supervisorBus, primeID)
 				gw.llmCostLedger.WithGapReporter(gapReporter)
-				slog.Info("gateway.gap_reporter.wired", "prime", primeID)
 			}
+			// Hook the tool registry so any call to an unregistered tool name
+			// triggers a CAPABILITY_GAP report to Prime.
+			if gw.toolReg != nil {
+				gw.toolReg.SetOnUnknownTool(func(ctx context.Context, toolName, agentID string) {
+					gapReporter.ReportToolMissing(ctx, toolName, agentID)
+				})
+			}
+			slog.Info("gateway.gap_reporter.wired", "prime", primeID)
 
 			// Wire capability gap handler — Prime resolves gaps autonomously.
 			// For model_pricing gaps: Prime fetches the price via web_fetch or
@@ -784,18 +791,23 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 				primeIDCopy := primeID
 				gw.supervisor.SetCapabilityGapHandler(func(ctx context.Context, msg supervisorpkg.Message) {
 					gapType, _ := msg.Context["gap_type"].(string)
-					modelID, _  := msg.Context["model_id"].(string)
-					providerID, _ := msg.Context["provider_id"].(string)
-					apiHint, _  := msg.Context["api_hint"].(string)
-					tokensIn, _  := msg.Context["tokens_in"].(int)
-					tokensOut, _ := msg.Context["tokens_out"].(int)
 
-					if gapType != "model_pricing" || modelID == "" {
-						return
-					}
+					var task string
+					var logKey string
 
-					task := fmt.Sprintf(
-						`A capability gap has been detected in the AI Gateway:
+					switch gapType {
+					case "model_pricing":
+						modelID, _   := msg.Context["model_id"].(string)
+						providerID, _ := msg.Context["provider_id"].(string)
+						apiHint, _   := msg.Context["api_hint"].(string)
+						tokensIn, _  := msg.Context["tokens_in"].(int)
+						tokensOut, _ := msg.Context["tokens_out"].(int)
+						if modelID == "" {
+							return
+						}
+						logKey = modelID
+						task = fmt.Sprintf(
+							`A capability gap has been detected in the AI Gateway:
 
 **Model without pricing data:** %s (provider: %s)
 **Tokens recorded at $0 cost:** %d input, %d output
@@ -804,20 +816,63 @@ Your task:
 1. Use web_fetch to look up the current input and output token prices (USD per 1M tokens) for model %q.
    - Check the provider's official pricing page, or https://qorven.ai/data/model-pricing.json
    - Look for "input price per 1M tokens" and "output price per 1M tokens"
-2. Once you have the prices, call this API to register them:
+2. Once you have the prices, register them:
    %s
    Body: {"input_per_1m": <number>, "output_per_1m": <number>}
    Use shell_exec with: curl -s -X PUT -H "Content-Type: application/json" -d '<body>' http://localhost:4200/v1/gateway/pricing/%s
-   Include the Authorization header if needed (use the admin token from config).
-3. After setting the price, the system will automatically reprice all past calls that recorded $0.
-4. If you cannot find the price, reply with a message to the user explaining what you found and asking them to provide the correct price via the Gateway admin UI.
+3. The system will automatically reprice all past calls recorded at $0.
+4. If you cannot find the price, ask the user to provide it via the Gateway admin UI.`,
+							modelID, providerID, tokensIn, tokensOut, modelID, apiHint, modelID,
+						)
 
-Do not skip this task — accurate pricing is required for budget enforcement to work correctly.`,
-						modelID, providerID, tokensIn, tokensOut, modelID, apiHint, modelID,
-					)
+					case "connector", "tool_missing":
+						toolName, _ := msg.Context["tool_name"].(string)
+						agentKey, _ := msg.Context["agent_id"].(string)
+						docsURL, _  := msg.Context["docs_url"].(string)
+						if toolName == "" {
+							return
+						}
+						logKey = toolName
+						docsLine := ""
+						if docsURL != "" {
+							docsLine = fmt.Sprintf("\n   API documentation: %s", docsURL)
+						}
+						task = fmt.Sprintf(
+							`A capability gap has been detected — an agent requested a tool that is not installed:
+
+**Missing tool:** %q
+**Requested by agent:** %s%s
+
+Your task:
+1. Use web_fetch to understand what this tool does and what API it calls.
+   - If a docs URL was provided, fetch it first.
+   - Otherwise, search for "%s API documentation" to find the API spec.
+2. Use get_connector_template to get a starting Go template for a new connector.
+3. Implement the connector in a temp directory under /tmp/qorven-connectors/%s/.
+   - The connector must implement the %q tool as its primary function.
+   - Use get_connector_template as your starting point, then edit main.go.
+4. Use build_connector to compile, install, and verify the connector:
+   - slug: %s
+   - tools_schema: {%q: {"description": "<one line>", "parameters": <JSON schema>}}
+5. After successful install, inform the user that the %q tool is now available.
+6. If you cannot build a working connector, ask the user to provide the API credentials and documentation.
+
+This is a self-building capability — you are extending Qorven autonomously.`,
+							toolName, agentKey, docsLine,
+							toolName,
+							toolName, toolName,
+							toolName,
+							toolName,
+							toolName,
+						)
+
+					default:
+						slog.Info("supervisor.capability_gap.unrouted", "gap_type", gapType)
+						return
+					}
 
 					slog.Info("supervisor.capability_gap.resolving",
-						"gap_type", gapType, "model", modelID, "prime", primeIDCopy)
+						"gap_type", gapType, "subject", logKey, "prime", primeIDCopy)
 
 					result, err := gw.agentLoop.Run(ctx, agent.RunRequest{
 						AgentID:     primeIDCopy,
@@ -827,12 +882,12 @@ Do not skip this task — accurate pricing is required for budget enforcement to
 					}, func(agent.StreamEvent) {})
 					if err != nil {
 						slog.Warn("supervisor.capability_gap.run_failed",
-							"model", modelID, "err", err)
+							"gap_type", gapType, "subject", logKey, "err", err)
 						return
 					}
 					if result != nil {
 						slog.Info("supervisor.capability_gap.resolved",
-							"model", modelID, "output_len", len(result.Content))
+							"gap_type", gapType, "subject", logKey, "output_len", len(result.Content))
 					}
 				})
 				slog.Info("supervisor.capability_gap_handler.wired", "prime", primeID)
