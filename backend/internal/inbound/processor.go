@@ -43,6 +43,10 @@ type AgentConfig struct {
 // Gateway wires this up so the inbound processor can deliver autonomous responses.
 type ReplyFunc func(ctx context.Context, agentID, channelType, chatID, content string, metadata map[string]string)
 
+// RuleEventFn fires a rule engine event. Gateway wires this up so inbound
+// messages can trigger threshold/event rules set by Prime.
+type RuleEventFn func(ctx context.Context, eventName string, data map[string]any)
+
 // Processor is the intelligence layer between channel receipt and agent loop.
 type Processor struct {
 	pool       *pgxpool.Pool
@@ -52,6 +56,7 @@ type Processor struct {
 	draftQueue *DraftQueue
 	pluginMgr  *plugin.Manager // nil-safe; set via SetPluginManager after construction
 	reply      ReplyFunc       // nil-safe; set via SetReplyFunc after construction
+	fireRule   RuleEventFn     // nil-safe; set via SetRuleEventFn after construction
 }
 
 // SetPluginManager injects the plugin manager so apps can hook into the pipeline.
@@ -59,6 +64,10 @@ func (p *Processor) SetPluginManager(mgr *plugin.Manager) { p.pluginMgr = mgr }
 
 // SetReplyFunc wires the outbound delivery callback.
 func (p *Processor) SetReplyFunc(fn ReplyFunc) { p.reply = fn }
+
+// SetRuleEventFn wires the rule engine event hook so inbound messages can
+// trigger threshold/event rules.
+func (p *Processor) SetRuleEventFn(fn RuleEventFn) { p.fireRule = fn }
 
 // NewProcessor creates a Processor.
 func NewProcessor(pool *pgxpool.Pool, sessions *session.Store, agentLoop *agent.Loop) *Processor {
@@ -84,6 +93,16 @@ func (p *Processor) Process(ctx context.Context, msg channels.InboundMessage) {
 			"channel":   msg.ChannelType,
 			"content":   msg.Content,
 			"label":     string(label),
+		})
+	}
+
+	// Fire rule event — lets Prime's event rules react to inbound messages.
+	if p.fireRule != nil {
+		p.fireRule(ctx, "message.received", map[string]any{
+			"agent_id":  msg.AgentID,
+			"sender_id": msg.SenderID,
+			"channel":   msg.ChannelType,
+			"content":   msg.Content,
 		})
 	}
 

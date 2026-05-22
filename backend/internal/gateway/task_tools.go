@@ -149,6 +149,13 @@ func (t *taskDoneTool) Execute(ctx context.Context, args map[string]any) *tools.
 		"result": result,
 	})
 
+	// Fire rule event so threshold/event rules can react to task completion.
+	t.gw.FireRuleEvent(ctx, "task.done", map[string]any{
+		"task_id":  t.taskID,
+		"agent_id": t.agentID,
+		"result":   result,
+	})
+
 	// Signal the iteration loop — non-blocking; loop may already be closing
 	select {
 	case t.signalCh <- taskSignalMsg{Signal: SignalDone, Payload: result}:

@@ -376,14 +376,22 @@ func (gw *Gateway) checkBudgetWarning(ctx context.Context, agentID string) {
 		return
 	}
 	if used*100/budget >= 80 {
+		pct := used * 100 / budget
 		gw.rtHub.Broadcast(realtime.Event{
 			Type: realtime.EventBudgetWarning,
 			Data: map[string]any{
 				"agent_id": agentID,
 				"used":     used,
 				"budget":   budget,
-				"pct":      used * 100 / budget,
+				"pct":      pct,
 			},
+		})
+		// Fire rule event so threshold rules can escalate budget warnings.
+		gw.FireRuleEvent(ctx, "budget.warning", map[string]any{
+			"agent_id": agentID,
+			"used":     float64(used),
+			"budget":   float64(budget),
+			"pct":      float64(pct),
 		})
 	}
 }
