@@ -74,6 +74,11 @@ func (gw *Gateway) Start() error {
 		} else {
 			slog.Info("chief of staff ready")
 		}
+		if _, err := gw.ensureCoder(context.Background()); err != nil {
+			slog.Warn("coder.bootstrap_failed", "error", err)
+		} else {
+			slog.Info("coder ready")
+		}
 	}
 
 	// Start real-time WebSocket hub
