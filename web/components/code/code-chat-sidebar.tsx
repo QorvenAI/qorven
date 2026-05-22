@@ -15,6 +15,7 @@ interface CodeChatSidebarProps {
   onSend: (msg: string) => void;
   thinkingLevel: 'off' | 'medium' | 'high';
   onThinkingLevelChange: (level: 'off' | 'medium' | 'high') => void;
+  onDelegated?: (projectId: string) => void;
 }
 
 export function CodeChatSidebar({
@@ -23,11 +24,23 @@ export function CodeChatSidebar({
   onSend,
   thinkingLevel,
   onThinkingLevelChange,
+  onDelegated,
 }: CodeChatSidebarProps) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // When Prime's response contains [DELEGATED:coder:<projectId>], notify parent to switch to build tab
+  useEffect(() => {
+    if (!onDelegated) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    const match = last.content?.match(/\[DELEGATED:coder:([^\]]*)\]/);
+    if (match) {
+      onDelegated(match[1] ?? '');
+    }
+  }, [messages, onDelegated]);
 
   const send = () => {
     const text = input.trim();

@@ -825,6 +825,9 @@ export default function CodePage() {
             onSend={handleChat}
             thinkingLevel={codeThinkingLevel}
             onThinkingLevelChange={setCodeThinkingLevel}
+            onDelegated={(projectId) => {
+              router.push(`/code?tab=build${projectId ? `&project=${projectId}` : ''}`);
+            }}
           />
         </aside>
 
