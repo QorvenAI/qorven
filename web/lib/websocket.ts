@@ -298,6 +298,14 @@ function handleEvent(event: WSEvent) {
       break;
     }
 
+    case 'page.navigate': {
+      const d = event.data as { url?: string };
+      if (d?.url && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('qorven:page.navigate', { detail: { url: d.url } }));
+      }
+      break;
+    }
+
     case 'budget_warning': {
       store.pushEvent(liveEvent);
       if (typeof window !== 'undefined') {

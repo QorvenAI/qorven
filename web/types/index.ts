@@ -114,7 +114,8 @@ export type WSEventType =
   | 'task_done'
   | 'task_blocked'
   | 'task_iteration_start'
-  | 'synthesis_triggered';
+  | 'synthesis_triggered'
+  | 'page.navigate';
 
 export interface WSEvent {
   type: WSEventType;
