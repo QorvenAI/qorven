@@ -646,14 +646,39 @@ function TileContent({ tile }: { tile: PinnedTile }) {
 
     case 'feed':
     case 'list': {
-      // Bullet list of string items
+      // If data has a "text" field with newline-separated bullets, use that directly
+      if (typeof (data as Record<string, unknown>).text === 'string') {
+        const lines = ((data as Record<string, unknown>).text as string)
+          .split('\n')
+          .map((l) => l.replace(/^•\s*/, '').trim())
+          .filter(Boolean);
+        return (
+          <ul className="space-y-1">
+            {lines.map((item, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs text-foreground">
+                <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                <span className="line-clamp-1">{item}</span>
+              </li>
+            ))}
+          </ul>
+        );
+      }
+      // Bullet list of items — extract title if object
+      const toStr = (v: unknown): string => {
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object') {
+          const obj = v as Record<string, unknown>;
+          return String(obj.title ?? obj.name ?? obj.label ?? obj.text ?? JSON.stringify(v));
+        }
+        return String(v);
+      };
       let items: string[] = [];
       if (Array.isArray(data)) {
-        items = (data as unknown[]).slice(0, 10).map(String);
+        items = (data as unknown[]).slice(0, 10).map(toStr);
       } else {
         const firstArray = Object.values(data).find(Array.isArray);
         if (firstArray) {
-          items = (firstArray as unknown[]).slice(0, 10).map(String);
+          items = (firstArray as unknown[]).slice(0, 10).map(toStr);
         } else {
           items = Object.entries(data).map(([k, v]) => `${k}: ${String(v)}`).slice(0, 10);
         }
