@@ -10,7 +10,7 @@ import {
   outbound, supervisor,
   type ApprovalItem, type OutboundAction, type SupervisorMessage,
 } from '@/lib/api';
-import { dashboardApi, type PinnedTile } from '@/lib/api-dashboard';
+import { dashboardApi, type PinnedTile, type DashboardStats } from '@/lib/api-dashboard';
 import { tickets as ticketsApi } from '@/lib/api-workspace';
 import type { Ticket as TicketItem } from '@/types';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -20,6 +20,7 @@ import {
   Users, Zap, Plus, Send, Settings, ArrowUpRight,
   ListChecks, GitBranch, ShieldCheck, Check, X, Loader2, RefreshCw,
   Bot, Clock, TrendingUp, MessageSquare, Activity, Mail, Ticket as TicketIcon,
+  DollarSign,
 } from 'lucide-react';
 import { soulGradient } from '@/components/soul-card';
 import type { Soul } from '@/types';
@@ -35,6 +36,7 @@ export default function DashboardPage() {
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalItem[]>([]);
   const [pendingOutbound, setPendingOutbound] = useState<OutboundAction[]>([]);
   const [auditFeed, setAuditFeed] = useState<SupervisorMessage[]>([]);
+  const [gwStats, setGwStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,8 +51,9 @@ export default function DashboardPage() {
       approvalsApi.list().catch(() => [] as ApprovalItem[]),
       outbound.pending().catch(() => ({ pending: [] as OutboundAction[] })),
       supervisor.auditLog().catch(() => ({ messages: [] as SupervisorMessage[] })),
+      dashboardApi.stats().catch(() => null),
     ])
-      .then(([a, pc, sess, tix, apps, ob, audit]) => {
+      .then(([a, pc, sess, tix, apps, ob, audit, gs]) => {
         const list = (Array.isArray(a) ? a : []).filter((s: any) => !s.agent_key?.startsWith('__'));
         setSouls(list);
         setProviderCount(pc);
@@ -65,6 +68,7 @@ export default function DashboardPage() {
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
           .slice(0, 15);
         setAuditFeed(msgs);
+        if (gs) setGwStats(gs as DashboardStats);
         setLoading(false);
         if (pc === 0) router.replace('/setup');
       })
@@ -132,6 +136,52 @@ export default function DashboardPage() {
 
         {/* ── Pinned tiles row ── */}
         <PinnedTilesRow />
+
+        {/* ── Cost / usage strip ── */}
+        {(gwStats || loading) && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              {
+                label: 'Cost this month',
+                value: loading ? null : `$${gwStats?.cost_this_month_usd?.toFixed(4) ?? '0.0000'}`,
+                icon: DollarSign,
+                href: '/usage',
+              },
+              {
+                label: 'LLM calls',
+                value: loading ? null : (gwStats?.calls_this_month ?? 0).toLocaleString(),
+                icon: Activity,
+                href: '/traces',
+              },
+              {
+                label: 'Tokens in',
+                value: loading ? null : fmtTokens(gwStats?.tokens_in ?? 0),
+                icon: TrendingUp,
+                href: '/traces',
+              },
+              {
+                label: 'Tokens out',
+                value: loading ? null : fmtTokens(gwStats?.tokens_out ?? 0),
+                icon: TrendingUp,
+                href: '/traces',
+              },
+            ].map(({ label, value, icon: Icon, href }) => (
+              <Link key={label} href={href}
+                className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:bg-accent/40 transition-colors">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-2xs text-muted-foreground">{label}</p>
+                  {value === null
+                    ? <div className="mt-1 h-5 w-16 rounded bg-muted animate-pulse" />
+                    : <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums">{value}</p>
+                  }
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
 
         {/* ── 3-col layout ── */}
         <div className="grid gap-6 lg:grid-cols-3">
@@ -305,6 +355,12 @@ export default function DashboardPage() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
 
 const outboundLabels: Record<string, string> = {
   email_send: 'Send Email',

@@ -914,6 +914,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 			r.Get("/tiles", gw.listDashboardTiles)
 			r.Post("/tiles", gw.createDashboardTile)
 			r.Delete("/tiles/{id}", gw.deleteDashboardTile)
+			r.Get("/stats", gw.handleDashboardStats)
 		})
 
 		// Multi-agent daemon: external agent registry, task queue, plan approval.

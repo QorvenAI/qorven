@@ -14,10 +14,18 @@ export interface PinnedTile {
   data?: Record<string, unknown>;
 }
 
+export interface DashboardStats {
+  cost_this_month_usd: number;
+  calls_this_month: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
 export const dashboardApi = {
   tiles: () => request<PinnedTile[]>('/dashboard/tiles'),
   pin: (t: Omit<PinnedTile, 'id' | 'data'>) =>
     request<PinnedTile>('/dashboard/tiles', { method: 'POST', body: JSON.stringify(t) }),
   unpin: (id: string) =>
     request<void>(`/dashboard/tiles/${id}`, { method: 'DELETE' }),
+  stats: () => request<DashboardStats>('/dashboard/stats'),
 };

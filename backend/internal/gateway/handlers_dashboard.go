@@ -142,3 +142,31 @@ func (gw *Gateway) deleteDashboardTile(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleDashboardStats returns a lightweight cost/token summary for the current
+// month, drawn from gateway_spend_raw. Used by the dashboard stats strip.
+func (gw *Gateway) handleDashboardStats(w http.ResponseWriter, r *http.Request) {
+	type stats struct {
+		CostThisMonthUSD float64 `json:"cost_this_month_usd"`
+		CallsThisMonth   int64   `json:"calls_this_month"`
+		TokensIn         int64   `json:"tokens_in"`
+		TokensOut        int64   `json:"tokens_out"`
+	}
+	var s stats
+	if gw.db != nil {
+		_ = gw.db.Pool.QueryRow(r.Context(), `
+			SELECT
+				COALESCE(SUM(cost_total_uusd), 0) / 1e6,
+				COUNT(*),
+				COALESCE(SUM(tokens_in), 0),
+				COALESCE(SUM(tokens_out), 0)
+			FROM gateway_spend_raw
+			WHERE tenant_id = $1
+			  AND created_at >= date_trunc('month', now())
+			  AND cache_hit = false`,
+			defaultTenant,
+		).Scan(&s.CostThisMonthUSD, &s.CallsThisMonth, &s.TokensIn, &s.TokensOut)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s)
+}
