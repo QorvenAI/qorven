@@ -11,7 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { providers as providersApi } from '@/lib/api';
-import type { ProviderAuthProfile } from '@/lib/api-providers';
+import type { ProviderAuthProfile, CatalogProvider } from '@/lib/api-providers';
 import { extractErrorMessage } from '@/lib/api-core';
 import { toast } from 'sonner';
 import { ProviderIcon } from '@/components/provider-icon';
@@ -27,75 +27,33 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/qor/popove
 
 // ─── Provider catalogue ───────────────────────────────────────────────────────
 
-type ProviderPreset = {
-  id: string;
-  name: string;
-  type: 'openai_compat' | 'anthropic_native' | 'bedrock' | 'gemini_native' | 'openrouter' | 'custom';
-  base: string;
-  description: string;
-  oauthId?: string; // set for OAuth 2.0 providers; value = backend provider ID
-  extraFields?: Array<{ key: string; label: string; type?: string; placeholder?: string }>;
+// CatalogPreset wraps a CatalogProvider for use inside the wizard.
+// driver_type maps directly to the backend provider_type expected by POST /providers.
+type CatalogPreset = CatalogProvider & {
+  // Convenience aliases for wizard logic
+  type: string;   // = driver_type (e.g. "openai_compat")
+  base: string;   // = default_api_base
+  description: string; // derived from models/category
+  oauthId?: string;    // set when auth_type === "oauth2"
 };
 
-const PRESETS: ProviderPreset[] = [
-  // OAuth providers — key step becomes "Connect" button
-  { id: 'claude_code',     name: 'Claude Code',          type: 'anthropic_native', base: 'https://api.anthropic.com',            description: 'Anthropic via OAuth — no API key needed', oauthId: 'claude_code' },
-  { id: 'github_copilot',  name: 'GitHub Copilot',       type: 'openai_compat',    base: 'https://api.githubcopilot.com',        description: 'Copilot via OAuth',                       oauthId: 'github_copilot' },
-  { id: 'google_vertex',   name: 'Google Vertex AI',     type: 'gemini_native',    base: '',                                     description: 'Vertex AI via Google OAuth',              oauthId: 'google_vertex' },
-  // API-key providers
-  { id: 'openai',      name: 'OpenAI',               type: 'openai_compat',    base: 'https://api.openai.com/v1',                               description: 'GPT-4o, o1, o3' },
-  { id: 'anthropic',   name: 'Anthropic',             type: 'anthropic_native', base: 'https://api.anthropic.com',                               description: 'Claude 4 Opus, Sonnet, Haiku' },
-  { id: 'gemini',      name: 'Google Gemini',         type: 'gemini_native',    base: 'https://generativelanguage.googleapis.com/v1beta/openai', description: 'Gemini 2.5 Pro, Flash' },
-  { id: 'deepseek',    name: 'DeepSeek',              type: 'openai_compat',    base: 'https://api.deepseek.com/v1',                             description: 'DeepSeek-V3, R1 reasoner' },
-  { id: 'xai',         name: 'xAI',                  type: 'openai_compat',    base: 'https://api.x.ai/v1',                                     description: 'Grok 3, Grok Vision' },
-  { id: 'mistral',     name: 'Mistral AI',            type: 'openai_compat',    base: 'https://api.mistral.ai/v1',                               description: 'Mistral Large, Codestral' },
-  { id: 'cohere',      name: 'Cohere',                type: 'openai_compat',    base: 'https://api.cohere.ai/v1',                                description: 'Command R+, Embed v3' },
-  {
-    id: 'bedrock', name: 'AWS Bedrock', type: 'bedrock', base: '', description: 'Claude, Llama, Titan on Bedrock',
-    extraFields: [
-      { key: 'region',     label: 'AWS Region',        placeholder: 'us-east-1' },
-      { key: 'access_key', label: 'Access Key ID',     placeholder: 'AKIA…' },
-      { key: 'secret_key', label: 'Secret Access Key', type: 'password', placeholder: '••••••' },
-    ],
-  },
-  { id: 'azure',       name: 'Azure OpenAI',          type: 'openai_compat',    base: 'https://{resource}.openai.azure.com/openai/deployments/{deployment}', description: 'Azure-hosted OpenAI models' },
-  { id: 'nvidia',      name: 'NVIDIA NIM',            type: 'openai_compat',    base: 'https://integrate.api.nvidia.com/v1',                     description: 'Llama, Mistral, Nemotron on NIM' },
-  { id: 'sambanova',   name: 'SambaNova',             type: 'openai_compat',    base: 'https://api.sambanova.ai/v1',                             description: 'Ultra-fast Llama 3 inference' },
-  { id: 'openrouter',  name: 'OpenRouter',            type: 'openrouter',       base: 'https://openrouter.ai/api/v1',                            description: 'Unified 200+ model gateway' },
-  { id: 'groq',        name: 'Groq',                  type: 'openai_compat',    base: 'https://api.groq.com/openai/v1',                          description: 'LPU-accelerated Llama 3' },
-  { id: 'together',    name: 'Together AI',           type: 'openai_compat',    base: 'https://api.together.xyz/v1',                             description: 'Open-source model cloud' },
-  { id: 'fireworks',   name: 'Fireworks AI',          type: 'openai_compat',    base: 'https://api.fireworks.ai/inference/v1',                   description: 'Fast open-model serving' },
-  { id: 'deepinfra',   name: 'DeepInfra',             type: 'openai_compat',    base: 'https://api.deepinfra.com/v1/openai',                     description: 'Hosted open-weight models' },
-  { id: 'replicate',   name: 'Replicate',             type: 'openai_compat',    base: 'https://openai-compat.replicate.com/v1',                  description: 'Run open-source AI models' },
-  { id: 'anyscale',    name: 'Anyscale',              type: 'openai_compat',    base: 'https://api.endpoints.anyscale.com/v1',                   description: 'Hosted OSS endpoints on Ray' },
-  { id: 'huggingface', name: 'HuggingFace',           type: 'openai_compat',    base: 'https://api-inference.huggingface.co/v1',                 description: 'HF Inference API & Endpoints' },
-  { id: 'perplexity',  name: 'Perplexity',            type: 'openai_compat',    base: 'https://api.perplexity.ai',                               description: 'Search-grounded models' },
-  { id: 'ollama',      name: 'Ollama',                type: 'openai_compat',    base: 'http://localhost:11434/v1',                                description: 'Local model serving' },
-  { id: 'lmstudio',    name: 'LM Studio',             type: 'openai_compat',    base: 'http://localhost:1234/v1',                                 description: 'Local LLM GUI + server' },
-  { id: 'vllm',        name: 'vLLM',                  type: 'openai_compat',    base: 'http://localhost:8000/v1',                                 description: 'High-throughput local serving' },
-  { id: 'llamafile',   name: 'Llamafile',             type: 'openai_compat',    base: 'http://localhost:8080/v1',                                 description: 'Single-file local LLM server' },
-  { id: 'custom',      name: 'Custom / Self-hosted',  type: 'custom',           base: '',                                                         description: 'Any OpenAI-compatible endpoint' },
-];
+function catalogToPreset(c: CatalogProvider): CatalogPreset {
+  return {
+    ...c,
+    type: c.driver_type || c.id,
+    base: c.default_api_base,
+    description: c.models?.slice(0, 3).join(', ') || c.category,
+    oauthId: c.auth_type === 'oauth2' ? c.id : undefined,
+  };
+}
 
-const PROVIDER_HELP: Record<string, { keyFormat: string; getKeyUrl: string }> = {
-  openai:      { keyFormat: 'sk-proj-… or sk-…',          getKeyUrl: 'https://platform.openai.com/api-keys' },
-  anthropic:   { keyFormat: 'sk-ant-…',                    getKeyUrl: 'https://console.anthropic.com/settings/keys' },
-  gemini:      { keyFormat: 'AIza…',                       getKeyUrl: 'https://aistudio.google.com/app/apikey' },
-  deepseek:    { keyFormat: 'sk-…',                        getKeyUrl: 'https://platform.deepseek.com/api_keys' },
-  xai:         { keyFormat: 'xai-…',                       getKeyUrl: 'https://console.x.ai/team/default/api-keys' },
-  mistral:     { keyFormat: 'alphanumeric string',         getKeyUrl: 'https://console.mistral.ai/api-keys' },
-  cohere:      { keyFormat: 'alphanumeric string',         getKeyUrl: 'https://dashboard.cohere.com/api-keys' },
-  groq:        { keyFormat: 'gsk_…',                       getKeyUrl: 'https://console.groq.com/keys' },
-  openrouter:  { keyFormat: 'sk-or-…',                     getKeyUrl: 'https://openrouter.ai/settings/keys' },
-  together:    { keyFormat: 'hex string',                  getKeyUrl: 'https://api.together.xyz/settings/api-keys' },
-  fireworks:   { keyFormat: 'fw_…',                        getKeyUrl: 'https://fireworks.ai/api-keys' },
-  deepinfra:   { keyFormat: 'hex string',                  getKeyUrl: 'https://deepinfra.com/dash/api_keys' },
-  perplexity:  { keyFormat: 'pplx-…',                      getKeyUrl: 'https://www.perplexity.ai/settings/api' },
-  huggingface: { keyFormat: 'hf_…',                        getKeyUrl: 'https://huggingface.co/settings/tokens' },
-  nvidia:      { keyFormat: 'nvapi-…',                     getKeyUrl: 'https://build.nvidia.com/settings/api-keys' },
-  sambanova:   { keyFormat: 'alphanumeric string',         getKeyUrl: 'https://cloud.sambanova.ai/apis' },
-  anyscale:    { keyFormat: 'esecret_…',                   getKeyUrl: 'https://console.anyscale.com/credentials' },
-  replicate:   { keyFormat: 'r8_…',                        getKeyUrl: 'https://replicate.com/account/api-tokens' },
+// Llamafile isn't in the backend catalog (no manifest entry); keep as static fallback.
+const LLAMAFILE_PRESET: CatalogPreset = {
+  id: 'llamafile', name: 'Llamafile', icon: 'llamafile', category: 'local',
+  auth_type: 'none', driver_type: 'openai_compat', type: 'openai_compat',
+  default_api_base: 'http://localhost:8080/v1', base: 'http://localhost:8080/v1',
+  default_model: '', models: [], fields: [],
+  description: 'Single-file local LLM server',
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -209,6 +167,7 @@ function KeyRow({
           type="password"
           value={entry.key}
           onChange={e => onChange({ key: e.target.value, status: 'idle', error: undefined })}
+          onBlur={() => { if (entry.key.trim()) onVerify(); }}
           placeholder="sk-… or paste key"
           className="qr-input flex-1 min-w-0 text-xs font-mono"
         />
@@ -280,13 +239,14 @@ function StrategyPicker({ strategy, failover, onChange }: {
 
 // ─── Add Provider Sheet (wizard) ──────────────────────────────────────────────
 
-function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
+function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }: {
   open: boolean; onOpenChange: (o: boolean) => void; onAdded: () => void;
   authProfiles: Record<string, ProviderAuthProfile>;
+  catalog: CatalogPreset[];
 }) {
   const [step, setStep]           = useState<1 | 2 | 3>(1);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [preset, setPreset]       = useState<ProviderPreset | null>(null);
+  const [preset, setPreset]       = useState<CatalogPreset | null>(null);
   const [name, setName]           = useState('');
   const [base, setBase]           = useState('');
   const [extras, setExtras]       = useState<Record<string, string>>({})
@@ -322,21 +282,22 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
     oauthPopupRef.current = null;
   };
 
-  const pickPreset = (p: ProviderPreset) => {
+  const pickPreset = (p: CatalogPreset) => {
     setPreset(p);
     setPickerOpen(false);
     setName(p.id === 'custom' ? '' : p.name.toLowerCase().replace(/\s+/g, '-'));
     setBase(p.base);
+    // Pre-fill extras for multi-field providers (AWS, Azure, etc.)
     const e: Record<string, string> = {};
-    p.extraFields?.forEach(f => { e[f.key] = ''; });
+    p.fields?.forEach(f => { if (f.name !== 'api_key') e[f.name] = ''; });
     setExtras(e);
   };
 
-  const isBedrock  = preset?.id === 'bedrock';
+  const isBedrock  = preset?.auth_type === 'aws_credentials';
   const isCustom   = preset?.id === 'custom';
-  const isLocal    = ['ollama', 'lmstudio', 'vllm', 'llamafile'].includes(preset?.id ?? '');
+  const isLocal    = preset?.auth_type === 'none';
   const isOAuth    = !!preset?.oauthId;
-  const step1Valid = !!preset && !!name && (isBedrock ? (extras.region && extras.access_key && extras.secret_key) : (base || preset?.base || isOAuth));
+  const step1Valid = !!preset && !!name && (isBedrock ? (extras.aws_region && extras.aws_access_key && extras.aws_secret_key) : (base || preset?.base || isOAuth || isLocal));
   const step2Valid = isBedrock || isLocal || isOAuth || keys.some(k => k.key.trim());
 
   // Key management helpers
@@ -365,8 +326,8 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
       return;
     }
     // Check prefix from backend auth profile if available
-    if (preset?.type) {
-      const profile = authProfiles[preset.type];
+    if (preset?.driver_type) {
+      const profile = authProfiles[preset.driver_type];
       const apiKeyField = profile?.fields.find(f => f.key === 'api_key');
       if (apiKeyField?.key_prefixes?.length) {
         const ok = apiKeyField.key_prefixes.some(p => k.startsWith(p));
@@ -424,10 +385,10 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
     setCreating(true);
     try {
       const payload: Record<string, unknown> = {
-        name, provider_type: preset.type === 'custom' ? 'openai_compat' : preset.type,
+        name, provider_type: preset.driver_type || 'openai_compat',
         api_base: base || preset.base || undefined,
       };
-      if (isBedrock) { payload.region = extras.region; payload.access_key = extras.access_key; payload.secret_key = extras.secret_key; }
+      if (isBedrock) { payload.region = extras.aws_region; payload.access_key = extras.aws_access_key; payload.secret_key = extras.aws_secret_key; }
       if (isOAuth) { payload.oauth_provider = preset.oauthId; }
       const prov = await providersApi.create(payload);
       const provId = (prov as any).id;
@@ -530,7 +491,7 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
                       <CommandList className="max-h-64">
                         <CommandEmpty>No providers found.</CommandEmpty>
                         <CommandGroup>
-                          {PRESETS.map(p => (
+                          {catalog.map(p => (
                             <CommandItem key={p.id} value={p.name} onSelect={() => pickPreset(p)} className="gap-2.5 py-2 cursor-pointer">
                               <ProviderIcon provider={p.id} size={18} className="shrink-0" />
                               <div className="flex-1 min-w-0">
@@ -556,10 +517,10 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
 
                   {isBedrock && (
                     <div className="grid sm:grid-cols-2 gap-3">
-                      {preset.extraFields!.map(f => (
-                        <div key={f.key} className={f.key === 'secret_key' ? 'sm:col-span-2' : ''}>
-                          <label className="block text-xs font-medium mb-1.5">{f.label} <span className="text-destructive">*</span></label>
-                          <input type={f.type ?? 'text'} value={extras[f.key] ?? ''} onChange={e => setExtras(p => ({ ...p, [f.key]: e.target.value }))} placeholder={f.placeholder} className={inputCls} />
+                      {(preset.fields ?? []).filter(f => f.name !== 'api_key').map(f => (
+                        <div key={f.name} className={f.name === 'aws_secret_key' ? 'sm:col-span-2' : ''}>
+                          <label className="block text-xs font-medium mb-1.5">{f.label} {f.required && <span className="text-destructive">*</span>}</label>
+                          <input type={f.type === 'password' ? 'password' : 'text'} value={extras[f.name] ?? ''} onChange={e => setExtras(p => ({ ...p, [f.name]: e.target.value }))} placeholder={f.placeholder} className={inputCls} />
                         </div>
                       ))}
                     </div>
@@ -593,11 +554,10 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
               </div>
 
               {(() => {
-                // Prefer backend auth profile; fall back to static PROVIDER_HELP
-                const profile = preset?.type ? authProfiles[preset.type] : undefined;
+                const profile = preset?.driver_type ? authProfiles[preset.driver_type] : undefined;
                 const apiKeyField = profile?.fields.find(f => f.key === 'api_key');
-                const helpUrl = apiKeyField?.help_url ?? (preset ? PROVIDER_HELP[preset.id]?.getKeyUrl : undefined);
-                const keyFormat = apiKeyField?.placeholder ?? (preset ? PROVIDER_HELP[preset.id]?.keyFormat : undefined);
+                const helpUrl = apiKeyField?.help_url;
+                const keyFormat = apiKeyField?.placeholder;
                 return (helpUrl || keyFormat) ? (
                   <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-2.5">
                     <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
@@ -818,8 +778,9 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
 
 // ─── Key Pool Sheet (manage keys on existing provider) ────────────────────────
 
-function KeyPoolSheet({ provider, open, onOpenChange }: {
+function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
   provider: ProviderItem | null; open: boolean; onOpenChange: (o: boolean) => void;
+  authProfiles: Record<string, ProviderAuthProfile>;
 }) {
   const [existingKeys, setExistingKeys] = useState<ProvKey[]>([]);
   const [loading, setLoading]           = useState(true);
@@ -834,8 +795,11 @@ function KeyPoolSheet({ provider, open, onOpenChange }: {
   const [poolConfig, setPoolConfig]     = useState({ strategy: 'priority', failover_mode: 'on_error' });
   const [savingPool, setSavingPool]     = useState(false);
 
-  const presetId = PRESETS.find(p => p.name.toLowerCase() === provider?.name.toLowerCase() || p.id === provider?.name.toLowerCase())?.id ?? provider?.name.toLowerCase() ?? '';
-  const help = PROVIDER_HELP[presetId];
+  const provTypeProfile = provider ? authProfiles[provider.provider_type] : undefined;
+  const provTypeApiKeyField = provTypeProfile?.fields.find(f => f.key === 'api_key');
+  const help = provTypeApiKeyField
+    ? { keyFormat: provTypeApiKeyField.placeholder ?? '', getKeyUrl: provTypeApiKeyField.help_url ?? '' }
+    : null;
 
   const loadData = useCallback(async () => {
     if (!provider) return;
@@ -1324,9 +1288,18 @@ export default function GenerativePage() {
   const [keyCounts, setKeyCounts]           = useState<Record<string, number>>({});
   const [oauthStatuses, setOauthStatuses]   = useState<Record<string, boolean>>({});
   const [authProfiles, setAuthProfiles]     = useState<Record<string, ProviderAuthProfile>>({});
+  const [catalog, setCatalog]               = useState<CatalogPreset[]>([]);
 
   useEffect(() => {
     providersApi.authProfiles().then(p => { if (p) setAuthProfiles(p); }).catch(() => {});
+    providersApi.catalog().then(items => {
+      if (items) {
+        const llmOnly = items.filter((c: any) => !['search', 'voice', 'data', 'embeddings', 'media'].includes(c.category));
+        const presets = llmOnly.map(catalogToPreset);
+        // Append llamafile which is not in the backend catalog
+        setCatalog([...presets, LLAMAFILE_PRESET]);
+      }
+    }).catch(() => { setCatalog([LLAMAFILE_PRESET]); });
     // Fetch OAuth connection statuses
     const oauthIds = ['claude_code', 'github_copilot', 'google_vertex'];
     Promise.allSettled(oauthIds.map(id =>
@@ -1441,8 +1414,8 @@ export default function GenerativePage() {
         </SCard>
       </div>
 
-      <AddProviderSheet open={showAdd} onOpenChange={setShowAdd} onAdded={load} authProfiles={authProfiles} />
-      <KeyPoolSheet provider={keysProvider} open={!!keysProvider} onOpenChange={o => { if (!o) setKeysProvider(null); }} />
+      <AddProviderSheet open={showAdd} onOpenChange={setShowAdd} onAdded={load} authProfiles={authProfiles} catalog={catalog} />
+      <KeyPoolSheet provider={keysProvider} open={!!keysProvider} onOpenChange={o => { if (!o) setKeysProvider(null); }} authProfiles={authProfiles} />
       <ModelDiscoveryDialog
         provider={modelsProvider} selectedModels={selectedModels} open={!!modelsProvider}
         onOpenChange={o => { if (!o) setModelsProvider(null); }} onSelectionChange={setSelectedModels}

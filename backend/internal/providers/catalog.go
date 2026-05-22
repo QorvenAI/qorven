@@ -13,6 +13,7 @@ type ProviderManifest struct {
 	Icon           string          `json:"icon"`
 	Category       string          `json:"category"`
 	AuthType       string          `json:"auth_type"` // api_key, aws_credentials, oauth2, cli_binary, none
+	DriverType     string          `json:"driver_type"` // internal driver: openai_compat, anthropic_native, etc.
 	DefaultAPIBase string          `json:"default_api_base"`
 	DefaultModel   string          `json:"default_model"`
 	Models         []string        `json:"models"`
@@ -743,6 +744,7 @@ func ProviderCatalog() []ProviderManifest {
 			Icon:           auth.Icon,
 			Category:       auth.Category,
 			AuthType:       authTypeToManifestAuthType(auth.AuthType),
+			DriverType:     auth.Driver,
 			DefaultAPIBase: auth.BaseURL,
 			DefaultModel:   sup.DefaultModel,
 			Models:         sup.Models,
@@ -760,11 +762,33 @@ func ProviderCatalog() []ProviderManifest {
 		return llm[i].Name < llm[j].Name
 	})
 
+	// OAuth providers — prepended first so they appear at the top of the list
+	oauth := []ProviderManifest{
+		{
+			ID: "claude_code", Name: "Claude Code", Icon: "anthropic", Category: "cloud",
+			AuthType: "oauth2", DriverType: TypeAnthropicNative,
+			DefaultAPIBase: "https://api.anthropic.com",
+			Fields:         []ManifestField{},
+		},
+		{
+			ID: "github_copilot", Name: "GitHub Copilot", Icon: "github", Category: "cloud",
+			AuthType: "oauth2", DriverType: TypeOpenAICompat,
+			DefaultAPIBase: "https://api.githubcopilot.com",
+			Fields:         []ManifestField{},
+		},
+		{
+			ID: "google_vertex", Name: "Google Vertex AI (OAuth)", Icon: "google", Category: "cloud",
+			AuthType: "oauth2", DriverType: TypeGeminiNative,
+			DefaultAPIBase: "https://us-central1-aiplatform.googleapis.com/v1",
+			Fields:         []ManifestField{},
+		},
+	}
+
 	// Special entries not in ProviderAuthManifest (prepended to the LLM list)
 	special := []ProviderManifest{
 		{
 			ID: "custom", Name: "Custom / OpenAI-Compatible", Icon: "server", Category: "custom",
-			AuthType: "api_key",
+			AuthType: "api_key", DriverType: TypeOpenAICompat,
 			Fields: []ManifestField{
 				{Name: "api_base", Label: "API Endpoint", Type: "url", Required: true, Placeholder: "https://your-server.com/v1"},
 				{Name: "api_key", Label: "API Key", Type: "password", Required: false, Placeholder: "sk-... (optional)"},
@@ -775,7 +799,7 @@ func ProviderCatalog() []ProviderManifest {
 		},
 		{
 			ID: "nvidia", Name: "NVIDIA NIM", Icon: "nvidia", Category: "openai_compat",
-			AuthType: "api_key", DefaultAPIBase: "https://integrate.api.nvidia.com/v1",
+			AuthType: "api_key", DriverType: TypeOpenAICompat, DefaultAPIBase: "https://integrate.api.nvidia.com/v1",
 			DefaultModel: "nvidia/nemotron-ultra-253b",
 			Models: []string{
 				"nvidia/nemotron-ultra-253b", "nvidia/nemotron-3-super-120b-a12b",
@@ -788,21 +812,21 @@ func ProviderCatalog() []ProviderManifest {
 		},
 		{
 			ID: "lmstudio", Name: "LM Studio (Local)", Icon: "lmstudio", Category: "local",
-			AuthType: "none", DefaultAPIBase: "http://localhost:1234/v1", DefaultModel: "local-model",
+			AuthType: "none", DriverType: TypeOpenAICompat, DefaultAPIBase: "http://localhost:1234/v1", DefaultModel: "local-model",
 			Fields: []ManifestField{
 				{Name: "api_base", Label: "LM Studio URL", Type: "url", Required: true, Placeholder: "http://localhost:1234/v1"},
 			},
 		},
 		{
 			ID: "vllm", Name: "vLLM (Self-hosted)", Icon: "vllm", Category: "local",
-			AuthType: "none", DefaultAPIBase: "http://localhost:8000/v1", DefaultModel: "local-model",
+			AuthType: "none", DriverType: TypeOpenAICompat, DefaultAPIBase: "http://localhost:8000/v1", DefaultModel: "local-model",
 			Fields: []ManifestField{
 				{Name: "api_base", Label: "vLLM URL", Type: "url", Required: true, Placeholder: "http://localhost:8000/v1"},
 			},
 		},
 	}
 
-	return append(append(special, llm...), nonLLMCatalog()...)
+	return append(append(append(oauth, special...), llm...), nonLLMCatalog()...)
 }
 
 // nonLLMCatalog returns search, voice, and data services (not LLM providers).

@@ -20,10 +20,31 @@ export interface ProviderAuthProfile {
   fields: AuthField[];
 }
 
+export interface CatalogManifestField {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  placeholder?: string;
+}
+
+export interface CatalogProvider {
+  id: string;
+  name: string;
+  icon: string;
+  category: string;
+  auth_type: string;  // api_key, aws_credentials, oauth2, none
+  driver_type: string; // openai_compat, anthropic_native, gemini_native, bedrock, etc.
+  default_api_base: string;
+  default_model: string;
+  models: string[];
+  fields: CatalogManifestField[];
+}
+
 export const providers = {
   list: () => listRequest<Provider>('/providers'),
   authProfiles: () => request<Record<string, ProviderAuthProfile>>('/providers/auth-profiles'),
-  catalog: () => request<any[]>('/providers/catalog'),
+  catalog: () => request<CatalogProvider[]>('/providers/catalog'),
   get: (id: string) => request<Provider>(`/providers/${id}`),
   create: (body: Record<string, unknown>) => request<Provider>('/providers', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: Record<string, unknown>) => request<void>(`/providers/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
