@@ -13,6 +13,8 @@ const PUBLIC_PATHS = [
   '/_next',
   '/favicon.ico',
   '/logo/',
+  '/vad/',              // VAD ONNX models + WASM runtime — fetched by vad-web before auth
+  '/icons/',
   '/__qorven_runtime',  // backend port discovery — must be reachable before login
   '/livez',             // health probes — used by reconnect-banner, no auth needed
   '/readyz',
@@ -42,6 +44,6 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Run on all routes except Next.js internals and static files
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|onnx|wasm|lottie)$).*)',
   ],
 };

@@ -31,6 +31,18 @@ const nextConfig: NextConfig = {
             { source: '/memory/:path*', destination: '/memories', permanent: true },
           ];
         },
+        async headers() {
+          return [
+            {
+              // SharedArrayBuffer required by ort-wasm-simd-threaded.wasm (VAD)
+              source: '/(.*)',
+              headers: [
+                { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+                { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
+              ],
+            },
+          ];
+        },
         async rewrites() {
           return [
             {

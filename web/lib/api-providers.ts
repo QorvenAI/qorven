@@ -31,7 +31,7 @@ export const providers = {
     request<void>(`/providers/${providerId}/pool`, { method: 'PUT', body: JSON.stringify(cfg) }),
   setKeyBudget: (keyId: string, budget: { budget_usd_monthly?: number | null; budget_tokens_monthly?: number | null }) =>
     request<void>(`/providers/keys/${keyId}/budget`, { method: 'PUT', body: JSON.stringify(budget) }),
-  testKey: (keyId: string) => request<{ key_id: string; ok: boolean; error: string; models: { id: string; name: string }[] }>(`/providers/keys/${keyId}/test`, { method: 'POST' }),
+  testKey: (keyId: string) => request<{ key_id: string; ok: boolean; verified: boolean; error: string; models: { id: string; name: string }[] }>(`/providers/keys/${keyId}/test`, { method: 'POST' }),
   availableModels: (category?: string) => listRequest<any>(`/models/available${category ? '?category=' + category : ''}`),
   discoveredModels: (unnotifiedOnly?: boolean) => listRequest<any>(`/models/discovered${unnotifiedOnly ? '?unnotified=1' : ''}`),
   actionDiscoveredModel: (id: string, action: 'enable' | 'dismiss') =>

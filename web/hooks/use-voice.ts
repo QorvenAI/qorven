@@ -248,7 +248,7 @@ export function useVoice({
   const vad = useMicVAD({
     startOnLoad: false,
     baseAssetPath: '/vad/',
-    onnxWASMBasePath: '/onnx/',
+    onnxWASMBasePath: '/vad/',
     positiveSpeechThreshold: vadCfg.positiveSpeechThreshold,
     negativeSpeechThreshold: vadCfg.negativeSpeechThreshold,
     minSpeechMs: vadCfg.minSpeechMs,

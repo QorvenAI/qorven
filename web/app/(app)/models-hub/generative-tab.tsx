@@ -234,11 +234,12 @@ function ProviderCard({ provider, selectedModels, onVerify, onDelete, onSelectio
     setTestingKey(keyId);
     try {
       const d = await providersApi.testKey(keyId);
-      setTestResults(prev => ({ ...prev, [keyId]: { ok: d.ok, models: d.models ?? [] } }));
-      if (d.ok) {
-        toast.success(`Key valid · ${d.models.length} models available`);
+      const passed = d.ok || d.verified;
+      setTestResults(prev => ({ ...prev, [keyId]: { ok: passed, models: d.models ?? [] } }));
+      if (passed) {
+        toast.success(`Key valid · ${(d.models ?? []).length} models available`);
         setKeys(prev => prev.map(k => k.id === keyId ? { ...k, status: 'verified' } : k));
-        if (liveModels.length === 0 && d.models.length > 0) setLiveModels(d.models);
+        if (liveModels.length === 0 && (d.models ?? []).length > 0) setLiveModels(d.models);
       } else {
         setTestResults(prev => ({ ...prev, [keyId]: { ok: false, error: extractErrorMessage(d.error || 'Key test failed'), models: [] } }));
       }

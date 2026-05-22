@@ -732,7 +732,7 @@ function KeyPoolSheet({ provider, open, onOpenChange }: {
     setTestingKey(id);
     try {
       const d = await providersApi.testKey(id);
-      if (d.ok) { toast.success(`Valid · ${d.models?.length ?? 0} models`); setExistingKeys(p => p.map(k => k.id === id ? { ...k, status: 'verified' } : k)); }
+      if (d.ok || d.verified) { toast.success(`Valid · ${d.models?.length ?? 0} models`); setExistingKeys(p => p.map(k => k.id === id ? { ...k, status: 'verified' } : k)); }
       else toast.error(extractErrorMessage(d.error || 'Key test failed'));
     } catch { toast.error('Key test failed. Check your API key and try again.'); }
     finally { setTestingKey(null); }
