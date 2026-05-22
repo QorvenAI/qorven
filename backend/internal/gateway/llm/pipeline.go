@@ -200,10 +200,15 @@ func (p *Pipeline) ChatStream(
 		return dispatchErr
 	}
 
+	var callCost CallCost
+	if llmResp != nil {
+		callCost = ComputeCost(req.Model, llmResp.Usage)
+	}
 	gResp := &GatewayResponse{
 		ChatResponse:  llmResp,
 		KeyID:         keyID,
 		ModelResolved: req.Model,
+		Cost:          callCost,
 	}
 
 	// 7. Cost recording (non-blocking)

@@ -57,10 +57,19 @@ type GatewayResponse struct {
 	// Gateway metadata — useful for dashboards and cost attribution.
 	ProviderID    string
 	KeyID         string
-	ModelResolved string // actual model ID used after alias resolution
-	CostUSD       float64
+	ModelResolved string   // actual model ID used after alias resolution
+	Cost          CallCost // full per-call cost breakdown in integer µUSD
 	CacheHit      bool
 	Latency       time.Duration
+}
+
+// CostUSD returns the total call cost in USD as float64, for display only.
+// Never use this value for arithmetic — use Cost.TotalUUSD (integer µUSD).
+func (r *GatewayResponse) CostUSD() float64 {
+	if r == nil {
+		return 0
+	}
+	return r.Cost.TotalUSD()
 }
 
 // StreamChunk extends providers.StreamChunk with gateway metadata.
