@@ -152,6 +152,26 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Put("/projects/{id}/file", gw.handleWriteProjectFile)
 
 		// Providers
+		r.Get("/providers/auth-profiles", gw.handleProviderAuthProfiles)
+
+		// AI Gateway admin
+		r.Get("/gateway/stats", gw.handleGatewayStats)
+		r.Get("/gateway/circuit", gw.handleGatewayCircuit)
+		r.Get("/gateway/queue", gw.handleGatewayQueue)
+		r.Get("/gateway/aliases", gw.handleGatewayAliasesList)
+		r.Put("/gateway/aliases/{alias}", gw.handleGatewayAliasesUpsert)
+		r.Delete("/gateway/aliases/{alias}", gw.handleGatewayAliasesDelete)
+		r.Get("/gateway/budgets", gw.handleGatewayBudgetsList)
+		r.Put("/gateway/budgets/{agentId}", gw.handleGatewayBudgetsUpsert)
+		r.Get("/gateway/cache/stats", gw.handleGatewayCacheStats)
+		r.Delete("/gateway/cache", gw.handleGatewayCacheFlush)
+
+		// OAuth provider flows (Claude Code, GitHub Copilot, Google Vertex AI)
+		r.Get("/providers/oauth", gw.handleOAuthProvidersList)
+		r.Get("/providers/oauth/{provider}/start", gw.handleOAuthProviderStart)
+		r.Get("/providers/oauth/{provider}/callback", gw.handleOAuthProviderCallback)
+		r.Get("/providers/oauth/{provider}/status", gw.handleOAuthProviderStatus)
+		r.Post("/providers/oauth/{provider}/revoke", gw.handleOAuthProviderRevoke)
 		r.Get("/providers", gw.handleListProviders)
 		r.Post("/providers", gw.handleCreateProviderDB)
 		r.Get("/providers/{id}", gw.handleGetProvider)

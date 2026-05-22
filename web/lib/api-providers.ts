@@ -3,8 +3,26 @@
 import { request, listRequest, BASE, getToken } from './api-core';
 import type { Provider } from '@/types';
 
+export interface AuthField {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  placeholder?: string;
+  help_text?: string;
+  help_url?: string;
+  key_prefixes?: string[];
+  options?: string[];
+}
+
+export interface ProviderAuthProfile {
+  kind: 'api_key' | 'aws_creds' | 'azure_api_key' | 'oauth2' | 'none';
+  fields: AuthField[];
+}
+
 export const providers = {
   list: () => listRequest<Provider>('/providers'),
+  authProfiles: () => request<Record<string, ProviderAuthProfile>>('/providers/auth-profiles'),
   catalog: () => request<any[]>('/providers/catalog'),
   get: (id: string) => request<Provider>(`/providers/${id}`),
   create: (body: Record<string, unknown>) => request<Provider>('/providers', { method: 'POST', body: JSON.stringify(body) }),
@@ -32,6 +50,13 @@ export const providers = {
   setKeyBudget: (keyId: string, budget: { budget_usd_monthly?: number | null; budget_tokens_monthly?: number | null }) =>
     request<void>(`/providers/keys/${keyId}/budget`, { method: 'PUT', body: JSON.stringify(budget) }),
   testKey: (keyId: string) => request<{ key_id: string; ok: boolean; verified: boolean; error: string; models: { id: string; name: string }[] }>(`/providers/keys/${keyId}/test`, { method: 'POST' }),
+  oauthList: () => request<{ id: string; name: string; pkce: boolean; icon: string }[]>('/providers/oauth'),
+  oauthStartUrl: (provider: string) => {
+    const base = typeof window !== 'undefined' ? '/api/v1' : (process.env.NEXT_PUBLIC_API_URL ?? '') + '/v1';
+    return `${base}/providers/oauth/${provider}/start`;
+  },
+  oauthStatus: (provider: string) => request<{ connected: boolean; expires_at?: string; updated_at?: string }>(`/providers/oauth/${provider}/status`),
+  oauthRevoke: (provider: string) => request<{ status: string }>(`/providers/oauth/${provider}/revoke`, { method: 'POST' }),
   availableModels: (category?: string) => listRequest<any>(`/models/available${category ? '?category=' + category : ''}`),
   discoveredModels: (unnotifiedOnly?: boolean) => listRequest<any>(`/models/discovered${unnotifiedOnly ? '?unnotified=1' : ''}`),
   actionDiscoveredModel: (id: string, action: 'enable' | 'dismiss') =>
@@ -226,6 +251,22 @@ export const wasmPlugins = {
     request<{ status: 'revoked'; name: string }>(`/wasm-plugins/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+};
+
+export const gatewayAdmin = {
+  stats: () => request<{ uptime_seconds: number; pipeline: boolean }>('/gateway/stats'),
+  circuit: () => request<{ breakers: { key_id: string; state: string; requests: number; failures: number }[] }>('/gateway/circuit'),
+  queue: () => request<{ interactive: number; background: number; batch: number; capacities: { interactive: number; background: number; batch: number } }>('/gateway/queue'),
+  aliases: () => request<{ tenant_id: string; alias: string; model_id: string; priority: number }[]>('/gateway/aliases'),
+  upsertAlias: (alias: string, modelId: string, priority = 0) =>
+    request<{ status: string }>(`/gateway/aliases/${encodeURIComponent(alias)}`, { method: 'PUT', body: JSON.stringify({ model_id: modelId, priority }) }),
+  deleteAlias: (alias: string) =>
+    request<{ status: string }>(`/gateway/aliases/${encodeURIComponent(alias)}`, { method: 'DELETE' }),
+  budgets: () => request<{ id: string; agent_id?: string; monthly_usd?: number; daily_usd?: number; spent_month_usd: number; spent_today_usd: number }[]>('/gateway/budgets'),
+  upsertBudget: (agentId: string, body: { monthly_usd?: number | null; daily_usd?: number | null }) =>
+    request<{ status: string }>(`/gateway/budgets/${encodeURIComponent(agentId)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  cacheStats: () => request<{ size: number; capacity: number }>('/gateway/cache/stats'),
+  cacheFlush: () => request<{ status: string }>('/gateway/cache', { method: 'DELETE' }),
 };
 
 export const systemInfo = {

@@ -49,6 +49,30 @@ func (gw *Gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"key required"}`, 400)
 		return
 	}
+
+	// Look up the provider type so we can validate key prefix format.
+	if gw.db != nil {
+		var providerType string
+		_ = gw.db.Pool.QueryRow(r.Context(),
+			`SELECT provider_type FROM providers WHERE id = $1 LIMIT 1`, providerID,
+		).Scan(&providerType)
+		if prefixes := providers.KeyPrefixesForProvider(providerType); len(prefixes) > 0 {
+			valid := false
+			for _, p := range prefixes {
+				if strings.HasPrefix(body.Key, p) {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				writeJSON(w, 400, map[string]string{
+					"error": "Key format invalid for this provider. Expected: " + prefixes[0] + "…",
+				})
+				return
+			}
+		}
+	}
+
 	store := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
 	kr, err := store.AddKey(r.Context(), defaultTenant, providerID, body.Label, body.Key)
 	if err != nil {
@@ -56,6 +80,10 @@ func (gw *Gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	json.NewEncoder(w).Encode(kr)
+}
+
+func (gw *Gateway) handleProviderAuthProfiles(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, providers.AuthProfiles)
 }
 
 func (gw *Gateway) handleVerifyProviderKey(w http.ResponseWriter, r *http.Request) {

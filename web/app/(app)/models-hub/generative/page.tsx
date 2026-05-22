@@ -2,15 +2,16 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState, useCallback, useId } from 'react';
+import { useEffect, useState, useCallback, useId, useRef } from 'react';
 import {
   Plus, Trash2, Loader2, Check, CheckCircle2, RefreshCw,
   ShieldCheck, Key, Zap, BarChart3, Power, ChevronDown, X,
-  ClipboardPaste, AlertCircle, ChevronRight,
+  ClipboardPaste, AlertCircle, ChevronRight, ExternalLink, Link2Off,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { providers as providersApi } from '@/lib/api';
+import type { ProviderAuthProfile } from '@/lib/api-providers';
 import { extractErrorMessage } from '@/lib/api-core';
 import { toast } from 'sonner';
 import { ProviderIcon } from '@/components/provider-icon';
@@ -32,10 +33,16 @@ type ProviderPreset = {
   type: 'openai_compat' | 'anthropic_native' | 'bedrock' | 'gemini_native' | 'openrouter' | 'custom';
   base: string;
   description: string;
+  oauthId?: string; // set for OAuth 2.0 providers; value = backend provider ID
   extraFields?: Array<{ key: string; label: string; type?: string; placeholder?: string }>;
 };
 
 const PRESETS: ProviderPreset[] = [
+  // OAuth providers — key step becomes "Connect" button
+  { id: 'claude_code',     name: 'Claude Code',          type: 'anthropic_native', base: 'https://api.anthropic.com',            description: 'Anthropic via OAuth — no API key needed', oauthId: 'claude_code' },
+  { id: 'github_copilot',  name: 'GitHub Copilot',       type: 'openai_compat',    base: 'https://api.githubcopilot.com',        description: 'Copilot via OAuth',                       oauthId: 'github_copilot' },
+  { id: 'google_vertex',   name: 'Google Vertex AI',     type: 'gemini_native',    base: '',                                     description: 'Vertex AI via Google OAuth',              oauthId: 'google_vertex' },
+  // API-key providers
   { id: 'openai',      name: 'OpenAI',               type: 'openai_compat',    base: 'https://api.openai.com/v1',                               description: 'GPT-4o, o1, o3' },
   { id: 'anthropic',   name: 'Anthropic',             type: 'anthropic_native', base: 'https://api.anthropic.com',                               description: 'Claude 4 Opus, Sonnet, Haiku' },
   { id: 'gemini',      name: 'Google Gemini',         type: 'gemini_native',    base: 'https://generativelanguage.googleapis.com/v1beta/openai', description: 'Gemini 2.5 Pro, Flash' },
@@ -273,21 +280,27 @@ function StrategyPicker({ strategy, failover, onChange }: {
 
 // ─── Add Provider Sheet (wizard) ──────────────────────────────────────────────
 
-function AddProviderSheet({ open, onOpenChange, onAdded }: {
+function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles }: {
   open: boolean; onOpenChange: (o: boolean) => void; onAdded: () => void;
+  authProfiles: Record<string, ProviderAuthProfile>;
 }) {
   const [step, setStep]           = useState<1 | 2 | 3>(1);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [preset, setPreset]       = useState<ProviderPreset | null>(null);
   const [name, setName]           = useState('');
   const [base, setBase]           = useState('');
-  const [extras, setExtras]       = useState<Record<string, string>>({});
+  const [extras, setExtras]       = useState<Record<string, string>>({})
 
   // Keys step
   const [keys, setKeys]           = useState<KeyEntry[]>([{ uid: uid(), label: '', key: '', status: 'idle' }]);
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [verifyingAll, setVerifyingAll] = useState(false);
+
+  // OAuth step
+  const [oauthConnecting, setOauthConnecting] = useState(false);
+  const [oauthConnected, setOauthConnected]   = useState(false);
+  const oauthPopupRef = useRef<Window | null>(null);
 
   // Models step — provider ID set after creation
   const [createdId, setCreatedId]   = useState<string | null>(null);
@@ -305,6 +318,8 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
     setPasteMode(false); setPasteText('');
     setCreatedId(null); setLiveModels([]); setPicked(new Set());
     setStrategy('priority'); setFailover('on_error');
+    setOauthConnecting(false); setOauthConnected(false);
+    oauthPopupRef.current = null;
   };
 
   const pickPreset = (p: ProviderPreset) => {
@@ -320,8 +335,9 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
   const isBedrock  = preset?.id === 'bedrock';
   const isCustom   = preset?.id === 'custom';
   const isLocal    = ['ollama', 'lmstudio', 'vllm', 'llamafile'].includes(preset?.id ?? '');
-  const step1Valid = !!preset && !!name && (isBedrock ? (extras.region && extras.access_key && extras.secret_key) : (base || preset?.base));
-  const step2Valid = isBedrock || isLocal || keys.some(k => k.key.trim());
+  const isOAuth    = !!preset?.oauthId;
+  const step1Valid = !!preset && !!name && (isBedrock ? (extras.region && extras.access_key && extras.secret_key) : (base || preset?.base || isOAuth));
+  const step2Valid = isBedrock || isLocal || isOAuth || keys.some(k => k.key.trim());
 
   // Key management helpers
   const updateKey = (idx: number, patch: Partial<KeyEntry>) =>
@@ -337,25 +353,66 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
     setPasteMode(false); setPasteText('');
   };
 
-  // Verify a single key against provider URL (pre-creation, just a format check)
-  // After provider is created, we use the real API. Pre-creation we can only do basic validation.
+  // Verify a single key: prefix check from backend auth profiles, then length sanity.
   const verifyKeyEntry = async (idx: number) => {
     const entry = keys[idx];
     if (!entry?.key.trim()) return;
     updateKey(idx, { status: 'verifying', error: undefined });
-    // Basic client-side check: non-empty and looks like a key
-    await new Promise(r => setTimeout(r, 400));
-    if (entry!.key.trim().length < 8) {
+    await new Promise(r => setTimeout(r, 300));
+    const k = entry.key.trim();
+    if (k.length < 8) {
       updateKey(idx, { status: 'error', error: 'Key seems too short' });
-    } else {
-      updateKey(idx, { status: 'ok' });
+      return;
     }
+    // Check prefix from backend auth profile if available
+    if (preset?.type) {
+      const profile = authProfiles[preset.type];
+      const apiKeyField = profile?.fields.find(f => f.key === 'api_key');
+      if (apiKeyField?.key_prefixes?.length) {
+        const ok = apiKeyField.key_prefixes.some(p => k.startsWith(p));
+        if (!ok) {
+          updateKey(idx, { status: 'error', error: `Expected format: ${apiKeyField.placeholder ?? apiKeyField.key_prefixes[0] + '…'}` });
+          return;
+        }
+      }
+    }
+    updateKey(idx, { status: 'ok' });
   };
 
   const verifyAll = async () => {
     setVerifyingAll(true);
     await Promise.all(keys.map((_, i) => verifyKeyEntry(i)));
     setVerifyingAll(false);
+  };
+
+  // OAuth connect — open popup, listen for postMessage from callback
+  const connectOAuth = () => {
+    if (!preset?.oauthId) return;
+    setOauthConnecting(true);
+    const url = providersApi.oauthStartUrl(preset.oauthId);
+    const popup = window.open(url, 'oauth_popup', 'width=600,height=700,scrollbars=yes,resizable=yes');
+    oauthPopupRef.current = popup;
+
+    const onMessage = (evt: MessageEvent) => {
+      if (evt.data?.type === 'oauth_complete' && evt.data?.provider === preset.oauthId) {
+        window.removeEventListener('message', onMessage);
+        setOauthConnecting(false);
+        setOauthConnected(true);
+        oauthPopupRef.current = null;
+        toast.success(`Connected to ${preset.name}`);
+      }
+    };
+    window.addEventListener('message', onMessage);
+
+    // Poll for popup closed without completing (user cancelled)
+    const poll = setInterval(() => {
+      if (oauthPopupRef.current?.closed) {
+        clearInterval(poll);
+        window.removeEventListener('message', onMessage);
+        setOauthConnecting(false);
+        oauthPopupRef.current = null;
+      }
+    }, 500);
   };
 
   // Step 1 → 2
@@ -368,19 +425,22 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
     try {
       const payload: Record<string, unknown> = {
         name, provider_type: preset.type === 'custom' ? 'openai_compat' : preset.type,
-        api_base: base || preset.base,
+        api_base: base || preset.base || undefined,
       };
       if (isBedrock) { payload.region = extras.region; payload.access_key = extras.access_key; payload.secret_key = extras.secret_key; }
+      if (isOAuth) { payload.oauth_provider = preset.oauthId; }
       const prov = await providersApi.create(payload);
       const provId = (prov as any).id;
       setCreatedId(provId);
 
-      // Add all non-empty keys
-      const keysToadd = keys.filter(k => k.key.trim());
-      if (keysToadd.length) {
-        await Promise.allSettled(keysToadd.map(k =>
-          providersApi.addKey(provId, { label: k.label || 'Key', key: k.key })
-        ));
+      // Add all non-empty keys (skipped for OAuth providers)
+      if (!isOAuth) {
+        const keysToadd = keys.filter(k => k.key.trim());
+        if (keysToadd.length) {
+          await Promise.allSettled(keysToadd.map(k =>
+            providersApi.addKey(provId, { label: k.label || 'Key', key: k.key })
+          ));
+        }
       }
 
       setStep(3);
@@ -532,22 +592,62 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
                 </div>
               </div>
 
-              {(() => { const ph = preset ? PROVIDER_HELP[preset.id] : undefined; return ph ? (
-                <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-2.5">
-                  <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                  <div className="text-xs text-muted-foreground min-w-0">
-                    <span className="font-medium text-foreground">Format: </span>
-                    <span className="font-mono">{ph.keyFormat}</span>
-                    <span className="mx-2">·</span>
-                    <a href={ph.getKeyUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-primary hover:underline inline-flex items-center gap-0.5">
-                      Get key ↗
-                    </a>
+              {(() => {
+                // Prefer backend auth profile; fall back to static PROVIDER_HELP
+                const profile = preset?.type ? authProfiles[preset.type] : undefined;
+                const apiKeyField = profile?.fields.find(f => f.key === 'api_key');
+                const helpUrl = apiKeyField?.help_url ?? (preset ? PROVIDER_HELP[preset.id]?.getKeyUrl : undefined);
+                const keyFormat = apiKeyField?.placeholder ?? (preset ? PROVIDER_HELP[preset.id]?.keyFormat : undefined);
+                return (helpUrl || keyFormat) ? (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-2.5">
+                    <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <div className="text-xs text-muted-foreground min-w-0">
+                      {keyFormat && <><span className="font-medium text-foreground">Format: </span><span className="font-mono">{keyFormat}</span></>}
+                      {keyFormat && helpUrl && <span className="mx-2">·</span>}
+                      {helpUrl && (
+                        <a href={helpUrl} target="_blank" rel="noopener noreferrer"
+                          className="text-primary hover:underline inline-flex items-center gap-0.5">
+                          Get key ↗
+                        </a>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : null; })()}
+                ) : null;
+              })()}
 
-              {(isLocal || isBedrock) ? (
+              {isOAuth ? (
+                <div className="space-y-3">
+                  {oauthConnected ? (
+                    <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3.5">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-emerald-400">Connected to {preset?.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">OAuth token stored securely. You can proceed.</p>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={connectOAuth} disabled={oauthConnecting}>
+                        <RefreshCw className="h-3.5 w-3.5" /> Reconnect
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-border bg-muted/10 px-4 py-5 flex flex-col items-center gap-4 text-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted border border-border">
+                        <ProviderIcon provider={preset?.id ?? ''} size={26} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Connect {preset?.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                          Authorize Qorven to access {preset?.name} on your behalf. No API key needed.
+                        </p>
+                      </div>
+                      <Button variant="primary" size="md" onClick={connectOAuth} disabled={oauthConnecting}>
+                        {oauthConnecting
+                          ? <><Loader2 className="h-4 w-4 animate-spin" /> Waiting for authorization…</>
+                          : <><ExternalLink className="h-4 w-4" /> Connect with {preset?.name}</>}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (isLocal || isBedrock) ? (
                 <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
                   <p className="text-xs text-muted-foreground">
                     {isBedrock ? 'AWS IAM credentials were provided in the previous step — no API key needed.' : 'Local provider — no API key required. The server must be running at the configured base URL.'}
@@ -626,7 +726,10 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
                 <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-emerald-400">{name} created</p>
-                  <p className="text-xs text-muted-foreground">{keys.filter(k => k.key.trim()).length} key{keys.filter(k => k.key.trim()).length !== 1 ? 's' : ''} added. Now select models to route.</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isOAuth ? 'OAuth token active.' : `${keys.filter(k => k.key.trim()).length} key${keys.filter(k => k.key.trim()).length !== 1 ? 's' : ''} added.`}
+                    {' '}Now select models to route.
+                  </p>
                 </div>
               </div>
 
@@ -697,7 +800,7 @@ function AddProviderSheet({ open, onOpenChange, onAdded }: {
             </Button>
           )}
           {step === 2 && (
-            <Button variant="primary" size="md" onClick={toStep3} disabled={creating}>
+            <Button variant="primary" size="md" onClick={toStep3} disabled={creating || (isOAuth && !oauthConnected)}>
               {creating ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : <>Create & Continue <ChevronRight className="h-4 w-4" /></>}
             </Button>
           )}
@@ -1151,26 +1254,38 @@ function SCard({ title, description, headerRight, children }: {
   );
 }
 
-function ProviderRow({ provider, selectedModels, keyCount, onToggle, onDelete, onVerify, onManageKeys, onManageModels }: {
+function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onToggle, onDelete, onVerify, onManageKeys, onManageModels }: {
   provider: ProviderItem; selectedModels: SelModel[]; keyCount: number;
+  oauthConnected?: boolean;
   onToggle: () => void; onDelete: () => void; onVerify: () => void;
   onManageKeys: () => void; onManageModels: () => void;
 }) {
   const provSelected = selectedModels.filter(m => m.provider_id === provider.id);
+  const isOAuthRow = !!(provider as any).oauth_provider;
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 group hover:border-border/80 transition-colors">
       <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-muted border border-border/50 shrink-0">
         <ProviderIcon provider={provider.name} size={20} />
         <span className={cn(
           'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background',
-          provider.enabled ? (keyCount > 0 ? 'bg-emerald-400' : 'bg-amber-400') : 'bg-muted-foreground/40',
+          provider.enabled ? (keyCount > 0 || oauthConnected ? 'bg-emerald-400' : 'bg-amber-400') : 'bg-muted-foreground/40',
         )} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{provider.display_name || provider.name}</p>
         <p className="text-xs text-muted-foreground font-mono truncate">{provider.api_base || provider.provider_type.replace(/_/g, ' ')}</p>
       </div>
-      {keyCount > 0 ? (
+      {isOAuthRow ? (
+        oauthConnected ? (
+          <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-500/10 text-emerald-400 shrink-0">
+            <CheckCircle2 className="h-3 w-3" />OAuth
+          </span>
+        ) : (
+          <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-amber-500/10 text-amber-400 shrink-0">
+            <Link2Off className="h-3 w-3" />Disconnected
+          </span>
+        )
+      ) : keyCount > 0 ? (
         <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground shrink-0">
           <Key className="h-3 w-3" />{keyCount}
         </span>
@@ -1207,6 +1322,21 @@ export default function GenerativePage() {
   const [keysProvider, setKeysProvider]     = useState<ProviderItem | null>(null);
   const [modelsProvider, setModelsProvider] = useState<ProviderItem | null>(null);
   const [keyCounts, setKeyCounts]           = useState<Record<string, number>>({});
+  const [oauthStatuses, setOauthStatuses]   = useState<Record<string, boolean>>({});
+  const [authProfiles, setAuthProfiles]     = useState<Record<string, ProviderAuthProfile>>({});
+
+  useEffect(() => {
+    providersApi.authProfiles().then(p => { if (p) setAuthProfiles(p); }).catch(() => {});
+    // Fetch OAuth connection statuses
+    const oauthIds = ['claude_code', 'github_copilot', 'google_vertex'];
+    Promise.allSettled(oauthIds.map(id =>
+      providersApi.oauthStatus(id).then(s => ({ id, connected: s?.connected ?? false }))
+    )).then(results => {
+      const statuses: Record<string, boolean> = {};
+      results.forEach(r => { if (r.status === 'fulfilled') statuses[r.value.id] = r.value.connected; });
+      setOauthStatuses(statuses);
+    });
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1300,6 +1430,7 @@ export default function GenerativePage() {
               {providerList.map(p => (
                 <ProviderRow
                   key={p.id} provider={p} selectedModels={selectedModels} keyCount={keyCounts[p.id] ?? 0}
+                  oauthConnected={(p as any).oauth_provider ? oauthStatuses[(p as any).oauth_provider] : undefined}
                   onToggle={() => toggleProvider(p)} onDelete={() => deleteProvider(p)}
                   onVerify={() => verifyProvider(p)} onManageKeys={() => setKeysProvider(p)}
                   onManageModels={() => setModelsProvider(p)}
@@ -1310,7 +1441,7 @@ export default function GenerativePage() {
         </SCard>
       </div>
 
-      <AddProviderSheet open={showAdd} onOpenChange={setShowAdd} onAdded={load} />
+      <AddProviderSheet open={showAdd} onOpenChange={setShowAdd} onAdded={load} authProfiles={authProfiles} />
       <KeyPoolSheet provider={keysProvider} open={!!keysProvider} onOpenChange={o => { if (!o) setKeysProvider(null); }} />
       <ModelDiscoveryDialog
         provider={modelsProvider} selectedModels={selectedModels} open={!!modelsProvider}

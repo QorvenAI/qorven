@@ -88,6 +88,7 @@ import (
 	"github.com/qorvenai/qorven/internal/discussion"
 	"github.com/qorvenai/qorven/internal/apps"
 	"github.com/qorvenai/qorven/internal/inbound"
+	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 )
 
 // embeddedMigrations holds the migrations FS injected by SetEmbeddedMigrations.
@@ -267,6 +268,11 @@ type Gateway struct {
 	// Autonomous runtime (071)
 	runtimeMgr      *agent.RuntimeManager  // persistent runtime manager (071)
 	taskCoordinator *TaskCoordinator       // synthesis trigger (071)
+
+	// AI Gateway pipeline — routes all agent LLM calls through middleware
+	// (budget, priority queue, cache, alias resolution, circuit breaker, cost).
+	llmPipeline  *gatewayllm.Pipeline
+	llmOAuthMgr  *gatewayllm.OAuthManager
 }
 
 func New(cfg *config.Config) (*Gateway, error) {
@@ -420,6 +426,30 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.agents = agent.NewStore(db.Pool)
 			gw.sessions = session.NewStore(db.Pool)
 			gw.providerStore = providers.NewStore(db.Pool, cfg.Auth.EncryptionKey)
+			// AI Gateway pipeline — full middleware stack: budget check,
+			// priority queue, exact cache, alias resolution, circuit breaker,
+			// cost ledger.
+			{
+				budgetEngine := gatewayllm.NewBudgetEngine(db.Pool)
+				costLedger   := gatewayllm.NewCostLedger(db.Pool, budgetEngine)
+				gw.llmPipeline = gatewayllm.NewPipeline(
+					gw.providerReg,
+					providers.NewKeyPoolStore(db.Pool, cfg.Auth.EncryptionKey),
+					defaultTenant,
+					gatewayllm.WithCircuit(gatewayllm.NewCircuitBreakerBank()),
+					gatewayllm.WithQueue(gatewayllm.NewPriorityQueue()),
+					gatewayllm.WithBudget(budgetEngine),
+					gatewayllm.WithCost(costLedger),
+					gatewayllm.WithCache(gatewayllm.NewCacheLayer(0, 0)),
+					gatewayllm.WithAliases(gatewayllm.NewAliasResolver(db.Pool, gw.providerReg, defaultTenant)),
+				)
+				// OAuth manager for Claude Code, GitHub Copilot, Google Vertex AI.
+				oauthBase := cfg.Server.BaseURL
+				if oauthBase == "" {
+					oauthBase = "http://localhost:4200"
+				}
+				gw.llmOAuthMgr = gatewayllm.NewOAuthManager(db.Pool, cfg.Auth.EncryptionKey, oauthBase)
+			}
 			gw.voiceStore = voice.NewStore(db.Pool, cfg.Auth.EncryptionKey)
 			gw.mediaStore = mediagen.NewStore(db.Pool, cfg.Auth.EncryptionKey)
 			gw.skillStore = skills.NewStore(db.Pool)
