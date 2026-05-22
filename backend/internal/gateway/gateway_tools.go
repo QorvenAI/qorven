@@ -741,6 +741,10 @@ func (gw *Gateway) registerTools() {
 		ks := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
 		reg.Register(tools.NewStoreCredentialTool(ks, defaultTenant))
 		slog.Info("store_credential tool registered")
+
+		// set_rule tool — lets Prime create background rules from user-stated policies.
+		reg.Register(tools.NewSetRuleTool(gw.db.Pool, defaultTenant))
+		slog.Info("set_rule tool registered")
 	}
 
 	// Connector template tool — returns ready-to-adapt Go source for REST GET,
