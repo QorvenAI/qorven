@@ -18,6 +18,18 @@ import (
 	"github.com/qorvenai/qorven/internal/tools"
 )
 
+// lazyChannelSender wraps the gateway's chanMgr, which is set after the
+// TaskCoordinator is created. Using a closure/lazy wrapper avoids a nil pointer
+// at the point of wiring (chanMgr is assigned later in gateway init).
+type lazyChannelSender struct{ gw *Gateway }
+
+func (l *lazyChannelSender) SendToChannel(ctx context.Context, channelName, chatID, content string) error {
+	if l.gw.chanMgr == nil {
+		return fmt.Errorf("channel manager not available")
+	}
+	return l.gw.chanMgr.SendToChannel(ctx, channelName, chatID, content)
+}
+
 func (gw *Gateway) getAnnounceMu(sessionKey string) *sync.Mutex {
 	v, _ := gw.announceMu.LoadOrStore(sessionKey, &sync.Mutex{})
 	return v.(*sync.Mutex)

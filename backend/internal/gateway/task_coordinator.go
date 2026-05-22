@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 type taskPresenceChecker interface {
 	IsOnline(ctx context.Context, tenantID string) (bool, error)
 	LastChannel(ctx context.Context, userID string) (string, error)
+	LastChannelAndChatID(ctx context.Context, userID string) (channel, chatID string, err error)
+}
+
+// taskChannelSender delivers a message to a user's last-known channel.
+type taskChannelSender interface {
+	SendToChannel(ctx context.Context, channelName, chatID, content string) error
 }
 
 // TaskCoordinator triggers parent-task synthesis once all subtasks are terminal.
@@ -30,6 +37,7 @@ type TaskCoordinator struct {
 	runtimeMgr    *agent.RuntimeManager
 	rtHub         *realtime.Hub
 	presenceStore taskPresenceChecker
+	channelSender taskChannelSender
 }
 
 // NewTaskCoordinator returns a ready-to-use coordinator.
@@ -39,6 +47,9 @@ func NewTaskCoordinator(ts *tasks.Store, rm *agent.RuntimeManager, hub *realtime
 
 // SetPresence wires an optional presence checker. Safe to call with nil.
 func (c *TaskCoordinator) SetPresence(p taskPresenceChecker) { c.presenceStore = p }
+
+// SetChannelSender wires an optional channel sender for offline nudges.
+func (c *TaskCoordinator) SetChannelSender(s taskChannelSender) { c.channelSender = s }
 
 // onTaskComplete is called by the iteration loop when a task transitions to done.
 // It checks whether all siblings are terminal, then atomically marks the parent
@@ -144,9 +155,7 @@ func (c *TaskCoordinator) onTaskComplete(ctx context.Context, task tasks.Task) {
 }
 
 // escalateIfOffline checks whether the tenant is currently online and, if not,
-// logs the offline escalation event. Full channel-based nudge delivery can be
-// added here later when TaskCoordinator gains a reference to the gateway's send
-// functions.
+// delivers a nudge to the user's last-known channel (e.g. Telegram).
 func (c *TaskCoordinator) escalateIfOffline(ctx context.Context, task tasks.Task) {
 	if c.presenceStore == nil {
 		return
@@ -157,14 +166,38 @@ func (c *TaskCoordinator) escalateIfOffline(ctx context.Context, task tasks.Task
 		return
 	}
 	if online {
-		slog.Info("escalation.user_online_skip", "task", task.ID)
 		return
 	}
-	// User is offline — log for now; full channel-based nudge can be added later.
+
 	slog.Info("escalation.user_offline",
-		"task", task.ID,
-		"tenant", task.TenantID,
-		"title", task.Title,
-		"status", task.Status,
-	)
+		"task", task.ID, "tenant", task.TenantID, "title", task.Title, "status", task.Status)
+
+	if c.channelSender == nil {
+		return
+	}
+
+	// Look up the last channel + chat_id the user was seen on.
+	channel, chatID, err := c.presenceStore.LastChannelAndChatID(ctx, task.TenantID)
+	if err != nil || chatID == "" || channel == "web" {
+		return
+	}
+
+	statusEmoji := "✅"
+	if task.Status == string(tasks.StatusBlocked) {
+		statusEmoji = "⚠️"
+	}
+	msg := fmt.Sprintf("%s *Task complete:* %s\n\nStatus: %s", statusEmoji, task.Title, task.Status)
+	if task.Result != "" {
+		preview := task.Result
+		if len(preview) > 200 {
+			preview = preview[:200] + "…"
+		}
+		msg += "\n\n" + preview
+	}
+
+	if err := c.channelSender.SendToChannel(ctx, channel, chatID, msg); err != nil {
+		slog.Warn("escalation.send_failed", "task", task.ID, "channel", channel, "error", err)
+	} else {
+		slog.Info("escalation.nudge_sent", "task", task.ID, "channel", channel)
+	}
 }

@@ -15,6 +15,7 @@ type Presence struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 	IsOnline   bool      `json:"is_online"`
 	Channel    string    `json:"channel"`
+	ChatID     string    `json:"chat_id"`
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -22,12 +23,17 @@ type Store struct{ pool *pgxpool.Pool }
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 func (s *Store) SetOnline(ctx context.Context, userID, tenantID, channel string) error {
+	return s.SetOnlineWithChatID(ctx, userID, tenantID, channel, "")
+}
+
+func (s *Store) SetOnlineWithChatID(ctx context.Context, userID, tenantID, channel, chatID string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO user_presence (user_id, tenant_id, last_seen_at, is_online, channel)
-         VALUES ($1, $2, now(), true, $3)
+		`INSERT INTO user_presence (user_id, tenant_id, last_seen_at, is_online, channel, chat_id)
+         VALUES ($1, $2, now(), true, $3, $4)
          ON CONFLICT (user_id) DO UPDATE
-           SET is_online = true, last_seen_at = now(), channel = $3`,
-		userID, tenantID, channel,
+           SET is_online = true, last_seen_at = now(), channel = $3,
+               chat_id = CASE WHEN $4 = '' THEN user_presence.chat_id ELSE $4 END`,
+		userID, tenantID, channel, chatID,
 	)
 	return err
 }
@@ -41,8 +47,8 @@ func (s *Store) SetOffline(ctx context.Context, userID string) error {
 func (s *Store) Get(ctx context.Context, userID string) (*Presence, error) {
 	p := &Presence{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT user_id, tenant_id, last_seen_at, is_online, channel FROM user_presence WHERE user_id = $1`, userID,
-	).Scan(&p.UserID, &p.TenantID, &p.LastSeenAt, &p.IsOnline, &p.Channel)
+		`SELECT user_id, tenant_id, last_seen_at, is_online, channel, COALESCE(chat_id,'') FROM user_presence WHERE user_id = $1`, userID,
+	).Scan(&p.UserID, &p.TenantID, &p.LastSeenAt, &p.IsOnline, &p.Channel, &p.ChatID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -61,15 +67,18 @@ func (s *Store) IsOnline(ctx context.Context, tenantID string) (bool, error) {
 }
 
 func (s *Store) LastChannel(ctx context.Context, userID string) (string, error) {
-	var channel string
-	err := s.pool.QueryRow(ctx,
-		`SELECT channel FROM user_presence WHERE user_id = $1`, userID,
-	).Scan(&channel)
+	ch, _, err := s.LastChannelAndChatID(ctx, userID)
+	return ch, err
+}
+
+// LastChannelAndChatID returns the last channel name and the chat_id (e.g. Telegram chat ID)
+// the user was seen on. Both are empty-string when there is no presence record.
+func (s *Store) LastChannelAndChatID(ctx context.Context, userID string) (channel, chatID string, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT channel, COALESCE(chat_id,'') FROM user_presence WHERE user_id = $1`, userID,
+	).Scan(&channel, &chatID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "web", nil
+		return "web", "", nil
 	}
-	if err != nil {
-		return "", err
-	}
-	return channel, nil
+	return channel, chatID, err
 }

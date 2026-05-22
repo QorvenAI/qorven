@@ -1173,6 +1173,10 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 				if gw.db != nil {
 					gw.taskCoordinator.SetPresence(presence.NewStore(gw.db.Pool))
 				}
+				// Wire channel sender so offline users get a nudge on task completion.
+				// chanMgr is set later; wrap in a closure so the coordinator always
+				// uses the current value.
+				gw.taskCoordinator.SetChannelSender(&lazyChannelSender{gw: gw})
 				var bootEntries []agent.AgentBootEntry
 				for _, a := range agentList {
 					bootEntries = append(bootEntries, agent.AgentBootEntry{
@@ -1407,6 +1411,12 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		chatID := msg.Metadata["chat_id"]
 		if chatID == "" {
 			chatID = msg.SenderID
+		}
+
+		// Update presence with the inbound channel + chat_id so offline nudges
+		// can reach the user on their last-used channel after a task completes.
+		if gw.db != nil && chatID != "" && isChatFamilyChannel(msg.ChannelType) {
+			go presence.NewStore(gw.db.Pool).SetOnlineWithChatID(ctx, defaultTenant, defaultTenant, msg.ChannelType, chatID)
 		}
 
 		// Build run request with all context.
