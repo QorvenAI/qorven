@@ -114,13 +114,22 @@ func (a *Aggregator) Refresh(ctx context.Context) (int, error) {
 		}
 	}
 
-	entries := make(map[string]gatewayllm.ModelPricing, len(feed.Models))
+	// Build pricing table entries. Every model is stored under two keys:
+	//   1. bare model ID   — "claude-sonnet-4-6"
+	//   2. provider/model  — "openrouter/claude-sonnet-4-6"
+	// This lets ComputeCost(model, usage, provider) find the correct rate
+	// for the actual routing path (OpenRouter markup vs direct provider rate).
+	entries := make(map[string]gatewayllm.ModelPricing, len(feed.Models)*2)
 	for _, m := range feed.Models {
-		entries[m.ID] = gatewayllm.ModelPricing{
+		p := gatewayllm.ModelPricing{
 			InputPer1M:  m.InputPer1M,
 			OutputPer1M: m.OutputPer1M,
 			CacheWrite:  m.CacheWritePer1M,
 			CacheRead:   m.CacheReadPer1M,
+		}
+		entries[m.ID] = p
+		if m.Provider != "" && m.Provider != "unknown" {
+			entries[m.Provider+"/"+m.ID] = p
 		}
 	}
 

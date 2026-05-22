@@ -202,7 +202,7 @@ func (p *Pipeline) ChatStream(
 
 	var callCost CallCost
 	if llmResp != nil {
-		callCost = ComputeCost(req.Model, llmResp.Usage)
+		callCost = ComputeCost(req.Model, llmResp.Usage, req.Provider)
 	}
 	gResp := &GatewayResponse{
 		ChatResponse:  llmResp,

@@ -116,14 +116,28 @@ func (c CallCost) TotalUSD() float64 {
 // All five token types are accounted for: input, output, thinking,
 // cache-write, and cache-read.
 //
+// providerID is optional. When set, the lookup tries "providerID/model"
+// first so that OpenRouter's rates (which include their markup) are used
+// for calls routed through OpenRouter, while direct Anthropic/OpenAI calls
+// use provider-native rates. Falls back to bare model ID if no
+// provider-specific price exists.
+//
 // For unknown models the cost is 0 (safe: we undercharge rather than
 // overcharge). Token counts are still recorded for audit purposes.
-func ComputeCost(model string, usage *providers.Usage) CallCost {
+func ComputeCost(model string, usage *providers.Usage, providerID ...string) CallCost {
 	if usage == nil {
 		return CallCost{}
 	}
+
 	pricingMu.RLock()
-	p, ok := pricingTable[model]
+	var p ModelPricing
+	var ok bool
+	if len(providerID) > 0 && providerID[0] != "" {
+		p, ok = pricingTable[providerID[0]+"/"+model]
+	}
+	if !ok {
+		p, ok = pricingTable[model]
+	}
 	pricingMu.RUnlock()
 
 	c := CallCost{
