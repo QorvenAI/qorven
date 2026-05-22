@@ -395,8 +395,15 @@ func (reg *Registry) AssignTask(taskID, agentID string) bool {
 	t.Owner = agentID
 	reg.mu.Unlock()
 
+	projectID := ""
+	if t.Context != nil {
+		if v, ok := t.Context["project_id"].(string); ok {
+			projectID = v
+		}
+	}
 	reg.broadcast(Event{Type: EvtTaskAssigned, Data: map[string]string{
 		"task_id": taskID, "agent_id": agentID, "reassigned_from": prev,
+		"project_id": projectID,
 	}})
 	go reg.dispatchTo(context2Background(), taskID, agentID)
 	return true
@@ -778,8 +785,15 @@ func (reg *Registry) dispatchTo(ctx context.Context, taskID, agentID string) {
 	provider := inst.provider
 	reg.mu.Unlock()
 
+	taskProjectID := ""
+	if taskCopy.Context != nil {
+		if v, ok := taskCopy.Context["project_id"].(string); ok {
+			taskProjectID = v
+		}
+	}
 	reg.broadcast(Event{Type: EvtTaskAssigned, Data: map[string]string{
 		"task_id": taskID, "agent_id": agentID,
+		"project_id": taskProjectID,
 	}})
 
 	// Push to provider if it has one (for programmatic dispatch).
