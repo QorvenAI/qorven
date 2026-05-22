@@ -23,7 +23,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Plug, Search, Check, ExternalLink, Shield, AlertCircle,
-  Loader2, X, RefreshCw, Package, Trash2, Bot,
+  Loader2, X, RefreshCw, Package, Trash2, Bot, Bell,
+  Clock, Activity, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { toast } from 'sonner';
@@ -111,7 +112,7 @@ export default function ConnectorsPage() {
   // the OAuth-apps management panel (BYO client_id/secret). Self-
   // hosted users live in `oauth_apps` until they've configured
   // credentials; everyone else mostly stays in `catalog`.
-  const [view, setView] = useState<'catalog' | 'oauth_apps' | 'installed'>('catalog');
+  const [view, setView] = useState<'catalog' | 'oauth_apps' | 'installed' | 'rules'>('catalog');
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeAuth, setActiveAuth] = useState<string | null>(null);
@@ -208,7 +209,9 @@ export default function ConnectorsPage() {
               ? `Plug your agents into the services you already use. ${entries.length} platforms available.`
               : view === 'installed'
                 ? 'Connectors your agents built and installed at runtime. Each one is a compiled Go binary the agent generated from API docs.'
-                : 'Register OAuth apps on each provider\u2019s developer console and paste credentials here. The same credentials serve every user on this Qorven install.'
+                : view === 'rules'
+                  ? 'Automation rules your agents created via set_rule. Toggle or delete rules here.'
+                  : 'Register OAuth apps on each provider\u2019s developer console and paste credentials here. The same credentials serve every user on this Qorven install.'
           }
           actions={
             (view === 'catalog' || view === 'installed') ? (
@@ -253,12 +256,23 @@ export default function ConnectorsPage() {
           >
             Installed
           </button>
+          <button
+            onClick={() => setView('rules')}
+            className={cn(
+              'rounded-md px-3 py-1 font-medium transition-colors',
+              view === 'rules' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Rules
+          </button>
         </div>
 
         {view === 'oauth_apps' ? (
           <OAuthAppsSettings />
         ) : view === 'installed' ? (
           <InstalledConnectors />
+        ) : view === 'rules' ? (
+          <RulesView />
         ) : (<>
 
         {/* Search */}
@@ -702,6 +716,170 @@ function InstalledCard({
           Uninstall
         </button>
       </div>
+    </div>
+  );
+}
+
+// --- Rules view --------------------------------------------------
+
+interface AgentRule {
+  id: string;
+  agent_id: string;
+  description: string;
+  trigger_type: 'cron' | 'threshold' | 'event';
+  trigger_spec: Record<string, unknown>;
+  action_type: 'run_tool' | 'escalate' | 'notify';
+  action_spec: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+}
+
+const TRIGGER_BADGE: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
+  cron:      { label: 'Scheduled', cls: 'bg-blue-500/10 text-blue-500',    icon: <Clock className="h-3 w-3" /> },
+  threshold: { label: 'Threshold', cls: 'bg-amber-500/10 text-amber-500',  icon: <Activity className="h-3 w-3" /> },
+  event:     { label: 'Event',     cls: 'bg-violet-500/10 text-violet-500', icon: <Bell className="h-3 w-3" /> },
+};
+
+const ACTION_BADGE: Record<string, { label: string; cls: string }> = {
+  run_tool: { label: 'Run tool',  cls: 'bg-emerald-500/10 text-emerald-600' },
+  escalate: { label: 'Escalate', cls: 'bg-orange-500/10 text-orange-600' },
+  notify:   { label: 'Notify',   cls: 'bg-sky-500/10 text-sky-600' },
+};
+
+function RulesView() {
+  const [rules, setRules] = useState<AgentRule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await request<AgentRule[]>('/rules');
+      setRules(data ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load rules');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleToggle = async (rule: AgentRule) => {
+    try {
+      await request(`/rules/${rule.id}/enabled`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: !rule.enabled }),
+      });
+      setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r));
+      toast.success(rule.enabled ? 'Rule disabled' : 'Rule enabled');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update rule');
+    }
+  };
+
+  const handleDelete = async (rule: AgentRule) => {
+    if (!confirm(`Delete rule "${rule.description}"? This cannot be undone.`)) return;
+    try {
+      await request(`/rules/${rule.id}`, { method: 'DELETE' });
+      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+      toast.success('Rule deleted');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete rule');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-24 rounded-xl border border-border bg-muted/20 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center py-16 text-center">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="mt-2 text-sm text-destructive">{error}</p>
+        <button onClick={load} className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Retry</button>
+      </div>
+    );
+  }
+
+  if (rules.length === 0) {
+    return (
+      <div className="flex flex-col items-center py-20 text-center text-muted-foreground">
+        <Bell className="h-10 w-10 mb-3 opacity-40" />
+        <p className="text-sm font-medium">No automation rules yet</p>
+        <p className="mt-1 text-xs max-w-sm">
+          Ask Prime to create rules — e.g. &ldquo;Alert me if any PC goes offline&rdquo; or &ldquo;Run antivirus every Sunday 2am.&rdquo;
+          Rules appear here once set.
+        </p>
+        <div className="mt-4 rounded-lg border border-border bg-muted/30 px-4 py-3 text-xs text-left max-w-sm font-mono">
+          <span className="text-muted-foreground">Prime uses this tool:</span><br />
+          <span className="text-primary">set_rule</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {rules.map((rule) => {
+        const trigger = TRIGGER_BADGE[rule.trigger_type] ?? TRIGGER_BADGE.event!;
+        const action = ACTION_BADGE[rule.action_type] ?? ACTION_BADGE.notify!;
+        const specSummary = rule.trigger_type === 'cron'
+          ? (rule.trigger_spec as any)?.cron ?? ''
+          : rule.trigger_type === 'threshold'
+            ? `${(rule.trigger_spec as any)?.metric ?? ''} ${(rule.trigger_spec as any)?.operator ?? ''} ${(rule.trigger_spec as any)?.value ?? ''}`
+            : (rule.trigger_spec as any)?.event ?? '';
+        return (
+          <div
+            key={rule.id}
+            className={cn(
+              'flex items-start gap-4 rounded-xl border p-4 transition-colors',
+              rule.enabled ? 'border-border bg-card' : 'border-border/50 bg-card/50 opacity-60',
+            )}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium', trigger.cls)}>
+                  {trigger.icon}{trigger.label}
+                </span>
+                <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium', action.cls)}>
+                  {action.label}
+                </span>
+                {specSummary && (
+                  <span className="text-xs text-muted-foreground font-mono">{specSummary}</span>
+                )}
+              </div>
+              <p className="mt-1.5 text-sm font-medium leading-snug">{rule.description}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 pt-0.5">
+              <button
+                onClick={() => handleToggle(rule)}
+                title={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {rule.enabled
+                  ? <ToggleRight className="h-5 w-5 text-primary" />
+                  : <ToggleLeft className="h-5 w-5" />}
+              </button>
+              <button
+                onClick={() => handleDelete(rule)}
+                title="Delete rule"
+                className="text-muted-foreground hover:text-destructive transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

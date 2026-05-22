@@ -60,6 +60,28 @@ func (gw *Gateway) handleListRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rules)
 }
 
+// DELETE /v1/rules/{id} — permanently remove a rule
+func (gw *Gateway) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	tag, err := gw.db.Pool.Exec(r.Context(),
+		`DELETE FROM agent_rules WHERE id = $1 AND tenant_id = $2`,
+		id, defaultTenant,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "rule not found"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // PUT /v1/rules/{id}/enabled — enable or disable a rule
 func (gw *Gateway) handleToggleRule(w http.ResponseWriter, r *http.Request) {
 	if gw.db == nil {

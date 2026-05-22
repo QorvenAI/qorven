@@ -698,6 +698,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		// Agent rules (created by set_rule tool — user-stated background policies)
 		r.Get("/rules", gw.handleListRules)
 		r.Put("/rules/{id}/enabled", gw.handleToggleRule)
+		r.Delete("/rules/{id}", gw.handleDeleteRule)
 
 		// Research
 		r.Post("/research/start", gw.handleResearchStart)
