@@ -470,6 +470,9 @@ func (gw *Gateway) Start() error {
 		}
 	}
 
+	// Rule execution engine — fires cron/threshold/event rules from agent_rules.
+	gw.startRuleEngine(context.Background())
+
 	// Optional web listener — only started when WebListen is set. Uses
 	// the same chi router as the API, but TLS-terminated per the
 	// [tls] config section. The API listener stays plain HTTP on

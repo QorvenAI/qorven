@@ -90,6 +90,7 @@ import (
 	"github.com/qorvenai/qorven/internal/inbound"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/pricing"
+	"github.com/qorvenai/qorven/internal/rules"
 )
 
 // embeddedMigrations holds the migrations FS injected by SetEmbeddedMigrations.
@@ -276,6 +277,9 @@ type Gateway struct {
 	llmCostLedger  *gatewayllm.CostLedger
 	llmOAuthMgr    *gatewayllm.OAuthManager
 	pricingAgg     *pricing.Aggregator
+
+	// Rule execution engine — fires cron/threshold/event rules from agent_rules table.
+	ruleEngine     *rules.Engine
 }
 
 func New(cfg *config.Config) (*Gateway, error) {
