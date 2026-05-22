@@ -455,11 +455,17 @@ func (gw *Gateway) handleAccountUsage(w http.ResponseWriter, r *http.Request) {
 		 FROM gateway_spend_raw WHERE tenant_id = $1 AND created_at >= date_trunc('month', now())`,
 		defaultTenant).Scan(&totalCost)
 
-	// Per-soul breakdown from daily aggregate (fast)
+	// Per-soul breakdown: cost from daily aggregate, call count from raw log.
 	rows, _ := gw.db.Pool.Query(ctx,
 		`SELECT a.id, a.display_name,
 		        COALESCE(SUM(gs.cost_usd), 0),
-		        COALESCE(SUM(gs.tokens_in + gs.tokens_out + gs.tokens_thinking), 0)
+		        COALESCE(SUM(gs.tokens_in + gs.tokens_out + gs.tokens_thinking), 0),
+		        COALESCE((
+		            SELECT COUNT(*) FROM gateway_spend_raw r
+		            WHERE r.agent_id = a.id
+		              AND r.tenant_id = $1
+		              AND r.created_at >= date_trunc('month', now())
+		        ), 0)
 		 FROM agents a
 		 LEFT JOIN gateway_spend gs ON gs.agent_id = a.id
 		     AND gs.tenant_id = $1
@@ -472,9 +478,9 @@ func (gw *Gateway) handleAccountUsage(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var id, name string
 			var cost float64
-			var tokens int
-			rows.Scan(&id, &name, &cost, &tokens)
-			souls = append(souls, map[string]any{"id": id, "name": name, "cost": cost, "tokens": tokens})
+			var tokens, calls int
+			rows.Scan(&id, &name, &cost, &tokens, &calls)
+			souls = append(souls, map[string]any{"id": id, "name": name, "cost": cost, "tokens": tokens, "calls": calls})
 		}
 	}
 
