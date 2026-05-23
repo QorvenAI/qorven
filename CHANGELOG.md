@@ -4,6 +4,15 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.31-alpha — 2026-05-23
+
+### Added
+- **Apps now have their own sidebar navigation** — when you open an installed app at `/apps/{slug}/page`, the sidebar switches to that app's pages only, with the app name as the header and a back link to the launcher. Apps behave like self-contained mini-products inside Qorven.
+- **Multi-page app support** — apps register named pages with labels via `register({ pages: [{ id, path, label }] })`. The sidebar navigation is driven entirely by the bundle, so page labels work immediately without backend manifest configuration.
+- **Scaffold template updated** — new apps built by agents include `displayName`, `label`, and `icon` fields in the `register()` call by default.
+
+---
+
 ## v0.1.30-alpha — 2026-05-23
 
 ### Fixed
