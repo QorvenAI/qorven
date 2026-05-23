@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { providers as providersApi } from '@/lib/api';
 import type { ProviderAuthProfile, CatalogProvider } from '@/lib/api-providers';
+import { gatewayAdmin } from '@/lib/api-providers';
 import { extractErrorMessage } from '@/lib/api-core';
 import { toast } from 'sonner';
 import { ProviderIcon } from '@/components/provider-icon';
@@ -1201,6 +1202,60 @@ function ModelDiscoveryDialog({ provider, selectedModels, open, onOpenChange, on
 
 // ─── Provider row ─────────────────────────────────────────────────────────────
 
+// ─── Alias Lookup Card ───────────────────────────────────────────────────────
+
+const BUILTIN_ALIASES = ['fast', 'smart', 'cheap', 'vision', 'code', 'reason'];
+
+function AliasLookupCard() {
+  const [aliases, setAliases] = useState<{ alias: string; model_id: string }[]>([]);
+  const [selected, setSelected] = useState('fast');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    gatewayAdmin.aliases().then(rows => {
+      if (Array.isArray(rows)) setAliases(rows);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const resolved = aliases.find(a => a.alias === selected)?.model_id;
+
+  return (
+    <SCard title="Model Alias Lookup" description="See which concrete model each alias resolves to. Override aliases in the Gateway tab.">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1 flex-wrap">
+          {BUILTIN_ALIASES.map(a => (
+            <button
+              key={a}
+              onClick={() => setSelected(a)}
+              className={cn(
+                'rounded-full px-2.5 py-0.5 text-xs font-mono font-medium border transition-colors',
+                selected === a
+                  ? 'bg-primary/10 text-primary border-primary/30'
+                  : 'bg-muted text-muted-foreground border-border hover:border-border/80',
+              )}
+            >
+              {a}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 min-w-0">
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          {loading ? (
+            <span className="text-xs text-muted-foreground">Loading…</span>
+          ) : resolved ? (
+            <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded text-foreground truncate">{resolved}</span>
+          ) : (
+            <span className="text-xs italic text-muted-foreground">auto-select (cheapest available)</span>
+          )}
+        </div>
+      </div>
+    </SCard>
+  );
+}
+
+// ─── Section Card ─────────────────────────────────────────────────────────────
+
 function SCard({ title, description, headerRight, children }: {
   title: string; description?: string; headerRight?: React.ReactNode; children: React.ReactNode;
 }) {
@@ -1218,11 +1273,12 @@ function SCard({ title, description, headerRight, children }: {
   );
 }
 
-function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onToggle, onDelete, onVerify, onManageKeys, onManageModels }: {
+function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onToggle, onDelete, onVerify, onManageKeys, onManageModels, onRevokeOAuth }: {
   provider: ProviderItem; selectedModels: SelModel[]; keyCount: number;
   oauthConnected?: boolean;
   onToggle: () => void; onDelete: () => void; onVerify: () => void;
   onManageKeys: () => void; onManageModels: () => void;
+  onRevokeOAuth?: () => void;
 }) {
   const provSelected = selectedModels.filter(m => m.provider_id === provider.id);
   const isOAuthRow = !!(provider as any).oauth_provider;
@@ -1242,7 +1298,7 @@ function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onTog
       {isOAuthRow ? (
         oauthConnected ? (
           <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-500/10 text-emerald-400 shrink-0">
-            <CheckCircle2 className="h-3 w-3" />OAuth
+            <CheckCircle2 className="h-3 w-3" />Connected
           </span>
         ) : (
           <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-amber-500/10 text-amber-400 shrink-0">
@@ -1268,7 +1324,13 @@ function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onTog
       </button>
       <Switch size="sm" checked={!!provider.enabled} onCheckedChange={onToggle} />
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button variant="ghost" mode="icon" size="sm" onClick={onManageKeys} title="Manage keys"><Key className="h-3.5 w-3.5" /></Button>
+        {isOAuthRow && oauthConnected && onRevokeOAuth ? (
+          <Button variant="ghost" mode="icon" size="sm" onClick={onRevokeOAuth} title="Disconnect OAuth" className="hover:text-destructive hover:bg-destructive/10">
+            <Link2Off className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          <Button variant="ghost" mode="icon" size="sm" onClick={onManageKeys} title="Manage keys"><Key className="h-3.5 w-3.5" /></Button>
+        )}
         <Button variant="ghost" mode="icon" size="sm" onClick={onVerify} title="Verify"><ShieldCheck className="h-3.5 w-3.5" /></Button>
         <Button variant="ghost" mode="icon" size="sm" onClick={onDelete} title="Remove" className="hover:text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></Button>
       </div>
@@ -1352,6 +1414,15 @@ export default function GenerativePage() {
     } catch { toast.error('Verification failed'); }
   };
 
+  const revokeOAuth = async (oauthId: string) => {
+    if (!confirm('Disconnect this OAuth provider? The access token will be deleted.')) return;
+    try {
+      await providersApi.oauthRevoke(oauthId);
+      toast.success('OAuth connection revoked');
+      setOauthStatuses(prev => ({ ...prev, [oauthId]: false }));
+    } catch { toast.error('Failed to revoke OAuth connection'); }
+  };
+
   const activeCount = providerList.filter(p => p.enabled).length;
 
   return (
@@ -1407,11 +1478,14 @@ export default function GenerativePage() {
                   onToggle={() => toggleProvider(p)} onDelete={() => deleteProvider(p)}
                   onVerify={() => verifyProvider(p)} onManageKeys={() => setKeysProvider(p)}
                   onManageModels={() => setModelsProvider(p)}
+                  onRevokeOAuth={(p as any).oauth_provider ? () => revokeOAuth((p as any).oauth_provider) : undefined}
                 />
               ))}
             </div>
           )}
         </SCard>
+
+        <AliasLookupCard />
       </div>
 
       <AddProviderSheet open={showAdd} onOpenChange={setShowAdd} onAdded={load} authProfiles={authProfiles} catalog={catalog} />

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/qorvenai/qorven/internal/mediagen"
 	"github.com/qorvenai/qorven/internal/providers"
@@ -315,8 +316,6 @@ func execContext(ctx context.Context, name string, args ...string) ([]byte, erro
 }
 
 
-func NewCreateAudioTool() Tool { return newMediaStub("create_audio", "Generate music or sound effects.") }
-
 // NewCreateVideoTool wires create_video to a mediagen.Manager video provider.
 func NewCreateVideoTool(mgr *mediagen.Manager) Tool { return &CreateVideoTool{mgr: mgr} }
 
@@ -426,6 +425,59 @@ func (t *TTSTool) Execute(ctx context.Context, args map[string]any) *Result {
 			},
 		},
 	}
+}
+
+// --- create_audio (TTS → file) ---
+
+type CreateAudioTool struct{ mgr *voice.Manager }
+
+func NewCreateAudioTool(mgr *voice.Manager) *CreateAudioTool { return &CreateAudioTool{mgr: mgr} }
+func (t *CreateAudioTool) Name() string                      { return "create_audio" }
+func (t *CreateAudioTool) Description() string {
+	return "Convert text to speech and save the result to a file. Returns the file path for downstream use (attach to email, save to drive, etc.)."
+}
+func (t *CreateAudioTool) Parameters() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{
+		"text":     map[string]any{"type": "string", "description": "Text to synthesise"},
+		"filename": map[string]any{"type": "string", "description": "Output filename without extension, e.g. 'welcome' (default: audio_<timestamp>)"},
+		"voice":    map[string]any{"type": "string", "description": "Voice name (provider-specific, optional)"},
+		"format":   map[string]any{"type": "string", "description": "Audio format: mp3, wav, opus (default: mp3)"},
+	}, "required": []string{"text"}}
+}
+
+func (t *CreateAudioTool) Execute(ctx context.Context, args map[string]any) *Result {
+	if t.mgr == nil || !t.mgr.HasTTS() {
+		return ErrorResult("create_audio: no TTS provider configured — add EdgeTTS or OpenAI TTS in Settings → Provider Keys")
+	}
+	text, _ := args["text"].(string)
+	if text == "" {
+		return ErrorResult("create_audio: text is required")
+	}
+	voiceName, _ := args["voice"].(string)
+	format, _ := args["format"].(string)
+	if format == "" {
+		format = "mp3"
+	}
+	filename, _ := args["filename"].(string)
+	if filename == "" {
+		filename = fmt.Sprintf("audio_%d", time.Now().UnixMilli())
+	}
+
+	result, err := t.mgr.Synthesize(ctx, text, voice.TTSOptions{Voice: voiceName, Format: format})
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("create_audio: synthesis failed: %v", err))
+	}
+
+	ext := result.Extension
+	if ext == "" {
+		ext = format
+	}
+	outPath := filepath.Join(os.TempDir(), filename+"."+ext)
+	if werr := os.WriteFile(outPath, result.Audio, 0600); werr != nil {
+		return ErrorResult(fmt.Sprintf("create_audio: failed to write file: %v", werr))
+	}
+
+	return TextResult(fmt.Sprintf("Audio saved to %s (%d bytes, %s)", outPath, len(result.Audio), ext))
 }
 
 // --- message (send to channel) ---

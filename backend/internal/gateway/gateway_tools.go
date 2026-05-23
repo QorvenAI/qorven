@@ -465,7 +465,7 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewQuoteGenTool(workspace))
 	reg.Register(tools.NewTTSTool(gw.voiceMgr))
 	reg.Register(tools.NewReadAudioTool(gw.voiceMgr))
-	reg.Register(tools.NewCreateAudioTool())
+	reg.Register(tools.NewCreateAudioTool(gw.voiceMgr))
 	reg.Register(tools.NewReadVideoTool(gw.providerReg))
 	reg.Register(tools.NewCreateVideoTool(gw.mediaMgr))
 	reg.Register(tools.NewScrapeTool())
@@ -715,10 +715,12 @@ func (gw *Gateway) registerTools() {
 	// Native flight search.
 	reg.Register(tools.NewFlightSearchTool())
 
-	// Shipment tracking — DHL (real API), FedEx (real API), SF/YTO/STO/Best (stubs).
+	// Shipment tracking — DHL, FedEx, SF Express, YTO, STO, Best Express.
 	// Keys stored in provider_keys with category "tracking". Key format:
-	//   dhl   → plain API key string
-	//   fedex → "client_id:client_secret" (colon-separated)
+	//   dhl                → plain API key string
+	//   fedex              → "client_id:client_secret" (colon-separated)
+	//   sf_express/yto/sto → "app_id:app_key" (colon-separated)
+	//   best               → "app_id:app_secret" (colon-separated)
 	{
 		trackGetKey := func(carrier string) string {
 			// Env var fallback (TRACKING_DHL_KEY, TRACKING_FEDEX_KEY, …)
