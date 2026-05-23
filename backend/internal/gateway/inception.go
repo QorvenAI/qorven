@@ -431,8 +431,10 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 		var agentID string
 		err := gw.db.Pool.QueryRow(ctx,
 			`INSERT INTO agents
-			   (tenant_id, agent_key, display_name, role, model, system_prompt, status, project_brief_id)
-			 VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+			   (tenant_id, agent_key, display_name, role, model, system_prompt, status,
+			    project_brief_id, outbound_approval, tool_profile, max_tool_iterations,
+			    memory_enabled, runtime_mode)
+			 VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, 'none', 'full', 40, true, 'continuous')
 			 RETURNING id`,
 			defaultTenant,
 			sanitizeKey(pa.DisplayName+"-"+b.ID[:8]),
@@ -524,7 +526,12 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 				},
 			})
 		}
-		gw.daemonReg.ProposePlan(b.Title, b.Idea, "inception", planTasks)
+		p := gw.daemonReg.ProposePlan(b.Title, b.Idea, "inception", planTasks)
+		// The user already approved this project — auto-approve all inception plans
+		// regardless of task count so the code panel populates immediately.
+		if len(planTasks) > 1 {
+			go func() { gw.daemonReg.ApprovePlan(p.ID, "system", "") }()
+		}
 	}
 
 	// Create Kanban tasks linked to each ticket so the Tasks board reflects the inception work.
@@ -628,7 +635,24 @@ func buildAgentSystemPrompt(role, projectTitle, workspacePath string) string {
 	base := fmt.Sprintf("You are working on the project: %s.\nWorkspace: %s\n\n", projectTitle, workspacePath)
 	switch role {
 	case "developer":
-		return base + "You are a senior software developer. Write clean, idiomatic code. Use the record_file_touch tool whenever you create or modify a file. Mark your ticket done when the implementation is complete and tests pass."
+		return base + `You are a senior software developer. Write clean, idiomatic code.
+
+When building a Qorven app (frontend UI component), follow this exact sequence:
+1. Call scaffold_app with name=<slug> — scaffolds ~/.qorven/apps/<slug>/ with a Vite IIFE project in ui/
+2. Edit the generated ui/src/index.tsx to implement the UI using window.__QorvenUI components
+3. Create an app.yaml at ~/.qorven/apps/<slug>/app.yaml:
+   slug: <slug>
+   display_name: <Display Name>
+   version: 0.0.1
+   description: <one sentence>
+   author: qorven
+   frontend:
+     bundle: ui/frontend/bundle.js
+4. Run: cd ~/.qorven/apps/<slug>/ui && npm install && npm run build
+5. Call install_app with path=~/.qorven/apps/<slug> — registers the bundle so it appears in the sidebar
+
+Use the record_file_touch tool whenever you create or modify a file.
+Mark your ticket done when the implementation is complete.`
 	case "tester":
 		return base + "You are a QA engineer. Write comprehensive tests. Prioritise edge cases and integration scenarios. Use record_file_touch when you write test files."
 	case "reviewer":

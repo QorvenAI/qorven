@@ -4,6 +4,15 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.28-alpha — 2026-05-23
+
+### Fixed
+- **Project agents now start autonomously** — agents created from a project brief now run continuously without waiting for supervisor approval on every tool call, and multi-task project plans are approved automatically so work begins immediately.
+- **Project task panel now populates** — the code panel's task list now fills in as soon as a project is approved instead of staying empty.
+- **Developer agents know how to build apps** — the developer role system prompt now includes the full scaffold → build → install sequence so agents can produce working Qorven apps end-to-end.
+
+---
+
 ## v0.1.27-alpha — 2026-05-23
 
 ### Fixed
