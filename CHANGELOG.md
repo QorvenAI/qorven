@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.30-alpha — 2026-05-23
+
+### Fixed
+- **App bundles now load in the browser** — the dev server and the auth middleware now correctly forward `/app-assets/*` requests to the backend, so installed app bundles render instead of showing "not registered".
+- **Project agents no longer fail when only Gemini is configured** — inception agents assigned a Claude/DeepSeek model by the planner now automatically fall back to the available provider's model instead of failing silently.
+
+---
+
 ## v0.1.29-alpha — 2026-05-23
 
 ### Fixed
