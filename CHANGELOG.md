@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.26-alpha — 2026-05-23
+
+### Fixed
+- **Installed apps render the correct content** — the app client now reads slug and path from the live URL when the static shell contains placeholder values, ensuring installed apps always display their actual pages.
+
+---
+
 ## v0.1.25-alpha — 2026-05-23
 
 ### Fixed

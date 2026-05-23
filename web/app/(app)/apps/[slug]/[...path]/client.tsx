@@ -13,8 +13,15 @@ export default function AppDynamicClient() {
   const params = useParams<{ slug: string; path: string[] }>();
   const { entries } = useAppRegistry();
 
-  const slug = params.slug;
-  const pathStr = Array.isArray(params.path) ? params.path.join('/') : params.path ?? '';
+  // Static shells bake placeholder params (__app__/__page__) into the RSC payload.
+  // When the real URL differs, read slug/path from window.location instead.
+  let slug = params.slug;
+  let pathStr = Array.isArray(params.path) ? params.path.join('/') : params.path ?? '';
+  if (typeof window !== 'undefined' && (slug === '__app__' || slug === '__page__')) {
+    const parts = window.location.pathname.replace(/^\/apps\//, '').split('/');
+    slug = parts[0] ?? slug;
+    pathStr = parts.slice(1).join('/') || pathStr;
+  }
 
   const app = entries[slug];
   if (!app) {
