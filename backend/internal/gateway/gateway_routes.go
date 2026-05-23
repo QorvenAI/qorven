@@ -193,6 +193,27 @@ func (gw *Gateway) registerRoutes() {
 				fs.ServeHTTP(w, req)
 				return
 			}
+			// App platform: /apps/<slug>/<page> → serve the placeholder shell
+			// so the client-side router can read the real slug from window.location.
+			parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+			if len(parts) >= 3 && parts[0] == "apps" {
+				shellPath := filepath.Join(webDir, "apps", "__app__", "__page__", "index.html")
+				if _, err := os.Stat(shellPath); err == nil {
+					http.ServeFile(w, req, shellPath)
+					return
+				}
+			}
+			// Dynamic single-segment fallback: /rooms/<uuid> → __dynamic__ shell
+			if len(parts) >= 2 && parts[1] != "__dynamic__" {
+				shellPath := filepath.Join(webDir, parts[0], "__dynamic__", "index.html")
+				realPath := filepath.Join(webDir, parts[0], parts[1], "index.html")
+				if _, err := os.Stat(shellPath); err == nil {
+					if _, err := os.Stat(realPath); err != nil {
+						http.ServeFile(w, req, shellPath)
+						return
+					}
+				}
+			}
 			// SPA fallback — serve index.html
 			http.ServeFile(w, req, filepath.Join(webDir, "index.html"))
 		})

@@ -359,6 +359,13 @@ function handleEvent(event: WSEvent) {
       break;
     }
 
+    case 'app_installed': {
+      // An app was installed or reloaded — tell AppHost to re-fetch the manifest list.
+      window.dispatchEvent(new CustomEvent('qorven:app_installed', { detail: event.data }));
+      store.pushEvent(liveEvent);
+      break;
+    }
+
     default: {
       // Phase 9 Step 1 — orchestrator telemetry.
       // `graph.node_*` + `agent.progress` events carry a session_id

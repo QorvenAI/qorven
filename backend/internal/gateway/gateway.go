@@ -1026,10 +1026,25 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 					if err != nil {
 						return "", "", "", err
 					}
+					if gw.rtHub != nil {
+						gw.rtHub.Broadcast(realtime.Event{
+							Type: realtime.EventAppInstalled,
+							Data: map[string]string{"slug": a.Slug, "display_name": a.DisplayName},
+						})
+					}
 					return a.ID, a.Slug, a.DisplayName, nil
 				},
 				func(ctx context.Context, slug string) error {
-					return appMgr.Reload(ctx, slug)
+					if err := appMgr.Reload(ctx, slug); err != nil {
+						return err
+					}
+					if gw.rtHub != nil {
+						gw.rtHub.Broadcast(realtime.Event{
+							Type: realtime.EventAppInstalled,
+							Data: map[string]string{"slug": slug},
+						})
+					}
+					return nil
 				},
 			))
 			gw.toolReg.Register(tools.NewUninstallAppTool(

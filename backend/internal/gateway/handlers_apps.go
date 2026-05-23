@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/apps"
+	"github.com/qorvenai/qorven/internal/realtime"
 )
 
 // handleListApps returns all installed apps plus frontend manifests.
@@ -81,6 +82,12 @@ func (gw *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
+	}
+	if gw.rtHub != nil {
+		gw.rtHub.Broadcast(realtime.Event{
+			Type: realtime.EventAppInstalled,
+			Data: map[string]string{"slug": created.Slug, "display_name": created.DisplayName},
+		})
 	}
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -188,6 +195,12 @@ func (gw *Gateway) handleReloadApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, _ := gw.appMgr.Store().Get(r.Context(), defaultTenant, id)
+	if gw.rtHub != nil {
+		gw.rtHub.Broadcast(realtime.Event{
+			Type: realtime.EventAppInstalled,
+			Data: map[string]string{"slug": a.Slug, "display_name": a.DisplayName},
+		})
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -256,7 +269,7 @@ func (gw *Gateway) handleAppAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	w.Header().Set("Content-Type", "application/javascript")
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	var modTime time.Time
 	if fi, err := os.Stat(path); err == nil {

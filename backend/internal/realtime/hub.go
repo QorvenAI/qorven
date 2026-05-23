@@ -47,6 +47,11 @@ const (
 	// EventPageNavigate tells any open browser tab to navigate to the given URL.
 	// Payload: { "url": "/code?tab=build&project=<id>", "project_id": "<id>", "task_id": "<id>" }
 	EventPageNavigate = "page.navigate"
+
+	// EventAppInstalled is broadcast when an app is installed or reloaded.
+	// Payload: { "slug": "expense-tracker", "display_name": "Expense Tracker" }
+	// Clients use it to re-fetch /api/v1/apps and inject the new bundle script.
+	EventAppInstalled = "app_installed"
 )
 
 // Event is a real-time event pushed to all connected clients.

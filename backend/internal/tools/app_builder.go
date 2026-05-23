@@ -179,6 +179,18 @@ func (t *InstallAppTool) Execute(ctx context.Context, args map[string]any) *Resu
 		return ErrorResult(fmt.Sprintf("no app.yaml at %s — scaffold the app first", path))
 	}
 
+	// Verify the frontend bundle exists (if declared). This catches the common
+	// mistake of calling install_app before running `npm run build`.
+	if bundleRel := readBundleFromManifest(path); bundleRel != "" {
+		bundlePath := filepath.Join(path, bundleRel)
+		if _, err := os.Stat(bundlePath); err != nil {
+			return ErrorResult(fmt.Sprintf(
+				"frontend bundle not found at %s — run `cd %s/ui && npm run build` first",
+				bundlePath, path,
+			))
+		}
+	}
+
 	// If scope params are provided, patch app.yaml to embed scope fields.
 	// AppManager.Install reads the manifest including scope, so this is the
 	// clean path: scope lives in app.yaml and is persisted via the normal flow.
@@ -308,6 +320,24 @@ func patchManifestScope(appYAML, scope, ownerAgentID, ownerTeamID string) error 
 	}
 	kept = append(kept, "") // trailing newline
 	return os.WriteFile(appYAML, []byte(strings.Join(kept, "\n")), 0644)
+}
+
+// readBundleFromManifest does a minimal parse of app.yaml to extract
+// frontend.bundle without importing the full apps package.
+// Returns "frontend/bundle.js" (the default) when the key is absent,
+// and "" when the manifest cannot be read (so callers can skip the check).
+func readBundleFromManifest(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "app.yaml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "bundle:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "bundle:"))
+		}
+	}
+	return "frontend/bundle.js"
 }
 
 // readSlugFromManifest does a minimal parse of app.yaml to extract the slug

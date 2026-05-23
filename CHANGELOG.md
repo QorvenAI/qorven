@@ -4,6 +4,17 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.27-alpha — 2026-05-23
+
+### Fixed
+- **Installed apps now appear instantly after build** — after an agent builds and installs a new app, the browser picks it up automatically without requiring a page refresh.
+- **App bundles always render correctly** — the scaffold template now generates bundles compatible with the Qorven host SDK; apps built by agents no longer fail to mount due to a JSX runtime mismatch.
+- **App sidebar shows the correct app after install** — the app registry now correctly matches installed apps to their URL routes.
+- **Bundle cache removed** — rebuilt app bundles are now served immediately; the previous 60-second browser cache could serve a stale bundle after an agent update.
+- **`install_app` now validates the build before installing** — if an agent calls `install_app` before running `npm run build`, it receives an actionable error rather than a silent failure at runtime.
+
+---
+
 ## v0.1.26-alpha — 2026-05-23
 
 ### Fixed

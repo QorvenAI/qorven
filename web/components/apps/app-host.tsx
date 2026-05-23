@@ -106,13 +106,9 @@ export function AppHost({ children }: { children: React.ReactNode }) {
   const [registryVersion, setRegistryVersion] = useState(0);
   const injectedSlugs = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    initHostBus();
-    initUiBus();
-
+  const fetchManifests = React.useCallback(() => {
     request<AppsListResponse>('/apps')
       .then((data) => {
-        // Store metadata for context consumers
         for (const m of data.frontend_manifests) {
           pageMeta[m.app_id] = m.pages ?? [];
           agentTabMeta[m.app_id] = m.agent_tabs ?? [];
@@ -122,6 +118,16 @@ export function AppHost({ children }: { children: React.ReactNode }) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    initHostBus();
+    initUiBus();
+    fetchManifests();
+
+    const onAppInstalled = () => fetchManifests();
+    window.addEventListener('qorven:app_installed', onAppInstalled);
+    return () => window.removeEventListener('qorven:app_installed', onAppInstalled);
+  }, [fetchManifests]);
 
   useEffect(() => {
     if (manifests.length === 0) return;
