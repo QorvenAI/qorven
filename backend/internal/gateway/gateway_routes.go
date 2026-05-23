@@ -272,6 +272,13 @@ func (gw *Gateway) registerRoutes() {
 					}
 				}
 			}
+			if len(parts) >= 3 && parts[0] == "apps" {
+				shellHTML := "apps/__app__/__page__/index.html"
+				if _, err := fs.Stat(sub, shellHTML); err == nil {
+					serveEmbeddedFile(w, shellHTML)
+					return
+				}
+			}
 			// Try exact file inside the embed — let FileServer do
 			// the usual static MIME/etag handling.
 			if info, err := fs.Stat(sub, cleanPath); err == nil && !info.IsDir() {

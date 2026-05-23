@@ -518,7 +518,7 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 				case "tool_approval":
 					data, _ = json.Marshal(map[string]any{"type": "tool_approval", "data": event.Data})
 				case "error":
-					data, _ = json.Marshal(map[string]any{"type": "error", "data": event.Data})
+					data, _ = json.Marshal(map[string]any{"type": "error", "data": event.Error})
 				case "done":
 					select {
 					case <-doneCh: // already closed

@@ -294,7 +294,9 @@ export async function POST(req: Request) {
             }
 
             if (type === 'error') {
-              enq({ type: 'error', errorText: String(data ?? 'Agent error') });
+              const errorMsg = String(data ?? 'An error occurred. Please check the agent\'s model configuration.');
+              if (!textStarted) { enq({ type: 'text-start', id: textId }); textStarted = true; }
+              enq({ type: 'text-delta', id: textId, delta: `⚠ ${errorMsg}` });
               continue;
             }
           }

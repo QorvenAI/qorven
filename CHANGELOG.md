@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.25-alpha — 2026-05-23
+
+### Fixed
+- **Agent error events now display in chat** — when an agent encountered an error mid-stream, the message appeared as an empty bubble. Errors now render as visible text inside the conversation.
+- **Installed apps now render correctly** — navigating directly to an app page no longer fell back to the dashboard. The routing layer now correctly serves the app shell for any installed app path.
+
+---
+
 ## v0.1.24-alpha — 2026-05-22
 
 ### Added
