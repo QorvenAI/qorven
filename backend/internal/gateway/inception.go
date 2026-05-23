@@ -428,6 +428,17 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 
 	for _, pa := range proposal.Agents {
 		sysPrompt := buildAgentSystemPrompt(pa.Role, b.Title, inceptionWorkspace)
+		// Resolve a model that the configured providers can actually serve.
+		// If the proposed model has no matching provider, fall back to the
+		// default provider's model so the agent doesn't fail at run time.
+		resolvedModel := pa.Model
+		if gw.providerReg != nil {
+			if gw.providerReg.ProviderForModel(pa.Model) == nil {
+				if def := gw.providerReg.Default(); def != nil {
+					resolvedModel = def.DefaultModel()
+				}
+			}
+		}
 		var agentID string
 		err := gw.db.Pool.QueryRow(ctx,
 			`INSERT INTO agents
@@ -440,7 +451,7 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 			sanitizeKey(pa.DisplayName+"-"+b.ID[:8]),
 			pa.DisplayName,
 			pa.Role,
-			pa.Model,
+			resolvedModel,
 			sysPrompt,
 			id,
 		).Scan(&agentID)

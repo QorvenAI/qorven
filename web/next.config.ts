@@ -104,6 +104,11 @@ const nextConfig: NextConfig = {
               source: '/readyz',
               destination: `${process.env.NEXT_PUBLIC_API_URL}/readyz`,
             },
+            // App platform: bundle assets served by the Go backend at /app-assets/*
+            {
+              source: '/app-assets/:path*',
+              destination: `${process.env.NEXT_PUBLIC_API_URL}/app-assets/:path*`,
+            },
           ];
         },
       }),

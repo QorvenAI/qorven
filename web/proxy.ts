@@ -18,6 +18,7 @@ const PUBLIC_PATHS = [
   '/__qorven_runtime',  // backend port discovery — must be reachable before login
   '/livez',             // health probes — used by reconnect-banner, no auth needed
   '/readyz',
+  '/app-assets/',       // app bundle JS served by backend — no auth needed
 ];
 
 export function proxy(request: NextRequest) {
