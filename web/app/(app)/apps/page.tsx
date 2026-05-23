@@ -3,6 +3,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -20,6 +21,7 @@ import MarketplacePage from '../marketplace/page';
 // ─── Apps content ─────────────────────────────────────────────────────────────
 
 function AppsContent() {
+  const router = useRouter();
   const [apps, setApps] = useState<QorvenApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -110,8 +112,12 @@ function AppsContent() {
                   !app.enabled && 'opacity-60'
                 )}
               >
-                {/* Icon / initials */}
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                {/* Icon / initials — click opens the app */}
+                <div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground cursor-pointer hover:bg-accent transition-colors"
+                  onClick={() => app.enabled && router.push(`/apps/${app.slug}/home`)}
+                  title={app.enabled ? `Open ${app.display_name}` : undefined}
+                >
                   {app.icon_url ? (
                     <img src={app.icon_url} alt="" className="h-8 w-8 rounded" />
                   ) : (
@@ -119,8 +125,11 @@ function AppsContent() {
                   )}
                 </div>
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
+                {/* Info — click opens the app */}
+                <div
+                  className={cn('flex-1 min-w-0', app.enabled && 'cursor-pointer')}
+                  onClick={() => app.enabled && router.push(`/apps/${app.slug}/home`)}
+                >
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-sm">{app.display_name}</span>
                     <span className="text-xs text-muted-foreground">v{app.version}</span>
@@ -131,9 +140,6 @@ function AppsContent() {
                   {app.description && (
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">{app.description}</p>
                   )}
-                  <p className="text-xs text-muted-foreground/60 mt-0.5 truncate font-mono">
-                    {app.slug}
-                  </p>
                 </div>
 
                 {/* Actions */}

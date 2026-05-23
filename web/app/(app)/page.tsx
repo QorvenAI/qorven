@@ -311,8 +311,8 @@ export default function DashboardPage() {
             ) : (
               auditFeed.map((m) => {
                 const intentLabel = friendlyIntent(m.intent);
-                const from = friendlyAgentId(m.from);
-                const to = friendlyAgentId(m.to);
+                const from = friendlyAgentId(m.from, souls);
+                const to = friendlyAgentId(m.to, souls);
                 const isEscalation = m.intent === 'ESCALATION_NOTICE';
                 const isAck = m.intent === 'ACK';
                 const iconColor = isEscalation ? 'bg-amber-500/10 text-amber-500'
@@ -390,10 +390,15 @@ function friendlyIntent(intent: string): string {
   return intentLabels[intent] ?? intent.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function friendlyAgentId(id: string): string {
-  if (!id || id === 'prime' || id === 'supervisor') return id === 'prime' ? 'Supervisor' : id;
+function friendlyAgentId(id: string, souls: Soul[] = []): string {
+  if (!id) return '';
   if (id === 'human') return 'You';
-  return id.slice(0, 8);
+  if (id === 'prime' || id === 'supervisor') return 'Supervisor';
+  const soul = souls.find(s => s.id === id || s.agent_key === id);
+  if (soul) return soul.display_name;
+  // UUID — shorten gracefully rather than show raw hex
+  if (id.length > 12 && id.includes('-')) return 'Agent';
+  return id;
 }
 
 // ─── Outbound row ─────────────────────────────────────────────────────────────

@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.29-alpha — 2026-05-23
+
+### Fixed
+- **App cards are now clickable** — clicking an installed app on the Apps page opens it directly instead of doing nothing.
+- **Activity feed shows agent names** — the "Today's activity" panel on the dashboard now shows agent display names instead of raw internal IDs.
+
+---
+
 ## v0.1.28-alpha — 2026-05-23
 
 ### Fixed
