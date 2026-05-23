@@ -32,13 +32,16 @@ export interface AppComponentProps {
 
 export interface RegisteredApp {
   id: string;
-  pages?: { id: string; path: string; component: (props: AppComponentProps) => React.ReactElement }[];
+  displayName?: string;
+  icon?: string;
+  pages?: { id: string; path: string; label?: string; icon?: string; component: (props: AppComponentProps) => React.ReactElement }[];
   agentTabs?: { id: string; component: (props: AppComponentProps) => React.ReactElement }[];
   settingTabs?: { id: string; component: (props: AppComponentProps) => React.ReactElement }[];
 }
 
 export interface AppRegistry {
   entries: Record<string, RegisteredApp>;
+  displayNames: Record<string, string>;        // appId → display_name from backend manifest
   // metadata from backend manifests (for labels/icons)
   pageMeta: Record<string, AppPageDef[]>;      // appId → pages
   agentTabMeta: Record<string, AppTabDef[]>;   // appId → agent_tabs
@@ -47,6 +50,7 @@ export interface AppRegistry {
 
 export const AppRegistryContext = createContext<AppRegistry>({
   entries: {},
+  displayNames: {},
   pageMeta: {},
   agentTabMeta: {},
   settingTabMeta: {},
@@ -54,6 +58,30 @@ export const AppRegistryContext = createContext<AppRegistry>({
 
 export function useAppRegistry(): AppRegistry {
   return useContext(AppRegistryContext);
+}
+
+export function useAppDisplayName(slug: string): string {
+  const { entries, displayNames } = useContext(AppRegistryContext);
+  return entries[slug]?.displayName ?? displayNames[slug] ?? slug;
+}
+
+export function useAppPagesForSlug(slug: string): AppPageEntry[] {
+  const { entries, pageMeta } = useContext(AppRegistryContext);
+  return useMemo(() => {
+    const app = entries[slug];
+    if (!app?.pages) return [];
+    const meta = pageMeta[slug] ?? [];
+    return app.pages.map((page) => {
+      const m = meta.find((p) => p.id === page.id);
+      return {
+        appId: slug,
+        id: page.id,
+        label: page.label ?? m?.label ?? page.id,
+        path: page.path,
+        component: page.component,
+      };
+    });
+  }, [entries, pageMeta, slug]);
 }
 
 export function useAppAgentTabs(): AppTabEntry[] {
@@ -116,7 +144,7 @@ export function useAppPages(): AppPageEntry[] {
         result.push({
           appId,
           id: page.id,
-          label: m?.label ?? page.id,
+          label: page.label ?? m?.label ?? page.id,
           path: page.path,
           component: page.component,
         });

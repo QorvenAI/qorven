@@ -18,6 +18,7 @@ import type { Soul } from '@/types';
 
 // Module-level registry — survives re-renders, populated by bundle.js calls
 const appRegistry: Record<string, RegisteredApp> = {};
+const displayNames: AppRegistry['displayNames'] = {};
 const pageMeta: AppRegistry['pageMeta'] = {};
 const agentTabMeta: AppRegistry['agentTabMeta'] = {};
 const settingTabMeta: AppRegistry['settingTabMeta'] = {};
@@ -110,6 +111,8 @@ export function AppHost({ children }: { children: React.ReactNode }) {
     request<AppsListResponse>('/apps')
       .then((data) => {
         for (const m of data.frontend_manifests) {
+          displayNames[m.app_id] = m.display_name;
+          displayNames[m.slug] = m.display_name;
           pageMeta[m.app_id] = m.pages ?? [];
           agentTabMeta[m.app_id] = m.agent_tabs ?? [];
           settingTabMeta[m.app_id] = m.setting_tabs ?? [];
@@ -162,6 +165,7 @@ export function AppHost({ children }: { children: React.ReactNode }) {
   // a new context value — consumers only re-render when registryVersion changes.
   const ctxValue: AppRegistry = useMemo(() => ({
     entries: registryVersion >= 0 ? { ...appRegistry } : {},
+    displayNames,
     pageMeta,
     agentTabMeta,
     settingTabMeta,

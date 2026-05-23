@@ -83,7 +83,9 @@ interface AppComponentProps {
 
 interface RegisteredApp {
   id: string;
-  pages?: { id: string; path: string; component: (props: AppComponentProps) => React.ReactElement }[];
+  displayName?: string;
+  icon?: string;
+  pages?: { id: string; path: string; label?: string; icon?: string; component: (props: AppComponentProps) => React.ReactElement }[];
   agentTabs?: { id: string; component: (props: AppComponentProps) => React.ReactElement }[];
   settingTabs?: { id: string; component: (props: AppComponentProps) => React.ReactElement }[];
 }

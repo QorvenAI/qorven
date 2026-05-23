@@ -19,10 +19,12 @@ if (!window.__QorvenUI) {
 
   register({
     id: '[[.Slug]]',
+    displayName: '[[.NameTitle]]',
     pages: [
       {
         id: 'home',
         path: 'home',
+        label: 'Home',
         component: () => <[[.NamePascal]]Page />,
       },
     ],
