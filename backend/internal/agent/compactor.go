@@ -46,33 +46,47 @@ type CompactionAction int
 const (
 	NoCompaction         CompactionAction = iota
 	PruneToolOutputs                             // Tier 1: free, no LLM — prune old tool outputs
-	BackgroundCompaction                         // Tier 2: >70% — LLM summarize oldest 30%
-	AggressiveCompaction                         // Tier 2: >85% — LLM summarize oldest 50%
-	EmergencyTruncation                          // Tier 3: >95% — hard drop, no LLM
+	BackgroundCompaction                         // Tier 2: LLM summarize oldest 30%
+	AggressiveCompaction                         // Tier 2: LLM summarize oldest 50%
+	EmergencyTruncation                          // Tier 3: hard drop, no LLM
+)
+
+// SessionKind classifies a session to set appropriate compaction thresholds.
+// Tool-heavy sessions (coding, file ops) degrade faster — quality cliff at ~70%.
+// Pure conversation sessions are stable up to ~90%.
+type SessionKind int
+
+const (
+	SessionKindConversation SessionKind = iota // pure chat, no tools
+	SessionKindToolHeavy                       // code agent, file reads, exec calls
 )
 
 // Compactor monitors context size and triggers 3-tier compaction.
+//
+// Thresholds are model-aware: the actual context window drives them, not a
+// hardcoded 128 K default. For tool-heavy sessions quality degrades faster
+// so the background trigger fires at 60% instead of 75%.
 //
 // Tier 1: Tool Output Pruning (free, no LLM)
 //   - Prune old tool outputs beyond PRUNE_PROTECT threshold
 //   - Protected tools (skill, memory) never pruned
 //   - Dedup stale tool results
 //
-// Tier 2: LLM Compaction (background, non-blocking)
-//   - Background (70%) → compact 30% oldest
-//   - Aggressive (85%) → compact 50% oldest
+// Tier 2: LLM Compaction — fire memory flush first, then summarize
+//   - Background  → compact 30% oldest
+//   - Aggressive  → compact 50% oldest
 //
 // Tier 3: Emergency Truncation (synchronous, no LLM)
-//   - Emergency (95%) → drop oldest 50%
-//
+//   - Hard drop oldest 60%
 type Compactor struct {
-	contextWindow int // max tokens for this agent
+	contextWindow int // max tokens for this agent (model-resolved, never 0)
+	sessionKind   SessionKind
 
 	// Configurable thresholds (as fraction of context window)
-	PruneThreshold      float64 // Tier 1 trigger (default 0.60)
-	BackgroundThreshold float64 // Tier 2 background trigger (default 0.70)
-	AggressiveThreshold float64 // Tier 2 aggressive trigger (default 0.85)
-	EmergencyThreshold  float64 // Tier 3 trigger (default 0.95)
+	PruneThreshold      float64 // Tier 1 trigger
+	BackgroundThreshold float64 // Tier 2 background trigger
+	AggressiveThreshold float64 // Tier 2 aggressive trigger
+	EmergencyThreshold  float64 // Tier 3 trigger
 
 	// Pruning config
 	PruneProtectTokens int // protect this many tokens of recent tool outputs (default 40000)
@@ -93,19 +107,53 @@ var pruneProtectedTools = map[string]bool{
 	"read_skill":  true,
 }
 
+// NewCompactor creates a compactor with conservative conversation thresholds.
+// Prefer NewCompactorForSession when the session kind is known.
 func NewCompactor(contextWindow int) *Compactor {
+	return NewCompactorForSession(contextWindow, SessionKindConversation)
+}
+
+// NewCompactorForSession creates a compactor with model-aware, session-type-aware thresholds.
+//
+// Tool-heavy sessions (code agents, file ops) hit the quality cliff at ~70% so
+// compaction fires earlier:
+//
+//	Prune=0.55  Background=0.65  Aggressive=0.80  Emergency=0.95
+//
+// Conversation sessions are stable to ~90%:
+//
+//	Prune=0.72  Background=0.82  Aggressive=0.92  Emergency=0.97
+//
+// Both use the real model context window — never a hardcoded 128 K default.
+func NewCompactorForSession(contextWindow int, kind SessionKind) *Compactor {
 	if contextWindow <= 0 {
-		contextWindow = 128000
+		contextWindow = 128000 // fallback when provider registry unavailable
 	}
-	return &Compactor{
-		contextWindow:       contextWindow,
-		PruneThreshold:      0.75, // Tier 1: prune old tool outputs at 75%
-		BackgroundThreshold: 0.85, // Tier 2: LLM summarize at 85%
-		AggressiveThreshold: 0.92, // Tier 2: aggressive summarize at 92%
-		EmergencyThreshold:  0.97, // Tier 3: hard drop at 97%
-		PruneProtectTokens:  40000,
-		PruneMinSavings:     20000,
+	c := &Compactor{
+		contextWindow:      contextWindow,
+		sessionKind:        kind,
+		PruneProtectTokens: 40000,
+		PruneMinSavings:    20000,
 	}
+	if kind == SessionKindToolHeavy {
+		// Tool-heavy: quality degrades early — compact aggressively
+		c.PruneThreshold      = 0.55
+		c.BackgroundThreshold = 0.65
+		c.AggressiveThreshold = 0.80
+		c.EmergencyThreshold  = 0.95
+	} else {
+		// Conversation: stable at high utilisation
+		c.PruneThreshold      = 0.72
+		c.BackgroundThreshold = 0.82
+		c.AggressiveThreshold = 0.92
+		c.EmergencyThreshold  = 0.97
+	}
+	slog.Debug("compactor.init",
+		"context_window", contextWindow,
+		"session_kind", kind,
+		"background_at", fmt.Sprintf("%d", int(float64(contextWindow)*c.BackgroundThreshold)),
+		"emergency_at", fmt.Sprintf("%d", int(float64(contextWindow)*c.EmergencyThreshold)))
+	return c
 }
 
 // Check evaluates whether compaction is needed based on estimated token count.

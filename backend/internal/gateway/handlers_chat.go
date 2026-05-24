@@ -140,6 +140,8 @@ func (gw *Gateway) saveCommandToSession(ctx context.Context, sessionID, agentID,
 	}
 }
 
+type planModeContextKey struct{}
+
 // pendingDelegation holds a deferred @soul task waiting for user confirmation.
 type pendingDelegation struct {
 	SoulKey string
@@ -238,6 +240,7 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		Message        string                     `json:"message,omitempty"`
 		ThinkingLevel  string                     `json:"thinking_level,omitempty"`
 		DelegationMode string                     `json:"delegation_mode,omitempty"` // "auto", "explicit", "manual"
+		PlanMode       bool                       `json:"plan_mode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid request body"})
@@ -264,6 +267,18 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 	// If agent_id provided, use the full agent loop (tools, memory, skills)
 	// Intercept @mentions and /commands — execute directly, skip LLM
 	if req.AgentID != "" && gw.agentLoop != nil {
+		// Resolve "prime" alias → coder agent (role=code). The /code page uses
+		// "prime" as a fixed alias; the DB agent has agent_key="coder", role="code".
+		if req.AgentID == "prime" && gw.agents != nil {
+			if ags, listErr := gw.agents.List(r.Context(), defaultTenant); listErr == nil {
+				for _, a := range ags {
+					if a.Role != nil && *a.Role == "code" {
+						req.AgentID = a.ID
+						break
+					}
+				}
+			}
+		}
 		agentID := req.AgentID
 		userMsg := req.Message
 		if userMsg == "" && len(req.Messages) > 0 {
@@ -310,7 +325,11 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		gw.handleAgentChat(w, r, agentID, req.SessionID, req.Model, req.Messages, req.Stream, req.Depth, req.Channel, req.ThinkingLevel, req.DelegationMode)
+		ctx := r.Context()
+		if req.PlanMode {
+			ctx = context.WithValue(ctx, planModeContextKey{}, true)
+		}
+		gw.handleAgentChat(w, r.WithContext(ctx), agentID, req.SessionID, req.Model, req.Messages, req.Stream, req.Depth, req.Channel, req.ThinkingLevel, req.DelegationMode)
 		return
 	}
 
@@ -377,12 +396,17 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 	// AppendMessage handles both UUID and session_key lookups
 	if gw.sessions != nil && sessionID != "" {
 		if _, err := gw.sessions.Get(r.Context(), sessionID); err != nil {
-			// Resolve agent_key → agent UUID for the FK constraint
-			agUUID := agentID
+			// Resolve agent_key → agent UUID for the FK constraint.
+			// "prime" is an alias for the code role agent used by the /code page.
+			agKeyOrRole := agentID
+			if agKeyOrRole == "prime" {
+				agKeyOrRole = "code"
+			}
+			agUUID := agKeyOrRole
 			if gw.agents != nil {
 				if ags, listErr := gw.agents.List(r.Context(), defaultTenant); listErr == nil {
 					for _, a := range ags {
-						if a.AgentKey == agentID || a.ID == agentID {
+						if a.AgentKey == agKeyOrRole || a.ID == agKeyOrRole || (a.Role != nil && *a.Role == agKeyOrRole) {
 							agUUID = a.ID
 							break
 						}
@@ -412,6 +436,9 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		DelegationMode: delegationMode,
 		UserID:         webUserID,
 		TenantID:       defaultTenant,
+	}
+	if r.Context().Value(planModeContextKey{}) == true {
+		req.Mode = "plan"
 	}
 
 	// Look up the current discussion for this session (fast, indexed)
@@ -517,6 +544,8 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 					data, _ = json.Marshal(map[string]any{"type": "stream_start", "data": event.Data})
 				case "tool_approval":
 					data, _ = json.Marshal(map[string]any{"type": "tool_approval", "data": event.Data})
+				case "usage":
+					data, _ = json.Marshal(map[string]any{"type": "usage", "data": event.Data})
 				case "error":
 					data, _ = json.Marshal(map[string]any{"type": "error", "data": event.Error})
 				case "done":

@@ -9,13 +9,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
 )
+
+// OnDelegateComplete is called when an async background delegation finishes.
+// jobID: the ID returned in the [BACKGROUND_JOB:id] marker
+// agentKey: which agent ran
+// result: the agent's output (or error message if err != nil)
+type OnDelegateComplete func(jobID, agentKey, result string, err error)
 
 // DelegateTool allows an agent (typically Prime) to delegate tasks to specialist agents.
 // The specialist runs the task and returns the result.
+// When background=true the task runs in a goroutine and Prime stays responsive.
 type DelegateTool struct {
-	runAgent func(ctx context.Context, agentKey, message string) (string, error)
+	runAgent   func(ctx context.Context, agentKey, message string) (string, error)
 	listAgents func(ctx context.Context) ([]map[string]any, error)
+	OnComplete OnDelegateComplete // optional callback for async jobs
 }
 
 // NewDelegateTool creates a delegation tool.
@@ -38,7 +49,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"agent": map[string]any{
 				"type":        "string",
-				"description": "The agent key to delegate to (e.g. 'researcher', 'writer', 'analyst')",
+				"description": "The agent key to delegate to (e.g. 'researcher', 'writer', 'analyst', 'coder')",
 			},
 			"task": map[string]any{
 				"type":        "string",
@@ -47,6 +58,11 @@ func (t *DelegateTool) Parameters() map[string]any {
 			"context": map[string]any{
 				"type":        "string",
 				"description": "Additional context or data the specialist needs",
+			},
+			"background": map[string]any{
+				"type":        "boolean",
+				"description": "Run asynchronously — return immediately with a job ID. Use for long-running build/coding tasks so you stay responsive to the user.",
+				"default":     false,
 			},
 		},
 		"required": []string{"agent", "task"},
@@ -57,6 +73,7 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *Result
 	agentKey, _ := args["agent"].(string)
 	task, _ := args["task"].(string)
 	extraCtx, _ := args["context"].(string)
+	background, _ := args["background"].(bool)
 
 	if agentKey == "" || task == "" {
 		return ErrorResult("agent and task are required")
@@ -71,8 +88,28 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *Result
 		message = fmt.Sprintf("%s\n\nContext:\n%s", task, extraCtx)
 	}
 
-	slog.Info("delegate.start", "to", agentKey, "task", task[:min(len(task), 80)])
+	// Async path: fire goroutine, return immediately with a job marker
+	if background {
+		jobID := uuid.New().String()
+		slog.Info("delegate.background.start", "to", agentKey, "job", jobID, "task", task[:min(len(task), 80)])
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			result, err := t.runAgent(bgCtx, agentKey, message)
+			if err != nil {
+				slog.Warn("delegate.background.failed", "to", agentKey, "job", jobID, "error", err)
+			} else {
+				slog.Info("delegate.background.complete", "to", agentKey, "job", jobID, "result_len", len(result))
+			}
+			if t.OnComplete != nil {
+				t.OnComplete(jobID, agentKey, result, err)
+			}
+		}()
+		return TextResult(fmt.Sprintf("[BACKGROUND_JOB:%s] Dispatched to %s — I'll let you know when it's done. What else can I help with?", jobID, agentKey))
+	}
 
+	// Synchronous path (original behaviour)
+	slog.Info("delegate.start", "to", agentKey, "task", task[:min(len(task), 80)])
 	result, err := t.runAgent(ctx, agentKey, message)
 	if err != nil {
 		slog.Warn("delegate.failed", "to", agentKey, "error", err)

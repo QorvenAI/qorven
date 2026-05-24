@@ -741,18 +741,34 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	}
 
 	// Use model's actual context window as an upper bound on the agent's configured window.
+	// If the provider registry doesn't know the model, contextWindow stays at ag.ContextWindow.
+	// When ag.ContextWindow is 0 (agent not explicitly configured), resolve from model registry
+	// so large-window models (Gemini 1M, Sonnet 4.6 1M) don't compact far too late.
 	contextWindow := ag.ContextWindow
 	if l.providerReg != nil {
-		if modelLimit := l.providerReg.GetModelContextWindow(model); modelLimit > 0 && modelLimit < contextWindow {
-			slog.Warn("agent.context_window_exceeds_model_limit",
-				"agent", ag.ID, "configured", contextWindow,
-				"model_limit", modelLimit, "using", modelLimit)
-			contextWindow = modelLimit
+		modelLimit := l.providerReg.GetModelContextWindow(model)
+		if modelLimit > 0 {
+			if contextWindow <= 0 || modelLimit < contextWindow {
+				if contextWindow > 0 && modelLimit < contextWindow {
+					slog.Warn("agent.context_window_exceeds_model_limit",
+						"agent", ag.ID, "configured", contextWindow,
+						"model_limit", modelLimit, "using", modelLimit)
+				}
+				contextWindow = modelLimit
+			}
 		}
 	}
 
-	// Mid-loop compactor (Qorven-inspired: compact at 75% context during iterations)
-	compactor := NewCompactor(contextWindow)
+	// Classify session kind for compaction thresholds.
+	// Agents with a tool profile other than "none" or a non-empty tool allowlist are
+	// considered tool-heavy — they hit the quality cliff at ~70% context utilisation.
+	sessionKind := SessionKindConversation
+	if len(toolDefs) > 0 || (ag.ToolProfile != "" && ag.ToolProfile != "none") {
+		sessionKind = SessionKindToolHeavy
+	}
+
+	// Model-aware compactor: thresholds scale with actual context window and session type.
+	compactor := NewCompactorForSession(contextWindow, sessionKind)
 
 	// Brain components (from BRAIN-ARCHITECTURE-v2)
 	loopGuard := NewLoopGuard()
@@ -835,6 +851,14 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 				// Tier 1 first, then Tier 2/3
 				if pruned, savings := compactor.PruneTools(messages); savings > 0 {
 					messages = pruned
+				}
+				// Flush durable memories before any LLM-based compaction so facts
+				// survive summarisation. Skip for emergency-only hard truncation since
+				// there may not be enough headroom for a flush LLM call.
+				if action >= BackgroundCompaction && action < EmergencyTruncation {
+					if l.memStore != nil && ag.MemoryEnabled {
+						l.flushMemoryBeforeCompaction(ctx, provider, ag, messages)
+					}
 				}
 				messages = compactor.Compact(messages, action)
 			}
@@ -1673,6 +1697,11 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 		req.UserMessage, result.Content, isFirstMsg, onEvent)
 
 	doneSent = true
+	onEvent(StreamEvent{Type: "usage", Data: map[string]any{
+		"input_tokens":  result.InputTokens,
+		"output_tokens": result.OutputTokens,
+		"total_tokens":  result.InputTokens + result.OutputTokens,
+	}})
 	onEvent(DoneEvent())
 
 	// 10. Send heartbeat to Prime (supervisor protocol)

@@ -50,6 +50,22 @@ func (gw *Gateway) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		in.Channel = "web"
 	}
 
+	// Resolve agent key/alias to UUID — sessions.agent_id is a UUID FK.
+	// The /code page sends agent_id:"prime" (an alias for the coder agent, role=code).
+	if in.AgentID == "prime" {
+		in.AgentID = "code" // normalize prime → role alias before lookup
+	}
+	if gw.agents != nil {
+		if ags, err := gw.agents.List(r.Context(), defaultTenant); err == nil {
+			for _, a := range ags {
+				if a.AgentKey == in.AgentID || a.ID == in.AgentID || (a.Role != nil && *a.Role == in.AgentID) {
+					in.AgentID = a.ID
+					break
+				}
+			}
+		}
+	}
+
 	// One-Qor-one-chat: for the chat-family channels (web, tui, telegram,
 	// whatsapp, slack DM, discord DM) we return the Qor's existing
 	// canonical session if one is active. POST /v1/sessions is the old

@@ -26,6 +26,7 @@ import (
 	"github.com/qorvenai/qorven/internal/search"
 	"github.com/qorvenai/qorven/internal/skills"
 	"github.com/qorvenai/qorven/internal/storage"
+	supervisorpkg "github.com/qorvenai/qorven/internal/supervisor"
 	"github.com/qorvenai/qorven/internal/tools"
 )
 
@@ -619,7 +620,7 @@ func (gw *Gateway) registerTools() {
 	slog.Info("tools registered", "count", reg.Count())
 
 	// Delegate tool: allows Prime to send tasks to specialist agents
-	reg.Register(tools.NewDelegateTool(
+	delegateTool := tools.NewDelegateTool(
 		func(ctx context.Context, agentKey, message string) (string, error) {
 			return gw.agentLoop.Chat(ctx, agentKey, message)
 		},
@@ -645,7 +646,25 @@ func (gw *Gateway) registerTools() {
 			}
 			return result, nil
 		},
-	))
+	)
+	// Background job completion: Prime hears the result on its next turn via supervisor bus
+	if gw.agentLoop != nil && gw.agentLoop.SupervisorBus != nil && gw.agentLoop.PrimeID != "" {
+		primeID := gw.agentLoop.PrimeID
+		bus := gw.agentLoop.SupervisorBus
+		delegateTool.OnComplete = func(jobID, agentKey, result string, err error) {
+			content := fmt.Sprintf("[BACKGROUND_JOB_DONE:%s] %s finished. Result:\n%s", jobID, agentKey, result)
+			if err != nil {
+				content = fmt.Sprintf("[BACKGROUND_JOB_DONE:%s] %s failed: %v", jobID, agentKey, err)
+			}
+			bus.Send(context.Background(), supervisorpkg.Message{
+				From:    agentKey,
+				To:      primeID,
+				Intent:  supervisorpkg.IntentHeartbeat,
+				Content: content,
+			})
+		}
+	}
+	reg.Register(delegateTool)
 	reg.Register(tools.NewListAgentsTool(func(ctx context.Context) ([]map[string]any, error) {
 		if gw.agents == nil {
 			return nil, nil

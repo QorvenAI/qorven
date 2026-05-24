@@ -35,10 +35,15 @@ type AppConfig struct {
 	MaxIterations    int    `json:"max_iterations"`
 	ContextWindow    int    `json:"context_window"`
 
-	// Compaction thresholds
-	CompactionBackground float64 `json:"compaction_background"` // default 0.70
-	CompactionAggressive float64 `json:"compaction_aggressive"` // default 0.85
-	CompactionEmergency  float64 `json:"compaction_emergency"`  // default 0.95
+	// Compaction thresholds — conversation sessions.
+	// Tool-heavy sessions (code agents) use lower multipliers derived from these:
+	//   prune      = CompactionPrune      (conv) / 0.72 * 0.55  ≈ 76 % of conv value
+	//   background = CompactionBackground (conv) / 0.82 * 0.65  ≈ 79 % of conv value
+	// Setting these values overrides the defaults for all session types uniformly.
+	CompactionPrune      float64 `json:"compaction_prune"`      // Tier 1 (conv default 0.72)
+	CompactionBackground float64 `json:"compaction_background"` // Tier 2 background (conv default 0.82)
+	CompactionAggressive float64 `json:"compaction_aggressive"` // Tier 2 aggressive (conv default 0.92)
+	CompactionEmergency  float64 `json:"compaction_emergency"`  // Tier 3 (default 0.97)
 
 	// Security
 	ShellAskMode     string `json:"shell_ask_mode"` // "off", "on-miss", "always"
@@ -117,9 +122,10 @@ func (hc *HotConfig) loadFromDisk() *AppConfig {
 	cfg := &AppConfig{
 		MaxIterations:        20,
 		ContextWindow:        128000,
-		CompactionBackground: 0.70,
-		CompactionAggressive: 0.85,
-		CompactionEmergency:  0.95,
+		CompactionPrune:      0.72, // conversation baseline — tool-heavy agents use 0.55
+		CompactionBackground: 0.82, // conversation baseline — tool-heavy agents use 0.65
+		CompactionAggressive: 0.92,
+		CompactionEmergency:  0.97,
 		ShellAskMode:         "on-miss",
 		MemoryCharLimit:      2200,
 		UserCharLimit:        1375,

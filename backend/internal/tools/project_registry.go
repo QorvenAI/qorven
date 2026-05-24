@@ -13,6 +13,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // CodeProject represents a user's coding project with its own session, memory, and tasks.
@@ -135,7 +137,7 @@ func (r *ProjectRegistry) Create(name, displayName, path string) *CodeProject {
 	id := fmt.Sprintf("proj-%d", time.Now().UnixMilli())
 	p := &CodeProject{
 		ID: id, Name: name, DisplayName: displayName, Path: path,
-		SessionID: fmt.Sprintf("code-%s", id),
+		SessionID: uuid.New().String(),
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	r.projects[id] = p

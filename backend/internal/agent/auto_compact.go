@@ -21,8 +21,12 @@ type AutoCompactConfig struct {
 	MaxOutputTokens  int     `json:"max_output_tokens"`
 }
 
+// DefaultAutoCompact is used by the hook-level auto-compact path.
+// Tool-heavy sessions compact at 65% (matches NewCompactorForSession tool-heavy background threshold).
+// Conversation sessions compact at 82% (matches conversation background threshold).
+// The hook reads from the session's compactor when available; this default is the fallback.
 var DefaultAutoCompact = AutoCompactConfig{
-	Enabled: true, ThresholdPercent: 80, MaxOutputTokens: 20000,
+	Enabled: true, ThresholdPercent: 65, MaxOutputTokens: 20000,
 }
 
 // AutoCompactState tracks compaction state per session.

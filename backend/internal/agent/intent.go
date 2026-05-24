@@ -24,9 +24,25 @@ const (
 func ClassifyChatIntent(msg string) ChatIntent {
 	lower := strings.ToLower(msg)
 
-	selfKeywords := []string{"qorven", "this platform", "our platform",
+	// Self-referential questions about the platform — only when NOT building/installing something.
+	// "Build a Todo app inside Qorven" mentions "qorven" but is a code task, not a meta-question.
+	codeActionKeywords := []string{
+		"build", "create", "make", "write", "implement", "install", "deploy",
+		"fix", "debug", "refactor", "scaffold", "generate", "add a", "add an",
+	}
+	isBuildingTask := false
+	for _, kw := range codeActionKeywords {
+		if strings.Contains(lower, kw) {
+			isBuildingTask = true
+			break
+		}
+	}
+	selfKeywords := []string{"this platform", "our platform",
 		"your capabilities", "what can you do", "your tools", "your agents",
 		"how do you work", "what are you", "who are you", "about yourself"}
+	if !isBuildingTask {
+		selfKeywords = append(selfKeywords, "qorven")
+	}
 	for _, kw := range selfKeywords {
 		if strings.Contains(lower, kw) {
 			return ChatIntentChat
@@ -90,6 +106,8 @@ var intentTools = map[ChatIntent]map[string]bool{
 		"list_files": true, "glob": true, "grep": true, "diagnostics": true,
 		"apply_patch": true, "undo": true, "lsp": true, "project": true,
 		"prime_coder": true, "project_manager": true,
+		// Qorven app platform — install apps (scaffold_app creates Go Wasm, not shell-script apps)
+		"install_app": true,
 		// Web: only fetch (have URL), not search (no web browsing during coding)
 		"web_fetch": true,
 		// Self-improvement tools
@@ -131,6 +149,8 @@ var intentTools = map[ChatIntent]map[string]bool{
 		"delegate_to_soul": true, "create_soul": true, "list_souls": true,
 		// Project / workspace builder — "build me a CRM" is chat-intent
 		"project": true, "project_manager": true, "workspace_builder": true,
+		// Qorven app platform — "build an app" can be chat-intent
+		"scaffold_app": true, "install_app": true,
 		// Connector tools — users often ask agents to do things via integrations
 		"execute_action": true,
 		// JIT discovery (always available)
