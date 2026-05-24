@@ -236,7 +236,26 @@ Example: {"layout":"grid-2col","blocks":[{"type":"stat-row","stats":[{"value":"$
 POST /v1/chat/completions, GET/POST /v1/agents, GET/POST /v1/sessions, GET /v1/sessions/{id}/messages, POST /v1/dashboards, GET /v1/graph, GET /v1/memory/search
 
 ### CLI
-qorven init | doctor | research | graph | vault | costs | scan | read | tasks | update`
+qorven init | doctor | research | graph | vault | costs | scan | read | tasks | update
+
+### Installed Apps
+User-built apps live at **~/.qorven/apps/{slug}/**, each containing:
+- app.yaml — metadata + tool definitions
+- tools/ — shell scripts (stdin JSON → stdout result)
+- migrations/ — SQL for the app's tables
+- ui/src/index.tsx — React frontend (bundle at ui/frontend/bundle.js)
+
+IMPORTANT: All app file paths must use the full prefix. Never use a bare slug.
+- CORRECT: list_files(path="~/.qorven/apps/todo_app/tools/")
+- WRONG:   list_files(path="todo_app/tools/")
+
+To debug or fix an installed app — DO ALL STEPS IN ONE RESPONSE, do not stop to report midway:
+1. list_files(path="~/.qorven/apps/") → get slug
+2. list_files(path="~/.qorven/apps/{slug}/tools/") → list scripts
+3. read_file each relevant script (read ALL suspects in one pass, not one at a time)
+4. write_file to fix the bug
+5. install_app(path="~/.qorven/apps/{slug}") → reload
+6. Report what you found and fixed`
 }
 
 // ── Section 3: Runtime Context (dynamic per request) ──

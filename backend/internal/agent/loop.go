@@ -831,7 +831,8 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	webFetchCalls := 0
 
 	var lastLLMContent string
-	consecutiveToolIters := 0 // track iterations with only tool calls, no text
+	consecutiveToolIters := 0   // track iterations with only tool calls, no text
+	emptyAfterToolsRetries := 0 // Gemini Flash sometimes returns empty after tool results; retry up to 2x
 	for iter := 0; iter < maxIter; iter++ {
 		// Search discipline: after 5 tool-only iterations, force the agent to answer
 		// Check if request was cancelled (user stopped, timeout)
@@ -1189,15 +1190,17 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			// worst UX failure mode.  Only retry once (iter check prevents
 			// infinite loops); on the second empty we fall through to the
 			// apology substitution below.
-			if result.Content == "" && len(llmResp.ToolCalls) == 0 && len(result.ToolsUsed) > 0 && iter < maxIter-1 {
+			if result.Content == "" && len(llmResp.ToolCalls) == 0 && len(result.ToolsUsed) > 0 && iter < maxIter-1 && emptyAfterToolsRetries < 2 {
+				emptyAfterToolsRetries++
 				slog.Warn("agent.loop.empty_after_tools",
-					"agent", ag.ID, "iter", iter, "tools_used", len(result.ToolsUsed))
+					"agent", ag.ID, "iter", iter, "tools_used", len(result.ToolsUsed), "retry", emptyAfterToolsRetries)
 				messages = append(messages, providers.Message{
 					Role:    "user",
-					Content: "You used tools but didn't write a reply. Summarise what you found and respond to the user now.",
+					Content: "Continue. Use more tools if needed to finish the task, then write your reply.",
 				})
 				continue
 			}
+			emptyAfterToolsRetries = 0 // reset on any non-empty iter
 			if result.Content == "" && len(llmResp.ToolCalls) == 0 {
 				result.Content = "I apologize, but I was unable to generate a response. Please try rephrasing your question."
 				slog.Warn("agent.loop.empty_response_recovery",
