@@ -141,20 +141,36 @@ func (gw *Gateway) runHeartbeat(hbID, agentID, ctxType, ctxID string) {
 		`UPDATE heartbeat_queue SET status = $2, error_msg = $3, finished_at = NOW() WHERE id = $1`,
 		hbID, status, errMsg)
 
-	if ticketObj != nil && runErr == nil {
-		// Testing gate — if the agent marked the ticket done, run tests before unblocking.
-		if ticketObj.Status == "done" && ctxType == "ticket" {
-			if !gw.runTestingGate(hbID, ctxID, agentID) {
-				// Tests failed; testing_gate.go already reopened the ticket.
-				return
+	if ticketObj != nil && ctxType == "ticket" {
+		// Re-read ticket from DB — agent may have called update_ticket_status during the run,
+		// which updates the DB but not the in-memory ticketObj loaded before the run.
+		var freshTicket Ticket
+		rerr := gw.db.Pool.QueryRow(ctx,
+			`SELECT id, tenant_id, slug, title, description, status, priority,
+			        assigned_agent_id, goal_id, created_at, updated_at
+			 FROM tickets WHERE id = $1 AND tenant_id = $2`, ctxID, defaultTenant).
+			Scan(&freshTicket.ID, &freshTicket.TenantID, &freshTicket.Slug, &freshTicket.Title,
+				&freshTicket.Description, &freshTicket.Status, &freshTicket.Priority,
+				&freshTicket.AssignedAgentID, &freshTicket.GoalID, &freshTicket.CreatedAt, &freshTicket.UpdatedAt)
+		if rerr == nil {
+			ticketObj = &freshTicket
+		}
+
+		if runErr == nil {
+			// Testing gate — if the agent marked the ticket done, run tests before unblocking.
+			if ticketObj.Status == "done" {
+				if !gw.runTestingGate(hbID, ctxID, agentID) {
+					// Tests failed; testing_gate.go already reopened the ticket.
+					return
+				}
 			}
+			gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventTicketUpdated, Data: ticketObj})
+			if ticketObj.Status == "done" {
+				gw.unblockDependents(ctx, ctxID)
+			}
+		} else {
+			gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventTicketUpdated, Data: ticketObj})
 		}
-		gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventTicketUpdated, Data: ticketObj})
-		if ticketObj.Status == "done" && ctxType == "ticket" {
-			gw.unblockDependents(ctx, ctxID)
-		}
-	} else if ticketObj != nil {
-		gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventTicketUpdated, Data: ticketObj})
 	}
 }
 

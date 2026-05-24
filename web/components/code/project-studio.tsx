@@ -479,8 +479,8 @@ function LiveTaskRow({ task, agentName }: { task: DaemonTask; agentName?: string
       task.status === 'failed'      && 'border-red-500/30',
     )}>
       <button
-        className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left"
-        onClick={() => (task.summary || task.error || files.length > 0) && setOpen(v => !v)}
+        className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/20 transition-colors"
+        onClick={() => setOpen(v => !v)}
       >
         <span className="mt-0.5">{icon}</span>
         <div className="flex-1 min-w-0">
@@ -493,9 +493,7 @@ function LiveTaskRow({ task, agentName }: { task: DaemonTask; agentName?: string
               <File className="h-3 w-3" />{files.length}
             </span>
           )}
-          {(task.summary || task.error || files.length > 0) && (
-            open ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />
-          )}
+          {open ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
         </div>
       </button>
 
@@ -515,14 +513,34 @@ function LiveTaskRow({ task, agentName }: { task: DaemonTask; agentName?: string
       {/* Expanded detail */}
       {open && (
         <div className="border-t border-border px-3 py-2 space-y-1.5 bg-muted/10">
+          <div className="flex items-center gap-1.5">
+            <span className={cn(
+              'text-[10px] font-medium rounded-full px-1.5 py-0.5',
+              task.status === 'done'        ? 'bg-emerald-500/10 text-emerald-400' :
+              task.status === 'in_progress' ? 'bg-amber-500/10 text-amber-400' :
+              task.status === 'failed'      ? 'bg-red-500/10 text-red-400' :
+                                              'bg-muted text-muted-foreground'
+            )}>
+              {task.status}
+            </span>
+            {task.priority && (
+              <span className="text-[10px] text-muted-foreground capitalize">{task.priority} priority</span>
+            )}
+          </div>
           {task.summary && (
             <p className="text-[10px] text-emerald-400 leading-relaxed">{task.summary}</p>
           )}
           {task.error && (
             <p className="text-[10px] text-red-400 leading-relaxed">{task.error}</p>
           )}
+          {!task.summary && !task.error && task.status !== 'done' && (
+            <p className="text-[10px] text-muted-foreground italic">
+              {task.status === 'in_progress' ? 'Agent is working on this…' : 'Waiting to be picked up'}
+            </p>
+          )}
           {files.length > 0 && (
             <div className="space-y-0.5">
+              <p className="text-[10px] font-medium text-muted-foreground">Files changed</p>
               {files.slice(0, 8).map(f => (
                 <p key={f} className="text-[10px] text-muted-foreground font-mono truncate">{f}</p>
               ))}

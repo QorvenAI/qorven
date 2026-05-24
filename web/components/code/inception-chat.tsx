@@ -63,6 +63,26 @@ function getBriefField(brief: ProjectBrief, field: Field): string {
   }
 }
 
+// Returns which fields are already answered based on the brief's current state.
+// 'stack' and 'budget' can be empty strings / 0 if the user skipped them —
+// so we infer they were answered by checking if all prior fields are filled.
+function getAnsweredFields(brief: ProjectBrief): Set<Field> {
+  const answered = new Set<Field>();
+  for (const field of FIELD_ORDER) {
+    const value = getBriefField(brief, field);
+    if (value) {
+      answered.add(field);
+    } else if (field === 'stack' || field === 'budget') {
+      // Empty/0 after title+idea are filled means the user skipped.
+      if (answered.has('idea')) answered.add(field);
+      else break;
+    } else {
+      break;
+    }
+  }
+  return answered;
+}
+
 function formatFieldDisplay(field: Field, value: string): string {
   if (field === 'budget')   return `$${value}`;
   if (field === 'timeline') return value.replace('_', ' ');
@@ -72,11 +92,15 @@ function formatFieldDisplay(field: Field, value: string): string {
 
 function briefToMessages(brief: ProjectBrief): ChatMessage[] {
   const msgs: ChatMessage[] = [];
+  const answered = getAnsweredFields(brief);
   for (const field of FIELD_ORDER) {
-    const value = getBriefField(brief, field);
     msgs.push({ role: 'assistant', content: QUESTIONS[field] });
-    if (value) {
-      msgs.push({ role: 'user', content: formatFieldDisplay(field, value) });
+    if (answered.has(field)) {
+      const value = getBriefField(brief, field);
+      const display = value
+        ? formatFieldDisplay(field, value)
+        : field === 'stack' ? 'skip' : 'skip';
+      msgs.push({ role: 'user', content: display });
     } else {
       break;
     }
@@ -84,14 +108,15 @@ function briefToMessages(brief: ProjectBrief): ChatMessage[] {
   return msgs;
 }
 
-function getNextField(brief: ProjectBrief): Field | null {
+function getNextField(brief: ProjectBrief, answered: Set<Field>): Field | null {
   for (const field of FIELD_ORDER) {
-    if (!getBriefField(brief, field)) return field;
+    if (!answered.has(field)) return field;
   }
   return null;
 }
 
 export function InceptionChat({ brief, onBriefUpdate }: Props) {
+  const [answered, setAnswered] = useState<Set<Field>>(() => getAnsweredFields(brief));
   const [messages, setMessages] = useState<ChatMessage[]>(() => briefToMessages(brief));
   const [input, setInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -100,6 +125,8 @@ export function InceptionChat({ brief, onBriefUpdate }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const a = getAnsweredFields(brief);
+    setAnswered(a);
     setMessages(briefToMessages(brief));
   }, [brief.id]);
 
@@ -111,7 +138,7 @@ export function InceptionChat({ brief, onBriefUpdate }: Props) {
     inputRef.current?.focus();
   }, [brief.id]);
 
-  const nextField = getNextField(brief);
+  const nextField = getNextField(brief, answered);
   const allFilled = nextField === null;
   const canPropose = allFilled && brief.status === 'intake';
 
@@ -133,7 +160,12 @@ export function InceptionChat({ brief, onBriefUpdate }: Props) {
       const updated = await api.update(brief.id, patch as Parameters<typeof api.update>[1]);
       onBriefUpdate(updated);
 
-      const newNextField = getNextField(updated);
+      // Mark this field answered locally — prevents re-asking skipped fields.
+      const newAnswered = new Set(answered);
+      newAnswered.add(nextField);
+      setAnswered(newAnswered);
+
+      const newNextField = getNextField(updated, newAnswered);
       if (newNextField) {
         setMessages(prev => [...prev, { role: 'assistant', content: QUESTIONS[newNextField] }]);
       } else {
