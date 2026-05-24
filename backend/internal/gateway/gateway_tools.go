@@ -915,11 +915,31 @@ func (gw *Gateway) loadProvidersFromDB() {
 	if gw.providerStore == nil {
 		return
 	}
+	keyStore := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
+
 	// 1. Load explicitly configured providers
 	configs, err := gw.providerStore.ListWithKeys(context.Background(), defaultTenant)
 	if err != nil {
 		slog.Warn("failed to load providers from DB", "error", err)
 	} else if len(configs) > 0 {
+		// Backfill API key from provider_keys for any provider whose key is stored
+		// in the key pool (provider_keys) rather than inline in the providers row.
+		for i, cfg := range configs {
+			if cfg.APIKey != "" {
+				continue
+			}
+			// cfg.ID is the providers.id UUID — look up verified key by that UUID
+			keys, _ := keyStore.ListKeys(context.Background(), defaultTenant, cfg.ID)
+			for _, k := range keys {
+				if k.Status == "verified" {
+					decrypted, _ := providers.DecryptKeyBytes(k.EncryptedKey(), gw.cfg.Auth.EncryptionKey)
+					if decrypted != "" {
+						configs[i].APIKey = decrypted
+						break
+					}
+				}
+			}
+		}
 		if err := gw.providerReg.LoadAll(configs); err != nil {
 			slog.Warn("failed to register DB providers", "error", err)
 		}
@@ -929,7 +949,6 @@ func (gw *Gateway) loadProvidersFromDB() {
 	// 2. Auto-register providers from provider_keys (Models Hub keys)
 	// If a user added Gemini keys via Models Hub but no providers row exists,
 	// create a provider instance using the catalog defaults + first available key.
-	keyStore := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
 	catalog := providers.ProviderCatalog()
 	for _, manifest := range catalog {
 		// Skip if already registered

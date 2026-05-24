@@ -70,7 +70,7 @@ func CleanToolSchemas(providerName string, tools []ToolDefinition) []ToolDefinit
 	profile := profileForProvider(providerName)
 	cleaned := make([]ToolDefinition, len(tools))
 	for i, t := range tools {
-		useStrict := profile.StrictToolMode && !IsMultiActionSchema(t.Function.Parameters)
+		useStrict := profile.StrictToolMode && !IsMultiActionSchema(t.Function.Parameters) && !hasFreeFormObjectProp(t.Function.Parameters)
 		var strictPtr *bool
 		if useStrict { tr := true; strictPtr = &tr }
 		toolProfile := profile
@@ -267,6 +267,24 @@ func applyStrictMode(schema map[string]any, depth int) map[string]any {
 	schema["required"] = allRequired
 	schema["additionalProperties"] = false
 	return schema
+}
+
+// hasFreeFormObjectProp returns true if any property in schema is an object with no
+// properties defined (i.e. a free-form dict). Such tools cannot satisfy OpenAI strict mode
+// because strict mode forbids both additionalProperties and open-ended object types.
+func hasFreeFormObjectProp(schema map[string]any) bool {
+	props, ok := schema["properties"].(map[string]any)
+	if !ok { return false }
+	for _, v := range props {
+		pm, ok := v.(map[string]any)
+		if !ok { continue }
+		if typ, _ := pm["type"].(string); typ == "object" {
+			if _, hasProps := pm["properties"]; !hasProps {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // IsMultiActionSchema detects tools with action enum (2+ values) — exempt from strict mode.
