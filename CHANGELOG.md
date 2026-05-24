@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.37-alpha — 2026-05-24
+
+### Fixed
+- **Providers with key-pool keys work correctly after restart** — API keys stored via Models Hub were not being loaded on startup, causing agents to 401 until the key was manually re-verified. Keys are now backfilled from the key pool at startup and after every verify.
+- **OpenAI no longer rejects tools with free-form parameters** — tools like `execute_action` that accept an open key-value `params` object were being sent with strict mode enabled, causing a schema validation error. These tools are now correctly excluded from strict mode.
+
+---
+
 ## v0.1.36-alpha — 2026-05-24
 
 ### Fixed
