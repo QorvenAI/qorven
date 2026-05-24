@@ -291,6 +291,7 @@ description: What this app does
 author: qorven
 permissions:
   - db_write
+  - tool_register   # REQUIRED for tool scripts to execute — without this, tools load with 0 entries
 migrations_dir: migrations
 frontend:
   bundle: ui/frontend/bundle.js   # output path after build
@@ -317,6 +318,20 @@ Key points:
 - Use ` + "`window.__QorvenUI`" + ` for React (do NOT import React — it's provided by the host)
 - Fetch data via ` + "`request('/apps/my-app/tools/tool_name', {method:'POST', body: JSON.stringify({args:{}})})`" + `
 - ` + "`request()`" + ` is available on ` + "`window.__QorvenApp.request`" + ` — auto-attaches auth token
+- **` + "`request()`" + ` returns a ` + "`tools.Result`" + ` object, NOT a fetch Response. Shape:**
+  ` + "```ts" + `
+  { content: string, user_content: string, is_error: boolean }
+  // content = raw stdout from your tool script
+  // Parse it: const data = JSON.parse(result.content)
+  // Do NOT call result.ok, result.json() — those don't exist
+  ` + "```" + `
+- **Available ` + "`window.__QorvenUI`" + ` components** (only use these — do NOT invent names):
+  ` + "`Button`" + `, ` + "`Card`" + `, ` + "`Input`" + `, ` + "`Checkbox`" + `, ` + "`Badge`" + `, ` + "`Avatar`" + `, ` + "`Separator`" + `, ` + "`Skeleton`" + `,
+  ` + "`Select`" + `, ` + "`Tabs`" + `, ` + "`Dialog`" + `, ` + "`Drawer`" + `, ` + "`Sheet`" + `, ` + "`Popover`" + `, ` + "`Tooltip`" + `, ` + "`Switch`" + `,
+  ` + "`Progress`" + `, ` + "`Textarea`" + `, ` + "`Label`" + `, ` + "`Toggle`" + `, ` + "`Table`" + `, ` + "`TableBody`" + `, ` + "`TableCell`" + `,
+  ` + "`TableHead`" + `, ` + "`TableHeader`" + `, ` + "`TableRow`" + `, ` + "`Text`" + `, ` + "`Accordion`" + `, ` + "`Collapsible`" + `
+  Plus ` + "`icons`" + ` (all Lucide icons) and ` + "`cn`" + ` (classnames helper).
+  There is NO ` + "`List`" + `, ` + "`ListItem`" + `, ` + "`IconButton`" + ` — use plain ` + "`<div>`" + ` rows with ` + "`icons.Trash2`" + ` etc instead.
 
 **Tool scripts — tools/*.sh:**
 Shell scripts that run server-side. Args arrive via STDIN as JSON (NOT as $1).
@@ -368,6 +383,16 @@ curl -s -X POST http://localhost:4200/v1/apps/{id}/reload -H "Authorization: Bea
 10. install_app: path=/home/ec2-user/.qorven/apps/{slug}
 
 **CRITICAL: Do NOT call scaffold_app** — it creates a Go Wasm plugin (wrong format). Use write_file and exec to create files directly per the structure above.
+
+**When editing an existing app:**
+ALWAYS use your tools directly. Never respond with code blocks for the user to run manually.
+1. exec: cat ~/.qorven/apps/{slug}/app.yaml  (read current state first)
+2. exec: cat the relevant tool scripts / bundle.js
+3. write_file: overwrite each file that needs changing
+4. If schema changed: exec the ALTER TABLE or new migration via psql
+5. If bundle changed: cd ~/.qorven/apps/{slug}/ui && npm run build
+6. exec: reload the app via the API (see Reload above)
+This is autonomous work — execute every step yourself with tools.
 `, ctx)
 }
 

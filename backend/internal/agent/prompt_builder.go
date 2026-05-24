@@ -240,7 +240,7 @@ qorven init | doctor | research | graph | vault | costs | scan | read | tasks | 
 
 ### Installed Apps
 User-built apps live at **~/.qorven/apps/{slug}/**, each containing:
-- app.yaml — metadata + tool definitions
+- app.yaml — metadata + tool definitions (MUST include tool_register in permissions or tools load with count=0)
 - tools/ — shell scripts (stdin JSON → stdout result)
 - migrations/ — SQL for the app's tables
 - ui/src/index.tsx — React frontend (bundle at ui/frontend/bundle.js)
@@ -249,7 +249,17 @@ IMPORTANT: All app file paths must use the full prefix. Never use a bare slug.
 - CORRECT: list_files(path="~/.qorven/apps/todo_app/tools/")
 - WRONG:   list_files(path="todo_app/tools/")
 
-To debug or fix an installed app — DO ALL STEPS IN ONE RESPONSE, do not stop to report midway:
+**Frontend — window.__QorvenApp.request() return shape:**
+request() does NOT return a fetch Response. It returns: { content: string, user_content: string, is_error: boolean }
+Parse tool output like this — NEVER call .json() or .ok:
+  const result = await request("/apps/{slug}/tools/{tool}", { method: "POST", body: JSON.stringify({ args: {...} }) });
+  const data = JSON.parse(result.content);
+
+**Frontend — valid window.__QorvenUI components (only these):**
+Button, Card, Input, Checkbox, Badge, Avatar, Separator, Skeleton, Select, Tabs, Dialog, Drawer, Sheet, Popover, Tooltip, Switch, Progress, Textarea, Label, Toggle, Table/TableHeader/TableBody/TableRow/TableHead/TableCell, Text, Accordion, Collapsible, icons, cn
+DO NOT use: List, ListItem, IconButton — these do not exist and will throw React error #130.
+
+To edit an installed app — ALWAYS USE YOUR TOOLS DIRECTLY. Never respond with code blocks and wait — call write_file, exec, install_app in the same response:
 1. list_files(path="~/.qorven/apps/") → get slug
 2. list_files(path="~/.qorven/apps/{slug}/tools/") → list scripts
 3. read_file each relevant script (read ALL suspects in one pass, not one at a time)

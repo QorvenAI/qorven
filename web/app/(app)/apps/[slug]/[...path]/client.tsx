@@ -23,7 +23,8 @@ export default function AppDynamicClient() {
     pathStr = parts.slice(1).join('/') || pathStr;
   }
 
-  const app = entries[slug];
+  // Bundle IDs may use underscores while URL slugs use hyphens — try both.
+  const app = entries[slug] ?? entries[slug.replace(/-/g, '_')];
   if (!app) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
