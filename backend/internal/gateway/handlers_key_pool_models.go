@@ -94,6 +94,9 @@ func (gw *Gateway) handleVerifyProviderKey(w http.ResponseWriter, r *http.Reques
 	keyID := chi.URLParam(r, "key_id")
 	store := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
 	store.VerifyKey(r.Context(), keyID)
+	// Reload provider registry so the newly-verified key is live immediately
+	// without requiring a server restart.
+	go gw.loadProvidersFromDB()
 	json.NewEncoder(w).Encode(map[string]string{"status": "verified"})
 }
 
