@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.36-alpha — 2026-05-24
+
+### Fixed
+- **New provider keys take effect immediately** — verifying an API key now reloads the provider registry on the spot. Previously the key was only picked up after a server restart.
+
+---
+
 ## v0.1.35-alpha — 2026-05-24
 
 ### Fixed
