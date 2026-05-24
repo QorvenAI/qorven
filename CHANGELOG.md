@@ -4,6 +4,30 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.32-alpha — 2026-05-24
+
+### Added
+- **Full-featured coding workbench at `/code`** — the editor now has a diff viewer, live preview iframe, slash command palette, and `@filename` file references. Every feature you'd expect from a modern AI coding tool is now built in.
+- **Diff viewer** — see exactly what the agent changed, line by line, with syntax-highlighted add/remove display. Switch between Code, Diff, and Preview with the three-way toggle.
+- **Slash command palette** — type `/` to open a searchable list of commands: `/new`, `/undo`, `/export`, `/add`, `/plan`, `/diff`, `/init`, `/clear`.
+- **@filename file references** — type `@` in chat to fuzzy-search your project files. The selected file's content is automatically included in the message so Prime has the right context.
+- **Live preview iframe** — see your running app inside the IDE with desktop, tablet, and mobile device frame options.
+- **Deploy panel** — when a build is complete, one-click buttons link to Vercel, Netlify, and GitHub Pages deployments, or download the project as a ZIP.
+- **Qorven App Builder mode** — building a Qorven plugin? A dedicated panel shows install status, lets you reload the app after edits, and lets you test individual tools without leaving the IDE.
+- **Context panel** — pin any files above the chat input with `/add`. Their content is prepended to every message automatically.
+- **Multi-session tabs** — open multiple projects simultaneously. Switching tabs preserves the full state of each session — messages, editor tabs, build log, and diff view all restore instantly.
+- **Checkpoints and undo** — the backend creates git-backed restore points before agent writes. `/undo` rolls back the last change without losing history.
+- **AGENTS.md initialiser** — `/init` sends Prime to read the codebase and write a project context file. A green confirmation chip appears once the file is written, so Prime knows your project from the very next session.
+- **Async agent delegation** — Prime dispatches build work to background agents and stays responsive immediately. Background jobs show a live status chip that turns green on completion.
+- **Plan mode** — toggle Plan/Build in the sidebar header. In Plan mode, Prime reasons and proposes changes without writing any files. Flip to Build to execute.
+- **Token and cost display** — cumulative token usage appears below the chat input. The counter turns amber above 40K tokens and red above 80K.
+
+### Improved
+- **Smarter context compaction** — four-tier model-aware compaction with configurable thresholds reduces context window pressure on long sessions.
+- **Intent classification** — agent tools are now gated per request type, so a "what does this do?" question never accidentally triggers file writes.
+
+---
+
 ## v0.1.31-alpha — 2026-05-23
 
 ### Added
