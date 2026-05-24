@@ -5,12 +5,16 @@
 package gateway
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -681,6 +685,62 @@ func (gw *Gateway) handleWriteProjectFile(w http.ResponseWriter, r *http.Request
 func last(path string) string {
 	parts := strings.Split(path, "/")
 	return parts[len(parts)-1]
+}
+
+// handleArchiveProject streams a ZIP of all project files (excluding .git, node_modules, vendor).
+// GET /v1/projects/{id}/archive
+func (gw *Gateway) handleArchiveProject(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	if workspace == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project has no workspace path"})
+		return
+	}
+
+	skipDirs := map[string]bool{
+		".git": true, "node_modules": true, "vendor": true,
+		".next": true, "dist": true, "__pycache__": true,
+	}
+
+	filename := project.Name + ".zip"
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	_ = filepath.WalkDir(workspace, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if d.IsDir() && skipDirs[d.Name()] {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(workspace, path)
+		fw, err := zw.Create(rel)
+		if err != nil {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		_, _ = io.Copy(fw, f)
+		return nil
+	})
 }
 
 // Ensure unused imports don't break compilation

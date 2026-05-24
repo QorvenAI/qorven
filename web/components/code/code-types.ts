@@ -13,6 +13,7 @@ export interface ChatMsg {
   content: string;
   streaming?: boolean;
   tools?: { name: string; args?: string; result?: string }[];
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
 }
 
 export interface CodeProject {
@@ -20,6 +21,7 @@ export interface CodeProject {
   tasks: any[]; notes: string;
   build_phase?: string; build_room_id?: string; build_plan?: string;
   display_name?: string; preview_url?: string;
+  project_type?: string; // 'qorven_app' | 'standard'
 }
 
 export interface BuildEntry {

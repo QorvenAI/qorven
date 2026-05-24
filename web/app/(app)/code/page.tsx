@@ -38,7 +38,14 @@ import { EditorTabBar } from '@/components/code/editor-tab-bar';
 import { CodeEditor } from '@/components/code/code-editor';
 import { TerminalPane } from '@/components/code/terminal-pane';
 import { BuildLog } from '@/components/code/build-log';
+import { DiffViewer } from '@/components/code/diff-viewer';
+import { EditorViewToggle } from '@/components/code/editor-view-toggle';
+import { PreviewPanel } from '@/components/code/preview-panel';
+import { AppBuilderPanel } from '@/components/code/app-builder-panel';
+import { DeployPanel } from '@/components/code/deploy-panel';
 import { CodeChatSidebar } from '@/components/code/code-chat-sidebar';
+import { SessionTabBar, type SessionEntry } from '@/components/code/session-tab-bar';
+import type { SlashCommand } from '@/components/code/slash-command-palette';
 import type { FileNode, FileTab, ChatMsg, CodeProject, BuildEntry } from '@/components/code/code-types';
 
 async function apiFetch(endpoint: string, options?: RequestInit) {
@@ -72,6 +79,32 @@ export default function CodePage() {
   const activeCodeTab = (searchParams.get('tab') as CodeTabId) || 'editor';
 
   const [activeProject, setActiveProject] = useState<CodeProject | null>(null);
+
+  // ── Multi-session state ──────────────────────────────────────────────────────
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
+
+  // Snapshot type — captures all per-project state for save/restore on tab switch
+  type SessionSnapshot = {
+    tree: FileNode[]; tabs: FileTab[]; activeTab: string; changes: any[];
+    messages: ChatMsg[]; projectPath: string; buildLog: BuildEntry[];
+    buildRunning: boolean; buildPhase: string; buildPlan: any; buildPlanEdited: any;
+    previewUrl: string; buildPrUrl: string; buildStartTime: number;
+    buildSummary: { files: number; agents: number; prUrl?: string; previewUrl?: string; elapsed?: string } | null; agentStatus: Record<string, 'working' | 'done' | 'error'>;
+    editorView: 'code' | 'diff' | 'preview' | 'app'; planMode: boolean;
+    pendingDiffs: Map<string, { original: string; modified: string }>;
+    contextFiles: string[]; initChipVisible: boolean;
+  };
+  const SESSION_DEFAULT_MESSAGES: ChatMsg[] = [{ role: 'assistant', content: "Hey! I'm Prime Coder. Describe your project and I'll build it, or open an existing one from the sidebar." }];
+  const sessionCacheRef = useRef<Map<string, SessionSnapshot>>(new Map());
+  // Declared here (before state vars) so the render-time assignment below is valid.
+  const snapshotRef = useRef<() => SessionSnapshot>(() => ({
+    tree: [], tabs: [], activeTab: '', changes: [], messages: SESSION_DEFAULT_MESSAGES,
+    projectPath: '', buildLog: [], buildRunning: false, buildPhase: '', buildPlan: null,
+    buildPlanEdited: null, previewUrl: '', buildPrUrl: '', buildStartTime: 0,
+    buildSummary: null, agentStatus: {}, editorView: 'code', planMode: false,
+    pendingDiffs: new Map(), contextFiles: [], initChipVisible: false,
+  }));
+  // ── End multi-session state ──────────────────────────────────────────────────
 
   const codeTabBar = useMemo(() => (
     <nav className="flex items-stretch gap-0">
@@ -122,6 +155,12 @@ export default function CodePage() {
   const [buildSummary, setBuildSummary] = useState<{ files: number; agents: number; prUrl?: string; previewUrl?: string; elapsed?: string } | null>(null);
   const [agentStatus, setAgentStatus] = useState<Record<string, 'working' | 'done' | 'error'>>({});
   const [codeThinkingLevel, setCodeThinkingLevel] = useState<'off' | 'medium' | 'high'>('off');
+  const [editorView, setEditorView] = useState<'code' | 'diff' | 'preview' | 'app'>('code');
+  const [planMode, setPlanMode] = useState(false);
+  const [pendingDiffs, setPendingDiffs] = useState<Map<string, { original: string; modified: string }>>(new Map());
+  const [contextFiles, setContextFiles] = useState<string[]>([]);
+  const [addContextOpen, setAddContextOpen] = useState(false);
+  const [initChipVisible, setInitChipVisible] = useState(false);
   // Mirror refs kept in sync with the 4 state values that parseSSEStream reads
   // inside an async callback where closure-captured state would be stale.
   const buildStartTimeRef = useRef<number>(0);
@@ -136,11 +175,22 @@ export default function CodePage() {
   // of whether the build succeeded or failed.
   const rtHubCleanupRef = useRef<(() => void) | null>(null);
 
+  // Keep snapshotRef.current in sync with all current per-session state so switchProject
+  // can save a snapshot at any time. Plain assignment in render (not useEffect) so it
+  // always captures the latest closure values.
+  snapshotRef.current = () => ({
+    tree, tabs, activeTab, changes, messages, projectPath, buildLog,
+    buildRunning, buildPhase, buildPlan, buildPlanEdited, previewUrl, buildPrUrl,
+    buildStartTime, buildSummary, agentStatus, editorView, planMode, pendingDiffs,
+    contextFiles, initChipVisible,
+  });
+
   // Wrapped setters that keep the mirror refs current so parseSSEStream /
   // subscribeToRtHub can read the latest values without stale closure issues.
   const setPreviewUrlSync = useCallback((url: string) => {
     previewUrlRef.current = url;
     setPreviewUrl(url);
+    if (url) setEditorView('preview');
   }, []);
   const setBuildPrUrlSync = useCallback((url: string) => {
     buildPrUrlRef.current = url;
@@ -257,15 +307,59 @@ export default function CodePage() {
     } catch {}
   }, [setStoreTree, setStoreProjectPath]);
 
-  const switchProject = useCallback((p: CodeProject) => {
-    setActiveProject(p); setProjectPath(p.path);
-    setCodeProjectName(p.name); sessionId.current = p.session_id;
+  const restoreSnapshot = useCallback((snap: SessionSnapshot) => {
+    setTree(snap.tree); setTabs(snap.tabs); setActiveTab(snap.activeTab);
+    setChanges(snap.changes); setMessages(snap.messages); setProjectPath(snap.projectPath);
+    setBuildLog(snap.buildLog); setBuildRunning(snap.buildRunning);
+    setBuildPhase(snap.buildPhase); setBuildPlan(snap.buildPlan);
+    setBuildPlanEdited(snap.buildPlanEdited);
+    setPreviewUrlSync(snap.previewUrl); setBuildPrUrlSync(snap.buildPrUrl);
+    setBuildStartTimeSync(snap.buildStartTime); setBuildSummary(snap.buildSummary);
+    setAgentStatus(snap.agentStatus); agentStatusRef.current = snap.agentStatus;
+    setEditorView(snap.editorView); setPlanMode(snap.planMode);
+    setPendingDiffs(snap.pendingDiffs); setContextFiles(snap.contextFiles);
+    setInitChipVisible(snap.initChipVisible);
+    previewUrlRef.current = snap.previewUrl;
+    buildPrUrlRef.current = snap.buildPrUrl;
+    buildStartTimeRef.current = snap.buildStartTime;
+  }, [setPreviewUrlSync, setBuildPrUrlSync, setBuildStartTimeSync]);
+
+  const switchProject = useCallback((p: CodeProject, { fromSession = false } = {}) => {
+    // Save current state into cache before switching
+    if (activeProject?.id) {
+      sessionCacheRef.current.set(activeProject.id, snapshotRef.current());
+    }
+
+    const cached = sessionCacheRef.current.get(p.id);
+
+    setActiveProject(p); setCodeProjectName(p.name);
+    sessionId.current = p.session_id;
     setStoreActiveProjectId(p.id);
-    setMessages([{ role: 'assistant', content: `Switched to **${p.name}**. The workspace is at \`${p.path}\`.` }]);
-    setTabs([]); setActiveTab(''); setChanges([]);
-    setBuildLog([]); setBuildRunning(false);
-    loadProjectTree(p.path, p.id);
-  }, [loadProjectTree, setCodeProjectName, setStoreActiveProjectId]);
+
+    // Register this project as an open session if not already
+    setSessions(prev => {
+      if (prev.some(s => s.id === p.id)) return prev;
+      return [...prev, { id: p.id, project: p, hasActivity: false }];
+    });
+
+    if (cached) {
+      // Restore full previous state for this project
+      restoreSnapshot(cached);
+      setStoreTree(cached.tree);
+      setStoreProjectPath(cached.projectPath);
+    } else {
+      // Fresh session for this project
+      setMessages([{ role: 'assistant', content: `Switched to **${p.name}**. The workspace is at \`${p.path}\`.` }]);
+      setTabs([]); setActiveTab(''); setChanges([]);
+      setBuildLog([]); setBuildRunning(false); setBuildPhase('');
+      setContextFiles([]); setInitChipVisible(false); setPlanMode(false);
+      setPendingDiffs(new Map()); setBuildSummary(null); setAgentStatus({});
+      agentStatusRef.current = {};
+      setPreviewUrlSync(''); setBuildPrUrlSync(''); setBuildStartTimeSync(0);
+      setProjectPath(p.path); setTree([]); setEditorView(p.project_type === 'qorven_app' ? 'app' : 'code');
+      loadProjectTree(p.path, p.id);
+    }
+  }, [activeProject?.id, loadProjectTree, setCodeProjectName, setStoreActiveProjectId, setStoreTree, setStoreProjectPath, restoreSnapshot, setPreviewUrlSync, setBuildPrUrlSync, setBuildStartTimeSync]);
 
   useEffect(() => {
     if (storeActiveProjectId && storeActiveProjectId !== activeProject?.id) {
@@ -611,6 +705,25 @@ export default function CodePage() {
     const abort = new AbortController();
     chatAbortRef.current = abort;
 
+    // Prepend context file contents if any are pinned
+    let fullMsg = msg;
+    if (contextFiles.length > 0 && activeProject?.id) {
+      const pid = useStore.getState().codeActiveProjectId || activeProject.id;
+      const blocks = await Promise.all(
+        contextFiles.map(async (path: string) => {
+          try {
+            const res = await apiFetch(`/projects/${pid}/file?path=${encodeURIComponent(path)}`);
+            if (!res.ok) return '';
+            const d = await res.json().catch(() => null) as { content?: string } | null;
+            const content = d?.content ?? '';
+            return `<context_file path="${path}">\n${content}\n</context_file>`;
+          } catch { return ''; }
+        })
+      );
+      const contextBlock = blocks.filter(Boolean).join('\n');
+      if (contextBlock) fullMsg = `${contextBlock}\n\n${msg}`;
+    }
+
     setMessages(prev => [...prev, { role: 'user', content: msg }]);
     setIsLoading(true);
     setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true, tools: [] }]);
@@ -619,7 +732,7 @@ export default function CodePage() {
       const sid = await getSessionId();
       const res = await apiFetch('/chat/completions', {
         method: 'POST',
-        body: JSON.stringify({ agent_id: 'prime', message: msg, session_id: sid, stream: true, ...(codeThinkingLevel !== 'off' ? { thinking_level: codeThinkingLevel } : {}) }),
+        body: JSON.stringify({ agent_id: 'prime', message: fullMsg, session_id: sid, stream: true, ...(codeThinkingLevel !== 'off' ? { thinking_level: codeThinkingLevel } : {}), ...(planMode ? { plan_mode: true } : {}) }),
         signal: abort.signal,
       });
 
@@ -631,6 +744,7 @@ export default function CodePage() {
       let fullContent = '';
       const toolCalls: ChatMsg['tools'] = [];
       let currentTool: { name: string; args: string } | null = null;
+      let usageData: ChatMsg['usage'] | undefined;
 
       while (!abort.signal.aborted) {
         const { done, value } = await reader.read();
@@ -648,6 +762,9 @@ export default function CodePage() {
                 return copy;
               });
             }
+            if (evt.type === 'usage' && evt.data) {
+              usageData = { input_tokens: evt.data.input_tokens ?? 0, output_tokens: evt.data.output_tokens ?? 0, total_tokens: evt.data.total_tokens ?? 0 };
+            }
             if (evt.type === 'tool_start') {
               const name = evt.data?.name || evt.data?.tool || '';
               currentTool = { name, args: JSON.stringify(evt.data?.input || {}) };
@@ -661,8 +778,21 @@ export default function CodePage() {
                 const input = evt.data?.input || {};
                 const fp = input.path || input.file_path || '';
                 if (fp) {
+                  // Detect AGENTS.md creation for /init success chip
+                  if (/AGENTS\.md$/.test(fp)) setInitChipVisible(true);
                   setChanges(prev => prev.some(c => c.path === fp) ? prev : [...prev, { path: fp, action: 'modified' }]);
                   setTimeout(() => loadProjectTree(activeProject?.path || projectPath), 500);
+                  // Track diff: original from open tab or empty, modified from write_file content
+                  const newContent = input.content || input.new_string || '';
+                  if (newContent) {
+                    setPendingDiffs(prev => {
+                      const m = new Map(prev);
+                      const existing = m.get(fp);
+                      m.set(fp, { original: existing?.modified ?? '', modified: newContent });
+                      return m;
+                    });
+                    setEditorView('diff');
+                  }
                 }
               }
               // exec tool output is streamed directly inside the PTY terminal.
@@ -678,7 +808,7 @@ export default function CodePage() {
 
       setMessages(prev => {
         const copy = [...prev];
-        copy[copy.length - 1] = { ...copy[copy.length - 1]!, content: fullContent, streaming: false, tools: toolCalls };
+        copy[copy.length - 1] = { ...copy[copy.length - 1]!, content: fullContent, streaming: false, tools: toolCalls, usage: usageData };
         return copy;
       });
     } catch (err: any) {
@@ -692,12 +822,60 @@ export default function CodePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeProject, projectPath, loadProjectTree, codeThinkingLevel]);
+  }, [activeProject, projectPath, loadProjectTree, codeThinkingLevel, planMode]);
 
 
   const currentTab = tabs.find(t => t.path === activeTab);
-  const allFiles = useCallback((nodes: FileNode[]): FileNode[] =>
-    nodes.flatMap(n => n.type === 'file' ? [n] : allFiles(n.children ?? [])), []);
+  const flatFiles = useCallback((nodes: FileNode[]): FileNode[] =>
+    nodes.flatMap(n => n.type === 'file' ? [n] : flatFiles(n.children ?? [])), []);
+
+  // Export session as Markdown
+  const exportSession = useCallback(() => {
+    const lines = [
+      `# Prime Coder Session — ${activeProject?.name ?? 'Untitled'}`,
+      `**Date:** ${new Date().toISOString()}`,
+      `**Project:** ${activeProject?.path ?? ''}`,
+      '', '---', '',
+      ...messages.map(m => `**${m.role === 'user' ? 'You' : 'Prime'}:**\n${m.content}`),
+    ];
+    const blob = new Blob([lines.join('\n\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `prime-session-${Date.now()}.md`; a.click();
+    URL.revokeObjectURL(url);
+  }, [messages, activeProject]);
+
+  const handleSlashCommand = useCallback((cmd: SlashCommand) => {
+    switch (cmd.id) {
+      case 'new':
+        setActiveProject(null);
+        setMessages([{ role: 'assistant', content: "Hey! I'm Prime Coder. Describe your project and I'll build it, or open an existing one from the sidebar." }]);
+        break;
+      case 'clear':
+        setBuildLog([]);
+        break;
+      case 'export':
+        exportSession();
+        break;
+      case 'diff':
+        // TODO T3: set editorView to 'diff'
+        break;
+      case 'plan':
+        setPlanMode(prev => !prev);
+        break;
+      case 'init':
+        handleChat('/init Generate an AGENTS.md file for this project with instructions for future AI agents');
+        break;
+      case 'undo':
+        handleChat('/undo Revert the last change you made');
+        break;
+      case 'add':
+        // Trigger via onAddContext — sidebar focuses its @-picker
+        setAddContextOpen(true);
+        break;
+    }
+  }, [exportSession, handleChat]);
+
 
   if (activeCodeTab !== 'editor') {
     return (
@@ -727,19 +905,78 @@ export default function CodePage() {
 
   return (
     <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
-      <div className="flex flex-1 overflow-hidden">
+
+      {/* Multi-session tab bar — only visible when 2+ sessions are open */}
+      {sessions.length > 1 && (
+        <SessionTabBar
+          sessions={sessions}
+          activeSessionId={activeProject?.id ?? null}
+          onSwitch={id => {
+            const p = projects.find(p => p.id === id);
+            if (p) switchProject(p);
+          }}
+          onClose={id => {
+            setSessions(prev => prev.filter(s => s.id !== id));
+            sessionCacheRef.current.delete(id);
+            // If closing the active session, switch to last remaining
+            if (id === activeProject?.id) {
+              const remaining = sessions.filter(s => s.id !== id);
+              const next = remaining[remaining.length - 1];
+              if (next) {
+                const p = projects.find(p => p.id === next.id);
+                if (p) switchProject(p);
+              } else {
+                setActiveProject(null);
+              }
+            }
+          }}
+          onNew={() => setActiveProject(null)}
+        />
+      )}
+
+      <div className="flex flex-1 overflow-hidden min-h-0">
         <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
-          <EditorTabBar tabs={tabs} active={activeTab} onSelect={setActiveTab} onClose={closeTab} />
+          <div className="flex shrink-0 items-center gap-2 border-b border-border">
+            <div className="flex-1 overflow-hidden">
+              <EditorTabBar tabs={tabs} active={activeTab} onSelect={setActiveTab} onClose={closeTab} />
+            </div>
+            <div className="shrink-0 px-2">
+              <EditorViewToggle
+                view={editorView}
+                onChange={setEditorView}
+                hasDiffs={pendingDiffs.size > 0}
+                hasPreview={!!previewUrl}
+                isQorvenApp={activeProject?.project_type === 'qorven_app'}
+              />
+            </div>
+          </div>
 
-          {currentTab && (
+          {currentTab && editorView === 'code' && (
             <div className="flex h-[22px] shrink-0 items-center border-b border-border bg-muted/20 px-3 gap-2">
               <span className="text-xs text-muted-foreground font-mono truncate">{currentTab.path}</span>
             </div>
           )}
 
           <div className={cn('flex-1 overflow-hidden min-h-0', termOpen && 'border-b border-border')}>
-            {currentTab ? (
+            {editorView === 'app' ? (
+              <AppBuilderPanel
+                projectId={activeProject.id}
+                projectPath={activeProject.path}
+                className="h-full"
+              />
+            ) : editorView === 'diff' ? (
+              (() => {
+                const entries = [...pendingDiffs.entries()];
+                const diffEntry = entries[entries.length - 1];
+                if (!diffEntry) return (
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No pending changes</div>
+                );
+                return <DiffViewer path={diffEntry[0]} original={diffEntry[1].original} modified={diffEntry[1].modified} className="h-full" />;
+              })()
+            ) : editorView === 'preview' ? (
+              <PreviewPanel url={previewUrl} className="h-full" />
+            ) : currentTab ? (
               <CodeEditor content={currentTab.content} path={currentTab.path}
                 onChange={value => setTabs(prev => prev.map(t =>
                   t.path === currentTab.path ? { ...t, content: value, dirty: true } : t
@@ -823,11 +1060,22 @@ export default function CodePage() {
             messages={messages}
             isLoading={isLoading}
             onSend={handleChat}
+            onCommand={handleSlashCommand}
+            files={flatFiles(tree)}
+            planMode={planMode}
+            onPlanModeChange={setPlanMode}
             thinkingLevel={codeThinkingLevel}
             onThinkingLevelChange={setCodeThinkingLevel}
             onDelegated={(projectId) => {
               router.push(`/code?tab=build${projectId ? `&project=${projectId}` : ''}`);
             }}
+            contextFiles={contextFiles}
+            onRemoveContextFile={(path) => setContextFiles(prev => prev.filter(f => f !== path))}
+            addContextOpen={addContextOpen}
+            onAddContextFile={(path) => setContextFiles(prev => prev.includes(path) ? prev : [...prev, path])}
+            onAddContextClose={() => setAddContextOpen(false)}
+            showInitChip={initChipVisible}
+            onDismissInitChip={() => setInitChipVisible(false)}
           />
         </aside>
 
@@ -961,6 +1209,19 @@ export default function CodePage() {
                   className="rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground hover:bg-primary/90">Open</button>
               </div>
             )}
+
+            {/* Deploy panel — shown when build is done */}
+            {buildPhase === 'done' && activeProject && (
+              <div className="shrink-0 border-t border-border px-3 py-3">
+                <p className="mb-2 text-xs font-semibold text-muted-foreground">Deploy</p>
+                <DeployPanel
+                  projectId={activeProject.id}
+                  projectName={activeProject.name}
+                  githubOwner={(activeProject as any).github_owner}
+                  githubRepo={(activeProject as any).github_repo}
+                />
+              </div>
+            )}
           </div>
         </BottomDrawerTab>
 
@@ -1003,7 +1264,7 @@ export default function CodePage() {
               <div className="max-h-80 overflow-y-auto py-1">
                 {(() => {
                   const q = quickQuery.toLowerCase();
-                  const files = allFiles(tree);
+                  const files = flatFiles(tree);
                   const matches = q ? files.filter(n => n.path.toLowerCase().includes(q)) : files.slice(0, 20);
                   if (matches.length === 0) return <p className="py-8 text-center text-sm text-muted-foreground">No files match</p>;
                   return matches.map(n => (

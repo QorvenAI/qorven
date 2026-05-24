@@ -150,6 +150,11 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/projects/{id}/tree", gw.handleProjectTree)
 		r.Get("/projects/{id}/file", gw.handleReadProjectFile)
 		r.Put("/projects/{id}/file", gw.handleWriteProjectFile)
+		r.Post("/projects/{id}/checkpoint", gw.handleProjectCheckpoint)
+		r.Post("/projects/{id}/undo", gw.handleProjectUndo)
+		r.Get("/projects/{id}/checkpoints", gw.handleProjectCheckpoints)
+		r.Post("/projects/{id}/restore", gw.handleProjectRestore)
+		r.Get("/projects/{id}/archive", gw.handleArchiveProject)
 
 		// Providers
 		r.Get("/providers/auth-profiles", gw.handleProviderAuthProfiles)
