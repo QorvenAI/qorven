@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.35-alpha — 2026-05-24
+
+### Fixed
+- **Agents no longer loop when a model returns an empty response** — if the model produces no text after using tools, the loop retries up to twice then moves on instead of spinning through all available iterations.
+- **Agent self-correction now works for installed apps** — agents are told the exact file path layout for user-built apps (`~/.qorven/apps/{slug}/`) so they can locate, read, and fix app scripts without being given the path manually.
+
+---
+
 ## v0.1.34-alpha — 2026-05-24
 
 ### Fixed
