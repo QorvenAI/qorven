@@ -4,6 +4,15 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.33-alpha — 2026-05-24
+
+### Fixed
+- **App Builder tasks now unblock and run in sequence** — when an agent completes a task, the next task in the chain is now correctly queued. Previously, tasks blocked by a dependency would stay stuck in `todo` indefinitely even after the blocker finished.
+- **Intake wizard no longer repeats the tech stack question** — typing `skip` now correctly advances past the question without re-asking it.
+- **Task cards are always clickable** — every task in the Build panel expands on click to show its status, agent progress, and changed files. Previously, tasks with no output yet showed nothing on click.
+
+---
+
 ## v0.1.32-alpha — 2026-05-24
 
 ### Added
