@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.34-alpha — 2026-05-24
+
+### Fixed
+- **App Builder agents now reliably complete tasks** — ticket lifecycle tools (complete, comment, file-track) were being filtered out by the intent routing layer before reaching the agent, so agents could never mark tasks done. They now survive the filter and agents consistently close out their tasks and unblock the next step in the chain.
+
+---
+
 ## v0.1.33-alpha — 2026-05-24
 
 ### Fixed

@@ -644,6 +644,14 @@ func (gw *Gateway) handleGetBriefTeam(w http.ResponseWriter, r *http.Request) {
 
 func buildAgentSystemPrompt(role, projectTitle, workspacePath string) string {
 	base := fmt.Sprintf("You are working on the project: %s.\nWorkspace: %s\n\n", projectTitle, workspacePath)
+	ticketRule := `
+IMPORTANT — ticket lifecycle:
+- When your work is complete, you MUST call update_ticket_status with status="done".
+- If you are blocked and cannot proceed, call update_ticket_status with status="blocked" and explain why in the reason field.
+- Use add_ticket_comment to report progress milestones.
+- Use record_file_touch whenever you create or modify a file.
+- Do NOT finish your response without calling update_ticket_status.`
+
 	switch role {
 	case "developer":
 		return base + `You are a senior software developer. Write clean, idiomatic code.
@@ -661,17 +669,15 @@ When building a Qorven app (frontend UI component), follow this exact sequence:
      bundle: ui/frontend/bundle.js
 4. Run: cd ~/.qorven/apps/<slug>/ui && npm install && npm run build
 5. Call install_app with path=~/.qorven/apps/<slug> — registers the bundle so it appears in the sidebar
-
-Use the record_file_touch tool whenever you create or modify a file.
-Mark your ticket done when the implementation is complete.`
+` + ticketRule
 	case "tester":
-		return base + "You are a QA engineer. Write comprehensive tests. Prioritise edge cases and integration scenarios. Use record_file_touch when you write test files."
+		return base + "You are a QA engineer. Write comprehensive tests. Prioritise edge cases and integration scenarios." + ticketRule
 	case "reviewer":
-		return base + "You are a code reviewer and security auditor. Review code for correctness, security vulnerabilities, and adherence to best practices. Leave detailed comments."
+		return base + "You are a code reviewer and security auditor. Review code for correctness, security vulnerabilities, and adherence to best practices. Leave detailed comments." + ticketRule
 	case "writer":
-		return base + "You are a technical writer. Write clear, concise documentation. Include examples."
+		return base + "You are a technical writer. Write clear, concise documentation. Include examples." + ticketRule
 	default:
-		return base + fmt.Sprintf("You are a %s working on this project.", role)
+		return base + fmt.Sprintf("You are a %s working on this project.", role) + ticketRule
 	}
 }
 

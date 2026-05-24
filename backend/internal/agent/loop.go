@@ -654,6 +654,33 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	if req.UserMessage != "" && req.Channel != "self_build" && req.Channel != "cron" && req.Channel != "task" {
 		toolDefs = GateToolsByIntent(toolDefs, chatIntent)
 		slog.Info("agent.loop.tools_gated", "agent", ag.AgentKey, "intent", chatIntent, "tools", len(toolDefs))
+		// Re-append per-request extra tools stripped by the intent gate.
+		// ExtraTools (e.g. heartbeat ticket lifecycle tools) are curated by the
+		// caller — they must always reach the LLM regardless of intent.
+		if len(req.ExtraTools) > 0 {
+			extraNames := make(map[string]bool, len(req.ExtraTools))
+			for _, t := range req.ExtraTools {
+				extraNames[t.Name()] = true
+			}
+			// Drop any gated def that will be shadowed before re-appending.
+			kept := toolDefs[:0]
+			for _, td := range toolDefs {
+				if !extraNames[td.Function.Name] {
+					kept = append(kept, td)
+				}
+			}
+			toolDefs = kept
+			for _, t := range req.ExtraTools {
+				toolDefs = append(toolDefs, providers.ToolDefinition{
+					Type: "function",
+					Function: providers.ToolFunctionSchema{
+						Name:        t.Name(),
+						Description: t.Description(),
+						Parameters:  t.Parameters(),
+					},
+				})
+			}
+		}
 	}
 	// Plan mode: restrict to read-only tools
 	if req.Mode == "plan" {

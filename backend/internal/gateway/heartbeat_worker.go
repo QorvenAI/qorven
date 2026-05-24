@@ -211,7 +211,7 @@ Priority: %s
 Description: %s
 %s
 
-Work on this ticket. Use update_ticket_status when done or blocked. Use add_ticket_comment to report your progress. Use record_file_touch whenever you create or modify a file.`,
+Complete this ticket now. When done, you MUST call update_ticket_status(status="done"). If blocked, call update_ticket_status(status="blocked", reason="..."). Use add_ticket_comment to report progress. Use record_file_touch for every file you create or modify. Do not end your turn without calling update_ticket_status.`,
 		t.Slug, t.Title, t.Status, t.Priority, t.Description, commentBlock)
 
 	return msg, &t, nil
