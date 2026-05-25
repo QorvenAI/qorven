@@ -398,14 +398,19 @@ NAME=$(echo "$INPUT" | python3 -c "import sys,json; d=json.loads(sys.stdin.read(
 # then use psql $QORVEN_DB_DSN to query the DB
 ` + "```" + `
 
-**When building a Qorven app, follow these steps exactly:**
+**⚠ CRITICAL — READ BEFORE BUILDING:**
+Node.js and npm are NOT installed on this system. Do NOT run npm install, npm run build, or any npm/node command — they will always fail. The UI bundle MUST be written as a plain JavaScript file directly using write_file. No build step. No package.json. No vite.config.ts.
+
+**When building a Qorven app, follow these 6 steps exactly — no deviations:**
 1. exec: ` + "`mkdir -p {appsDir}/{slug}/migrations {appsDir}/{slug}/tools {appsDir}/{slug}/ui/frontend`" + `
 2. write_file: ` + "`{appsDir}/{slug}/app.yaml`" + ` (follow the format above exactly)
-3. write_file: ` + "`{appsDir}/{slug}/migrations/001_create_tables.up.sql`" + ` (CREATE TABLE IF NOT EXISTS ... — MUST end in .up.sql)
+3. write_file: ` + "`{appsDir}/{slug}/migrations/001_create_tables.up.sql`" + ` (CREATE TABLE IF NOT EXISTS ...)
 4. write_file: each tool script in ` + "`{appsDir}/{slug}/tools/`" + ` (read args from stdin: INPUT=$(cat))
-   exec: ` + "`chmod +x {appsDir}/{slug}/tools/*.sh`" + `  ← REQUIRED or tools fail with Permission denied
-5. write_file: ` + "`{appsDir}/{slug}/ui/frontend/bundle.js`" + ` — plain JavaScript IIFE following the bundle pattern above (NO npm, NO build step)
+   exec: ` + "`chmod +x {appsDir}/{slug}/tools/*.sh`" + `
+5. write_file: ` + "`{appsDir}/{slug}/ui/frontend/bundle.js`" + ` — copy the plain JS IIFE pattern above, substituting your app's logic. This IS the complete UI. Do NOT try to build it.
 6. install_app: path=` + "`{appsDir}/{slug}`" + `
+
+After step 6 completes, tell the user the app is ready.
 
 **CRITICAL: Do NOT call scaffold_app** — it creates a Go Wasm plugin (wrong format). Use write_file and exec to create files directly per the structure above.
 

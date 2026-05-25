@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.47-alpha — 2026-05-25
+
+### Fixed
+- **App builder: explicit npm prohibition** — Gemini was reverting to npm even with the plain-JS bundle pattern in the prompt. Added a prominent warning block at the top of the build instructions: "Node.js and npm are NOT installed — do NOT run npm install or npm run build."
+
+---
+
 ## v0.1.46-alpha — 2026-05-25
 
 ### Fixed
