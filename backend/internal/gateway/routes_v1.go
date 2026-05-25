@@ -795,6 +795,13 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Patch("/social/media/{id}", gw.handleUpdateSocialMediaAsset)
 		r.Delete("/social/media/{id}", gw.handleDeleteSocialMedia)
 
+		// Social Webhooks
+		r.Get("/social/webhooks", gw.handleListSocialWebhooks)
+		r.Post("/social/webhooks", gw.handleCreateSocialWebhook)
+		r.Delete("/social/webhooks/{id}", gw.handleDeleteSocialWebhook)
+		r.Patch("/social/webhooks/{id}/toggle", gw.handleToggleSocialWebhook)
+		r.Post("/social/webhooks/{id}/test", gw.handleTestSocialWebhook)
+
 		// Social Content Sets
 		r.Get("/social/sets", gw.handleListSocialSets)
 		r.Post("/social/sets", gw.handleCreateSocialSet)

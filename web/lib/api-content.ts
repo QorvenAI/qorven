@@ -311,6 +311,13 @@ export const social = {
   deleteMedia: (id: string) => request<void>(`/social/media/${id}`, { method: 'DELETE' }),
   updateMedia: (id: string, body: { alt_text?: string; tags?: string[] }) =>
     request<any>(`/social/media/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  listWebhooks: (agentId?: string) =>
+    request<any[]>(`/social/webhooks${agentId ? `?agent_id=${agentId}` : ''}`),
+  createWebhook: (body: { name?: string; url: string; secret?: string; events?: string[]; agent_id?: string }) =>
+    request<any>('/social/webhooks', { method: 'POST', body: JSON.stringify(body) }),
+  deleteWebhook: (id: string) => request<void>(`/social/webhooks/${id}`, { method: 'DELETE' }),
+  toggleWebhook: (id: string) => request<any>(`/social/webhooks/${id}/toggle`, { method: 'PATCH' }),
+  testWebhook: (id: string) => request<any>(`/social/webhooks/${id}/test`, { method: 'POST' }),
   listSets: (agentId?: string) => {
     const p = new URLSearchParams();
     if (agentId) p.set('agent_id', agentId);

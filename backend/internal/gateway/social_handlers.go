@@ -124,6 +124,24 @@ func (gw *Gateway) handlePublishSocialPost(w http.ResponseWriter, r *http.Reques
 	}
 	// Emit in-app notification
 	gw.emitSocialPublishNotification(post.AgentID, allOK, results)
+
+	// Fire outgoing webhooks (async, best-effort)
+	user := userFromContext(r.Context())
+	if user != nil {
+		event := "post.published"
+		if !allOK {
+			event = "post.failed"
+		}
+		webhookPayload := SocialWebhookPayload{
+			Event:     event,
+			Timestamp: time.Now(),
+			AgentID:   post.AgentID,
+			Post:      map[string]any{"id": postID, "content": post.Content, "platforms": post.Platforms},
+			Results:   results,
+		}
+		gw.fireSocialWebhooks(r.Context(), post.AgentID, user.TenantID, event, webhookPayload)
+	}
+
 	writeJSON(w, 200, map[string]any{"results": results})
 }
 

@@ -11,7 +11,7 @@ import {
   Image as ImageIcon, Upload, Search, Grid, Video, Copy,
   BarChart2, TrendingUp, Eye, Heart, Share2, MessageCircle,
   CornerDownRight, CheckCheck,
-  BookOpen, Edit3, Settings, Pause, Play,
+  BookOpen, Edit3, Settings, Pause, Play, Webhook, PlayCircle,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
@@ -382,6 +382,7 @@ export default function SocialPage() {
           {tab === 'media'     && <MediaTab agentId={agentFilter} />}
           {tab === 'analytics' && <AnalyticsTab agentId={agentFilter} />}
           {tab === 'sets'      && <SetsTab agentId={agentFilter} />}
+          {tab === 'webhooks'  && <WebhooksTab agentId={agentFilter} />}
         </div>
       </div>
     </ErrorBoundary>
@@ -2336,6 +2337,179 @@ function SetsTab({ agentId }: { agentId: string }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Webhooks Tab ─────────────────────────────────────────────────────────────
+
+const WEBHOOK_EVENTS = [
+  { id: 'post.published', label: 'Post published' },
+  { id: 'post.failed',    label: 'Post failed' },
+  { id: 'post.scheduled', label: 'Post scheduled' },
+  { id: 'post.deleted',   label: 'Post deleted' },
+];
+
+function WebhooksTab({ agentId }: { agentId: string }) {
+  const [webhooks, setWebhooks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', url: '', secret: '', events: ['post.published', 'post.failed'] });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await socialApi.listWebhooks(agentId || undefined);
+      setWebhooks(data ?? []);
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function create() {
+    if (!form.url.trim()) { toast.error('URL required'); return; }
+    if (!form.url.startsWith('http')) { toast.error('URL must start with http/https'); return; }
+    try {
+      await socialApi.createWebhook({ ...form, agent_id: agentId || undefined });
+      setShowAdd(false);
+      setForm({ name: '', url: '', secret: '', events: ['post.published', 'post.failed'] });
+      await load();
+      toast.success('Webhook created');
+    } catch { toast.error('Failed to create webhook'); }
+  }
+
+  async function del(id: string) {
+    await socialApi.deleteWebhook(id);
+    setWebhooks(prev => prev.filter(w => w.id !== id));
+  }
+
+  async function toggle(id: string) {
+    await socialApi.toggleWebhook(id);
+    setWebhooks(prev => prev.map(w => w.id === id ? { ...w, active: !w.active } : w));
+  }
+
+  async function test(id: string) {
+    setTesting(id);
+    try {
+      await socialApi.testWebhook(id);
+      toast.success('Test ping delivered');
+    } catch { toast.error('Delivery failed — check the URL'); }
+    finally { setTesting(null); }
+  }
+
+  const toggleEvent = (ev: string) =>
+    setForm(f => ({ ...f, events: f.events.includes(ev) ? f.events.filter(e => e !== ev) : [...f.events, ev] }));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Receive a POST request when social events happen. Compatible with N8N, Make, Zapier, and any HTTP endpoint.
+        </p>
+        {!showAdd && (
+          <button onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 cursor-pointer shrink-0">
+            <Plus className="h-3.5 w-3.5" /> Add Webhook
+          </button>
+        )}
+      </div>
+
+      {showAdd && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Name (optional)</label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. N8N workflow trigger"
+                className="qr-input" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Endpoint URL *</label>
+              <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
+                placeholder="https://n8n.example.com/webhook/…"
+                className="qr-input font-mono" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">
+              Signing secret <span className="text-muted-foreground/60">(optional — adds X-Qorven-Signature header)</span>
+            </label>
+            <input value={form.secret} onChange={e => setForm(f => ({ ...f, secret: e.target.value }))}
+              type="password" placeholder="your-webhook-secret"
+              className="qr-input font-mono" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1.5">Trigger on</label>
+            <div className="flex flex-wrap gap-2">
+              {WEBHOOK_EVENTS.map(ev => (
+                <button key={ev.id} onClick={() => toggleEvent(ev.id)}
+                  className={cn(
+                    'text-xs px-2.5 py-1 rounded-full border transition-colors cursor-pointer',
+                    form.events.includes(ev.id)
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
+                  )}>
+                  {ev.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={create}
+              className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
+              <Webhook className="h-3.5 w-3.5" /> Create
+            </button>
+            <button onClick={() => setShowAdd(false)}
+              className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      ) : webhooks.length === 0 ? (
+        <EmptyState icon={Webhook} title="No webhooks" description="Add a webhook to push social events to N8N, Make, Zapier, or any HTTP endpoint." />
+      ) : (
+        <div className="space-y-2">
+          {webhooks.map(wh => (
+            <div key={wh.id} className={cn(
+              'rounded-xl border bg-card px-4 py-3 flex items-center gap-3',
+              wh.active ? 'border-border' : 'border-border opacity-60',
+            )}>
+              <div className={cn('h-2 w-2 rounded-full shrink-0', wh.active ? 'bg-emerald-400' : 'bg-muted-foreground')} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{wh.name || wh.url}</p>
+                {wh.name && <p className="text-xs text-muted-foreground font-mono truncate">{wh.url}</p>}
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(wh.events ?? []).map((ev: string) => (
+                    <span key={ev} className="text-xs bg-muted px-1.5 py-0.5 rounded">{ev}</span>
+                  ))}
+                </div>
+              </div>
+              <button onClick={() => test(wh.id)} disabled={testing === wh.id}
+                className="flex items-center gap-1 h-7 px-2 rounded text-xs text-muted-foreground hover:text-primary hover:bg-accent transition-colors cursor-pointer disabled:opacity-50"
+                title="Send test ping">
+                {testing === wh.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
+                Test
+              </button>
+              <button onClick={() => toggle(wh.id)}
+                className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                title={wh.active ? 'Pause' : 'Resume'}>
+                {wh.active ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              </button>
+              <button onClick={() => del(wh.id)}
+                className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

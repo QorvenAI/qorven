@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiBase } from '@/lib/api-url';
-import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon, BarChart2, BookOpen } from 'lucide-react';
+import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon, BarChart2, BookOpen, Webhook } from 'lucide-react';
 import { SidebarMenuItem } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
@@ -33,6 +33,7 @@ export function SocialSidebar() {
     { label: 'Media', sub: '/social?tab=media', icon: ImageIcon },
     { label: 'Analytics', sub: '/social?tab=analytics', icon: BarChart2 },
     { label: 'Sets', sub: '/social?tab=sets', icon: BookOpen },
+    { label: 'Webhooks', sub: '/social?tab=webhooks', icon: Webhook },
   ];
 
   return (
