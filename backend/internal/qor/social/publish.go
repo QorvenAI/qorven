@@ -52,6 +52,22 @@ func (p *Publisher) Publish(ctx context.Context, platform Platform, token, conte
 		return p.publishMastodon(ctx, token, content)
 	case PlatformPinterest:
 		return p.publishPinterest(ctx, token, content, mediaURLs)
+	case PlatformDiscord:
+		return p.publishDiscord(ctx, token, content)
+	case PlatformSlack:
+		return p.publishSlack(ctx, token, content)
+	case PlatformDevTo:
+		return p.publishDevTo(ctx, token, content)
+	case PlatformMedium:
+		return p.publishMedium(ctx, token, content)
+	case PlatformWordPress:
+		return p.publishWordPress(ctx, token, content)
+	case PlatformGoogleMyBiz:
+		return p.publishGoogleMyBusiness(ctx, token, content)
+	case PlatformNostr:
+		return p.publishNostr(ctx, token, content)
+	case PlatformTelegramBot:
+		return p.publishTelegramBot(ctx, token, content)
 	default:
 		return &PostResult{Platform: platform, Success: false, Error: fmt.Sprintf("platform %s not supported yet", platform)}, nil
 	}
@@ -403,6 +419,284 @@ func (p *Publisher) publishPinterest(ctx context.Context, token, content string,
 	json.NewDecoder(resp.Body).Decode(&result)
 	slog.Info("social.publish.pinterest", "id", result.ID)
 	return &PostResult{Platform: PlatformPinterest, Success: true, PostID: result.ID}, nil
+}
+
+// ─── Discord (Webhook) ────────────────────────────────────────────────────────
+// Token format: webhook URL stored directly as access_token.
+func (p *Publisher) publishDiscord(ctx context.Context, token, content string) (*PostResult, error) {
+	// Token is the webhook URL for the channel
+	webhookURL := token
+	if !strings.HasPrefix(webhookURL, "https://discord.com/api/webhooks/") {
+		return &PostResult{Platform: PlatformDiscord, Success: false, Error: "invalid Discord webhook URL — connect via OAuth or paste webhook URL directly"}, nil
+	}
+	body, _ := json.Marshal(map[string]any{"content": content})
+	req, _ := http.NewRequestWithContext(ctx, "POST", webhookURL+"?wait=true", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformDiscord, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &PostResult{Platform: PlatformDiscord, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+	}
+	var result struct{ ID string `json:"id"` }
+	json.NewDecoder(resp.Body).Decode(&result)
+	slog.Info("social.publish.discord", "id", result.ID)
+	return &PostResult{Platform: PlatformDiscord, Success: true, PostID: result.ID}, nil
+}
+
+// ─── Slack (Incoming Webhook) ────────────────────────────────────────────────
+// Token is the incoming webhook URL obtained after OAuth.
+func (p *Publisher) publishSlack(ctx context.Context, token, content string) (*PostResult, error) {
+	body, _ := json.Marshal(map[string]any{"text": content})
+	req, _ := http.NewRequestWithContext(ctx, "POST", token, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformSlack, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if string(respBody) != "ok" && resp.StatusCode != http.StatusOK {
+		return &PostResult{Platform: PlatformSlack, Success: false, Error: fmt.Sprintf("Slack error: %s", string(respBody))}, nil
+	}
+	slog.Info("social.publish.slack")
+	return &PostResult{Platform: PlatformSlack, Success: true}, nil
+}
+
+// ─── Dev.to (Forem API) ───────────────────────────────────────────────────────
+// Token is the API key from dev.to Settings → Extensions.
+func (p *Publisher) publishDevTo(ctx context.Context, token, content string) (*PostResult, error) {
+	// Treat content as the article body; first line becomes title
+	lines := strings.SplitN(content, "\n", 2)
+	title := strings.TrimPrefix(strings.TrimSpace(lines[0]), "# ")
+	body := ""
+	if len(lines) > 1 {
+		body = strings.TrimSpace(lines[1])
+	}
+	if body == "" {
+		body = content
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"article": map[string]any{
+			"title":     title,
+			"body_markdown": body,
+			"published": true,
+		},
+	})
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://dev.to/api/articles", bytes.NewReader(payload))
+	req.Header.Set("api-key", token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformDevTo, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &PostResult{Platform: PlatformDevTo, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+	}
+	var result struct {
+		ID  int    `json:"id"`
+		URL string `json:"url"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	slog.Info("social.publish.devto", "id", result.ID)
+	return &PostResult{Platform: PlatformDevTo, Success: true, PostID: fmt.Sprint(result.ID), PostURL: result.URL}, nil
+}
+
+// ─── Medium ────────────────────────────────────────────────────────────────────
+// Token is an integration token or OAuth access token.
+func (p *Publisher) publishMedium(ctx context.Context, token, content string) (*PostResult, error) {
+	// Get user ID first
+	userReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.medium.com/v1/me", nil)
+	userReq.Header.Set("Authorization", "Bearer "+token)
+	userResp, err := p.client.Do(userReq)
+	if err != nil {
+		return &PostResult{Platform: PlatformMedium, Success: false, Error: err.Error()}, nil
+	}
+	defer userResp.Body.Close()
+	var userResult struct {
+		Data struct{ ID string `json:"id"` } `json:"data"`
+	}
+	json.NewDecoder(userResp.Body).Decode(&userResult)
+	if userResult.Data.ID == "" {
+		return &PostResult{Platform: PlatformMedium, Success: false, Error: "could not fetch Medium user ID"}, nil
+	}
+
+	// First line is title, rest is content
+	lines := strings.SplitN(content, "\n", 2)
+	title := strings.TrimSpace(lines[0])
+	body := ""
+	if len(lines) > 1 {
+		body = strings.TrimSpace(lines[1])
+	}
+	if body == "" {
+		body = content
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"title":         title,
+		"contentFormat": "markdown",
+		"content":       body,
+		"publishStatus": "public",
+	})
+	url := fmt.Sprintf("https://api.medium.com/v1/users/%s/posts", userResult.Data.ID)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformMedium, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &PostResult{Platform: PlatformMedium, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+	}
+	var result struct {
+		Data struct {
+			ID  string `json:"id"`
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	slog.Info("social.publish.medium", "id", result.Data.ID)
+	return &PostResult{Platform: PlatformMedium, Success: true, PostID: result.Data.ID, PostURL: result.Data.URL}, nil
+}
+
+// ─── WordPress (REST API) ─────────────────────────────────────────────────────
+// Token format: "https://site.com|username|application_password"
+func (p *Publisher) publishWordPress(ctx context.Context, token, content string) (*PostResult, error) {
+	parts := strings.SplitN(token, "|", 3)
+	if len(parts) != 3 {
+		return &PostResult{Platform: PlatformWordPress, Success: false, Error: "WordPress token must be site_url|username|app_password"}, nil
+	}
+	siteURL, username, appPassword := strings.TrimRight(parts[0], "/"), parts[1], parts[2]
+
+	lines := strings.SplitN(content, "\n", 2)
+	title := strings.TrimSpace(lines[0])
+	body := ""
+	if len(lines) > 1 {
+		body = strings.TrimSpace(lines[1])
+	}
+	if body == "" {
+		body = content
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"title":   title,
+		"content": body,
+		"status":  "publish",
+	})
+	postURL := siteURL + "/wp-json/wp/v2/posts"
+	req, _ := http.NewRequestWithContext(ctx, "POST", postURL, bytes.NewReader(payload))
+	req.SetBasicAuth(username, appPassword)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformWordPress, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &PostResult{Platform: PlatformWordPress, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+	}
+	var result struct {
+		ID   int    `json:"id"`
+		Link string `json:"link"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	slog.Info("social.publish.wordpress", "id", result.ID)
+	return &PostResult{Platform: PlatformWordPress, Success: true, PostID: fmt.Sprint(result.ID), PostURL: result.Link}, nil
+}
+
+// ─── Google My Business ───────────────────────────────────────────────────────
+// Posts a local post update to Google Business Profile.
+func (p *Publisher) publishGoogleMyBusiness(ctx context.Context, token, content string) (*PostResult, error) {
+	// Requires knowing the location ID — store in integration metadata
+	// For now publish via the local posts API once location is known
+	payload, _ := json.Marshal(map[string]any{
+		"languageCode": "en-US",
+		"summary":      content,
+		"topicType":    "STANDARD",
+	})
+	// Using accounts.locations from Business Profile API
+	req, _ := http.NewRequestWithContext(ctx, "POST",
+		"https://mybusiness.googleapis.com/v4/accounts/-/locations/-/localPosts",
+		bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformGoogleMyBiz, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &PostResult{Platform: PlatformGoogleMyBiz, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+	}
+	var result struct{ Name string `json:"name"` }
+	json.NewDecoder(resp.Body).Decode(&result)
+	slog.Info("social.publish.gmb", "name", result.Name)
+	return &PostResult{Platform: PlatformGoogleMyBiz, Success: true, PostID: result.Name}, nil
+}
+
+// ─── Nostr ────────────────────────────────────────────────────────────────────
+// Publishes a kind-1 note (short text) to default relays using the private key.
+// Token is the nsec or hex private key.
+func (p *Publisher) publishNostr(ctx context.Context, token, content string) (*PostResult, error) {
+	// Basic Nostr event signing via HTTP relay — using nostr.wine as default relay
+	// We use the raw HTTP REST relay interface (NIP-20 compatible relay accepting HTTP POST)
+	// For full Nostr support, a proper nostr library would be used; this is a functional stub.
+	_ = token
+	_ = content
+	// Nostr requires cryptographic signing (secp256k1) which needs an additional library.
+	// Return a graceful not-yet-wired message rather than a panic.
+	return &PostResult{
+		Platform: PlatformNostr,
+		Success:  false,
+		Error:    "Nostr signing requires secp256k1 key — connect a Nostr relay adapter in Settings",
+	}, nil
+}
+
+// ─── Telegram Bot ─────────────────────────────────────────────────────────────
+// Token format: "bot_token:chat_id"
+func (p *Publisher) publishTelegramBot(ctx context.Context, token, content string) (*PostResult, error) {
+	parts := strings.SplitN(token, ":", 2)
+	if len(parts) != 2 {
+		return &PostResult{Platform: PlatformTelegramBot, Success: false, Error: "Telegram token must be bot_token:chat_id"}, nil
+	}
+	botToken, chatID := parts[0], parts[1]
+
+	payload, _ := json.Marshal(map[string]any{
+		"chat_id":    chatID,
+		"text":       content,
+		"parse_mode": "HTML",
+	})
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+	req, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformTelegramBot, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	var result struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			MessageID int `json:"message_id"`
+		} `json:"result"`
+		Description string `json:"description"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if !result.OK {
+		return &PostResult{Platform: PlatformTelegramBot, Success: false, Error: result.Description}, nil
+	}
+	slog.Info("social.publish.telegram", "message_id", result.Result.MessageID)
+	return &PostResult{Platform: PlatformTelegramBot, Success: true, PostID: fmt.Sprint(result.Result.MessageID)}, nil
 }
 
 // PublishToAll publishes a post to all its target platforms.

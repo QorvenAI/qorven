@@ -95,6 +95,43 @@ var socialOAuthDefs = map[string]socialOAuthProvider{
 		Scopes:   []string{"boards:read", "pins:write"},
 		Platform: socialqor.PlatformPinterest,
 	},
+	"reddit": {
+		Name:     "Reddit",
+		AuthURL:  "https://www.reddit.com/api/v1/authorize",
+		TokenURL: "https://www.reddit.com/api/v1/access_token",
+		Scopes:   []string{"identity", "submit", "read"},
+		ExtraParams: map[string]string{"duration": "permanent"},
+		Platform: socialqor.PlatformReddit,
+	},
+	"discord": {
+		Name:     "Discord",
+		AuthURL:  "https://discord.com/api/oauth2/authorize",
+		TokenURL: "https://discord.com/api/oauth2/token",
+		Scopes:   []string{"identify", "bot", "webhook.incoming"},
+		Platform: socialqor.PlatformDiscord,
+	},
+	"slack": {
+		Name:     "Slack",
+		AuthURL:  "https://slack.com/oauth/v2/authorize",
+		TokenURL: "https://slack.com/api/oauth.v2.access",
+		Scopes:   []string{"chat:write", "channels:read", "incoming-webhook"},
+		Platform: socialqor.PlatformSlack,
+	},
+	"medium": {
+		Name:     "Medium",
+		AuthURL:  "https://medium.com/m/oauth/authorize",
+		TokenURL: "https://api.medium.com/v1/tokens",
+		Scopes:   []string{"basicProfile", "publishPost"},
+		Platform: socialqor.PlatformMedium,
+	},
+	"googlemybusiness": {
+		Name:     "Google My Business",
+		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL: "https://oauth2.googleapis.com/token",
+		Scopes:   []string{"https://www.googleapis.com/auth/business.manage"},
+		ExtraParams: map[string]string{"access_type": "offline", "prompt": "consent"},
+		Platform: socialqor.PlatformGoogleMyBiz,
+	},
 }
 
 // socialOAuthCreds returns the client_id and client_secret for a platform.
@@ -417,7 +454,7 @@ func (gw *Gateway) socialFetchAccountInfo(platform, token string) (name, id stri
 			json.NewDecoder(resp.Body).Decode(&r)
 			return r.Name, r.ID
 		}
-	case "youtube":
+	case "youtube", "googlemybusiness":
 		req, _ := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		if resp, err := client.Do(req); err == nil {
@@ -429,6 +466,59 @@ func (gw *Gateway) socialFetchAccountInfo(platform, token string) (name, id stri
 			}
 			json.NewDecoder(resp.Body).Decode(&r)
 			return r.Name, r.ID
+		}
+	case "reddit":
+		req, _ := http.NewRequest("GET", "https://oauth.reddit.com/api/v1/me", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("User-Agent", "Qorven/1.0")
+		if resp, err := client.Do(req); err == nil {
+			defer resp.Body.Close()
+			var r struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}
+			json.NewDecoder(resp.Body).Decode(&r)
+			return "u/" + r.Name, r.ID
+		}
+	case "discord":
+		req, _ := http.NewRequest("GET", "https://discord.com/api/users/@me", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		if resp, err := client.Do(req); err == nil {
+			defer resp.Body.Close()
+			var r struct {
+				ID       string `json:"id"`
+				Username string `json:"username"`
+			}
+			json.NewDecoder(resp.Body).Decode(&r)
+			return r.Username, r.ID
+		}
+	case "slack":
+		req, _ := http.NewRequest("GET", "https://slack.com/api/auth.test", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		if resp, err := client.Do(req); err == nil {
+			defer resp.Body.Close()
+			var r struct {
+				UserID string `json:"user_id"`
+				Team   string `json:"team"`
+				User   string `json:"user"`
+			}
+			json.NewDecoder(resp.Body).Decode(&r)
+			return r.User + " (" + r.Team + ")", r.UserID
+		}
+	case "medium":
+		req, _ := http.NewRequest("GET", "https://api.medium.com/v1/me", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		if resp, err := client.Do(req); err == nil {
+			defer resp.Body.Close()
+			var r struct {
+				Data struct {
+					ID       string `json:"id"`
+					Name     string `json:"name"`
+					Username string `json:"username"`
+				} `json:"data"`
+			}
+			json.NewDecoder(resp.Body).Decode(&r)
+			return "@" + r.Data.Username, r.Data.ID
 		}
 	}
 	return platform + "-account", ""

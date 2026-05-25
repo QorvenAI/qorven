@@ -169,14 +169,19 @@ func (w *TokenRefreshWorker) refresh(ctx context.Context, integ Integration) err
 
 // platformTokenURL maps each OAuth platform to its token refresh endpoint.
 var platformTokenURL = map[Platform]string{
-	PlatformTwitter:   "https://api.twitter.com/2/oauth2/token",
-	PlatformLinkedIn:  "https://www.linkedin.com/oauth/v2/accessToken",
-	PlatformFacebook:  "https://graph.facebook.com/v20.0/oauth/access_token",
-	PlatformInstagram: "https://graph.facebook.com/v20.0/oauth/access_token",
-	PlatformThreads:   "https://graph.threads.net/refresh_access_token",
-	PlatformTikTok:    "https://open.tiktokapis.com/v2/oauth/token/",
-	PlatformYouTube:   "https://oauth2.googleapis.com/token",
-	PlatformPinterest: "https://api.pinterest.com/v5/oauth/token",
+	PlatformTwitter:     "https://api.twitter.com/2/oauth2/token",
+	PlatformLinkedIn:    "https://www.linkedin.com/oauth/v2/accessToken",
+	PlatformFacebook:    "https://graph.facebook.com/v20.0/oauth/access_token",
+	PlatformInstagram:   "https://graph.facebook.com/v20.0/oauth/access_token",
+	PlatformThreads:     "https://graph.threads.net/refresh_access_token",
+	PlatformTikTok:      "https://open.tiktokapis.com/v2/oauth/token/",
+	PlatformYouTube:     "https://oauth2.googleapis.com/token",
+	PlatformPinterest:   "https://api.pinterest.com/v5/oauth/token",
+	PlatformReddit:      "https://www.reddit.com/api/v1/access_token",
+	PlatformDiscord:     "https://discord.com/api/oauth2/token",
+	PlatformSlack:       "https://slack.com/api/oauth.v2.access",
+	PlatformMedium:      "https://api.medium.com/v1/tokens",
+	PlatformGoogleMyBiz: "https://oauth2.googleapis.com/token",
 }
 
 // threadsFallback handles Threads' non-standard refresh which uses GET not POST.

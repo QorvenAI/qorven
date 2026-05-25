@@ -21,16 +21,25 @@ import { toast } from 'sonner';
 // ─── Platform config ──────────────────────────────────────────────────────────
 
 const PLATFORMS = [
-  { id: 'twitter', label: 'X / Twitter', icon: '𝕏', color: 'bg-black text-white', maxChars: 280 },
-  { id: 'linkedin', label: 'LinkedIn', icon: 'in', color: 'bg-blue-700 text-white', maxChars: 3000 },
-  { id: 'facebook', label: 'Facebook', icon: 'f', color: 'bg-blue-600 text-white', maxChars: 63206 },
-  { id: 'instagram', label: 'Instagram', icon: '📸', color: 'bg-gradient-to-br from-purple-600 to-pink-500 text-white', maxChars: 2200 },
-  { id: 'threads', label: 'Threads', icon: '@', color: 'bg-black text-white', maxChars: 500 },
-  { id: 'tiktok', label: 'TikTok', icon: '♪', color: 'bg-black text-white', maxChars: 150 },
-  { id: 'youtube', label: 'YouTube', icon: '▶', color: 'bg-red-600 text-white', maxChars: 5000 },
-  { id: 'bluesky', label: 'Bluesky', icon: '🦋', color: 'bg-sky-500 text-white', maxChars: 300 },
-  { id: 'mastodon', label: 'Mastodon', icon: '🐘', color: 'bg-violet-700 text-white', maxChars: 500 },
-  { id: 'pinterest', label: 'Pinterest', icon: '📌', color: 'bg-red-700 text-white', maxChars: 500 },
+  { id: 'twitter',          label: 'X / Twitter',       icon: '𝕏',  color: 'bg-black text-white',                                          maxChars: 280 },
+  { id: 'linkedin',         label: 'LinkedIn',           icon: 'in', color: 'bg-blue-700 text-white',                                       maxChars: 3000 },
+  { id: 'facebook',         label: 'Facebook',           icon: 'f',  color: 'bg-blue-600 text-white',                                       maxChars: 63206 },
+  { id: 'instagram',        label: 'Instagram',          icon: '📸', color: 'bg-gradient-to-br from-purple-600 to-pink-500 text-white',     maxChars: 2200 },
+  { id: 'threads',          label: 'Threads',            icon: '@',  color: 'bg-black text-white',                                          maxChars: 500 },
+  { id: 'tiktok',           label: 'TikTok',             icon: '♪',  color: 'bg-black text-white',                                          maxChars: 150 },
+  { id: 'youtube',          label: 'YouTube',            icon: '▶',  color: 'bg-red-600 text-white',                                        maxChars: 5000 },
+  { id: 'bluesky',          label: 'Bluesky',            icon: '🦋', color: 'bg-sky-500 text-white',                                        maxChars: 300 },
+  { id: 'mastodon',         label: 'Mastodon',           icon: '🐘', color: 'bg-violet-700 text-white',                                     maxChars: 500 },
+  { id: 'pinterest',        label: 'Pinterest',          icon: '📌', color: 'bg-red-700 text-white',                                        maxChars: 500 },
+  { id: 'reddit',           label: 'Reddit',             icon: '🤖', color: 'bg-orange-600 text-white',                                     maxChars: 40000 },
+  { id: 'discord',          label: 'Discord',            icon: '#',  color: 'bg-indigo-600 text-white',                                     maxChars: 2000 },
+  { id: 'slack',            label: 'Slack',              icon: '⚡', color: 'bg-emerald-600 text-white',                                    maxChars: 40000 },
+  { id: 'devto',            label: 'Dev.to',             icon: 'D',  color: 'bg-gray-900 text-white',                                       maxChars: 65535 },
+  { id: 'medium',           label: 'Medium',             icon: 'M',  color: 'bg-gray-800 text-white',                                       maxChars: 100000 },
+  { id: 'wordpress',        label: 'WordPress',          icon: 'W',  color: 'bg-blue-500 text-white',                                       maxChars: 200000 },
+  { id: 'googlemybusiness', label: 'Google My Business', icon: 'G',  color: 'bg-blue-600 text-white',                                       maxChars: 1500 },
+  { id: 'nostr',            label: 'Nostr',              icon: '⚡', color: 'bg-yellow-500 text-black',                                     maxChars: 2000 },
+  { id: 'telegrambot',      label: 'Telegram Bot',       icon: '✈',  color: 'bg-sky-500 text-white',                                        maxChars: 4096 },
 ];
 
 // Per-platform connection config — drives the connect form fields and instructions
@@ -192,10 +201,126 @@ const PLATFORM_AUTH: Record<string, PlatformAuth> = {
     docsLabel: 'Pinterest Developer Apps ↗',
     warning: 'Pinterest only supports image pins — text-only posts will fail.',
   },
+  reddit: {
+    tokenLabel: 'OAuth Access Token',
+    tokenPlaceholder: '',
+    tokenHint: 'Connect via OAuth to post to Reddit. You\'ll be redirected to Reddit to authorize.',
+    showAccountId: false,
+    docsUrl: 'https://www.reddit.com/prefs/apps',
+    docsLabel: 'Reddit App Preferences ↗',
+  },
+  discord: {
+    tokenLabel: 'Bot Token',
+    tokenPlaceholder: '',
+    tokenHint: 'Connect via OAuth to get a webhook token for posting to a Discord channel.',
+    showAccountId: false,
+    docsUrl: 'https://discord.com/developers/applications',
+    docsLabel: 'Discord Developer Portal ↗',
+  },
+  slack: {
+    tokenLabel: 'OAuth Bot Token',
+    tokenPlaceholder: '',
+    tokenHint: 'Connect via OAuth to post to a Slack workspace channel.',
+    showAccountId: false,
+    docsUrl: 'https://api.slack.com/apps',
+    docsLabel: 'Slack API Apps ↗',
+  },
+  devto: {
+    tokenLabel: 'API Key',
+    tokenPlaceholder: 'your-devto-api-key',
+    tokenHint: 'From dev.to → Settings → Extensions → DEV Community API Keys. Create a new key and paste it here.',
+    showAccountId: false,
+    docsUrl: 'https://dev.to/settings/extensions',
+    docsLabel: 'Dev.to API Keys ↗',
+  },
+  medium: {
+    tokenLabel: 'Integration Token',
+    tokenPlaceholder: '',
+    tokenHint: 'Connect via OAuth or from Medium → Settings → Security and apps → Integration tokens.',
+    showAccountId: false,
+    docsUrl: 'https://medium.com/me/settings',
+    docsLabel: 'Medium Settings ↗',
+  },
+  wordpress: {
+    tokenLabel: 'Application Password',
+    tokenPlaceholder: '',
+    tokenHint: '',
+    showAccountId: false,
+    docsUrl: 'https://developer.wordpress.org/rest-api/using-the-rest-api/authentication/',
+    docsLabel: 'WordPress REST API docs ↗',
+    customFields: [
+      {
+        key: 'wp_url',
+        label: 'WordPress URL',
+        type: 'text',
+        placeholder: 'https://yoursite.wordpress.com',
+        hint: 'Full URL of your WordPress site',
+      },
+      {
+        key: 'wp_user',
+        label: 'Username',
+        type: 'text',
+        placeholder: 'admin',
+      },
+      {
+        key: 'wp_password',
+        label: 'Application Password',
+        type: 'password',
+        placeholder: 'xxxx xxxx xxxx xxxx xxxx xxxx',
+        hint: 'Generate in WordPress Admin → Users → Profile → Application Passwords',
+      },
+    ],
+    buildToken: (e) => `${e.wp_url ?? ''}|${e.wp_user ?? ''}|${e.wp_password ?? ''}`,
+  },
+  googlemybusiness: {
+    tokenLabel: 'OAuth Access Token',
+    tokenPlaceholder: '',
+    tokenHint: 'Connect via OAuth to post updates to your Google Business Profile.',
+    showAccountId: false,
+    docsUrl: 'https://developers.google.com/my-business/content/overview',
+    docsLabel: 'Google My Business API ↗',
+  },
+  nostr: {
+    tokenLabel: 'Private Key (nsec or hex)',
+    tokenPlaceholder: 'nsec1… or 64-char hex',
+    tokenHint: 'Your Nostr private key in nsec (bech32) or raw hex format. This is stored encrypted in Qorven — never shared.',
+    showAccountId: false,
+    docsUrl: 'https://nostr.how/',
+    docsLabel: 'Nostr documentation ↗',
+    warning: 'Your private key grants full control of your Nostr identity. Use a dedicated key for automation.',
+  },
+  telegrambot: {
+    tokenLabel: 'Bot Token',
+    tokenPlaceholder: '',
+    tokenHint: '',
+    showAccountId: false,
+    docsUrl: 'https://core.telegram.org/bots#how-do-i-create-a-bot',
+    docsLabel: 'Telegram BotFather docs ↗',
+    customFields: [
+      {
+        key: 'tg_bot_token',
+        label: 'Bot Token',
+        type: 'password',
+        placeholder: '123456789:AABBcc…',
+        hint: 'From @BotFather on Telegram → /newbot → token',
+      },
+      {
+        key: 'tg_chat_id',
+        label: 'Chat ID',
+        type: 'text',
+        placeholder: '-100123456789 or @channelname',
+        hint: 'Channel/group ID to post to. Use @username for public channels or -100xxxxxxxxx for private ones.',
+      },
+    ],
+    buildToken: (e) => `${e.tg_bot_token ?? ''}:${e.tg_chat_id ?? ''}`,
+  },
 };
 
-// Platforms that support real OAuth flows via the backend
-const OAUTH_PLATFORMS = new Set(['twitter', 'linkedin', 'facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'pinterest']);
+// Platforms that use OAuth 2.0 popup flow via the backend
+const OAUTH_PLATFORMS = new Set([
+  'twitter', 'linkedin', 'facebook', 'instagram', 'threads', 'tiktok',
+  'youtube', 'pinterest', 'reddit', 'discord', 'slack', 'medium', 'googlemybusiness',
+]);
 
 const STATUS_COLORS: Record<string, string> = {
   draft:     'bg-muted text-muted-foreground',
