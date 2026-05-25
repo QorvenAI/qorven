@@ -173,6 +173,82 @@ func jsonUnmarshalInts(data []byte, out *[]int) {
 	json.Unmarshal(data, out) //nolint:errcheck
 }
 
+// FilterAllowedPlatforms returns only the platforms that pass their integration's
+// posting-hour and posting-day restrictions at the given time.
+// skipAll is true when every platform is gated — the caller should defer the post.
+func (s *Store) FilterAllowedPlatforms(ctx context.Context, agentID string, platforms []Platform, at time.Time) (allowed []Platform, skipAll bool) {
+	// Load settings for every integration belonging to this agent
+	rows, err := s.pool.Query(ctx,
+		`SELECT platform, COALESCE(post_hours,'[]'::jsonb), COALESCE(post_days,'[0,1,2,3,4,5,6]'::jsonb), COALESCE(paused,false)
+		 FROM social_integrations WHERE agent_id = $1 AND active = true`, agentID)
+	if err != nil {
+		// If we can't read settings, allow all platforms
+		return platforms, false
+	}
+	defer rows.Close()
+
+	type settings struct {
+		hours  []int
+		days   []int
+		paused bool
+	}
+	byPlatform := map[Platform]*settings{}
+	for rows.Next() {
+		var platform Platform
+		var hoursJSON, daysJSON []byte
+		var paused bool
+		rows.Scan(&platform, &hoursJSON, &daysJSON, &paused)
+		s := &settings{paused: paused}
+		jsonUnmarshalInts(hoursJSON, &s.hours)
+		jsonUnmarshalInts(daysJSON, &s.days)
+		byPlatform[platform] = s
+	}
+
+	hour := at.Hour()             // 0-23
+	day := int(at.Weekday())      // 0=Sun … 6=Sat
+
+	for _, p := range platforms {
+		cfg, ok := byPlatform[p]
+		if !ok {
+			// No integration record found — allow (token-based or no restrictions)
+			allowed = append(allowed, p)
+			continue
+		}
+		if cfg.paused {
+			continue
+		}
+		// Check posting hours (empty = any hour)
+		if len(cfg.hours) > 0 {
+			hourOK := false
+			for _, h := range cfg.hours {
+				if h == hour {
+					hourOK = true
+					break
+				}
+			}
+			if !hourOK {
+				continue
+			}
+		}
+		// Check posting days (empty = any day)
+		if len(cfg.days) > 0 {
+			dayOK := false
+			for _, d := range cfg.days {
+				if d == day {
+					dayOK = true
+					break
+				}
+			}
+			if !dayOK {
+				continue
+			}
+		}
+		allowed = append(allowed, p)
+	}
+
+	return allowed, len(allowed) == 0
+}
+
 func (s *Store) GetIntegrationToken(ctx context.Context, agentID string, platform Platform) (string, string, error) {
 	var access, refresh string
 	err := s.pool.QueryRow(ctx,

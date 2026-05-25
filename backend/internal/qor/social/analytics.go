@@ -249,8 +249,15 @@ func (w *AnalyticsWorker) fetchMetrics(ctx context.Context, platform Platform, t
 		return w.fetchLinkedInMetrics(ctx, token, postID, m)
 	case PlatformFacebook:
 		return w.fetchFacebookMetrics(ctx, token, postID, m)
+	case PlatformReddit:
+		return w.fetchRedditMetrics(ctx, token, postID, m)
+	case PlatformYouTube:
+		return w.fetchYouTubeMetrics(ctx, token, postID, m)
+	case PlatformPinterest:
+		return w.fetchPinterestMetrics(ctx, token, postID, m)
+	case PlatformBluesky:
+		return w.fetchBlueskyMetrics(ctx, token, postID, m)
 	default:
-		// Platform doesn't support metrics polling yet — return zeros
 		return m
 	}
 }
@@ -332,6 +339,129 @@ func (w *AnalyticsWorker) fetchFacebookMetrics(ctx context.Context, token, postI
 		}
 	}
 	return m
+}
+
+// fetchRedditMetrics fetches upvotes and comments for a Reddit post.
+// postID is the full-name (e.g. "t3_abc123"). Token is the OAuth Bearer token.
+func (w *AnalyticsWorker) fetchRedditMetrics(ctx context.Context, token, postID string, m *PostMetrics) *PostMetrics {
+	url := fmt.Sprintf("https://oauth.reddit.com/api/info?id=%s", postID)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil { return m }
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", "Qorven/1.0")
+	resp, err := w.client.Do(req)
+	if err != nil { return m }
+	defer resp.Body.Close()
+	var r struct {
+		Data struct {
+			Children []struct {
+				Data struct {
+					Ups      int64 `json:"ups"`
+					NumComments int64 `json:"num_comments"`
+					Score    int64 `json:"score"`
+				} `json:"data"`
+			} `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&r); err != nil { return m }
+	if len(r.Data.Children) > 0 {
+		child := r.Data.Children[0].Data
+		m.Likes = child.Ups
+		m.Comments = child.NumComments
+		m.Impressions = child.Score
+	}
+	return m
+}
+
+// fetchYouTubeMetrics fetches view count, likes, and comments for a YouTube video.
+// postID is the YouTube video ID. Token is the OAuth Bearer token.
+func (w *AnalyticsWorker) fetchYouTubeMetrics(ctx context.Context, token, postID string, m *PostMetrics) *PostMetrics {
+	url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/videos?part=statistics&id=%s", postID)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil { return m }
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := w.client.Do(req)
+	if err != nil { return m }
+	defer resp.Body.Close()
+	var r struct {
+		Items []struct {
+			Statistics struct {
+				ViewCount    string `json:"viewCount"`
+				LikeCount    string `json:"likeCount"`
+				CommentCount string `json:"commentCount"`
+			} `json:"statistics"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&r); err != nil { return m }
+	if len(r.Items) > 0 {
+		stats := r.Items[0].Statistics
+		m.Impressions = parseStrInt(stats.ViewCount)
+		m.Likes       = parseStrInt(stats.LikeCount)
+		m.Comments    = parseStrInt(stats.CommentCount)
+	}
+	return m
+}
+
+// fetchPinterestMetrics fetches impressions, saves, and clicks for a Pinterest pin.
+// postID is the pin ID. Token is the OAuth Bearer token.
+func (w *AnalyticsWorker) fetchPinterestMetrics(ctx context.Context, token, postID string, m *PostMetrics) *PostMetrics {
+	url := fmt.Sprintf("https://api.pinterest.com/v5/pins/%s/analytics?start_date=%s&end_date=%s&metric_types=IMPRESSION,SAVE,PIN_CLICK",
+		postID,
+		fmt.Sprintf("%d-%02d-%02d", 1970, 1, 1), // Pinterest requires date range; use wide range
+		fmt.Sprintf("%d-%02d-%02d", 2099, 12, 31),
+	)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil { return m }
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := w.client.Do(req)
+	if err != nil { return m }
+	defer resp.Body.Close()
+	var r struct {
+		AllTime struct {
+			Impression int64 `json:"IMPRESSION"`
+			Save       int64 `json:"SAVE"`
+			PinClick   int64 `json:"PIN_CLICK"`
+		} `json:"all_time"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&r); err != nil { return m }
+	m.Impressions = r.AllTime.Impression
+	m.Shares      = r.AllTime.Save
+	m.Clicks      = r.AllTime.PinClick
+	return m
+}
+
+// fetchBlueskyMetrics fetches like and repost counts for a Bluesky post.
+// postID is the AT-URI (e.g. "at://did:plc:abc/app.bsky.feed.post/tid").
+// Token format: "handle:appPassword" — decoded to get the handle for DID lookup.
+func (w *AnalyticsWorker) fetchBlueskyMetrics(ctx context.Context, token, postURI string, m *PostMetrics) *PostMetrics {
+	// Resolve post via getPostThread to get like/repost counts
+	url := fmt.Sprintf("https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread?uri=%s&depth=0", postURI)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil { return m }
+	resp, err := w.client.Do(req)
+	if err != nil { return m }
+	defer resp.Body.Close()
+	var r struct {
+		Thread struct {
+			Post struct {
+				LikeCount   int64 `json:"likeCount"`
+				RepostCount int64 `json:"repostCount"`
+				ReplyCount  int64 `json:"replyCount"`
+			} `json:"post"`
+		} `json:"thread"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&r); err != nil { return m }
+	m.Likes   = r.Thread.Post.LikeCount
+	m.Shares  = r.Thread.Post.RepostCount
+	m.Comments = r.Thread.Post.ReplyCount
+	return m
+}
+
+// parseStrInt converts a numeric string to int64, returning 0 on error.
+func parseStrInt(s string) int64 {
+	var n int64
+	fmt.Sscan(s, &n)
+	return n
 }
 
 // ─── Unused import guard ──────────────────────────────────────────────────────

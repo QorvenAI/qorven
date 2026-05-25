@@ -79,6 +79,20 @@ func (gw *Gateway) handleCreateSocialPost(w http.ResponseWriter, r *http.Request
 	id, err := store.CreatePost(r.Context(), &post)
 	if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
 	post.ID = id
+
+	// Fire post.scheduled webhook if the post is being scheduled
+	if post.Status == socialqor.PostScheduled {
+		user := userFromContext(r.Context())
+		if user != nil {
+			gw.fireSocialWebhooks(r.Context(), post.AgentID, user.TenantID, "post.scheduled", SocialWebhookPayload{
+				Event:     "post.scheduled",
+				Timestamp: time.Now(),
+				AgentID:   post.AgentID,
+				Post:      map[string]any{"id": id, "content": post.Content, "platforms": post.Platforms, "scheduled_at": post.ScheduledAt},
+			})
+		}
+	}
+
 	writeJSON(w, 201, post)
 }
 
@@ -93,7 +107,23 @@ func (gw *Gateway) handleGetSocialPost(w http.ResponseWriter, r *http.Request) {
 func (gw *Gateway) handleDeleteSocialPost(w http.ResponseWriter, r *http.Request) {
 	store := gw.socialStore()
 	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }
-	store.DeletePost(r.Context(), chi.URLParam(r, "id"))
+	postID := chi.URLParam(r, "id")
+	// Capture post info before deletion so webhook payload is meaningful
+	post, _ := store.GetPost(r.Context(), postID)
+	store.DeletePost(r.Context(), postID)
+
+	// Fire post.deleted webhook
+	if post != nil {
+		user := userFromContext(r.Context())
+		if user != nil {
+			gw.fireSocialWebhooks(r.Context(), post.AgentID, user.TenantID, "post.deleted", SocialWebhookPayload{
+				Event:     "post.deleted",
+				Timestamp: time.Now(),
+				AgentID:   post.AgentID,
+				Post:      map[string]any{"id": postID, "content": post.Content, "platforms": post.Platforms},
+			})
+		}
+	}
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 

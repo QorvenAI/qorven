@@ -138,15 +138,32 @@ func (gw *Gateway) runSocialScheduler(store *socialqor.Store) {
 			slog.Warn("social.scheduler.list_error", "error", err)
 			continue
 		}
+		now := time.Now()
 		for _, post := range due {
-			results := publisher.PublishToAll(ctx, store, &post)
+			// Filter out platforms whose integration has posting-hour or posting-day restrictions.
+			// Platforms without a matching integration (e.g. token-based) are always allowed.
+			allowedPlatforms, skipAll := store.FilterAllowedPlatforms(ctx, post.AgentID, post.Platforms, now)
+			if skipAll {
+				// All platforms are outside their allowed window — leave the post scheduled,
+				// it will be picked up again on the next tick when the window opens.
+				slog.Info("social.scheduler.deferred", "post", post.ID, "reason", "outside posting window")
+				continue
+			}
+			publishPost := post
+			publishPost.Platforms = allowedPlatforms
+
+			results := publisher.PublishToAll(ctx, store, &publishPost)
 			allOK := true
+			platformIDs := map[string]string{}
 			for _, r := range results {
 				if !r.Success {
 					allOK = false
 					slog.Warn("social.scheduler.publish_failed", "post", post.ID, "platform", r.Platform, "error", r.Error)
 				} else {
 					slog.Info("social.scheduler.published", "post", post.ID, "platform", r.Platform, "url", r.PostURL)
+					if r.PostID != "" {
+						platformIDs[string(r.Platform)] = r.PostID
+					}
 				}
 			}
 			if allOK {
@@ -154,6 +171,23 @@ func (gw *Gateway) runSocialScheduler(store *socialqor.Store) {
 			} else {
 				store.UpdatePostStatus(ctx, post.ID, socialqor.PostFailed)
 			}
+			if len(platformIDs) > 0 {
+				store.StorePlatformPostIDs(ctx, post.ID, platformIDs)
+			}
+			// In-app notification
+			gw.emitSocialPublishNotification(post.AgentID, allOK, results)
+			// Outgoing webhooks
+			event := "post.published"
+			if !allOK {
+				event = "post.failed"
+			}
+			gw.fireSocialWebhooks(ctx, post.AgentID, "", event, SocialWebhookPayload{
+				Event:     event,
+				Timestamp: now,
+				AgentID:   post.AgentID,
+				Post:      map[string]any{"id": post.ID, "content": post.Content, "platforms": post.Platforms},
+				Results:   results,
+			})
 			// Broadcast to web UI
 			if gw.rtHub != nil {
 				gw.rtHub.Broadcast(realtime.Event{

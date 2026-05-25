@@ -14,6 +14,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	nostr "github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
 // publish.go — Publish posts to social media platforms via their APIs.
@@ -647,19 +650,76 @@ func (p *Publisher) publishGoogleMyBusiness(ctx context.Context, token, content 
 // ─── Nostr ────────────────────────────────────────────────────────────────────
 // Publishes a kind-1 note (short text) to default relays using the private key.
 // Token is the nsec or hex private key.
+// publishNostr publishes a kind-1 text note to Nostr via one or more relays.
+// Token is the hex-encoded private key (nsec or raw hex both accepted).
+// Optionally, relay URLs can be appended after a pipe: "privatekey|wss://relay1,wss://relay2"
 func (p *Publisher) publishNostr(ctx context.Context, token, content string) (*PostResult, error) {
-	// Basic Nostr event signing via HTTP relay — using nostr.wine as default relay
-	// We use the raw HTTP REST relay interface (NIP-20 compatible relay accepting HTTP POST)
-	// For full Nostr support, a proper nostr library would be used; this is a functional stub.
-	_ = token
-	_ = content
-	// Nostr requires cryptographic signing (secp256k1) which needs an additional library.
-	// Return a graceful not-yet-wired message rather than a panic.
-	return &PostResult{
-		Platform: PlatformNostr,
-		Success:  false,
-		Error:    "Nostr signing requires secp256k1 key — connect a Nostr relay adapter in Settings",
-	}, nil
+	privKey := token
+	relays := []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"}
+
+	// Support "privatekey|wss://relay1,wss://relay2" format
+	if idx := strings.Index(token, "|"); idx != -1 {
+		privKey = token[:idx]
+		relayList := strings.Split(token[idx+1:], ",")
+		if len(relayList) > 0 && relayList[0] != "" {
+			relays = relayList
+		}
+	}
+
+	// Decode nsec bech32 to hex if needed
+	if strings.HasPrefix(privKey, "nsec") {
+		_, decoded, err := nip19.Decode(privKey)
+		if err != nil {
+			return &PostResult{Platform: PlatformNostr, Success: false, Error: "invalid nsec key: " + err.Error()}, nil
+		}
+		switch v := decoded.(type) {
+		case []byte:
+			privKey = fmt.Sprintf("%x", v)
+		case string:
+			privKey = v
+		}
+	}
+
+	// Create and sign the event
+	ev := nostr.Event{
+		Kind:      nostr.KindTextNote,
+		Content:   content,
+		CreatedAt: nostr.Timestamp(time.Now().Unix()),
+		Tags:      nostr.Tags{},
+	}
+	pubKey, err := nostr.GetPublicKey(privKey)
+	if err != nil {
+		return &PostResult{Platform: PlatformNostr, Success: false, Error: "invalid private key: " + err.Error()}, nil
+	}
+	ev.PubKey = pubKey
+	if err := ev.Sign(privKey); err != nil {
+		return &PostResult{Platform: PlatformNostr, Success: false, Error: "signing failed: " + err.Error()}, nil
+	}
+
+	// Publish to each relay — succeed if at least one accepts
+	var lastErr string
+	for _, relayURL := range relays {
+		relay, err := nostr.RelayConnect(ctx, relayURL)
+		if err != nil {
+			lastErr = err.Error()
+			continue
+		}
+		publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err = relay.Publish(publishCtx, ev)
+		cancel()
+		relay.Close()
+		if err == nil {
+			return &PostResult{
+				Platform: PlatformNostr,
+				Success:  true,
+				PostID:   ev.ID,
+				PostURL:  fmt.Sprintf("https://snort.social/e/%s", ev.ID),
+			}, nil
+		}
+		lastErr = err.Error()
+	}
+
+	return &PostResult{Platform: PlatformNostr, Success: false, Error: "all relays failed: " + lastErr}, nil
 }
 
 // ─── Telegram Bot ─────────────────────────────────────────────────────────────
