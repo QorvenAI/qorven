@@ -41,6 +41,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/livekit/protocol v1.45.1
 	github.com/livekit/server-sdk-go/v2 v2.16.1
+	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/pion/webrtc/v4 v4.2.11
 	github.com/redis/go-redis/v9 v9.18.0
@@ -163,7 +164,6 @@ require (
 	github.com/nats-io/nats.go v1.50.0 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/nbd-wtf/go-nostr v0.52.3 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
