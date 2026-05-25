@@ -259,11 +259,46 @@ Parse tool output like this — NEVER call .json() or .ok:
 Button, Card, Input, Checkbox, Badge, Avatar, Separator, Skeleton, Select, Tabs, Dialog, Drawer, Sheet, Popover, Tooltip, Switch, Progress, Textarea, Label, Toggle, Table/TableHeader/TableBody/TableRow/TableHead/TableCell, Text, Accordion, Collapsible, icons, cn
 DO NOT use: List, ListItem, IconButton — these do not exist and will throw React error #130.
 
+To CREATE a new app — use write_file + exec + install_app. NEVER call scaffold_app (it builds Go Wasm — wrong format).
+
+Minimal app.yaml (slug must match directory name, tool_register is mandatory):
+  slug: my_app
+  display_name: My App
+  version: "1.0.0"
+  permissions:
+    - tool_register
+  tools:
+    - name: my_tool
+      description: Does something
+      command: ./tools/my_tool.sh
+      parameters:
+        type: object
+        properties:
+          input: {type: string}
+        required: [input]
+  frontend:
+    bundle: ui/frontend/bundle.js
+    pages:
+      - id: home
+        path: home
+        label: Home
+
+Creation sequence (do all in one response — do not stop midway):
+1. write_file(path="~/.qorven/apps/{slug}/app.yaml") with content above
+2. exec("mkdir -p ~/.qorven/apps/{slug}/tools")
+3. write_file each tool script to ~/.qorven/apps/{slug}/tools/{name}.sh
+4. exec("chmod +x ~/.qorven/apps/{slug}/tools/*.sh")
+5. write_file(path="~/.qorven/apps/{slug}/ui/src/index.tsx") — the React IIFE
+6. write_file(path="~/.qorven/apps/{slug}/ui/package.json") and vite.config.ts
+7. exec("cd ~/.qorven/apps/{slug}/ui && npm install && npm run build")
+8. install_app(path="~/.qorven/apps/{slug}") → registers and loads
+9. Report done
+
 To edit an installed app — ALWAYS USE YOUR TOOLS DIRECTLY. Never respond with code blocks and wait — call write_file, exec, install_app in the same response:
 1. list_files(path="~/.qorven/apps/") → get slug
 2. list_files(path="~/.qorven/apps/{slug}/tools/") → list scripts
 3. read_file each relevant script (read ALL suspects in one pass, not one at a time)
-4. write_file to fix the bug
+4. write_file to fix
 5. install_app(path="~/.qorven/apps/{slug}") → reload
 6. Report what you found and fixed`
 }
