@@ -5,6 +5,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -16,6 +17,23 @@ import (
 func (gw *Gateway) socialStore() *socialqor.Store {
 	if gw.db == nil { return nil }
 	return socialqor.NewStore(gw.db.Pool)
+}
+
+// startSocialTokenRefreshWorker launches the background token refresh goroutine.
+func (gw *Gateway) startSocialTokenRefreshWorker(ctx context.Context) {
+	store := gw.socialStore()
+	if store == nil {
+		return
+	}
+	worker := socialqor.NewTokenRefreshWorker(
+		store,
+		gw.encryptIntegrationKey,
+		gw.decryptIntegrationKey,
+		func(platform socialqor.Platform) (string, string) {
+			return gw.socialOAuthCreds(string(platform))
+		},
+	)
+	worker.Start(ctx)
 }
 
 func (gw *Gateway) handleListSocialPosts(w http.ResponseWriter, r *http.Request) {

@@ -163,6 +163,47 @@ func (s *Store) DeleteIntegration(ctx context.Context, integrationID string) err
 	return err
 }
 
+// ListExpiringSoon returns active integrations whose token expires within the given window.
+// Used by the token refresh background worker.
+func (s *Store) ListExpiringSoon(ctx context.Context, within time.Duration) ([]Integration, error) {
+	deadline := time.Now().Add(within)
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, platform, account_name, account_id, access_token, COALESCE(refresh_token,''),
+		 token_expiry, agent_id, active
+		 FROM social_integrations
+		 WHERE active = true AND token_expiry IS NOT NULL AND token_expiry <= $1
+		 ORDER BY token_expiry`, deadline)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Integration{}
+	for rows.Next() {
+		var i Integration
+		rows.Scan(&i.ID, &i.Platform, &i.AccountName, &i.AccountID,
+			&i.AccessToken, &i.RefreshToken, &i.TokenExpiry, &i.AgentID, &i.Active)
+		out = append(out, i)
+	}
+	return out, nil
+}
+
+// UpdateTokens replaces access/refresh tokens and expiry for an integration.
+func (s *Store) UpdateTokens(ctx context.Context, integrationID, accessToken, refreshToken string, expiry *time.Time) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE social_integrations
+		 SET access_token = $1, refresh_token = $2, token_expiry = $3, active = true
+		 WHERE id = $4`,
+		accessToken, refreshToken, expiry, integrationID)
+	return err
+}
+
+// MarkNeedsReconnect sets active=false when token refresh fails.
+func (s *Store) MarkNeedsReconnect(ctx context.Context, integrationID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE social_integrations SET active = false WHERE id = $1`, integrationID)
+	return err
+}
+
 // --- AutoPosts ---
 
 func (s *Store) CreateAutoPost(ctx context.Context, a AutoPost) (string, error) {

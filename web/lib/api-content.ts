@@ -269,6 +269,27 @@ export const social = {
     request<{ entries: any[]; total: number; stats: Record<string, number> }>(
       `/social/calendar${agentId ? `?agent_id=${agentId}` : ''}`
     ),
+
+  // Media library
+  listMedia: (params?: { agentId?: string; q?: string; type?: string; limit?: number; offset?: number }) => {
+    const p = new URLSearchParams();
+    if (params?.agentId) p.set('agent_id', params.agentId);
+    if (params?.q) p.set('q', params.q);
+    if (params?.type) p.set('type', params.type);
+    if (params?.limit) p.set('limit', String(params.limit));
+    if (params?.offset) p.set('offset', String(params.offset));
+    return request<{ assets: any[]; total: number; limit: number; offset: number }>(`/social/media?${p}`);
+  },
+  uploadMedia: (file: File, agentId: string, altText?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('agent_id', agentId);
+    if (altText) fd.append('alt_text', altText);
+    return request<any>('/social/media', { method: 'POST', body: fd });
+  },
+  deleteMedia: (id: string) => request<void>(`/social/media/${id}`, { method: 'DELETE' }),
+  updateMedia: (id: string, body: { alt_text?: string; tags?: string[] }) =>
+    request<any>(`/social/media/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
 // Research

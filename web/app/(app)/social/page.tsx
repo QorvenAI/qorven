@@ -8,6 +8,7 @@ import {
   Megaphone, Calendar, Clock, CheckCircle2, FileText, Users, Zap,
   Plus, Trash2, Send, Loader2, Check, X,
   ChevronLeft, ChevronRight,
+  Image as ImageIcon, Upload, Search, Grid, Video, Copy,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
@@ -31,6 +32,170 @@ const PLATFORMS = [
   { id: 'mastodon', label: 'Mastodon', icon: '🐘', color: 'bg-violet-700 text-white', maxChars: 500 },
   { id: 'pinterest', label: 'Pinterest', icon: '📌', color: 'bg-red-700 text-white', maxChars: 500 },
 ];
+
+// Per-platform connection config — drives the connect form fields and instructions
+type PlatformAuthField = {
+  key: string;          // key into form.extras
+  label: string;
+  type: 'text' | 'password';
+  placeholder: string;
+  defaultValue?: string;
+  optional?: boolean;
+  hint?: string;
+};
+
+type PlatformAuth = {
+  tokenLabel: string;
+  tokenPlaceholder: string;
+  tokenHint: string;
+  accountIdLabel?: string;
+  accountIdPlaceholder?: string;
+  showAccountId: boolean;
+  docsUrl: string;
+  docsLabel: string;
+  warning?: string;
+  // When set, renders these fields instead of the single token input
+  customFields?: PlatformAuthField[];
+  // Combines customFields values into the access_token string sent to backend
+  buildToken?: (extras: Record<string, string>) => string;
+};
+
+const PLATFORM_AUTH: Record<string, PlatformAuth> = {
+  twitter: {
+    tokenLabel: 'Bearer Token (OAuth 2.0)',
+    tokenPlaceholder: 'AAAA…',
+    tokenHint: 'From Twitter Developer Portal → Project → Keys & Tokens → Bearer Token',
+    showAccountId: true,
+    accountIdLabel: 'Twitter User ID',
+    accountIdPlaceholder: '123456789',
+    docsUrl: 'https://developer.twitter.com/en/portal/projects-and-apps',
+    docsLabel: 'Twitter Developer Portal ↗',
+  },
+  linkedin: {
+    tokenLabel: 'Access Token',
+    tokenPlaceholder: 'AQV…',
+    tokenHint: 'From LinkedIn Developer App → Auth → OAuth 2.0 tokens. Requires r_liteprofile + w_member_social scopes.',
+    showAccountId: false,
+    docsUrl: 'https://www.linkedin.com/developers/apps',
+    docsLabel: 'LinkedIn Developer Apps ↗',
+  },
+  facebook: {
+    tokenLabel: 'Page Access Token',
+    tokenPlaceholder: 'EAAn…',
+    tokenHint: 'From Meta Graph API Explorer → select your Page → Generate Access Token.',
+    showAccountId: true,
+    accountIdLabel: 'Facebook Page ID',
+    accountIdPlaceholder: '123456789012345',
+    docsUrl: 'https://developers.facebook.com/tools/explorer',
+    docsLabel: 'Meta Graph Explorer ↗',
+  },
+  instagram: {
+    tokenLabel: 'Instagram Graph API Token',
+    tokenPlaceholder: 'EAAn…',
+    tokenHint: 'Same token as Facebook Page Access Token — your Instagram Business account must be linked to a Facebook Page. Posts require an image URL.',
+    showAccountId: true,
+    accountIdLabel: 'Instagram Business Account ID',
+    accountIdPlaceholder: '17841400000000000',
+    docsUrl: 'https://developers.facebook.com/docs/instagram-api/getting-started',
+    docsLabel: 'Instagram Graph API docs ↗',
+    warning: 'Instagram only supports image posts — text-only posts will fail.',
+  },
+  threads: {
+    tokenLabel: 'Threads Access Token',
+    tokenPlaceholder: 'THR…',
+    tokenHint: 'From Meta Developer App with Threads API access. Requires threads_basic + threads_content_publish permissions.',
+    showAccountId: false,
+    docsUrl: 'https://developers.facebook.com/docs/threads',
+    docsLabel: 'Threads API docs ↗',
+  },
+  tiktok: {
+    tokenLabel: 'TikTok Access Token',
+    tokenPlaceholder: 'act.…',
+    tokenHint: 'From TikTok for Developers → your app → access token. Requires video.upload scope. TikTok only supports video posts.',
+    showAccountId: false,
+    docsUrl: 'https://developers.tiktok.com/',
+    docsLabel: 'TikTok for Developers ↗',
+    warning: 'TikTok only supports video posts — text-only posts will fail.',
+  },
+  youtube: {
+    tokenLabel: 'Google OAuth Access Token',
+    tokenPlaceholder: 'ya29.…',
+    tokenHint: 'From Google Cloud Console → OAuth 2.0 credentials. Requires youtube.upload or youtube.force-ssl scope.',
+    showAccountId: false,
+    docsUrl: 'https://console.cloud.google.com/apis/credentials',
+    docsLabel: 'Google Cloud Console ↗',
+  },
+  bluesky: {
+    tokenLabel: 'App Password',
+    tokenPlaceholder: '',
+    tokenHint: '',
+    showAccountId: false,
+    docsUrl: 'https://bsky.app/settings/app-passwords',
+    docsLabel: 'Bluesky App Passwords ↗',
+    customFields: [
+      {
+        key: 'bsky_service',
+        label: 'Service URL',
+        type: 'text',
+        placeholder: 'bsky.social',
+        defaultValue: 'bsky.social',
+        optional: true,
+        hint: 'Leave as bsky.social unless you use a custom PDS',
+      },
+      {
+        key: 'bsky_handle',
+        label: 'Handle or Email',
+        type: 'text',
+        placeholder: 'yourhandle.bsky.social',
+      },
+      {
+        key: 'bsky_password',
+        label: 'App Password',
+        type: 'password',
+        placeholder: 'xxxx-xxxx-xxxx-xxxx',
+        hint: 'Generate in Bluesky Settings → App Passwords (do not use your main password)',
+      },
+    ],
+    buildToken: (e) => `${e.bsky_handle ?? ''}:${e.bsky_password ?? ''}`,
+  },
+  mastodon: {
+    tokenLabel: 'Access Token',
+    tokenPlaceholder: '',
+    tokenHint: '',
+    showAccountId: false,
+    docsUrl: 'https://docs.joinmastodon.org/client/token/',
+    docsLabel: 'Mastodon API docs ↗',
+    customFields: [
+      {
+        key: 'masto_instance',
+        label: 'Instance URL',
+        type: 'text',
+        placeholder: 'mastodon.social',
+        hint: 'Your Mastodon server, e.g. mastodon.social or fosstodon.org',
+      },
+      {
+        key: 'masto_token',
+        label: 'Access Token',
+        type: 'password',
+        placeholder: 'your-access-token',
+        hint: 'From your instance → Settings → Development → New Application → Your token',
+      },
+    ],
+    buildToken: (e) => `${e.masto_instance ?? ''}:${e.masto_token ?? ''}`,
+  },
+  pinterest: {
+    tokenLabel: 'Pinterest Access Token',
+    tokenPlaceholder: 'pina_…',
+    tokenHint: 'From Pinterest Developer Apps → your app → access token. Requires boards:read + pins:write scopes. Posts require an image URL.',
+    showAccountId: false,
+    docsUrl: 'https://developers.pinterest.com/apps/',
+    docsLabel: 'Pinterest Developer Apps ↗',
+    warning: 'Pinterest only supports image pins — text-only posts will fail.',
+  },
+};
+
+// Platforms that support real OAuth flows via the backend
+const OAUTH_PLATFORMS = new Set(['twitter', 'linkedin', 'facebook', 'instagram', 'threads', 'tiktok', 'youtube', 'pinterest']);
 
 const STATUS_COLORS: Record<string, string> = {
   draft:     'bg-muted text-muted-foreground',
@@ -86,6 +251,7 @@ export default function SocialPage() {
           {tab === 'drafts'    && <PostsTab agentId={agentFilter} status="draft" />}
           {tab === 'accounts'  && <AccountsTab agentId={agentFilter} />}
           {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
+          {tab === 'media'     && <MediaTab agentId={agentFilter} />}
         </div>
       </div>
     </ErrorBoundary>
@@ -97,12 +263,16 @@ export default function SocialPage() {
 function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: () => void }) {
   const souls = useStore(s => s.souls);
   const [content, setContent] = useState('');
+  // Per-platform content overrides — key: platform id, value: custom content
+  // Empty string means "use the main content"
+  const [platformContent, setPlatformContent] = useState<Record<string, string>>({});
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['twitter']);
   const [scheduleAt, setScheduleAt] = useState('');
   const [mediaUrls, setMediaUrls] = useState('');
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(agentId || (souls[0]?.id ?? ''));
+  const [showPerPlatform, setShowPerPlatform] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const activePlatform = PLATFORMS.find(p => selectedPlatforms[0] === p.id) ?? PLATFORMS[0]!;
@@ -113,6 +283,22 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
     setSelectedPlatforms(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
   };
 
+  // Build metadata with per-platform content overrides for the backend
+  const buildMetadata = () => {
+    const meta: Record<string, string> = {};
+    for (const [pid, text] of Object.entries(platformContent)) {
+      if (text.trim() && text !== content) {
+        meta[`content_${pid}`] = text;
+      }
+    }
+    return Object.keys(meta).length > 0 ? meta : undefined;
+  };
+
+  const resetForm = () => {
+    setContent(''); setScheduleAt(''); setMediaUrls('');
+    setPlatformContent({}); setShowPerPlatform(false);
+  };
+
   const saveDraft = async () => {
     if (!content.trim()) { toast.error('Content required'); return; }
     setSaving(true);
@@ -120,9 +306,10 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
       await socialApi.createPost({
         content, platforms: selectedPlatforms, status: 'draft',
         agent_id: selectedAgent, media_urls: mediaUrls ? mediaUrls.split('\n').filter(Boolean) : [],
+        metadata: buildMetadata(),
       });
       toast.success('Draft saved');
-      setContent(''); setScheduleAt(''); setMediaUrls('');
+      resetForm();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
     finally { setSaving(false); }
   };
@@ -136,9 +323,10 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
         content, platforms: selectedPlatforms, status: 'scheduled',
         scheduled_at: new Date(scheduleAt).toISOString(),
         agent_id: selectedAgent, media_urls: mediaUrls ? mediaUrls.split('\n').filter(Boolean) : [],
+        metadata: buildMetadata(),
       });
       toast.success('Post scheduled ✓');
-      setContent(''); setScheduleAt(''); setMediaUrls('');
+      resetForm();
       onScheduled();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
     finally { setSaving(false); }
@@ -151,13 +339,14 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
       const post = await socialApi.createPost({
         content, platforms: selectedPlatforms, status: 'draft',
         agent_id: selectedAgent, media_urls: mediaUrls ? mediaUrls.split('\n').filter(Boolean) : [],
+        metadata: buildMetadata(),
       }) as any;
       const result = await socialApi.publishNow(post.id) as any;
       const ok = result?.results?.filter((r: any) => r.success).length ?? 0;
       const fail = result?.results?.filter((r: any) => !r.success).length ?? 0;
       if (fail === 0) toast.success(`Published to ${ok} platform${ok !== 1 ? 's' : ''} ✓`);
       else toast.error(`${ok} succeeded, ${fail} failed`);
-      setContent(''); setScheduleAt(''); setMediaUrls('');
+      resetForm();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
     finally { setPublishing(false); }
   };
@@ -216,6 +405,65 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
             className="w-full px-4 py-3 text-sm bg-transparent resize-none outline-none placeholder:text-muted-foreground/40 font-mono"
           />
         </div>
+
+        {/* Per-platform content overrides */}
+        {selectedPlatforms.length > 1 && (
+          <div className="rounded-xl border border-border overflow-hidden">
+            <button
+              onClick={() => setShowPerPlatform(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer text-left"
+            >
+              <span className="text-xs font-medium text-muted-foreground">
+                Per-Platform Content
+                {Object.values(platformContent).some(v => v.trim()) && (
+                  <span className="ml-2 rounded-full bg-primary/20 text-primary px-1.5 py-0.5 text-xs">
+                    {Object.values(platformContent).filter(v => v.trim()).length} customised
+                  </span>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground">{showPerPlatform ? '▲' : '▼'}</span>
+            </button>
+            {showPerPlatform && (
+              <div className="divide-y divide-border/50">
+                {selectedPlatforms.map(pid => {
+                  const platform = PLATFORMS.find(p => p.id === pid)!;
+                  const overrideText = platformContent[pid] ?? '';
+                  const displayText = overrideText || content;
+                  const chars = displayText.length;
+                  const left = platform.maxChars - chars;
+                  const leftColor = left < 0 ? 'text-destructive' : left < 20 ? 'text-amber-500' : 'text-muted-foreground';
+                  return (
+                    <div key={pid} className="p-3 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className={cn('h-5 w-5 rounded flex items-center justify-center text-xs font-bold shrink-0', platform.color)}>
+                          {platform.icon}
+                        </span>
+                        <span className="text-xs font-medium">{platform.label}</span>
+                        <span className={cn('ml-auto text-xs tabular-nums', leftColor)}>{left} chars</span>
+                        {overrideText && (
+                          <button
+                            onClick={() => setPlatformContent(c => { const n = {...c}; delete n[pid]; return n; })}
+                            className="text-xs text-muted-foreground hover:text-destructive cursor-pointer"
+                          >Reset</button>
+                        )}
+                      </div>
+                      <textarea
+                        value={overrideText || content}
+                        onChange={e => setPlatformContent(c => ({ ...c, [pid]: e.target.value }))}
+                        rows={3}
+                        placeholder={`Custom content for ${platform.label} (leave blank to use main content)`}
+                        className={cn(
+                          'w-full px-3 py-2 text-sm bg-background border rounded-lg resize-none outline-none placeholder:text-muted-foreground/40',
+                          overrideText ? 'border-primary/40' : 'border-border',
+                        )}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Agent picker */}
         <div className="flex items-center gap-3">
@@ -533,6 +781,89 @@ function PostsTab({ agentId, status }: { agentId: string; status: string }) {
   );
 }
 
+// ─── OAuth Connect Button ─────────────────────────────────────────────────────
+
+function OAuthConnectButton({
+  platform,
+  agentId,
+  onSuccess,
+}: {
+  platform: string;
+  agentId: string;
+  onSuccess: (accountName: string) => void;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const platformDef = PLATFORMS.find(p => p.id === platform);
+  const auth = PLATFORM_AUTH[platform];
+
+  const connect = () => {
+    setConnecting(true);
+    const params = new URLSearchParams({ agent_id: agentId });
+    const startUrl = `/api/v1/social/oauth/${platform}/start?${params}`;
+
+    // Open OAuth popup
+    const popup = window.open(startUrl, `oauth_${platform}`,
+      'width=600,height=700,scrollbars=yes,resizable=yes');
+
+    const listener = (e: MessageEvent) => {
+      if (e.data?.type === 'social_oauth_success' && e.data.platform === platform) {
+        window.removeEventListener('message', listener);
+        setConnecting(false);
+        onSuccess(e.data.account || platform);
+      } else if (e.data?.type === 'social_oauth_error' && e.data.platform === platform) {
+        window.removeEventListener('message', listener);
+        setConnecting(false);
+        toast.error(e.data.error || `Failed to connect ${platform}`);
+      }
+    };
+    window.addEventListener('message', listener);
+
+    // Clean up if popup closed without postMessage
+    const poll = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(poll);
+        window.removeEventListener('message', listener);
+        setConnecting(false);
+      }
+    }, 500);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground leading-relaxed">
+        <p className="font-medium text-foreground mb-1">OAuth 2.0 — Secure Connect</p>
+        Click the button below to authorise Qorven on {platformDef?.label ?? platform}.
+        You will be redirected to {platformDef?.label ?? platform} and back automatically.
+        {auth?.docsUrl && (
+          <span> <a href={auth.docsUrl} target="_blank" rel="noopener noreferrer"
+            className="text-primary hover:underline">{auth.docsLabel}</a></span>
+        )}
+      </div>
+      <button
+        onClick={connect}
+        disabled={connecting}
+        className={cn(
+          'flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all cursor-pointer',
+          connecting
+            ? 'border-border text-muted-foreground opacity-60'
+            : 'border-primary/30 bg-primary/5 text-primary hover:bg-primary/10',
+        )}
+      >
+        {connecting ? (
+          <><Loader2 className="h-4 w-4 animate-spin" /> Connecting…</>
+        ) : (
+          <>
+            <span className={cn('h-5 w-5 rounded flex items-center justify-center text-xs font-bold', platformDef?.color)}>
+              {platformDef?.icon}
+            </span>
+            Connect with {platformDef?.label ?? platform}
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
 // ─── Accounts Tab ─────────────────────────────────────────────────────────────
 
 function AccountsTab({ agentId }: { agentId: string }) {
@@ -541,6 +872,7 @@ function AccountsTab({ agentId }: { agentId: string }) {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ platform: 'twitter', account_name: '', account_id: '', access_token: '', agent_id: agentId || '' });
+  const [extras, setExtras] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     setLoading(true);
@@ -552,12 +884,26 @@ function AccountsTab({ agentId }: { agentId: string }) {
   useEffect(() => { load(); }, [load]);
 
   const save = async () => {
-    if (!form.account_name || !form.access_token) { toast.error('Account name and access token required'); return; }
+    const auth = PLATFORM_AUTH[form.platform];
+    // Build token from custom fields if the platform defines them
+    const token = auth?.buildToken ? auth.buildToken(extras) : form.access_token;
+    if (!form.account_name) { toast.error('Account name required'); return; }
+    if (!token || token === ':') { toast.error('Credentials required'); return; }
+    // Validate all required custom fields are filled
+    if (auth?.customFields) {
+      for (const f of auth.customFields) {
+        if (!f.optional && !extras[f.key]?.trim()) {
+          toast.error(`${f.label} is required`);
+          return;
+        }
+      }
+    }
     try {
-      await socialApi.saveIntegration({ ...form });
+      await socialApi.saveIntegration({ ...form, access_token: token });
       toast.success('Account connected');
       setShowAdd(false);
       setForm({ platform: 'twitter', account_name: '', account_id: '', access_token: '', agent_id: agentId || '' });
+      setExtras({});
       load();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
   };
@@ -576,58 +922,138 @@ function AccountsTab({ agentId }: { agentId: string }) {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
             <p className="text-sm font-semibold">Connect Account</p>
-            <button onClick={() => setShowAdd(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X className="h-4 w-4" /></button>
+            <button onClick={() => { setShowAdd(false); setExtras({}); }} className="text-muted-foreground hover:text-foreground cursor-pointer"><X className="h-4 w-4" /></button>
           </div>
-          <div className="p-4 space-y-3">
+          {(() => {
+            const auth = PLATFORM_AUTH[form.platform];
+            return (
+          <div className="p-4 space-y-4">
+            {/* Row 1: Platform + Agent */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground">Platform</label>
-                <select value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
+                <label className="text-xs text-muted-foreground mb-1 block">Platform</label>
+                <select value={form.platform} onChange={e => { setForm(f => ({ ...f, platform: e.target.value, account_id: '', access_token: '' })); setExtras({}); }}
                   className="qr-select">
                   {PLATFORMS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">Agent</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Assign to Agent</label>
                 <select value={form.agent_id} onChange={e => setForm(f => ({ ...f, agent_id: e.target.value }))}
                   className="qr-select">
+                  <option value="">No agent</option>
                   {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
                 </select>
               </div>
+            </div>
+
+            {/* Per-platform warning */}
+            {auth?.warning && (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                ⚠ {auth.warning}
+              </div>
+            )}
+
+            {/* Row 2: Account name + optional account ID */}
+            <div className={cn('grid gap-3', auth?.showAccountId ? 'grid-cols-2' : 'grid-cols-1')}>
               <div>
-                <label className="text-xs text-muted-foreground">Account Name / Handle</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Account Name / Handle</label>
                 <input value={form.account_name} onChange={e => setForm(f => ({ ...f, account_name: e.target.value }))}
-                  placeholder="@handle or email"
+                  placeholder={form.platform === 'bluesky' ? 'yourhandle.bsky.social' : form.platform === 'mastodon' ? '@user@instance.social' : '@handle or display name'}
                   className="qr-input" />
               </div>
+              {auth?.showAccountId && (
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    {auth.accountIdLabel ?? 'Account ID'}
+                  </label>
+                  <input value={form.account_id} onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}
+                    placeholder={auth.accountIdPlaceholder ?? 'Numeric ID'}
+                    className="qr-input" />
+                </div>
+              )}
+            </div>
+
+            {/* Credential fields — OAuth button, custom multi-field, or single token input */}
+            {OAUTH_PLATFORMS.has(form.platform) ? (
+              <OAuthConnectButton
+                platform={form.platform}
+                agentId={form.agent_id}
+                onSuccess={(accountName) => {
+                  toast.success(`${accountName} connected via OAuth`);
+                  setShowAdd(false);
+                  setExtras({});
+                  load();
+                }}
+              />
+            ) : auth?.customFields ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Credentials</span>
+                  {auth.docsUrl && (
+                    <a href={auth.docsUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline">
+                      {auth.docsLabel}
+                    </a>
+                  )}
+                </div>
+                {auth.customFields.map(field => (
+                  <div key={field.key}>
+                    <label className="text-xs text-muted-foreground mb-1 block">
+                      {field.label}{field.optional && <span className="ml-1 text-muted-foreground/50">(optional)</span>}
+                    </label>
+                    <input
+                      type={field.type}
+                      value={extras[field.key] ?? field.defaultValue ?? ''}
+                      onChange={e => setExtras(x => ({ ...x, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      className={cn('qr-input', field.type === 'password' && 'font-mono')}
+                    />
+                    {field.hint && (
+                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{field.hint}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
               <div>
-                <label className="text-xs text-muted-foreground">Account ID</label>
-                <input value={form.account_id} onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}
-                  placeholder="Numeric user ID"
-                  className="qr-input" />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-muted-foreground">
+                    {auth?.tokenLabel ?? 'Access Token'}
+                  </label>
+                  {auth?.docsUrl && (
+                    <a href={auth.docsUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline">
+                      {auth.docsLabel}
+                    </a>
+                  )}
+                </div>
+                <input type="password" value={form.access_token} onChange={e => setForm(f => ({ ...f, access_token: e.target.value }))}
+                  placeholder={auth?.tokenPlaceholder ?? 'Paste token here'}
+                  className="qr-input font-mono" />
+                {auth?.tokenHint && (
+                  <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
+                    {auth.tokenHint}
+                  </p>
+                )}
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">
-                Access Token
-                {form.platform === 'bluesky' && <span className="ml-1 text-amber-500">(handle:app_password)</span>}
-                {form.platform === 'mastodon' && <span className="ml-1 text-amber-500">(instance.url:access_token)</span>}
-              </label>
-              <input type="password" value={form.access_token} onChange={e => setForm(f => ({ ...f, access_token: e.target.value }))}
-                placeholder="Bearer token or credentials"
-                className="mt-1 qr-input font-mono" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={save}
-                className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
-                <Check className="h-3.5 w-3.5" /> Connect
-              </button>
-              <button onClick={() => setShowAdd(false)}
-                className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer">
-                Cancel
-              </button>
-            </div>
+            )}
+
+            {!OAUTH_PLATFORMS.has(form.platform) && (
+              <div className="flex gap-2 pt-1">
+                <button onClick={save}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
+                  <Check className="h-3.5 w-3.5" /> Connect
+                </button>
+                <button onClick={() => { setShowAdd(false); setExtras({}); }}
+                  className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer">
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
+            );
+          })()}
         </div>
       ) : (
         <button onClick={() => setShowAdd(true)}
@@ -646,8 +1072,17 @@ function AccountsTab({ agentId }: { agentId: string }) {
           {integrations.map(i => {
             const platform = PLATFORMS.find(p => p.id === i.platform);
             const soul = souls.find(s => s.id === i.agent_id);
+            // Token expiry state
+            const expiry = i.token_expiry ? new Date(i.token_expiry) : null;
+            const now = Date.now();
+            const msLeft = expiry ? expiry.getTime() - now : null;
+            const isExpired = msLeft !== null && msLeft <= 0;
+            const isExpiringSoon = msLeft !== null && msLeft > 0 && msLeft < 7 * 24 * 60 * 60 * 1000;
             return (
-              <div key={i.id} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+              <div key={i.id} className={cn(
+                'flex items-center gap-3 rounded-xl border bg-card px-4 py-3',
+                isExpired ? 'border-destructive/40' : isExpiringSoon ? 'border-amber-500/40' : 'border-border',
+              )}>
                 <span className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-sm font-bold shrink-0', platform?.color ?? 'bg-muted')}>
                   {platform?.icon ?? '?'}
                 </span>
@@ -656,13 +1091,23 @@ function AccountsTab({ agentId }: { agentId: string }) {
                   <p className="text-xs text-muted-foreground">
                     {platform?.label ?? i.platform}
                     {soul && ` · ${soul.display_name}`}
-                    {i.token_expiry && ` · expires ${new Date(i.token_expiry).toLocaleDateString()}`}
+                    {expiry && (
+                      <span className={cn('ml-1', isExpired ? 'text-destructive' : isExpiringSoon ? 'text-amber-500' : '')}>
+                        · {isExpired ? 'expired' : `expires ${expiry.toLocaleDateString()}`}
+                      </span>
+                    )}
                   </p>
                 </div>
-                <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
-                  i.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground')}>
-                  {i.active ? 'Active' : 'Inactive'}
-                </span>
+                {isExpired ? (
+                  <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-destructive/10 text-destructive">Expired</span>
+                ) : isExpiringSoon ? (
+                  <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-amber-500/10 text-amber-500">Expiring soon</span>
+                ) : (
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
+                    i.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground')}>
+                    {i.active ? 'Active' : 'Inactive'}
+                  </span>
+                )}
                 <button onClick={() => disconnect(i.id)}
                   className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors">
                   <Trash2 className="h-3.5 w-3.5" />
@@ -670,6 +1115,354 @@ function AccountsTab({ agentId }: { agentId: string }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Media Library Tab ────────────────────────────────────────────────────────
+
+type MediaAsset = {
+  id: string;
+  agent_id: string;
+  name: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  width?: number;
+  height?: number;
+  alt_text: string;
+  tags: string[];
+  url: string;
+  created_at: string;
+};
+
+function MediaTab({ agentId }: { agentId: string }) {
+  const souls = useStore(s => s.souls);
+  const [assets, setAssets] = useState<MediaAsset[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'image' | 'video'>('all');
+  const [offset, setOffset] = useState(0);
+  const [selectedAgent, setSelectedAgent] = useState(agentId || (souls[0]?.id ?? ''));
+  const [selectedAsset, setSelectedAsset] = useState<MediaAsset | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const limit = 48;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await socialApi.listMedia({
+        agentId: selectedAgent || undefined,
+        q: search || undefined,
+        type: typeFilter === 'all' ? undefined : typeFilter,
+        limit,
+        offset,
+      });
+      setAssets(data?.assets ?? []);
+      setTotal(data?.total ?? 0);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedAgent, search, typeFilter, offset]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => { setOffset(0); }, [selectedAgent, search, typeFilter]);
+
+  const uploadFiles = async (files: FileList | File[]) => {
+    const fileArr = Array.from(files);
+    if (fileArr.length === 0) return;
+    setUploading(true);
+    let uploaded = 0;
+    for (const file of fileArr) {
+      try {
+        await socialApi.uploadMedia(file, selectedAgent || souls[0]?.id || '');
+        uploaded++;
+      } catch (e) {
+        toast.error(`Failed to upload ${file.name}: ${e instanceof Error ? e.message : 'unknown error'}`);
+      }
+    }
+    setUploading(false);
+    if (uploaded > 0) {
+      toast.success(`Uploaded ${uploaded} file${uploaded !== 1 ? 's' : ''}`);
+      load();
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) uploadFiles(files);
+  };
+
+  const deleteAsset = async (id: string) => {
+    if (!confirm('Delete this media asset?')) return;
+    try {
+      await socialApi.deleteMedia(id);
+      toast.success('Deleted');
+      if (selectedAsset?.id === id) setSelectedAsset(null);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const copyUrl = (asset: MediaAsset) => {
+    const absoluteUrl = window.location.origin + '/api/v1' + asset.url.replace('/api/v1', '');
+    navigator.clipboard.writeText(absoluteUrl);
+    toast.success('URL copied to clipboard');
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  };
+
+  const isVideo = (mime: string) => mime.startsWith('video/');
+
+  const pages = Math.ceil(total / limit);
+  const currentPage = Math.floor(offset / limit) + 1;
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap gap-2 items-center">
+        {/* Agent picker */}
+        <select
+          value={selectedAgent}
+          onChange={e => setSelectedAgent(e.target.value)}
+          className="qr-select w-44 shrink-0"
+        >
+          <option value="">All Agents</option>
+          {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+        </select>
+
+        {/* Search */}
+        <div className="relative flex-1 min-w-[160px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or alt text…"
+            className="qr-input pl-8 w-full"
+          />
+        </div>
+
+        {/* Type filter */}
+        <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+          {(['all', 'image', 'video'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(t)}
+              className={cn(
+                'px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer capitalize',
+                typeFilter === t
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-accent text-muted-foreground',
+              )}
+            >
+              {t === 'image' ? <span className="flex items-center gap-1"><ImageIcon className="h-3 w-3" /> Images</span>
+               : t === 'video' ? <span className="flex items-center gap-1"><Video className="h-3 w-3" /> Videos</span>
+               : <span className="flex items-center gap-1"><Grid className="h-3 w-3" /> All</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Upload button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0"
+        >
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          Upload
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,video/*"
+          className="hidden"
+          onChange={e => { if (e.target.files) uploadFiles(e.target.files); e.target.value = ''; }}
+        />
+      </div>
+
+      {/* Drop zone + grid */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        className={cn(
+          'relative min-h-[300px] rounded-xl border-2 transition-colors',
+          dragging ? 'border-primary bg-primary/5 border-dashed' : 'border-border',
+        )}
+      >
+        {dragging && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="flex flex-col items-center gap-2 text-primary">
+              <Upload className="h-10 w-10" />
+              <p className="text-sm font-medium">Drop files to upload</p>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex justify-center items-center min-h-[300px]">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : assets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center min-h-[300px] gap-3 text-muted-foreground">
+            <ImageIcon className="h-12 w-12 opacity-20" />
+            <p className="text-sm">No media yet — upload images or videos to your library</p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-2 text-sm hover:border-primary/40 hover:bg-accent/30 cursor-pointer"
+            >
+              <Upload className="h-4 w-4" /> Upload files
+            </button>
+          </div>
+        ) : (
+          <div className="p-3 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+            {assets.map(asset => (
+              <button
+                key={asset.id}
+                onClick={() => setSelectedAsset(selectedAsset?.id === asset.id ? null : asset)}
+                className={cn(
+                  'group relative rounded-lg overflow-hidden border bg-muted aspect-square cursor-pointer transition-all',
+                  selectedAsset?.id === asset.id
+                    ? 'border-primary ring-2 ring-primary/30'
+                    : 'border-border hover:border-primary/40',
+                )}
+              >
+                {isVideo(asset.mime_type) ? (
+                  <div className="w-full h-full flex items-center justify-center bg-muted">
+                    <Video className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={asset.url}
+                    alt={asset.alt_text || asset.original_name}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                )}
+                {/* Hover overlay */}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end justify-start p-1 gap-1">
+                  <button
+                    onClick={e => { e.stopPropagation(); copyUrl(asset); }}
+                    className="h-6 w-6 rounded flex items-center justify-center bg-white/20 hover:bg-white/40 text-white"
+                    title="Copy URL"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteAsset(asset.id); }}
+                    className="h-6 w-6 rounded flex items-center justify-center bg-white/20 hover:bg-destructive text-white"
+                    title="Delete"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Selected asset detail panel */}
+      {selectedAsset && (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
+            <p className="text-sm font-semibold truncate flex-1 min-w-0 mr-3">{selectedAsset.original_name}</p>
+            <button onClick={() => setSelectedAsset(null)} className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="p-4 flex gap-4">
+            {/* Preview */}
+            <div className="w-40 h-40 rounded-lg overflow-hidden border border-border bg-muted shrink-0 flex items-center justify-center">
+              {isVideo(selectedAsset.mime_type) ? (
+                <Video className="h-10 w-10 text-muted-foreground" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={selectedAsset.url}
+                  alt={selectedAsset.alt_text || selectedAsset.original_name}
+                  className="w-full h-full object-contain"
+                />
+              )}
+            </div>
+            {/* Meta */}
+            <div className="flex-1 space-y-2 text-sm">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <span className="text-muted-foreground">Type</span>
+                <span className="font-mono">{selectedAsset.mime_type}</span>
+                <span className="text-muted-foreground">Size</span>
+                <span>{formatSize(selectedAsset.size)}</span>
+                {selectedAsset.width && <>
+                  <span className="text-muted-foreground">Dimensions</span>
+                  <span>{selectedAsset.width} × {selectedAsset.height}</span>
+                </>}
+                <span className="text-muted-foreground">Uploaded</span>
+                <span>{new Date(selectedAsset.created_at).toLocaleDateString()}</span>
+              </div>
+              {/* URL row */}
+              <div className="flex items-center gap-2 mt-2">
+                <code className="flex-1 text-xs bg-muted rounded px-2 py-1.5 font-mono truncate">
+                  {window.location.origin + '/api/v1' + selectedAsset.url.replace('/api/v1', '')}
+                </code>
+                <button
+                  onClick={() => copyUrl(selectedAsset)}
+                  className="shrink-0 flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent cursor-pointer"
+                >
+                  <Copy className="h-3 w-3" /> Copy URL
+                </button>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => deleteAsset(selectedAsset.id)}
+                  className="flex items-center gap-1.5 rounded-lg border border-destructive/30 text-destructive px-3 py-1.5 text-xs hover:bg-destructive/10 cursor-pointer"
+                >
+                  <Trash2 className="h-3 w-3" /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-muted-foreground">{total} assets total</p>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={currentPage === 1}
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+              className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-accent disabled:opacity-40 cursor-pointer"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-xs text-muted-foreground">{currentPage} / {pages}</span>
+            <button
+              disabled={currentPage >= pages}
+              onClick={() => setOffset(offset + limit)}
+              className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-accent disabled:opacity-40 cursor-pointer"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
     </div>

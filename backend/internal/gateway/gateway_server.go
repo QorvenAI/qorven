@@ -97,6 +97,12 @@ func (gw *Gateway) Start() error {
 		slog.Info("health monitor started")
 	}
 
+	// Start social token refresh worker (refreshes expiring OAuth tokens every 15min)
+	if gw.db != nil {
+		go gw.startSocialTokenRefreshWorker(context.Background())
+		slog.Info("social token refresh worker started")
+	}
+
 	// Start background memory dreamer (consolidates memories on interval)
 	if gw.dreamer != nil {
 		go gw.dreamer.Start(context.Background())

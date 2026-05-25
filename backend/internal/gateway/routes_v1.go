@@ -770,6 +770,20 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Delete("/social/autoposts/{id}", gw.handleDeleteSocialAutoPost)
 		r.Get("/social/calendar", gw.handleSocialCalendar)
 
+		// Social OAuth flows
+		r.Get("/social/oauth/{platform}/start", gw.handleSocialOAuthStart)
+		r.Get("/social/oauth/{platform}/callback", gw.handleSocialOAuthCallback)
+		r.Get("/social/oauth/{platform}/status", gw.handleSocialOAuthStatus)
+		r.Post("/social/oauth/{platform}/revoke", gw.handleSocialOAuthRevoke)
+
+		// Social Media Library
+		r.Post("/social/media", gw.handleSocialMediaUpload)
+		r.Get("/social/media", gw.handleListSocialMedia)
+		r.Get("/social/media/{id}", gw.handleGetSocialMediaAsset)
+		r.Get("/social/media/{id}/content", gw.handleSocialMediaContent)
+		r.Patch("/social/media/{id}", gw.handleUpdateSocialMediaAsset)
+		r.Delete("/social/media/{id}", gw.handleDeleteSocialMedia)
+
 		// Dead-letter queue (FU-021)
 		r.Get("/admin/dead-letters", gw.handleListDeadLetters)
 		r.Post("/admin/reset/{target}", gw.handleAdminReset)
