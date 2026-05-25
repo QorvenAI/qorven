@@ -261,6 +261,12 @@ func (t *ReadVideoTool) Execute(ctx context.Context, args map[string]any) *Resul
 	if videoPath == "" {
 		return ErrorResult("read_video: video_path is required")
 	}
+	// Restrict to workspace or /tmp to prevent path traversal.
+	ws := WorkspaceFromCtx(ctx)
+	videoPath = filepath.Clean(videoPath)
+	if ws != "" && !strings.HasPrefix(videoPath, filepath.Clean(ws)) && !strings.HasPrefix(videoPath, os.TempDir()) {
+		return ErrorResult("read_video: video_path is outside the workspace")
+	}
 	if _, err := os.Stat(videoPath); err != nil {
 		return ErrorResult(fmt.Sprintf("read_video: cannot access %q: %v", videoPath, err))
 	}
@@ -462,6 +468,8 @@ func (t *CreateAudioTool) Execute(ctx context.Context, args map[string]any) *Res
 	if filename == "" {
 		filename = fmt.Sprintf("audio_%d", time.Now().UnixMilli())
 	}
+	// Strip path separators from agent-provided filename to prevent traversal.
+	filename = filepath.Base(filename)
 
 	result, err := t.mgr.Synthesize(ctx, text, voice.TTSOptions{Voice: voiceName, Format: format})
 	if err != nil {

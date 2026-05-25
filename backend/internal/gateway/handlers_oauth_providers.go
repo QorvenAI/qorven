@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"html"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -53,7 +54,7 @@ func (gw *Gateway) handleOAuthProviderCallback(w http.ResponseWriter, r *http.Re
 
 	if errParam != "" {
 		writeHTML(w, http.StatusBadRequest,
-			`<html><body><p>OAuth error: `+errParam+`</p><script>window.close();</script></body></html>`)
+			`<html><body><p>OAuth error: `+html.EscapeString(errParam)+`</p><script>window.close();</script></body></html>`)
 		return
 	}
 	if code == "" || state == "" {
@@ -65,16 +66,18 @@ func (gw *Gateway) handleOAuthProviderCallback(w http.ResponseWriter, r *http.Re
 	_, err := mgr.HandleCallback(r.Context(), provider, code, state)
 	if err != nil {
 		writeHTML(w, http.StatusBadRequest,
-			`<html><body><p>OAuth failed: `+err.Error()+`</p><script>window.close();</script></body></html>`)
+			`<html><body><p>OAuth failed: `+html.EscapeString(err.Error())+`</p><script>window.close();</script></body></html>`)
 		return
 	}
 
 	// Close the popup and signal success to the opener window.
+	// provider is a path param from a fixed set of known IDs — escape anyway.
+	safeProvider := html.EscapeString(provider)
 	writeHTML(w, http.StatusOK, `<html><body>
 <p>Connected! You can close this window.</p>
 <script>
   if (window.opener) {
-    window.opener.postMessage({ type: 'oauth_complete', provider: '`+provider+`' }, '*');
+    window.opener.postMessage({ type: 'oauth_complete', provider: '`+safeProvider+`' }, '*');
   }
   setTimeout(() => window.close(), 1000);
 </script>

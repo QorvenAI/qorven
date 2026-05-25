@@ -508,15 +508,19 @@ func runSelect(ctx context.Context, db *sql.DB, query string, params []any) *Res
 		tx = nil
 	}
 	var rows *sql.Rows
+	// query is agent-provided SQL executed against a user-configured external DB.
+	// The read-only transaction enforces SELECT-only semantics; non-SELECT statements
+	// are rejected by classifyStatement before this point. This is intentional
+	// tool behaviour — the agent is granted SQL access to a DB the user connected.
 	if tx != nil {
-		rows, err = tx.QueryContext(ctx, query, params...)
+		rows, err = tx.QueryContext(ctx, query, params...) //nolint:sqlclosecheck
 		if err != nil {
 			_ = tx.Rollback()
 			return ErrorResult(fmt.Sprintf("query: %v", err))
 		}
 		defer func() { rows.Close(); _ = tx.Rollback() }()
 	} else {
-		rows, err = db.QueryContext(ctx, query, params...)
+		rows, err = db.QueryContext(ctx, query, params...) //nolint:sqlclosecheck
 		if err != nil {
 			return ErrorResult(fmt.Sprintf("query: %v", err))
 		}
