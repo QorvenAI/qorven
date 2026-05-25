@@ -86,6 +86,14 @@ type Integration struct {
 	AgentID      string   `json:"agent_id"`
 	Active       bool     `json:"active"`
 	CreatedAt    time.Time `json:"created_at"`
+
+	// Per-integration settings
+	Nickname   string `json:"nickname,omitempty"`    // display name override on this channel
+	AvatarURL  string `json:"avatar_url,omitempty"`  // avatar override on this channel
+	PostHours  []int  `json:"post_hours,omitempty"`  // 0-23; empty = any hour
+	PostDays   []int  `json:"post_days,omitempty"`   // 0=Sun,1=Mon,...,6=Sat; empty = any day
+	GroupName  string `json:"group_name,omitempty"`  // channel group label
+	Paused     bool   `json:"paused"`                // temporarily pause this channel
 }
 
 // PostResult holds the outcome of publishing to a platform.

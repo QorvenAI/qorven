@@ -260,6 +260,8 @@ export const social = {
   saveIntegration: (body: Record<string, unknown>) =>
     request<any>('/social/integrations', { method: 'POST', body: JSON.stringify(body) }),
   deleteIntegration: (id: string) => request<void>(`/social/integrations/${id}`, { method: 'DELETE' }),
+  updateIntegrationSettings: (id: string, body: { nickname?: string; avatar_url?: string; group_name?: string; post_hours?: number[]; post_days?: number[]; paused?: boolean }) =>
+    request<any>(`/social/integrations/${id}/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
   listAutoPosts: (agentId?: string) =>
     request<any[]>(`/social/autoposts${agentId ? `?agent_id=${agentId}` : ''}`),
   createAutoPost: (body: Record<string, unknown>) =>

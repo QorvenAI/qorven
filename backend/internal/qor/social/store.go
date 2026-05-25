@@ -137,17 +137,40 @@ func (s *Store) SaveIntegration(ctx context.Context, i Integration) (string, err
 
 func (s *Store) ListIntegrations(ctx context.Context, agentID string) ([]Integration, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, platform, account_name, account_id, token_expiry, agent_id, active, created_at
+		`SELECT id, platform, account_name, account_id, token_expiry, agent_id, active, created_at,
+		        COALESCE(nickname,''), COALESCE(avatar_url,''), COALESCE(post_hours,'[]'::jsonb),
+		        COALESCE(post_days,'[0,1,2,3,4,5,6]'::jsonb), COALESCE(group_name,''), COALESCE(paused,false)
 		 FROM social_integrations WHERE agent_id = $1 ORDER BY platform`, agentID)
 	if err != nil { return nil, err }
 	defer rows.Close()
 	integrations := []Integration{}
 	for rows.Next() {
 		var i Integration
-		rows.Scan(&i.ID, &i.Platform, &i.AccountName, &i.AccountID, &i.TokenExpiry, &i.AgentID, &i.Active, &i.CreatedAt)
+		var hoursJSON, daysJSON []byte
+		rows.Scan(&i.ID, &i.Platform, &i.AccountName, &i.AccountID, &i.TokenExpiry, &i.AgentID, &i.Active, &i.CreatedAt,
+			&i.Nickname, &i.AvatarURL, &hoursJSON, &daysJSON, &i.GroupName, &i.Paused)
+		jsonUnmarshalInts(hoursJSON, &i.PostHours)
+		jsonUnmarshalInts(daysJSON, &i.PostDays)
 		integrations = append(integrations, i)
 	}
 	return integrations, nil
+}
+
+// UpdateIntegrationSettings patches per-channel settings for an integration.
+func (s *Store) UpdateIntegrationSettings(ctx context.Context, id, nickname, avatarURL, groupName string, postHours, postDays []int, paused bool) error {
+	hoursJSON, _ := json.Marshal(postHours)
+	daysJSON, _ := json.Marshal(postDays)
+	_, err := s.pool.Exec(ctx,
+		`UPDATE social_integrations SET
+		   nickname = $1, avatar_url = $2, post_hours = $3, post_days = $4, group_name = $5, paused = $6
+		 WHERE id = $7`,
+		nickname, avatarURL, hoursJSON, daysJSON, groupName, paused, id)
+	return err
+}
+
+func jsonUnmarshalInts(data []byte, out *[]int) {
+	if len(data) == 0 { return }
+	json.Unmarshal(data, out) //nolint:errcheck
 }
 
 func (s *Store) GetIntegrationToken(ctx context.Context, agentID string, platform Platform) (string, string, error) {

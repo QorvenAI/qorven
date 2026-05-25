@@ -182,6 +182,29 @@ func (gw *Gateway) handleDeleteSocialIntegration(w http.ResponseWriter, r *http.
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 
+func (gw *Gateway) handleUpdateSocialIntegrationSettings(w http.ResponseWriter, r *http.Request) {
+	store := gw.socialStore()
+	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }
+	integrationID := chi.URLParam(r, "id")
+	var body struct {
+		Nickname   string `json:"nickname"`
+		AvatarURL  string `json:"avatar_url"`
+		GroupName  string `json:"group_name"`
+		PostHours  []int  `json:"post_hours"`
+		PostDays   []int  `json:"post_days"`
+		Paused     bool   `json:"paused"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if err := store.UpdateIntegrationSettings(r.Context(), integrationID, body.Nickname, body.AvatarURL, body.GroupName, body.PostHours, body.PostDays, body.Paused); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "updated"})
+}
+
 func (gw *Gateway) handleListSocialAutoPosts(w http.ResponseWriter, r *http.Request) {
 	store := gw.socialStore()
 	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }

@@ -11,7 +11,7 @@ import {
   Image as ImageIcon, Upload, Search, Grid, Video, Copy,
   BarChart2, TrendingUp, Eye, Heart, Share2, MessageCircle,
   CornerDownRight, CheckCheck,
-  BookOpen, Edit3,
+  BookOpen, Edit3, Settings, Pause, Play,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
@@ -1207,6 +1207,125 @@ function OAuthConnectButton({
   );
 }
 
+// ─── Integration Settings Panel ───────────────────────────────────────────────
+
+const ALL_HOURS = Array.from({ length: 24 }, (_, i) => i);
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function IntegrationSettingsPanel({
+  integration,
+  onSaved,
+}: {
+  integration: any;
+  onSaved: (updated: any) => void;
+}) {
+  const [form, setForm] = useState({
+    nickname:   integration.nickname   ?? '',
+    avatar_url: integration.avatar_url ?? '',
+    group_name: integration.group_name ?? '',
+    post_hours: (integration.post_hours ?? []) as number[],
+    post_days:  (integration.post_days  ?? [0,1,2,3,4,5,6]) as number[],
+    paused:     integration.paused ?? false,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const toggleHour = (h: number) =>
+    setForm(f => ({ ...f, post_hours: f.post_hours.includes(h) ? f.post_hours.filter(x => x !== h) : [...f.post_hours, h].sort((a,b)=>a-b) }));
+
+  const toggleDay = (d: number) =>
+    setForm(f => ({ ...f, post_days: f.post_days.includes(d) ? f.post_days.filter(x => x !== d) : [...f.post_days, d].sort((a,b)=>a-b) }));
+
+  async function save() {
+    setSaving(true);
+    try {
+      await socialApi.updateIntegrationSettings(integration.id, form);
+      onSaved({ ...integration, ...form });
+      toast.success('Settings saved');
+    } catch {
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-border px-4 py-4 bg-muted/20 space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">Display name override</label>
+          <input value={form.nickname} onChange={e => setForm(f => ({ ...f, nickname: e.target.value }))}
+            placeholder={integration.account_name || 'Channel nickname'}
+            className="qr-input" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">Channel group</label>
+          <input value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
+            placeholder="e.g. Marketing, Product, Personal"
+            className="qr-input" />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">Avatar URL override</label>
+        <input value={form.avatar_url} onChange={e => setForm(f => ({ ...f, avatar_url: e.target.value }))}
+          placeholder="https://… (optional)"
+          className="qr-input" />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1.5">
+          Allowed posting hours <span className="text-muted-foreground/60">(empty = any hour)</span>
+        </label>
+        <div className="flex flex-wrap gap-1">
+          {ALL_HOURS.map(h => (
+            <button key={h} onClick={() => toggleHour(h)}
+              className={cn(
+                'w-8 h-6 text-xs rounded border transition-colors cursor-pointer',
+                form.post_hours.includes(h)
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border text-muted-foreground hover:border-primary/40',
+              )}>
+              {h}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1.5">Allowed posting days</label>
+        <div className="flex gap-1.5">
+          {DAY_LABELS.map((label, d) => (
+            <button key={d} onClick={() => toggleDay(d)}
+              className={cn(
+                'flex-1 h-7 text-xs rounded border transition-colors cursor-pointer',
+                form.post_days.includes(d)
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border text-muted-foreground hover:border-primary/40',
+              )}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setForm(f => ({ ...f, paused: !f.paused }))}
+          className={cn(
+            'flex items-center gap-1.5 text-sm rounded-lg border px-3 py-1.5 transition-colors cursor-pointer',
+            form.paused
+              ? 'border-amber-500/40 text-amber-600 bg-amber-500/10 hover:bg-amber-500/20'
+              : 'border-border text-muted-foreground hover:bg-accent',
+          )}
+        >
+          {form.paused ? <><Play className="h-3.5 w-3.5" /> Resume channel</> : <><Pause className="h-3.5 w-3.5" /> Pause channel</>}
+        </button>
+        <button onClick={save} disabled={saving}
+          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Accounts Tab ─────────────────────────────────────────────────────────────
 
 function AccountsTab({ agentId }: { agentId: string }) {
@@ -1214,6 +1333,7 @@ function AccountsTab({ agentId }: { agentId: string }) {
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
   const [form, setForm] = useState({ platform: 'twitter', account_name: '', account_id: '', access_token: '', agent_id: agentId || '' });
   const [extras, setExtras] = useState<Record<string, string>>({});
 
@@ -1415,46 +1535,72 @@ function AccountsTab({ agentId }: { agentId: string }) {
           {integrations.map(i => {
             const platform = PLATFORMS.find(p => p.id === i.platform);
             const soul = souls.find(s => s.id === i.agent_id);
-            // Token expiry state
             const expiry = i.token_expiry ? new Date(i.token_expiry) : null;
             const now = Date.now();
             const msLeft = expiry ? expiry.getTime() - now : null;
             const isExpired = msLeft !== null && msLeft <= 0;
             const isExpiringSoon = msLeft !== null && msLeft > 0 && msLeft < 7 * 24 * 60 * 60 * 1000;
+            const showSettings = settingsOpen === i.id;
             return (
               <div key={i.id} className={cn(
-                'flex items-center gap-3 rounded-xl border bg-card px-4 py-3',
+                'rounded-xl border bg-card overflow-hidden',
                 isExpired ? 'border-destructive/40' : isExpiringSoon ? 'border-amber-500/40' : 'border-border',
+                i.paused && 'opacity-60',
               )}>
-                <span className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-sm font-bold shrink-0', platform?.color ?? 'bg-muted')}>
-                  {platform?.icon ?? '?'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{i.account_name || i.account_id}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {platform?.label ?? i.platform}
-                    {soul && ` · ${soul.display_name}`}
-                    {expiry && (
-                      <span className={cn('ml-1', isExpired ? 'text-destructive' : isExpiringSoon ? 'text-amber-500' : '')}>
-                        · {isExpired ? 'expired' : `expires ${expiry.toLocaleDateString()}`}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                {isExpired ? (
-                  <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-destructive/10 text-destructive">Expired</span>
-                ) : isExpiringSoon ? (
-                  <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-amber-500/10 text-amber-500">Expiring soon</span>
-                ) : (
-                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
-                    i.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground')}>
-                    {i.active ? 'Active' : 'Inactive'}
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <span className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-sm font-bold shrink-0', platform?.color ?? 'bg-muted')}>
+                    {platform?.icon ?? '?'}
                   </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium">{i.nickname || i.account_name || i.account_id}</p>
+                      {i.group_name && (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{i.group_name}</span>
+                      )}
+                      {i.paused && <span className="text-xs text-muted-foreground">(paused)</span>}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {platform?.label ?? i.platform}
+                      {soul && ` · ${soul.display_name}`}
+                      {expiry && (
+                        <span className={cn('ml-1', isExpired ? 'text-destructive' : isExpiringSoon ? 'text-amber-500' : '')}>
+                          · {isExpired ? 'expired' : `expires ${expiry.toLocaleDateString()}`}
+                        </span>
+                      )}
+                      {(i.post_hours?.length > 0) && ` · hours: ${i.post_hours.join(',')}`}
+                    </p>
+                  </div>
+                  {isExpired ? (
+                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-destructive/10 text-destructive">Expired</span>
+                  ) : isExpiringSoon ? (
+                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-amber-500/10 text-amber-500">Expiring soon</span>
+                  ) : (
+                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
+                      i.paused ? 'bg-muted text-muted-foreground' : i.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground')}>
+                      {i.paused ? 'Paused' : i.active ? 'Active' : 'Inactive'}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setSettingsOpen(showSettings ? null : i.id)}
+                    className={cn(
+                      'h-7 w-7 flex items-center justify-center rounded transition-colors cursor-pointer',
+                      showSettings ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                    )}
+                    title="Channel settings"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => disconnect(i.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {showSettings && (
+                  <IntegrationSettingsPanel integration={i} onSaved={updated => {
+                    setIntegrations(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
+                    setSettingsOpen(null);
+                  }} />
                 )}
-                <button onClick={() => disconnect(i.id)}
-                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
               </div>
             );
           })}

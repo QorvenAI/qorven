@@ -765,6 +765,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/integrations", gw.handleListSocialIntegrations)
 		r.Post("/social/integrations", gw.handleSaveSocialIntegration)
 		r.Delete("/social/integrations/{id}", gw.handleDeleteSocialIntegration)
+		r.Patch("/social/integrations/{id}/settings", gw.handleUpdateSocialIntegrationSettings)
 		r.Get("/social/autoposts", gw.handleListSocialAutoPosts)
 		r.Post("/social/autoposts", gw.handleCreateSocialAutoPost)
 		r.Delete("/social/autoposts/{id}", gw.handleDeleteSocialAutoPost)
