@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.46-alpha — 2026-05-25
+
+### Fixed
+- **CI test failure** — `TestWriteRuntimeInfo_Roundtrip` was failing because the test expected `~/.qorven/runtime.json` but `config.DataDir()` now resolves to the XDG path (`~/.local/share/qorven`) on Linux. Test now pins `QORVEN_DATA_DIR` so it is not sensitive to path resolution strategy.
+
+---
+
 ## v0.1.45-alpha — 2026-05-25
 
 ### Fixed

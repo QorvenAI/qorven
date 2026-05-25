@@ -142,6 +142,8 @@ func TestWriteRuntimeInfo_Roundtrip(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	// Also clear USERPROFILE for Windows just in case (no-op on Linux).
 	t.Setenv("USERPROFILE", tmp)
+	// Pin data dir so the test is not sensitive to XDG vs legacy path resolution.
+	t.Setenv("QORVEN_DATA_DIR", filepath.Join(tmp, ".qorven"))
 
 	info := runtimeInfo{
 		APIAddr:   "127.0.0.1:4273",
