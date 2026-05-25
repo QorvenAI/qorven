@@ -223,11 +223,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "enter", " ":
 				if m.cfg.SkipTailscale {
-					// Flag already decided — skip Tailscale choice, go to port picker
-					m.portInput = ""
-					m.portErr = ""
-					m.screen = screenPortPicker
-					return m, nil
+					// Flag already decided — skip Tailscale choice, go straight to install
+					m.screen = screenInstall
+					m.stepStarted = time.Now()
+					return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
 				}
 				m.screen = screenTailscaleChoice
 				return m, nil
@@ -253,11 +252,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case 1, 2: // Skip / Decide later
 					m.cfg.SkipTailscale = true
 				}
-				// Proceed to port picker before starting install
-				m.portInput = ""
-				m.portErr = ""
-				m.screen = screenPortPicker
-				return m, nil
+				// Go straight to install — no port/nginx questions
+				m.screen = screenInstall
+				m.stepStarted = time.Now()
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
 			}
 
 		case screenPortPicker:
@@ -447,12 +445,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.kickStep(next)
 		}
 		// All steps done — check what Tailscale step returned.
-		// steps[10].detail is either:
+		// steps[11].detail is either:
 		//   "connected:<100.x.x.x>"  → already connected, skip auth screen
 		//   "url:<https://...>"       → need browser auth
 		//   "skipped"                 → --skip-tailscale or error, go to config
 		m.ips = detectIPs()
-		detail := m.steps[10].detail
+		detail := m.steps[11].detail
 		switch {
 		case strings.HasPrefix(detail, "connected:"):
 			ip := strings.TrimPrefix(detail, "connected:")
@@ -718,8 +716,6 @@ func (m *Model) renderFooter() string {
 	hints := map[screen]string{
 		screenWelcome:         "Enter  agree & install  ·  Ctrl+C  cancel",
 		screenTailscaleChoice: "↑ ↓ / J K  navigate  ·  Enter  confirm  ·  Ctrl+C  cancel",
-		screenPortPicker:      "Type port number  ·  Enter  confirm (blank = 8486)  ·  Ctrl+C  cancel",
-		screenNginxChoice:     "↑ ↓ / J K  navigate  ·  Enter  confirm  ·  Ctrl+C  cancel",
 		screenInstall:         "Installing…  ·  Ctrl+C  force quit (re-run to resume)",
 		screenTailscale: "Waiting for Tailscale authorization  ·  S  skip (use IP manually)  ·  Ctrl+C  cancel",
 		screenConfig:    "Edit URL if needed  ·  Enter  confirm & finish  ·  Ctrl+C  cancel",
@@ -1282,117 +1278,81 @@ func (m *Model) viewConfigRight() string {
 // ── Done ─────────────────────────────────────────────────────────────────────
 
 func (m *Model) viewDoneLeft() string {
-	url := m.urlInput
-	if url == "" {
-		url = "localhost"
-	}
-	if !strings.HasPrefix(url, "http") {
-		url = "http://" + url
-	}
-
-	mode := detectMode(m.urlInput, m.ips, m.tsIP)
-
 	var b strings.Builder
-	b.WriteString(okSt.Bold(true).Render("✓  Qorven is ready!") + "\n")
-
-	// Mode-specific subtitle
-	switch mode {
-	case "tailscale":
-		b.WriteString(mutedSt.Render("Running on your Tailscale network.") + "\n")
-	case "nat":
-		b.WriteString(mutedSt.Render("Running on your local network (behind NAT).") + "\n")
-	case "local":
-		b.WriteString(mutedSt.Render("Running locally on this machine.") + "\n")
-	default:
-		b.WriteString(mutedSt.Render("Running and reachable from the internet.") + "\n")
-	}
-
-	b.WriteString("\n")
+	b.WriteString(okSt.Bold(true).Render("✓  Qorven is installed!") + "\n\n")
 
 	// Health check status
 	switch m.health {
 	case healthChecking:
 		b.WriteString(m.spinner.View() + " " + mutedSt.Render("Verifying service is up…") + "\n\n")
 	case healthUp:
-		b.WriteString(okSt.Bold(true).Render("✓  Service is responding") + "\n\n")
+		b.WriteString(okSt.Bold(true).Render("✓  Service is running") + "\n\n")
 	case healthDown:
 		b.WriteString(warnSt.Render("⚠  Service not yet responding") + "\n")
 		b.WriteString(dimSt.Render("   Check: journalctl -u qorven -f") + "\n\n")
 	}
 
 	b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
-	b.WriteString(boldSt.Render("Open Qorven in your browser:") + "\n\n")
-	b.WriteString("  " + primSt.Render(url+"/") + "\n")
+	b.WriteString(boldSt.Render("Access Qorven at:") + "\n\n")
 
-	// Mode-specific access notes
-	switch mode {
-	case "nat":
-		if m.ips.wanIP != "" {
-			b.WriteString("\n" + warnSt.Render("  Router WAN: "+m.ips.wanIP) + "\n")
-			b.WriteString(mutedSt.Render("  Forward port 80 on your router to reach") + "\n")
-			b.WriteString(mutedSt.Render("  this server from outside your network.") + "\n")
-		}
-		if len(m.ips.lanIPs) > 0 {
-			b.WriteString("\n" + dimSt.Render("  Other LAN addresses:") + "\n")
-			for _, ip := range m.ips.lanIPs {
-				b.WriteString(dimSt.Render("    http://"+ip+"/") + "\n")
-			}
-		}
-	case "tailscale":
-		b.WriteString("\n" + dimSt.Render("  Only devices on your Tailscale network") + "\n")
-		b.WriteString(dimSt.Render("  can reach this URL.") + "\n")
+	port := m.effectivePort()
+
+	// Always show local/public IP
+	localURL := ""
+	if m.ips.publicURL != "" {
+		localURL = fmt.Sprintf("http://%s:%d/", m.ips.publicURL, port)
+	} else if len(m.ips.lanIPs) > 0 {
+		localURL = fmt.Sprintf("http://%s:%d/", m.ips.lanIPs[0], port)
+	} else {
+		localURL = fmt.Sprintf("http://localhost:%d/", port)
+	}
+	b.WriteString("  " + fgSt.Render("Local / Public IP") + "\n")
+	b.WriteString("  " + primSt.Render(localURL) + "\n\n")
+
+	// Tailscale IP (if connected)
+	if m.tsIP != "" {
+		tsURL := fmt.Sprintf("http://%s:%d/", m.tsIP, port)
+		b.WriteString("  " + fgSt.Render("Tailscale (private network)") + "\n")
+		b.WriteString("  " + primSt.Render(tsURL) + "\n")
+		b.WriteString("  " + mutedSt.Render("Reachable from any device on your Tailscale network.") + "\n\n")
 	}
 
-	b.WriteString("\n" + dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
-	b.WriteString(fgSt.Render("Create your admin account and add an AI") + "\n")
-	b.WriteString(fgSt.Render("provider from the web UI. No terminal config needed.") + "\n")
+	b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
+	b.WriteString(fgSt.Render("Open either URL to complete setup in your browser.") + "\n")
 	return b.String()
 }
 
 func (m *Model) viewDoneRight() string {
-	mode := detectMode(m.urlInput, m.ips, m.tsIP)
-
 	steps := dimSt.Render("  1.  Open the URL on the left") + "\n" +
 		dimSt.Render("  2.  Create your admin account") + "\n" +
 		dimSt.Render("  3.  Add an AI provider API key") + "\n" +
-		dimSt.Render("  4.  Create your first agent") + "\n" +
-		dimSt.Render("  5.  Start chatting")
+		dimSt.Render("  4.  Start chatting")
 
 	service := mutedSt.Render("  systemctl status qorven") + "\n" +
 		mutedSt.Render("  journalctl -u qorven -f") + "\n" +
 		mutedSt.Render("  sudo qorven migrate up")
 
-	var modeNote string
-	switch mode {
-	case "nat":
-		modeNote = m.infoBox("Behind NAT",
-			warnSt.Render("  Your WAN IP is "+m.ips.wanIP) + "\n\n" +
-				dimSt.Render("  To reach Qorven from outside:") + "\n" +
-				dimSt.Render("  • Forward port 80 on router") + "\n" +
-				dimSt.Render("  • Or use Tailscale (tailscale.com)") + "\n" +
-				dimSt.Render("  • Or use Cloudflare Tunnel"))
-	case "tailscale":
-		modeNote = m.infoBox("Tailscale mode",
-			okSt.Render("  Secure private network access") + "\n\n" +
-				dimSt.Render("  Add devices via tailscale.com/admin") + "\n" +
-				dimSt.Render("  to let others join your Qorven."))
-	case "local":
-		modeNote = m.infoBox("Local access only",
-			dimSt.Render("  Reachable on this machine only.") + "\n\n" +
-				dimSt.Render("  To share with others:") + "\n" +
-				dimSt.Render("  • Install Tailscale") + "\n" +
-				dimSt.Render("  • Or use your LAN IP"))
-	default:
-		modeNote = m.infoBox("Publicly reachable",
-			okSt.Render("  Your server has a public IP.") + "\n\n" +
-				dimSt.Render("  Add a domain for HTTPS:") + "\n" +
-				dimSt.Render("  Point DNS → "+m.ips.publicURL) + "\n" +
-				dimSt.Render("  Then: sudo qorven tls enable"))
+	var accessNote string
+	if m.tsIP != "" {
+		accessNote = m.infoBox("Tailscale connected",
+			okSt.Render("  ✓  Private network access active") + "\n\n" +
+				dimSt.Render("  Add devices: tailscale.com/admin") + "\n" +
+				dimSt.Render("  Port & TLS: Settings → Access in the UI"))
+	} else if m.ips.publicURL != "" {
+		accessNote = m.infoBox("Public IP",
+			okSt.Render("  ✓  Publicly reachable") + "\n\n" +
+				dimSt.Render("  Add a domain and HTTPS in") + "\n" +
+				dimSt.Render("  Settings → Access after install."))
+	} else {
+		accessNote = m.infoBox("Private network",
+			dimSt.Render("  Reachable on your LAN.") + "\n\n" +
+				dimSt.Render("  For remote access install Tailscale:") + "\n" +
+				dimSt.Render("  tailscale.com/download"))
 	}
 
 	return m.infoBox("Next steps", steps) +
 		"\n\n" +
-		modeNote +
+		accessNote +
 		"\n\n" +
 		m.infoBox("Service commands", service)
 }
