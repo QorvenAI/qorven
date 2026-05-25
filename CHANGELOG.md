@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.48-alpha — 2026-05-25
+
+### Fixed
+- **App builder no longer stalls mid-build** — the agent loop was cutting off tool execution after 5 consecutive tool-only iterations and forcing a text reply. Building an app requires 10+ consecutive file writes, so Prime was getting interrupted before writing `bundle.js`. Code tasks now allow 20 consecutive tool iterations before the search-discipline guard fires.
+
+---
+
 ## v0.1.47-alpha — 2026-05-25
 
 ### Fixed

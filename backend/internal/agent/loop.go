@@ -841,7 +841,14 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			result.Content = "Request cancelled."
 			break
 		}
-		if consecutiveToolIters >= 5 {
+		// For code tasks, allow many more consecutive tool iterations — app building
+		// legitimately requires 10+ consecutive file writes without any text in between.
+		// Research/chat tasks keep the tight 5-call limit to prevent search loops.
+		consecutiveToolLimit := 5
+		if chatIntent == ChatIntentCode {
+			consecutiveToolLimit = 20
+		}
+		if consecutiveToolIters >= consecutiveToolLimit {
 			slog.Warn("agent.loop.search_discipline", "agent", ag.ID, "forcing_answer", true, "tool_iters", consecutiveToolIters)
 			messages = append(messages, providers.Message{
 				Role:    "user",
