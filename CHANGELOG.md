@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.40-alpha — 2026-05-25
+
+### Improved
+- **Data directory is now configurable and platform-aware** — Qorven resolves its data directory via the `QORVEN_DATA_DIR` environment variable. If unset, it automatically falls back to the legacy `~/.qorven` path (for existing installs) or the correct platform default: `~/.local/share/qorven` on Linux, `~/Library/Application Support/Qorven` on macOS, `%APPDATA%\Qorven` on Windows. No migration required for existing users.
+- **Agent file and exec tools respect the configured data directory** — agents writing app files or running shell commands now use the resolved data path, eliminating permission errors when the service runs under a dedicated system user.
+
+---
+
 ## v0.1.37-alpha — 2026-05-24
 
 ### Fixed
