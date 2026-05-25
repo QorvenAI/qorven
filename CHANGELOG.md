@@ -4,6 +4,15 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.41-alpha — 2026-05-25
+
+### Fixed
+- **Installer Tailscale auth URL was never shown** — the installer was reading the wrong step result (nginx's output instead of Tailscale's), so the authorization URL never appeared and the screen fell through to showing a LAN IP instead. Fixed.
+- **Port and nginx screens removed from installer** — port and nginx are now configurable from Settings in the UI after install. The install flow is: Welcome → access mode → installing → done.
+- **Done screen shows both local IP and Tailscale IP** — after install completes, both addresses are shown clearly so you can open whichever is reachable.
+
+---
+
 ## v0.1.40-alpha — 2026-05-25
 
 ### Improved
