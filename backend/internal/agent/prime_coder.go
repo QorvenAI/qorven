@@ -280,10 +280,8 @@ When the user asks you to "build an app", they mean a Qorven app that installs i
 ├── tools/
 │   └── my_tool.sh        ← shell scripts for agent tools
 └── ui/
-    ├── package.json
-    ├── vite.config.ts
-    └── src/
-        └── index.tsx     ← IIFE bundle entry
+    └── frontend/
+        └── bundle.js     ← plain JavaScript IIFE (NO build step needed)
 ` + "```" + `
 
 **app.yaml format:**
@@ -315,20 +313,74 @@ tools:
       required: [name]
 ` + "```" + `
 
-**UI bundle — ui/src/index.tsx:**
-The bundle is an IIFE that calls ` + "`window.__QorvenApp.register()`" + `. Read ` + "`backend/cmd/scaffold/templates/ui/src/index.tsx.tmpl`" + ` for the exact pattern.
-Key points:
-- Call ` + "`register({ id: 'my-app', displayName: 'My App', pages: [{id, path, label, component}] })`" + `
-- Use ` + "`window.__QorvenUI`" + ` for React (do NOT import React — it's provided by the host)
-- Fetch data via ` + "`request('/apps/my-app/tools/tool_name', {method:'POST', body: JSON.stringify({args:{}})})`" + `
-- ` + "`request()`" + ` is available on ` + "`window.__QorvenApp.request`" + ` — auto-attaches auth token
-- **` + "`request()`" + ` returns a ` + "`tools.Result`" + ` object, NOT a fetch Response. Shape:**
-  ` + "```ts" + `
-  { content: string, user_content: string, is_error: boolean }
-  // content = raw stdout from your tool script
-  // Parse it: const data = JSON.parse(result.content)
-  // Do NOT call result.ok, result.json() — those don't exist
-  ` + "```" + `
+**UI bundle — ui/frontend/bundle.js:**
+Write the bundle as a plain JavaScript IIFE file — NO build step, NO npm required. The host loads it via a script tag and React/components are already on the page.
+
+Pattern (copy and adapt this exactly):
+` + "```js" + `
+(function() {
+  var React = window.__QorvenApp.React;
+  var h = React.createElement;
+  var useState = React.useState;
+  var useEffect = React.useEffect;
+  var UI = window.__QorvenUI;        // Button, Card, Input, Text, Table, etc.
+  var icons = window.__QorvenUI.icons; // all Lucide icons: icons.Trash2, icons.Plus, etc.
+  var request = window.__QorvenApp.request;
+
+  function MyPage() {
+    var s = useState([]); var items = s[0]; var setItems = s[1];
+    var inp = useState(''); var input = inp[0]; var setInput = inp[1];
+
+    useEffect(function() { loadItems(); }, []);
+
+    function loadItems() {
+      request('/apps/my-app/tools/view_items', {method:'POST', body: JSON.stringify({args:{}})})
+        .then(function(r) {
+          if (!r.is_error) setItems(JSON.parse(r.content));
+        });
+    }
+
+    function addItem() {
+      if (!input.trim()) return;
+      request('/apps/my-app/tools/add_item', {method:'POST', body: JSON.stringify({args:{name: input}})})
+        .then(function() { setInput(''); loadItems(); });
+    }
+
+    function deleteItem(id) {
+      request('/apps/my-app/tools/delete_item', {method:'POST', body: JSON.stringify({args:{id: id}})})
+        .then(function() { loadItems(); });
+    }
+
+    return h('div', {style:{padding:'20px', display:'flex', flexDirection:'column', gap:'16px'}},
+      h('div', {style:{display:'flex', gap:'8px'}},
+        h(UI.Input, {value: input, onChange: function(e){setInput(e.target.value)}, placeholder: 'Enter text...', style:{flex:1}}),
+        h(UI.Button, {onClick: addItem}, 'Add')
+      ),
+      h('div', {style:{display:'flex', flexDirection:'column', gap:'8px'}},
+        items.map(function(item) {
+          return h('div', {key: item.id, style:{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 12px', background:'var(--muted)', borderRadius:'6px'}},
+            h('span', null, item.name),
+            h(UI.Button, {variant:'ghost', onClick: function(){deleteItem(item.id)}, style:{padding:'4px 8px'}},
+              h(icons.Trash2, {size:16})
+            )
+          );
+        })
+      )
+    );
+  }
+
+  window.__QorvenApp.register({
+    id: 'my-app',
+    displayName: 'My App',
+    pages: [{ id: 'home', path: 'home', label: 'Home', component: MyPage }]
+  });
+})();
+` + "```" + `
+
+Key rules for the bundle:
+- ALWAYS use ` + "`React.createElement`" + ` (aliased as ` + "`h`" + `) — NEVER use JSX syntax in the bundle
+- ALWAYS use ` + "`var`" + ` + destructure manually — avoid arrow functions in React.useState calls
+- ` + "`request()`" + ` returns ` + "`{content: string, is_error: boolean}`" + ` — parse with ` + "`JSON.parse(r.content)`" + `, do NOT call ` + "`r.json()`" + `
 - **Available ` + "`window.__QorvenUI`" + ` components** (only use these — do NOT invent names):
   ` + "`Button`" + `, ` + "`Card`" + `, ` + "`Input`" + `, ` + "`Checkbox`" + `, ` + "`Badge`" + `, ` + "`Avatar`" + `, ` + "`Separator`" + `, ` + "`Skeleton`" + `,
   ` + "`Select`" + `, ` + "`Tabs`" + `, ` + "`Dialog`" + `, ` + "`Drawer`" + `, ` + "`Sheet`" + `, ` + "`Popover`" + `, ` + "`Tooltip`" + `, ` + "`Switch`" + `,
@@ -346,51 +398,29 @@ NAME=$(echo "$INPUT" | python3 -c "import sys,json; d=json.loads(sys.stdin.read(
 # then use psql $QORVEN_DB_DSN to query the DB
 ` + "```" + `
 
-**Build the bundle:**
-` + "```bash" + `
-cd ~/.qorven/apps/my-app/ui
-npm install
-npm run build   # outputs to ui/frontend/bundle.js
-` + "```" + `
-
-**Install the app:**
-` + "```bash" + `
-curl -s -X POST http://localhost:4200/v1/apps/ \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"path": "~/.qorven/apps/my-app"}'
-` + "```" + `
-Get a token first: ` + "`curl -s -X POST http://localhost:4200/auth/login -d '{\"username\":\"jay\",\"password\":\"devpass123\"}' | python3 -c \"import sys,json; print(json.load(sys.stdin)['token'])\"`" + `
-
-**Reload after editing:**
-` + "```bash" + `
-curl -s -X POST http://localhost:4200/v1/apps/{id}/reload -H "Authorization: Bearer $TOKEN"
-` + "```" + `
-
 **When building a Qorven app, follow these steps exactly:**
-1. exec: mkdir -p ~/.qorven/apps/{slug}/migrations ~/.qorven/apps/{slug}/tools ~/.qorven/apps/{slug}/ui/src
-2. write_file: ~/.qorven/apps/{slug}/app.yaml (follow the format above exactly)
-3. write_file: ~/.qorven/apps/{slug}/migrations/001_create_tables.up.sql (CREATE TABLE IF NOT EXISTS ... — MUST end in .up.sql or migrations are skipped)
-4. write_file: each tool script in ~/.qorven/apps/{slug}/tools/ (read args from stdin: INPUT=$(cat))
-   exec: chmod +x ~/.qorven/apps/{slug}/tools/*.sh  ← REQUIRED or tools fail with Permission denied
-5. write_file: UI source files (index.tsx, vite.config.ts, package.json) following the pattern in the UI bundle section above
-6. exec: cd ~/.qorven/apps/{slug}/ui && npm install && npm run build
-7. install_app: path=~/.qorven/apps/{slug}
+1. exec: ` + "`mkdir -p {appsDir}/{slug}/migrations {appsDir}/{slug}/tools {appsDir}/{slug}/ui/frontend`" + `
+2. write_file: ` + "`{appsDir}/{slug}/app.yaml`" + ` (follow the format above exactly)
+3. write_file: ` + "`{appsDir}/{slug}/migrations/001_create_tables.up.sql`" + ` (CREATE TABLE IF NOT EXISTS ... — MUST end in .up.sql)
+4. write_file: each tool script in ` + "`{appsDir}/{slug}/tools/`" + ` (read args from stdin: INPUT=$(cat))
+   exec: ` + "`chmod +x {appsDir}/{slug}/tools/*.sh`" + `  ← REQUIRED or tools fail with Permission denied
+5. write_file: ` + "`{appsDir}/{slug}/ui/frontend/bundle.js`" + ` — plain JavaScript IIFE following the bundle pattern above (NO npm, NO build step)
+6. install_app: path=` + "`{appsDir}/{slug}`" + `
 
 **CRITICAL: Do NOT call scaffold_app** — it creates a Go Wasm plugin (wrong format). Use write_file and exec to create files directly per the structure above.
 
 **When editing an existing app:**
 ALWAYS use your tools directly. Never respond with code blocks for the user to run manually.
-1. exec: cat ~/.qorven/apps/{slug}/app.yaml  (read current state first)
-2. exec: cat the relevant tool scripts / bundle.js
+1. exec: cat ` + "`{appsDir}/{slug}/app.yaml`" + `  (read current state first)
+2. exec: cat the relevant tool scripts and bundle.js
 3. write_file: overwrite each file that needs changing
-4. If schema changed: exec the ALTER TABLE or new migration via psql
-5. If bundle changed: cd ~/.qorven/apps/{slug}/ui && npm run build
-6. exec: reload the app via the API (see Reload above)
+4. If schema changed: write a new migration file ` + "`{appsDir}/{slug}/migrations/002_change.up.sql`" + `
+5. install_app: path=` + "`{appsDir}/{slug}`" + `  (re-installs and picks up changes)
 This is autonomous work — execute every step yourself with tools.
 `, ctx)
 	// Replace placeholder paths with the actual resolved apps directory.
 	prompt = strings.ReplaceAll(prompt, "~/.qorven/apps", appsDir)
+	prompt = strings.ReplaceAll(prompt, "{appsDir}", appsDir)
 	return prompt
 }
 

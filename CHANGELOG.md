@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.45-alpha — 2026-05-25
+
+### Fixed
+- **App builder no longer requires npm** — agent instructions now write the UI as a plain JavaScript IIFE bundle directly, with no Vite/npm build step. Production installs don't have Node.js installed, so the previous npm-based build always failed. The bundle pattern uses `React.createElement` and `window.__QorvenUI` components available from the host page.
+
+---
+
 ## v0.1.44-alpha — 2026-05-25
 
 ### Fixed
