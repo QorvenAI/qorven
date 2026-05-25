@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.44-alpha — 2026-05-25
+
+### Fixed
+- **App builder tools not executed with Gemini models** — Gemini 2.5 Flash outputs tool calls using `print(default_api.func_name(...))` Python-style syntax in `tool_code` blocks instead of structured function call responses. The narrated tool call rescue parser now handles this pattern, including multi-line triple-quoted string arguments (file contents). App builds using Gemini now execute write_file, exec, and install_app correctly.
+
+---
+
 ## v0.1.43-alpha — 2026-05-25
 
 ### Fixed
