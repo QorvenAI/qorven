@@ -82,9 +82,9 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
     officialLink: 'https://discord.com/developers/applications',
     docsSlug: 'discord',
     setupSteps: [
-      'Go to discord.com/developers/applications → New Application',
-      'Open the Bot tab → Reset Token → copy the token',
-      'Enable Message Content Intent under Privileged Gateway Intents',
+      'Go to discord.com/developers/applications → New Application → Bot tab → Reset Token; copy the token',
+      'Privileged Gateway Intents → enable Message Content Intent and Server Members Intent',
+      'OAuth2 → URL Generator → scope: bot → permissions: Send Messages, Read Message History → copy the URL and open it to invite the bot to your server',
     ],
     fields: [
       {
@@ -129,8 +129,9 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
     docsSlug: 'slack',
     setupSteps: [
       'Go to api.slack.com/apps → Create New App → From scratch',
-      'Enable Socket Mode under Settings; generate an App-Level Token (xapp-) with connections:write scope',
-      'OAuth & Permissions → Install to Workspace; copy the Bot Token (xoxb-)',
+      'OAuth & Permissions → Bot Token Scopes → add: app_mentions:read, chat:write, im:history, im:read, im:write',
+      'Settings → Socket Mode → Enable; generate an App-Level Token (xapp-) with connections:write scope',
+      'Install to Workspace → copy the Bot Token (xoxb-) and App-Level Token (xapp-)',
     ],
     fields: [
       {
