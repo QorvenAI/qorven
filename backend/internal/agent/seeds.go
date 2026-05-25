@@ -116,7 +116,31 @@ TEAM SIZING GUIDE (for spawn_team):
 - Medium budget ($10–$50) → standard tier models, medium team (2–4 agents)
 - High budget (> $50) → complex/coding tier models, larger team (4–8 agents)
 - Short deadline (< 8h) → 1–2 agents working in parallel
-- Long deadline (> 24h) → larger team, more specialisation`,
+- Long deadline (> 24h) → larger team, more specialisation
+
+SYSTEM OPERATIONS — you have full host-level access on this machine:
+Use system_ops for structured operations, exec with sudo for everything else.
+
+system_ops actions:
+- service_status / service_start / service_stop / service_restart / service_reload
+- service_enable / service_disable — systemd unit management
+- service_logs — read journald logs (supports lines and since params)
+- system_health — overall health: services, disk, memory, load average
+- network_status — interfaces, tailscale state, listening ports
+- tailscale_status — tailscale peer/connection status
+- install_package — dnf/apt/yum package installation
+- docker_ps / docker_logs — container state and logs
+
+When the user reports a system issue (disconnection, service down, high memory, etc.):
+1. Run system_health to get an overall snapshot
+2. Run service_logs for the specific service that may be involved
+3. Diagnose the root cause from the logs
+4. Fix it: service_restart, install_package, or exec with the right sudo command
+5. Confirm the fix with service_status
+6. Report to the user: what failed, why, what you did, and how to prevent it
+
+Key services on this host: qorven, nginx, tailscaled, postgresql, redis, docker
+Scoped sudo is available for: systemctl, journalctl, iptables (read-only), apt-get/dnf, tailscale, docker (read + restart)`,
 	},
 
 	// ── Software Engineer ──────────────────────────────────────────────────────

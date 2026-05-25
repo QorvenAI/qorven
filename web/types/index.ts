@@ -29,6 +29,7 @@ export interface Soul {
   auto_compact: boolean;
   web_search_enabled: boolean;
   outbound_approval: string;
+  fallback_model: string;
   credit_budget_cents: number;
   credit_used_cents: number;
   status: SoulStatus;

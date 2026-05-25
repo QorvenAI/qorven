@@ -60,7 +60,7 @@ func (s *Store) Create(ctx context.Context, tenantID string, cfg ProviderConfig)
 	return cfg, nil
 }
 
-// mergeAWSCredsIntoSettings folds AWS static credentials into the settings JSONB blob.
+// mergeAWSCredsIntoSettings folds AWS static credentials and oauth_provider into the settings JSONB blob.
 // This avoids schema changes — credentials live in the flexible settings column.
 func mergeAWSCredsIntoSettings(cfg ProviderConfig) json.RawMessage {
 	base := map[string]any{}
@@ -74,22 +74,27 @@ func mergeAWSCredsIntoSettings(cfg ProviderConfig) json.RawMessage {
 			base["aws_session_token"] = cfg.AWSSessionToken
 		}
 	}
+	if cfg.OAuthProvider != "" {
+		base["oauth_provider"] = cfg.OAuthProvider
+	}
 	b, _ := json.Marshal(base)
 	return b
 }
 
-// extractAWSCredsFromSettings reads AWS credentials back out of the settings JSONB.
+// extractAWSCredsFromSettings reads AWS credentials and oauth_provider back out of settings JSONB.
 func extractAWSCredsFromSettings(cfg *ProviderConfig) {
 	if len(cfg.Settings) == 0 { return }
 	var s struct {
-		AccessKey    string `json:"aws_access_key"`
-		SecretKey    string `json:"aws_secret_key"`
-		SessionToken string `json:"aws_session_token"`
+		AccessKey     string `json:"aws_access_key"`
+		SecretKey     string `json:"aws_secret_key"`
+		SessionToken  string `json:"aws_session_token"`
+		OAuthProvider string `json:"oauth_provider"`
 	}
 	if json.Unmarshal(cfg.Settings, &s) == nil {
 		cfg.AWSAccessKey = s.AccessKey
 		cfg.AWSSecretKey = s.SecretKey
 		cfg.AWSSessionToken = s.SessionToken
+		cfg.OAuthProvider = s.OAuthProvider
 	}
 }
 

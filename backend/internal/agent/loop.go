@@ -702,6 +702,14 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	toolCtx = tools.WithAgentID(toolCtx, ag.ID)
 	toolCtx = tools.WithSessionID(toolCtx, req.SessionID)
 	toolCtx = tools.WithDiscussionID(toolCtx, req.DiscussionID)
+	// Elevate tool context for agents that have system operations access.
+	// This bypasses privilege_escalation/package_install deny groups in exec.go
+	// and enables the system_ops tool. Requires scoped sudoers at /etc/sudoers.d/qorven-ops.
+	// "chief" is Prime Qor — the personal AI chief of staff with full system rights.
+	if ag.AgentKey == "sysops" || ag.AgentKey == "chief" ||
+		(ag.Role != nil && (*ag.Role == "sysops" || *ag.Role == "chief")) {
+		toolCtx = tools.WithAllowElevated(toolCtx)
+	}
 	// Wire fork subagent so spawn tool can delegate
 	toolCtx = tools.WithForkFunc(toolCtx, func(forkCtx context.Context, directive string) (string, error) {
 		forkReq := ForkRequest{
@@ -1765,6 +1773,12 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 
 	// 11. Extract memories (background, don't block response)
 	go l.extractMemories(context.Background(), ag.ID, req.UserMessage, result.Content, req.SessionID)
+
+	// 11a. Cortex synthesis — extract facts/decisions from full conversation history
+	if l.memStore != nil && l.providerReg != nil && len(history) >= 4 {
+		synthHistory := append(history, providers.Message{Role: "user", Content: req.UserMessage}, providers.Message{Role: "assistant", Content: result.Content})
+		go memory.RunCortexSynthesis(context.Background(), l.providerReg.Default(), l.memStore, l.tenantID, ag.ID, req.SessionID, synthHistory)
+	}
 
 	// 11b. Self-improving skills: analyze session for learnable patterns
 	if l.skillLearner != nil && result.Content != "" && len(result.ToolsUsed) >= 3 {

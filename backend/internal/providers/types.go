@@ -184,6 +184,11 @@ type ProviderConfig struct {
 	AWSAccessKey    string `json:"aws_access_key,omitempty"`
 	AWSSecretKey    string `json:"aws_secret_key,omitempty"`
 	AWSSessionToken string `json:"aws_session_token,omitempty"`
+
+	// OAuthProvider links this provider row to an oauth_tokens entry.
+	// When set, the live OAuth access token is injected as the API key at runtime
+	// (see loadProvidersFromDB). Stored in the settings JSONB column.
+	OAuthProvider string `json:"oauth_provider,omitempty"`
 }
 
 // DefaultAPIBase returns the default API base URL for a provider type.

@@ -82,6 +82,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		// Files
 		r.Post("/files", gw.handleFileUpload)
 		r.Get("/files/{id}/content", gw.handleFileContent)
+		r.Get("/files/download/{token}", gw.handleServeFile)
 
 		// Agents
 		r.Get("/agents", gw.handleListAgents)

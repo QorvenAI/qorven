@@ -6,7 +6,7 @@ import React, { useState, useEffect, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type UIMessage } from 'ai';
-import { Copy, Check, RefreshCw, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { modelDisplayName } from '@/lib/model-names';
 import { ToolInvocation } from './tool-invocation';
@@ -245,6 +245,28 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                 const src = w.data.url as string | undefined;
                 if (!src) return null;
                 return <img key={i} src={src} alt={(w.data.prompt as string) ?? 'generated image'} className="max-w-sm rounded-xl border border-border" />;
+              }
+              if (w.type === 'shell_output') {
+                const cmd = w.data.command as string | undefined;
+                const out = w.data.output as string | undefined;
+                const code = w.data.exit_code as number | undefined;
+                const ok = code === 0;
+                return (
+                  <div key={i} className="rounded-xl border border-border overflow-hidden my-2 max-w-full font-mono text-xs">
+                    <div className={cn('flex items-center gap-2 px-3 py-1.5 border-b border-border', ok ? 'bg-muted/30' : 'bg-destructive/10')}>
+                      <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <code className="flex-1 truncate text-muted-foreground">{cmd}</code>
+                      <span className={cn('text-2xs font-medium shrink-0', ok ? 'text-emerald-500' : 'text-destructive')}>
+                        exit {code ?? '?'}
+                      </span>
+                    </div>
+                    {out && out !== '(no output)' && (
+                      <pre className="p-3 overflow-x-auto whitespace-pre-wrap break-words bg-muted/10 text-foreground/80 max-h-64 overflow-y-auto leading-relaxed">
+                        {out}
+                      </pre>
+                    )}
+                  </div>
+                );
               }
               return null;
             })}

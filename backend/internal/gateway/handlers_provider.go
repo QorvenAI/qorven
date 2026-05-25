@@ -51,7 +51,7 @@ func (gw *Gateway) handleCreateProviderDB(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 400, map[string]string{"error": "name must be lowercase alphanumeric with hyphens only"})
 		return
 	}
-	if !providers.ValidProviderTypes[cfg.ProviderType] {
+	if !providers.ValidProviderTypes[cfg.ProviderType] && !providers.IsValidProviderType(cfg.ProviderType) {
 		writeJSON(w, 400, map[string]string{"error": "unsupported provider_type"})
 		return
 	}
@@ -67,8 +67,14 @@ func (gw *Gateway) handleCreateProviderDB(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Register in live registry (with the key, before we cleared it)
+	// For OAuth providers, inject current token as API key before registry registration.
 	cfg.ID = created.ID
+	if cfg.OAuthProvider != "" && cfg.APIKey == "" && gw.llmOAuthMgr != nil {
+		if tok, err2 := gw.llmOAuthMgr.Token(r.Context(), defaultTenant, cfg.OAuthProvider); err2 == nil && tok != "" {
+			cfg.APIKey = tok
+		}
+	}
+	// Register in live registry (with the key, before we cleared it)
 	gw.providerReg.Register(cfg)
 
 	slog.Info("provider created", "id", created.ID, "name", cfg.Name, "type", cfg.ProviderType)

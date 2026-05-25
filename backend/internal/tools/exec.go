@@ -157,8 +157,23 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *Result {
 		return ErrorResult("command contains invalid NUL byte")
 	}
 
-	// Security: check deny patterns
-	if denied, pattern := IsShellDenied(command); denied {
+	// Security: check deny patterns.
+	// Elevated context (sysops role) bypasses privilege_escalation and package_install
+	// deny groups — those are handled by scoped sudoers (/etc/sudoers.d/qorven-ops).
+	// All other deny groups (reverse_shell, data_exfiltration, etc.) remain active.
+	if IsElevated(ctx) {
+		elevated := ResolveDenyPatterns(map[string]bool{
+			"privilege_escalation": false,
+			"package_install":      false,
+			"process_control":      false,
+		})
+		for _, p := range elevated {
+			if p.MatchString(command) {
+				return ErrorResult(fmt.Sprintf("command blocked by security policy (matched: %s)", p.String()))
+			}
+		}
+		// Also bypass ShellDenyPatterns sudo check for elevated context
+	} else if denied, pattern := IsShellDenied(command); denied {
 		return ErrorResult(fmt.Sprintf("command blocked by security policy (matched: %s)", pattern))
 	}
 
@@ -265,6 +280,14 @@ func (t *ExecTool) executeOnHost(ctx context.Context, command, cwd string, timeo
 			ForLLM:  fmt.Sprintf("❌ Exit code: %d\n%s\nFix the command or code and try again.", exitCode, result),
 			ForUser: fmt.Sprintf("exit code %d\n%s", exitCode, result),
 			IsError: true,
+			Widget: &Widget{
+				Type: "shell_output",
+				Data: map[string]any{
+					"command":   command,
+					"output":    result,
+					"exit_code": exitCode,
+				},
+			},
 		}
 	}
 
@@ -278,9 +301,18 @@ func (t *ExecTool) executeOnHost(ctx context.Context, command, cwd string, timeo
 		OnExecComplete(ctx, AgentIDFromCtx(ctx), command, result, 0, 0)
 	}
 
+	capped := capOutput(result, maxExecOutput)
 	return &Result{
-		ForLLM:  fmt.Sprintf("✅ Exit code: 0\n%s", capOutput(result, maxExecOutput)),
-		ForUser: capOutput(result, maxExecOutput),
+		ForLLM:  fmt.Sprintf("✅ Exit code: 0\n%s", capped),
+		ForUser: capped,
+		Widget: &Widget{
+			Type: "shell_output",
+			Data: map[string]any{
+				"command":   command,
+				"output":    capped,
+				"exit_code": 0,
+			},
+		},
 	}
 }
 
@@ -323,19 +355,29 @@ func (t *ExecTool) executeInSandbox(ctx context.Context, command, cwd, sandboxKe
 			output = fmt.Sprintf("command exited with code %d", result.ExitCode)
 		}
 		output += sandbox.MaybeSandboxHint(result.ExitCode, output)
+		capped := capOutput(output, maxExecOutput)
 		return &Result{
-			ForLLM:  fmt.Sprintf("❌ [sandbox] Exit code: %d\n%s", result.ExitCode, capOutput(output, maxExecOutput)),
-			ForUser: capOutput(output, maxExecOutput),
+			ForLLM:  fmt.Sprintf("❌ [sandbox] Exit code: %d\n%s", result.ExitCode, capped),
+			ForUser: capped,
 			IsError: true,
+			Widget: &Widget{
+				Type: "shell_output",
+				Data: map[string]any{"command": command, "output": capped, "exit_code": result.ExitCode},
+			},
 		}
 	}
 
 	if output == "" {
 		output = "(no output)"
 	}
+	capped := capOutput(output, maxExecOutput)
 	return &Result{
-		ForLLM:  fmt.Sprintf("✅ [sandbox] Exit code: 0\n%s", capOutput(output, maxExecOutput)),
-		ForUser: capOutput(output, maxExecOutput),
+		ForLLM:  fmt.Sprintf("✅ [sandbox] Exit code: 0\n%s", capped),
+		ForUser: capped,
+		Widget: &Widget{
+			Type: "shell_output",
+			Data: map[string]any{"command": command, "output": capped, "exit_code": 0},
+		},
 	}
 }
 

@@ -83,15 +83,16 @@ func ToDefinition(t Tool) ToolDefinition {
 type ctxKey string
 
 const (
-	ctxWorkspace   ctxKey = "tool_workspace"
-	ctxChannel     ctxKey = "tool_channel"
-	ctxChatID      ctxKey = "tool_chat_id"
-	ctxSessionKey  ctxKey = "tool_session_key"
-	ctxAgentID     ctxKey = "tool_agent_id"
-	ctxUserID      ctxKey = "tool_user_id"
-	ctxTenantID    ctxKey = "tool_tenant_id"
-	ctxForkFunc    ctxKey = "tool_fork_func"
-	ctxSandboxKey  ctxKey = "tool_sandbox_key"
+	ctxWorkspace    ctxKey = "tool_workspace"
+	ctxChannel      ctxKey = "tool_channel"
+	ctxChatID       ctxKey = "tool_chat_id"
+	ctxSessionKey   ctxKey = "tool_session_key"
+	ctxAgentID      ctxKey = "tool_agent_id"
+	ctxUserID       ctxKey = "tool_user_id"
+	ctxTenantID     ctxKey = "tool_tenant_id"
+	ctxForkFunc     ctxKey = "tool_fork_func"
+	ctxSandboxKey   ctxKey = "tool_sandbox_key"
+	ctxAllowElevated ctxKey = "tool_allow_elevated"
 )
 
 func WithWorkspace(ctx context.Context, ws string) context.Context {
@@ -164,6 +165,18 @@ func WithSandboxKey(ctx context.Context, key string) context.Context {
 func SandboxKeyFromCtx(ctx context.Context) string {
 	if v, ok := ctx.Value(ctxSandboxKey).(string); ok { return v }
 	return ""
+}
+
+// AllowElevated marks the context as coming from a privileged agent role
+// (sysops) that is permitted to run scoped sudo commands via /etc/sudoers.d/qorven-ops.
+// Never set this from user input — only the gateway sets it when the agent's
+// role is "sysops".
+func WithAllowElevated(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxAllowElevated, true)
+}
+func IsElevated(ctx context.Context) bool {
+	v, _ := ctx.Value(ctxAllowElevated).(bool)
+	return v
 }
 
 // MimeFromExt returns MIME type for common file extensions.

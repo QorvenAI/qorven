@@ -52,6 +52,9 @@ func (gw *Gateway) registerTools() {
 
 	// Runtime
 	reg.Register(tools.NewExecTool(workspace, true))
+	// System operations — structured tool for privileged agent roles (sysops).
+	// Only executes when the tool context has AllowElevated set (see loop.go).
+	reg.Register(tools.NewSystemOpsTool())
 
 	// Web
 	// Web search — try to find Perplexity API key from providers
@@ -199,6 +202,15 @@ func (gw *Gateway) registerTools() {
 		reg.Register(tools.NewQorCrawlTool(fcToken))
 		slog.Info("qor_crawl.configured")
 	}
+
+	// send_file — agent delivers workspace files to the user as downloads.
+	// The onSend callback emits a notification so the user sees a download link.
+	reg.Register(tools.NewSendFileTool(workspace, func(token, filename, mime string) {
+		gw.writeNotification("", "", "", "file_download",
+			"File ready: "+filename,
+			"/api/v1/files/download/"+token,
+			"file", token)
+	}))
 
 	// Memory + KG (need DB)
 	if gw.db != nil {
@@ -923,11 +935,18 @@ func (gw *Gateway) loadProvidersFromDB() {
 	if err != nil {
 		slog.Warn("failed to load providers from DB", "error", err)
 	} else if len(configs) > 0 {
-		// Backfill API key from provider_keys for any provider whose key is stored
-		// in the key pool (provider_keys) rather than inline in the providers row.
+		// Backfill API key from provider_keys or OAuth token manager.
 		for i, cfg := range configs {
 			if cfg.APIKey != "" {
 				continue
+			}
+			// OAuth-connected providers: fetch live token from oauth_tokens table.
+			if cfg.OAuthProvider != "" && gw.llmOAuthMgr != nil {
+				if tok, err := gw.llmOAuthMgr.Token(context.Background(), defaultTenant, cfg.OAuthProvider); err == nil && tok != "" {
+					configs[i].APIKey = tok
+					slog.Info("provider.oauth_token_injected", "provider", cfg.Name, "oauth", cfg.OAuthProvider)
+					continue
+				}
 			}
 			// cfg.ID is the providers.id UUID — look up verified key by that UUID
 			keys, _ := keyStore.ListKeys(context.Background(), defaultTenant, cfg.ID)
@@ -947,7 +966,7 @@ func (gw *Gateway) loadProvidersFromDB() {
 		slog.Info("providers loaded from database", "count", len(configs))
 	}
 
-	// 2. Auto-register providers from provider_keys (Models Hub keys)
+	// 2. Auto-register providers from provider_keys or OAuth tokens (Models Hub keys)
 	// If a user added Gemini keys via Models Hub but no providers row exists,
 	// create a provider instance using the catalog defaults + first available key.
 	catalog := providers.ProviderCatalog()
@@ -956,6 +975,27 @@ func (gw *Gateway) loadProvidersFromDB() {
 		if _, ok := gw.providerReg.GetByName(manifest.ID); ok {
 			continue
 		}
+
+		// For OAuth providers, try the OAuth token manager first (no key pool needed).
+		if manifest.AuthType == "oauth2" && gw.llmOAuthMgr != nil {
+			if tok, err := gw.llmOAuthMgr.Token(context.Background(), defaultTenant, manifest.ID); err == nil && tok != "" {
+				cfg := providers.ProviderConfig{
+					ID:            "oauth-" + manifest.ID,
+					Name:          manifest.ID,
+					DisplayName:   manifest.Name,
+					ProviderType:  manifest.DriverType,
+					APIBase:       manifest.DefaultAPIBase,
+					APIKey:        tok,
+					OAuthProvider: manifest.ID,
+					Enabled:       true,
+				}
+				if err := gw.providerReg.Register(cfg); err == nil {
+					slog.Info("provider auto-registered from oauth", "provider", manifest.ID)
+				}
+				continue
+			}
+		}
+
 		keys, _ := keyStore.ListKeys(context.Background(), defaultTenant, manifest.ID)
 		if len(keys) == 0 {
 			continue

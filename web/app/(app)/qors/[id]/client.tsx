@@ -540,6 +540,7 @@ function ConfigTab({ soul, onSaved }: { soul: Soul; onSaved: (s: Soul) => void }
     max_tool_iterations: soul.max_tool_iterations,
     thinking_level: (soul.thinking_level || 'off') as 'off' | 'medium' | 'high',
     outbound_approval: soul.outbound_approval || 'supervisor',
+    fallback_model: soul.fallback_model || '',
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -606,6 +607,21 @@ function ConfigTab({ soul, onSaved }: { soul: Soul; onSaved: (s: Soul) => void }
               />
             </div>
           </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Fallback Model</label>
+            <div className="mt-1">
+              <SearchableSelect
+                value={form.fallback_model}
+                onChange={(v) => setForm((f) => ({ ...f, fallback_model: v }))}
+                options={[
+                  { value: '', label: 'None (no fallback)' },
+                  ...models.filter((m) => m.model_id !== form.model).map((m) => ({ value: m.model_id, label: m.model_id })),
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="text-xs text-muted-foreground">Context Window</label>
             <div className="mt-1 rounded-lg border border-border bg-muted/10 px-3 py-2 text-sm text-muted-foreground font-mono">

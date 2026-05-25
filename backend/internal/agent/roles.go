@@ -77,6 +77,16 @@ var roleRegistry = map[string]AgentRole{
 		PromptMode:   PromptChannel,
 	},
 
+	// sysops: full system operations access — can run systemctl, apt, docker,
+	// tailscale, journalctl via scoped sudoers (/etc/sudoers.d/qorven-ops).
+	// This role also signals the gateway to set AllowElevated on the tool context
+	// so the exec tool bypasses the privilege_escalation deny group.
+	// Only assign to agents you trust with host-level access.
+	"sysops": {
+		AgentKey:      "sysops",
+		MaxIterations: 30,
+	},
+
 	// general: no structural restrictions beyond the agent's own DB config.
 	// Registered so callers can detect "known general role" vs unrecognised key.
 	"general": {

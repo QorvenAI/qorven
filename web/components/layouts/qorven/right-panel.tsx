@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { useStore } from '@/store';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { X, MessageSquare, Bell, Activity, Send, Loader2, Brain, ShieldAlert, CheckCircle2, XCircle, Zap, Infinity, Megaphone, AlertTriangle } from 'lucide-react';
+import { X, MessageSquare, Bell, Activity, Send, Loader2, Brain, ShieldAlert, CheckCircle2, XCircle, Zap, Infinity, Megaphone, AlertTriangle, Download } from 'lucide-react';
 import { notifications as notifApi, chat as chatApi, sessions, providers as providersApi, permissions } from '@/lib/api';
 import { tasks as tasksApi } from '@/lib/api-workspace';
 import { agents } from '@/lib/api-agents';
@@ -335,17 +335,30 @@ function NotificationsTab() {
           const isSocial = isSocialPublished || isSocialFailed || isSocialPartial;
           const SocialIcon = isSocialFailed ? AlertTriangle : Megaphone;
           const socialColor = isSocialPublished ? 'text-emerald-500' : isSocialFailed ? 'text-destructive' : 'text-amber-500';
+          const isFileDownload = n.type === 'file_download';
           return (
             <button key={i} onClick={() => markRead(n.id)}
               className={cn('w-full text-left px-3 py-2.5 border-b border-border/50 hover:bg-accent/50 transition-colors', !n.read_at && 'bg-primary/5')}>
               <div className="flex items-start gap-2">
                 {isSocial
                   ? <SocialIcon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', socialColor)} />
+                  : isFileDownload
+                  ? <Download className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                   : !n.read_at && <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
                 }
-                <div className={cn('min-w-0', !isSocial && n.read_at && 'pl-3.5')}>
+                <div className={cn('min-w-0', !isSocial && !isFileDownload && n.read_at && 'pl-3.5')}>
                   <p className="text-xs font-medium truncate">{n.title || n.type}</p>
                   <p className="text-2xs text-muted-foreground mt-0.5 line-clamp-2">{n.highlight || n.body || n.detail}</p>
+                  {isFileDownload && n.highlight && (
+                    <a
+                      href={n.highlight}
+                      download
+                      onClick={e => e.stopPropagation()}
+                      className="mt-1 inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary hover:bg-primary/20"
+                    >
+                      <Download className="h-2.5 w-2.5" /> Download
+                    </a>
+                  )}
                   <p className="text-2xs text-muted-foreground/60 mt-0.5">{n.created_at ? new Date(n.created_at).toLocaleTimeString() : ''}</p>
                 </div>
               </div>

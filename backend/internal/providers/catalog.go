@@ -768,19 +768,37 @@ func ProviderCatalog() []ProviderManifest {
 			ID: "claude_code", Name: "Claude Code", Icon: "anthropic", Category: "cloud",
 			AuthType: "oauth2", DriverType: TypeAnthropicNative,
 			DefaultAPIBase: "https://api.anthropic.com",
-			Fields:         []ManifestField{},
+			DefaultModel:   "claude-sonnet-4-6",
+			Models: []string{
+				"claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+				"claude-sonnet-4-5", "claude-haiku-4-5-20251001",
+				"claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022",
+			},
+			Fields: []ManifestField{},
 		},
 		{
 			ID: "github_copilot", Name: "GitHub Copilot", Icon: "github", Category: "cloud",
 			AuthType: "oauth2", DriverType: TypeOpenAICompat,
 			DefaultAPIBase: "https://api.githubcopilot.com",
-			Fields:         []ManifestField{},
+			DefaultModel:   "gpt-4o",
+			Models: []string{
+				"gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
+				"o3", "o3-mini", "o4-mini",
+				"claude-3.7-sonnet", "claude-sonnet-4",
+				"gemini-2.0-flash", "gemini-2.5-pro",
+			},
+			Fields: []ManifestField{},
 		},
 		{
 			ID: "google_vertex", Name: "Google Vertex AI (OAuth)", Icon: "google", Category: "cloud",
 			AuthType: "oauth2", DriverType: TypeGeminiNative,
 			DefaultAPIBase: "https://us-central1-aiplatform.googleapis.com/v1",
-			Fields:         []ManifestField{},
+			DefaultModel:   "gemini-2.5-pro",
+			Models: []string{
+				"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash",
+				"gemini-1.5-pro", "gemini-1.5-flash",
+			},
+			Fields: []ManifestField{},
 		},
 	}
 
