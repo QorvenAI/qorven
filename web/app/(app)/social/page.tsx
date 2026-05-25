@@ -10,6 +10,7 @@ import {
   ChevronLeft, ChevronRight,
   Image as ImageIcon, Upload, Search, Grid, Video, Copy,
   BarChart2, TrendingUp, Eye, Heart, Share2, MessageCircle,
+  CornerDownRight, CheckCheck,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
@@ -814,6 +815,7 @@ function CalendarTab({ agentId }: { agentId: string }) {
 function PostsTab({ agentId, status }: { agentId: string; status: string }) {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedComments, setExpandedComments] = useState<string | null>(null);
   const souls = useStore(s => s.souls);
 
   const load = useCallback(() => {
@@ -865,45 +867,244 @@ function PostsTab({ agentId, status }: { agentId: string; status: string }) {
       {posts.map(post => {
         const soul = souls.find(s => s.id === post.agent_id);
         const date = post.scheduled_at || post.published_at || post.created_at;
+        const showComments = expandedComments === post.id;
         return (
-          <div key={post.id} className="rounded-xl border border-border bg-card p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium', STATUS_COLORS[post.status] ?? STATUS_COLORS.draft)}>
-                    {post.status}
-                  </span>
-                  {soul && <span className="text-xs text-muted-foreground">{soul.display_name}</span>}
-                  {date && (
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          <div key={post.id} className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium', STATUS_COLORS[post.status] ?? STATUS_COLORS.draft)}>
+                      {post.status}
                     </span>
-                  )}
+                    {soul && <span className="text-xs text-muted-foreground">{soul.display_name}</span>}
+                    {date && (
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-foreground/80 line-clamp-2">{post.content}</p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {(post.platforms || []).map((p: string) => (
+                      <span key={p} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{p}</span>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-sm text-foreground/80 line-clamp-2">{post.content}</p>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {(post.platforms || []).map((p: string) => (
-                    <span key={p} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{p}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {post.status === 'draft' && (
-                  <button onClick={() => publishPost(post.id)}
-                    className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-accent cursor-pointer transition-colors"
-                    title="Publish now">
-                    <Send className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => setExpandedComments(showComments ? null : post.id)}
+                    className={cn(
+                      'h-7 w-7 flex items-center justify-center rounded cursor-pointer transition-colors',
+                      showComments
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:text-primary hover:bg-accent',
+                    )}
+                    title="Comments"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
                   </button>
-                )}
-                <button onClick={() => deletePost(post.id)}
-                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                  {post.status === 'draft' && (
+                    <button onClick={() => publishPost(post.id)}
+                      className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-accent cursor-pointer transition-colors"
+                      title="Publish now">
+                      <Send className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <button onClick={() => deletePost(post.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
+            {showComments && (
+              <div className="border-t border-border">
+                <CommentsPanel postId={post.id} />
+              </div>
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Comments Panel ───────────────────────────────────────────────────────────
+
+function CommentsPanel({ postId }: { postId: string }) {
+  const [comments, setComments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newBody, setNewBody] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; author: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await socialApi.listComments(postId);
+      setComments(data ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, [postId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function submit() {
+    const body = newBody.trim();
+    if (!body) return;
+    setSubmitting(true);
+    try {
+      await socialApi.createComment(postId, {
+        body,
+        parent_id: replyTo?.id ?? undefined,
+      });
+      setNewBody('');
+      setReplyTo(null);
+      await load();
+    } catch {
+      toast.error('Failed to add comment');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function del(commentId: string) {
+    try {
+      await socialApi.deleteComment(postId, commentId);
+      setComments(prev => {
+        const removed = prev.filter(c => c.id !== commentId);
+        return removed.map(c => ({
+          ...c,
+          replies: (c.replies ?? []).filter((r: any) => r.id !== commentId),
+        }));
+      });
+    } catch {
+      toast.error('Failed to delete comment');
+    }
+  }
+
+  async function toggleResolve(commentId: string, resolved: boolean) {
+    try {
+      await socialApi.resolveComment(postId, commentId, !resolved);
+      setComments(prev =>
+        prev.map(c =>
+          c.id === commentId ? { ...c, resolved: !resolved } : {
+            ...c,
+            replies: (c.replies ?? []).map((r: any) =>
+              r.id === commentId ? { ...r, resolved: !resolved } : r,
+            ),
+          },
+        ),
+      );
+    } catch {
+      toast.error('Failed to update comment');
+    }
+  }
+
+  function CommentRow({ c, depth = 0 }: { c: any; depth?: number }) {
+    const ts = new Date(c.created_at).toLocaleString([], {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    return (
+      <div className={cn('group', depth > 0 && 'ml-6 border-l border-border pl-3')}>
+        <div className="flex items-start gap-2 py-2">
+          {depth > 0 && <CornerDownRight className="h-3 w-3 mt-1 shrink-0 text-muted-foreground" />}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-xs font-medium text-foreground">{c.author_name || 'Team member'}</span>
+              <span className="text-xs text-muted-foreground">{ts}</span>
+              {c.resolved && (
+                <span className="text-xs text-emerald-600 font-medium flex items-center gap-0.5">
+                  <CheckCheck className="h-3 w-3" /> resolved
+                </span>
+              )}
+            </div>
+            <p className={cn('text-sm text-foreground/80 whitespace-pre-wrap break-words', c.resolved && 'line-through text-muted-foreground')}>
+              {c.body}
+            </p>
+          </div>
+          <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {depth === 0 && (
+              <button
+                onClick={() => setReplyTo(replyTo?.id === c.id ? null : { id: c.id, author: c.author_name })}
+                className="h-6 px-1.5 text-xs rounded text-muted-foreground hover:text-primary hover:bg-accent transition-colors"
+              >
+                reply
+              </button>
+            )}
+            <button
+              onClick={() => toggleResolve(c.id, c.resolved)}
+              className={cn(
+                'h-6 w-6 flex items-center justify-center rounded transition-colors',
+                c.resolved
+                  ? 'text-emerald-600 hover:text-muted-foreground hover:bg-accent'
+                  : 'text-muted-foreground hover:text-emerald-600 hover:bg-accent',
+              )}
+              title={c.resolved ? 'Unresolve' : 'Mark resolved'}
+            >
+              <CheckCheck className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => del(c.id)}
+              className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Delete"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+        {(c.replies ?? []).map((r: any) => (
+          <CommentRow key={r.id} c={r} depth={depth + 1} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-3 space-y-1">
+      {loading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+          <Loader2 className="h-3 w-3 animate-spin" /> Loading comments…
+        </div>
+      ) : comments.length === 0 ? (
+        <p className="text-xs text-muted-foreground py-2">No comments yet. Add one below.</p>
+      ) : (
+        <div className="divide-y divide-border/50">
+          {comments.map(c => <CommentRow key={c.id} c={c} />)}
+        </div>
+      )}
+
+      {replyTo && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1">
+          <CornerDownRight className="h-3 w-3 shrink-0" />
+          Replying to <span className="font-medium text-foreground">{replyTo.author}</span>
+          <button onClick={() => setReplyTo(null)} className="ml-auto text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-end gap-2 pt-1">
+        <textarea
+          value={newBody}
+          onChange={e => setNewBody(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
+          placeholder={replyTo ? `Reply to ${replyTo.author}…` : 'Add a comment… (⌘↵ to submit)'}
+          rows={2}
+          className="flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+        />
+        <button
+          onClick={submit}
+          disabled={!newBody.trim() || submitting}
+          className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50 hover:bg-primary/90 transition-colors flex items-center gap-1.5"
+        >
+          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          Post
+        </button>
+      </div>
     </div>
   );
 }
