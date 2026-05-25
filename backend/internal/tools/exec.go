@@ -341,9 +341,13 @@ func (t *ExecTool) executeInSandbox(ctx context.Context, command, cwd, sandboxKe
 
 // safeEnv builds a minimal environment.
 func safeEnv(workspace string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = workspace
+	}
 	return []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"HOME=" + workspace,
+		"HOME=" + home,
 		"LANG=en_US.UTF-8",
 		"TERM=dumb",
 	}
@@ -403,12 +407,23 @@ func resolvePath(path, base string, mustExist bool) (string, error) {
 	if path == "" {
 		return base, nil
 	}
-	// Simple path resolution — expand relative paths
+	// Expand tilde to real home directory
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = home + path[1:]
+		}
+	} else if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = home
+		}
+	}
+	// Expand relative paths against base
 	if !strings.HasPrefix(path, "/") {
 		path = base + "/" + path
 	}
-	// Check if within workspace
-	if !strings.HasPrefix(path, base) {
+	// Allow workspace or home-dir paths
+	home, _ := os.UserHomeDir()
+	if !strings.HasPrefix(path, base) && (home == "" || !strings.HasPrefix(path, home)) {
 		return "", fmt.Errorf("path %s is outside workspace", path)
 	}
 	if mustExist {

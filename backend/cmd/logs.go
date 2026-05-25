@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -61,8 +62,7 @@ func streamLogs(cmd *cobra.Command) error {
 }
 
 func tailLogFile(lines int, level string) error {
-	home, _ := os.UserHomeDir()
-	logFile := home + "/.qorven/logs/qorven.log"
+	logFile := config.Sub("logs", "qorven.log")
 	if _, err := os.Stat(logFile); err != nil {
 		logFile = "/tmp/qorven.log"
 		if _, err := os.Stat(logFile); err != nil {

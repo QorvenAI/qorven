@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"nhooyr.io/websocket"
 )
 
@@ -199,13 +200,7 @@ func evictStalePID() {
 }
 
 func runtimePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		// Fall back to /tmp — better than crashing when HOME is unset
-		// (e.g. `sudo systemctl start qorven` without User= directive).
-		return filepath.Join(os.TempDir(), "qorven-runtime.json")
-	}
-	return filepath.Join(home, ".qorven", "runtime.json")
+	return config.Sub("runtime.json")
 }
 
 // writeRuntimeInfo persists bound addresses so the web client and any
@@ -273,8 +268,7 @@ func (gw *Gateway) handleRuntimeInfo(w http.ResponseWriter, r *http.Request) {
 // stop showing the "connection not private" warning.
 // Content-Disposition: attachment so browsers save rather than render.
 func (gw *Gateway) handleCADownload(w http.ResponseWriter, r *http.Request) {
-	home, _ := os.UserHomeDir()
-	caPath := filepath.Join(home, ".qorven", "tls", "ca.pem")
+	caPath := config.Sub("tls", "ca.pem")
 	data, err := os.ReadFile(caPath)
 	if err != nil {
 		http.Error(w, "CA certificate not found — run: qorven tls generate", http.StatusNotFound)

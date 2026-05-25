@@ -415,8 +415,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 				migDir = filepath.Join(filepath.Dir(exe), "migrations")
 			}
 			if _, err := os.Stat(migDir); os.IsNotExist(err) {
-				home, _ := os.UserHomeDir()
-				migDir = filepath.Join(home, ".qorven", "migrations")
+				migDir = config.Sub("migrations")
 			}
 			if err := db.MigrateUpFS(embeddedMigrations, migDir); err != nil {
 				slog.Warn("migration failed (non-fatal)", "error", err, "dir", migDir)
@@ -467,8 +466,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			// non-fatal; a missing prompts folder shouldn't block
 			// the gateway from starting.
 			{
-				home, _ := os.UserHomeDir()
-				builtinRoot := filepath.Join(home, ".qorven", "skills", "builtin")
+				builtinRoot := config.Sub("skills", "builtin")
 				inst, skip, errs := gw.skillStore.InstallBuiltIns(context.Background(), defaultTenant, builtinRoot)
 				slog.Info("skills.builtin_installed",
 					"installed", inst, "skipped_unchanged", skip, "errors", len(errs))
@@ -986,7 +984,7 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		// Plugin system
 		gw.pluginMgr = plugin.NewManager()
 		pluginMgr := gw.pluginMgr
-		pluginMgr.LoadDir(filepath.Join(os.Getenv("HOME"), ".qorven", "plugins"))
+		pluginMgr.LoadDir(config.Sub("plugins"))
 		gw.agentLoop.SetPluginManager(pluginMgr)
 		slog.Info("plugins loaded", "count", len(pluginMgr.List()))
 
@@ -1016,8 +1014,10 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			}
 
 			// scaffold_app / install_app — let the agent build and install apps.
-			home, _ := os.UserHomeDir()
-			appsDir := filepath.Join(home, ".qorven", "apps")
+			appsDir := config.Sub("apps")
+			if err := os.MkdirAll(appsDir, 0755); err != nil {
+				slog.Warn("apps.dir_create_failed", "path", appsDir, "err", err)
+			}
 			gw.toolReg.Register(tools.NewScaffoldAppTool(appsDir))
 			appMgr := gw.appMgr
 			gw.toolReg.Register(tools.NewInstallAppTool(
@@ -1114,8 +1114,7 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		// override by setting QORVEN_MEMORY_DIR before start.
 		memoryDir := os.Getenv("QORVEN_MEMORY_DIR")
 		if memoryDir == "" {
-			home, _ := os.UserHomeDir()
-			memoryDir = filepath.Join(home, ".qorven", "brain-memory")
+			memoryDir = config.Sub("brain-memory")
 		}
 		gw.brain = engine.New(engine.Options{
 			ConfigPath:   cfg.ConfigPath,

@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -75,9 +75,8 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	if purge {
 		// 3. Remove config + data
 		fmt.Print("  Removing config and logs... ")
-		home, _ := os.UserHomeDir()
 		for _, d := range []string{
-			filepath.Join(home, ".qorven"),
+			config.DataDir(),
 			"/etc/qorven",
 			"/var/lib/qorven",
 			"/var/log/qorven",
@@ -103,8 +102,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println("  Qorven has been uninstalled.")
 	if !purge {
-		home, _ := os.UserHomeDir()
-		fmt.Printf("  Config and data preserved at %s/.qorven\n", home)
+		fmt.Printf("  Config and data preserved at %s\n", config.DataDir())
 		fmt.Println("  Re-run with --purge to remove everything.")
 	}
 	return nil

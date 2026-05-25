@@ -303,8 +303,7 @@ func runInit(cmd *cobra.Command) error {
 
 func resolveQorvenHome() string {
 	if h := os.Getenv("QORVEN_HOME"); h != "" { return h }
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".qorven")
+	return config.DataDir()
 }
 
 func findMigrationsDir() string {

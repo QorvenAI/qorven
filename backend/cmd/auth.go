@@ -13,6 +13,7 @@ import (
 	"github.com/qorvenai/qorven/cmd/client"
 	"github.com/qorvenai/qorven/cmd/output"
 	"github.com/qorvenai/qorven/cmd/tui"
+	"github.com/qorvenai/qorven/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,8 +29,7 @@ type profilesFile struct {
 }
 
 func profilesDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".qorven")
+	return config.DataDir()
 }
 
 func profilesPath() string {

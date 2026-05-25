@@ -20,6 +20,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qorvenai/qorven/internal/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -443,8 +444,7 @@ func (s *AuthService) ValidateAPIKey(ctx context.Context, key string) (*User, er
 
 // loadOrCreateSecret loads JWT secret from disk or generates a new one.
 func loadOrCreateSecret() []byte {
-	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, ".qorven", "jwt_secret")
+	path := config.Sub("jwt_secret")
 
 	data, err := os.ReadFile(path)
 	if err == nil && len(data) >= 32 {

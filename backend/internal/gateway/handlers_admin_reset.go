@@ -10,12 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/audit"
+	"github.com/qorvenai/qorven/internal/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -187,15 +187,14 @@ func (gw *Gateway) handleAdminFactoryReset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	home, _ := os.UserHomeDir()
-	workspacesDir := filepath.Join(home, ".qorven", "workspaces")
+	workspacesDir := config.Sub("workspaces")
 	if _, err := os.Stat(workspacesDir); err == nil {
 		os.RemoveAll(workspacesDir)
 		os.MkdirAll(workspacesDir, 0o755)
 	}
 
 	// Remove installed apps from disk (DB rows were dropped with the schema).
-	appsDir := filepath.Join(home, ".qorven", "apps")
+	appsDir := config.Sub("apps")
 	if _, err := os.Stat(appsDir); err == nil {
 		os.RemoveAll(appsDir)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/skills"
 	"github.com/qorvenai/qorven/internal/tools"
 )
@@ -239,14 +240,14 @@ POST /v1/chat/completions, GET/POST /v1/agents, GET/POST /v1/sessions, GET /v1/s
 qorven init | doctor | research | graph | vault | costs | scan | read | tasks | update
 
 ### Installed Apps
-User-built apps live at **~/.qorven/apps/{slug}/**, each containing:
+User-built apps live at **` + config.Sub("apps") + `/{slug}/**, each containing:
 - app.yaml — metadata + tool definitions (MUST include tool_register in permissions or tools load with count=0)
 - tools/ — shell scripts (stdin JSON → stdout result)
 - migrations/ — SQL for the app's tables
 - ui/src/index.tsx — React frontend (bundle at ui/frontend/bundle.js)
 
 IMPORTANT: All app file paths must use the full prefix. Never use a bare slug.
-- CORRECT: list_files(path="~/.qorven/apps/todo_app/tools/")
+- CORRECT: list_files(path="` + config.Sub("apps") + `/todo_app/tools/")
 - WRONG:   list_files(path="todo_app/tools/")
 
 **Frontend — window.__QorvenApp.request() return shape:**
@@ -283,23 +284,25 @@ Minimal app.yaml (slug must match directory name, tool_register is mandatory):
         path: home
         label: Home
 
+Apps directory: ` + config.Sub("apps") + `
+
 Creation sequence (do all in one response — do not stop midway):
-1. write_file(path="~/.qorven/apps/{slug}/app.yaml") with content above
-2. exec("mkdir -p ~/.qorven/apps/{slug}/tools")
-3. write_file each tool script to ~/.qorven/apps/{slug}/tools/{name}.sh
-4. exec("chmod +x ~/.qorven/apps/{slug}/tools/*.sh")
-5. write_file(path="~/.qorven/apps/{slug}/ui/src/index.tsx") — the React IIFE
-6. write_file(path="~/.qorven/apps/{slug}/ui/package.json") and vite.config.ts
-7. exec("cd ~/.qorven/apps/{slug}/ui && npm install && npm run build")
-8. install_app(path="~/.qorven/apps/{slug}") → registers and loads
+1. write_file(path="` + config.Sub("apps") + `/{slug}/app.yaml") with content above
+2. exec("mkdir -p ` + config.Sub("apps") + `/{slug}/tools")
+3. write_file each tool script to ` + config.Sub("apps") + `/{slug}/tools/{name}.sh
+4. exec("chmod +x ` + config.Sub("apps") + `/{slug}/tools/*.sh")
+5. write_file(path="` + config.Sub("apps") + `/{slug}/ui/src/index.tsx") — the React IIFE
+6. write_file(path="` + config.Sub("apps") + `/{slug}/ui/package.json") and vite.config.ts
+7. exec("cd ` + config.Sub("apps") + `/{slug}/ui && npm install && npm run build")
+8. install_app(path="` + config.Sub("apps") + `/{slug}") → registers and loads
 9. Report done
 
 To edit an installed app — ALWAYS USE YOUR TOOLS DIRECTLY. Never respond with code blocks and wait — call write_file, exec, install_app in the same response:
-1. list_files(path="~/.qorven/apps/") → get slug
-2. list_files(path="~/.qorven/apps/{slug}/tools/") → list scripts
+1. list_files(path="` + config.Sub("apps") + `/") → get slug
+2. list_files(path="` + config.Sub("apps") + `/{slug}/tools/") → list scripts
 3. read_file each relevant script (read ALL suspects in one pass, not one at a time)
 4. write_file to fix
-5. install_app(path="~/.qorven/apps/{slug}") → reload
+5. install_app(path="` + config.Sub("apps") + `/{slug}") → reload
 6. Report what you found and fixed`
 }
 

@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/spf13/cobra"
 
 	"github.com/qorvenai/qorven/internal/store"
@@ -89,9 +90,7 @@ func defaultMigrationsDir() string {
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "migrations"))
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".qorven", "migrations"))
-	}
+	candidates = append(candidates, config.Sub("migrations"))
 	for _, c := range candidates {
 		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
 			return c

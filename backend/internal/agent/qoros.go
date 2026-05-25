@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/qorvenai/qorven/internal/config"
 )
 
 // QOROS — Always-on background agent mode.
@@ -69,11 +71,11 @@ type QorosMode struct {
 
 // NewQoros creates a new QOROS proactive agent mode.
 func NewQoros(agentID string, onTick func(ctx context.Context, tickTime time.Time) error, onMessage func(string, string, string)) *QorosMode {
-	home, _ := os.UserHomeDir()
+	
 	return &QorosMode{
 		agentID:      agentID,
 		tickInterval: DefaultTickInterval,
-		logDir:       filepath.Join(home, ".qorven", "logs", "daily"),
+		logDir:       config.Sub("logs", "daily"),
 		onTick:       onTick,
 		onMessage:    onMessage,
 	}

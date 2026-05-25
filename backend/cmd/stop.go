@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -59,8 +60,7 @@ func runServiceCommand(action string) error {
 }
 
 func killRuntimePID() error {
-	home, _ := os.UserHomeDir()
-	pidFile := home + "/.qorven/runtime.json"
+	pidFile := config.Sub("runtime.json")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return fmt.Errorf("runtime.json not found — is qorven running?")

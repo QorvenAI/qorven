@@ -5,12 +5,11 @@
 package cmd
 
 import (
-	"github.com/spf13/cobra"
-	"github.com/qorvenai/qorven/cmd/tui"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/spf13/cobra"
+	"github.com/qorvenai/qorven/cmd/tui"
 	"github.com/qorvenai/qorven/internal/config"
 )
 
@@ -21,13 +20,10 @@ func init() {
 }
 
 func runDefaultCommand() error {
-	home, _ := os.UserHomeDir()
-	qHome := filepath.Join(home, ".qorven")
-
 	// 1. No config? → guide to init
 	cfgFile := os.Getenv("QORVEN_CONFIG")
 	if cfgFile == "" {
-		cfgFile = filepath.Join(qHome, "config.toml")
+		cfgFile = config.Sub("config.toml")
 	}
 	serverCfg, err := config.Load(cfgFile)
 	if err != nil || serverCfg == nil {
@@ -61,6 +57,5 @@ func runDefaultCommand() error {
 	if sid, err := createSession(c, agentID); err == nil {
 		sessionID = sid
 	}
-	_ = qHome
 	return tui.Run(agentName, agentID, agentModel, sessionID)
 }

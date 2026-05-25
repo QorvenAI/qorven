@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/qorvenai/qorven/internal/config"
 )
 
 // Engine types for URL-based routing .
@@ -142,8 +144,7 @@ func (r *EngineRouter) loadFromEnv() {
 
 // loadFromFile loads domain mappings from ~/.qorven/engine-domains.json
 func (r *EngineRouter) loadFromFile() {
-	home, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(home, ".qorven", "engine-domains.json"))
+	data, err := os.ReadFile(config.Sub("engine-domains.json"))
 	if err != nil {
 		return
 	}

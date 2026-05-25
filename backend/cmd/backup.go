@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -115,7 +114,7 @@ Examples:
 		}
 
 		// Include config.toml if it exists (with API keys — keep it secure)
-		configPath := filepath.Join(os.Getenv("HOME"), ".qorven", "config.toml")
+		configPath := config.Sub("config.toml")
 		if data, err := os.ReadFile(configPath); err == nil {
 			addTarFile(tw, "config.toml", data)
 			fmt.Println("  ✓ config.toml")

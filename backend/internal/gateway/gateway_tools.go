@@ -27,6 +27,7 @@ import (
 	"github.com/qorvenai/qorven/internal/skills"
 	"github.com/qorvenai/qorven/internal/storage"
 	supervisorpkg "github.com/qorvenai/qorven/internal/supervisor"
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/tools"
 )
 
@@ -34,19 +35,19 @@ func (gw *Gateway) registerTools() {
 	workspace := "/tmp/qorven-workspace" // default workspace
 	reg := gw.toolReg
 
-	// Filesystem — allow workspace + home dir + /tmp for full coding capability
-	homeDir, _ := os.UserHomeDir()
+	// Filesystem — allow workspace + data dir + /tmp for full coding capability
+	dataDir := config.DataDir()
 	readTool := tools.NewReadFileTool(workspace)
-	readTool.AllowPaths(homeDir, "/tmp")
+	readTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(readTool)
 	writeTool := tools.NewWriteFileTool(workspace)
-	writeTool.AllowPaths(homeDir, "/tmp")
+	writeTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(writeTool)
 	listTool := tools.NewListFilesTool(workspace)
-	listTool.AllowPaths(homeDir, "/tmp")
+	listTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(listTool)
 	editTool := tools.NewEditTool(workspace)
-	editTool.AllowPaths(homeDir, "/tmp")
+	editTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(editTool)
 
 	// Runtime
@@ -132,7 +133,7 @@ func (gw *Gateway) registerTools() {
 	// Inherits the same allow-list as read_file so both tools see
 	// the same paths.
 	digestTool := tools.NewCodebaseDigestTool(workspace)
-	digestTool.AllowPaths(homeDir, "/tmp")
+	digestTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(digestTool)
 
 	// NL→SQL — user connects a database via Settings → Connections,
@@ -460,7 +461,7 @@ func (gw *Gateway) registerTools() {
 	// Real PDF/DOCX extraction — replaces the earlier stub. Same
 	// allow-list as read_file so both tools see the same paths.
 	readDocTool := tools.NewReadDocumentV2Tool(workspace)
-	readDocTool.AllowPaths(homeDir, "/tmp")
+	readDocTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(readDocTool)
 	// PDF quote/invoice generation — pure-Go, no system dependencies.
 	reg.Register(tools.NewQuoteGenTool(workspace))
@@ -783,7 +784,7 @@ func (gw *Gateway) registerTools() {
 
 	// Coding tools.
 	fileHistory := tools.NewFileHistory()
-	projectReg := tools.NewProjectRegistry(os.Getenv("HOME") + "/.qorven")
+	projectReg := tools.NewProjectRegistry(config.DataDir())
 	gw.projectReg = projectReg
 	reg.Register(tools.NewGlobTool(workspace))
 	reg.Register(tools.NewGrepTool(workspace))

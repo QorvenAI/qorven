@@ -33,8 +33,7 @@ var gwStartCmd = &cobra.Command{
 			printer.Success("Gateway is already running")
 			return nil
 		}
-		home, _ := os.UserHomeDir()
-		logDir := filepath.Join(home, ".qorven", "logs")
+		logDir := config.Sub("logs")
 		os.MkdirAll(logDir, 0755)
 		logFile := filepath.Join(logDir, "gateway.log")
 
@@ -48,7 +47,7 @@ var gwStartCmd = &cobra.Command{
 		}
 
 		// Save PID
-		pidFile := filepath.Join(home, ".qorven", "gateway.pid")
+		pidFile := config.Sub("gateway.pid")
 		os.WriteFile(pidFile, []byte(strconv.Itoa(proc.Process.Pid)), 0644)
 
 		printer.Success(fmt.Sprintf("Gateway started (PID: %d)\n  Log: %s", proc.Process.Pid, logFile))
@@ -108,8 +107,8 @@ var gwInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install as systemd user service",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		home, _ := os.UserHomeDir()
 		binary, _ := os.Executable()
+		home, _ := os.UserHomeDir()
 		unitDir := filepath.Join(home, ".config", "systemd", "user")
 		os.MkdirAll(unitDir, 0755)
 
@@ -122,11 +121,11 @@ Type=simple
 ExecStart=%s start
 Restart=on-failure
 RestartSec=5
-Environment=QORVEN_CONFIG=%s/.qorven/config.toml
+Environment=QORVEN_CONFIG=%s/config.toml
 
 [Install]
 WantedBy=default.target
-`, binary, home)
+`, binary, config.DataDir())
 
 		unitFile := filepath.Join(unitDir, "qorven.service")
 		if err := os.WriteFile(unitFile, []byte(unit), 0644); err != nil {
@@ -179,8 +178,7 @@ func isGatewayRunning() bool {
 }
 
 func readPID() int {
-	home, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(home, ".qorven", "gateway.pid"))
+	data, err := os.ReadFile(config.Sub("gateway.pid"))
 	if err != nil {
 		return 0
 	}
@@ -189,6 +187,5 @@ func readPID() int {
 }
 
 func removePID() {
-	home, _ := os.UserHomeDir()
-	os.Remove(filepath.Join(home, ".qorven", "gateway.pid"))
+	os.Remove(config.Sub("gateway.pid"))
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/qorvenai/qorven/cmd/client"
 	"github.com/qorvenai/qorven/cmd/output"
@@ -143,8 +144,7 @@ func loadConfig(cmd *cobra.Command) *Config {
 
 // loadQorvenEnv sources ~/.qorven/.env if it exists.
 func loadQorvenEnv() {
-	home, _ := os.UserHomeDir()
-	envFile := home + "/.qorven/.env"
+	envFile := config.Sub(".env")
 	data, err := os.ReadFile(envFile)
 	if err != nil {
 		return

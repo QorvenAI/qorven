@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -26,8 +27,7 @@ var configGetCmd = &cobra.Command{
 		}
 		// Try ~/.qorven/config.toml as fallback
 		if _, err := os.Stat(cfgFile); err != nil {
-			home, _ := os.UserHomeDir()
-			cfgFile = home + "/.qorven/config.toml"
+			cfgFile = config.Sub("config.toml")
 		}
 		data, err := os.ReadFile(cfgFile)
 		if err != nil {
@@ -52,8 +52,7 @@ Examples:
 		fmt.Printf("To set %s = %s, edit your config.toml:\n", args[0], args[1])
 		cfgFile := os.Getenv("QORVEN_CONFIG")
 		if cfgFile == "" {
-			home, _ := os.UserHomeDir()
-			cfgFile = home + "/.qorven/config.toml"
+			cfgFile = config.Sub("config.toml")
 		}
 		fmt.Printf("  %s\n", cfgFile)
 		return nil
@@ -70,8 +69,7 @@ var configEditCmd = &cobra.Command{
 		}
 		cfgFile := os.Getenv("QORVEN_CONFIG")
 		if cfgFile == "" {
-			home, _ := os.UserHomeDir()
-			cfgFile = home + "/.qorven/config.toml"
+			cfgFile = config.Sub("config.toml")
 		}
 		fmt.Printf("Run: %s %s\n", editor, cfgFile)
 		return nil

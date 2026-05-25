@@ -16,6 +16,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/qorvenai/qorven/internal/config"
 )
 
 type persistedSession struct {
@@ -29,8 +30,7 @@ type persistedSession struct {
 
 // sessionDir returns the directory where sessions are persisted.
 func sessionDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".qorven", "sessions")
+	return config.Sub("sessions")
 }
 
 // sessionPath returns the path for a specific session file.

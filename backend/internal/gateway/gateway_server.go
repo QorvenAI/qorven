@@ -46,11 +46,10 @@ func (gw *Gateway) findWebDir() string {
 		slog.Warn("web_dir configured but index.html missing — falling back", "web_dir", d)
 	}
 	exe, _ := os.Executable()
-	home, _ := os.UserHomeDir()
 	candidates := []string{
 		"web",
 		filepath.Join(filepath.Dir(exe), "web"),
-		filepath.Join(home, ".qorven", "web"),
+		config.Sub("web"),
 	}
 	for _, d := range candidates {
 		if info, err := os.Stat(filepath.Join(d, "index.html")); err == nil && !info.IsDir() {
@@ -619,10 +618,9 @@ func (gw *Gateway) startWebListener() error {
 
 func (gw *Gateway) startWebListenerAuto(web *http.Server) error {
 	domain := gw.cfg.Server.TLS.Domain
-	home, _ := os.UserHomeDir()
 	cacheDir := gw.cfg.Server.TLS.CacheDir
 	if cacheDir == "" {
-		cacheDir = filepath.Join(home, ".qorven", "certs")
+		cacheDir = config.Sub("certs")
 	}
 
 	if domain != "" {
@@ -651,7 +649,7 @@ func (gw *Gateway) startWebListenerAuto(web *http.Server) error {
 	}
 
 	// Self-signed for localhost / private IPs.
-	certFile, keyFile, err := qorvtls.EnsureCert(filepath.Join(home, ".qorven", "tls"))
+	certFile, keyFile, err := qorvtls.EnsureCert(config.Sub("tls"))
 	if err != nil {
 		return fmt.Errorf("self-signed cert: %w", err)
 	}

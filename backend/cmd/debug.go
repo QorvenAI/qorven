@@ -90,9 +90,7 @@ func runDebug() error {
 
 	// ── Config ──
 	configPath := ""
-	if home, _ := os.UserHomeDir(); home != "" {
-		configPath = home + "/.qorven/config.toml"
-	}
+	configPath = config.Sub("config.toml")
 	_, err := os.Stat(configPath)
 	result.Config = debugConfigInfo{
 		Found:    err == nil,
