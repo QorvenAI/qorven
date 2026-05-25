@@ -858,7 +858,7 @@ export default function CodePage() {
         exportSession();
         break;
       case 'diff':
-        // TODO T3: set editorView to 'diff'
+        setEditorView(prev => prev === 'diff' ? 'code' : 'diff');
         break;
       case 'plan':
         setPlanMode(prev => !prev);
