@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { useStore } from '@/store';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { X, MessageSquare, Bell, Activity, Send, Loader2, Brain, ShieldAlert, CheckCircle2, XCircle, Zap, Infinity } from 'lucide-react';
+import { X, MessageSquare, Bell, Activity, Send, Loader2, Brain, ShieldAlert, CheckCircle2, XCircle, Zap, Infinity, Megaphone, AlertTriangle } from 'lucide-react';
 import { notifications as notifApi, chat as chatApi, sessions, providers as providersApi, permissions } from '@/lib/api';
 import { tasks as tasksApi } from '@/lib/api-workspace';
 import { agents } from '@/lib/api-agents';
@@ -328,19 +328,30 @@ function NotificationsTab() {
             <Bell className="h-8 w-8 text-muted-foreground/30 mb-2" />
             <p className="text-sm text-muted-foreground">No notifications</p>
           </div>
-        ) : items.map((n, i) => (
-          <button key={i} onClick={() => markRead(n.id)}
-            className={cn('w-full text-left px-3 py-2.5 border-b border-border/50 hover:bg-accent/50 transition-colors', !n.read_at && 'bg-primary/5')}>
-            <div className="flex items-start gap-2">
-              {!n.read_at && <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />}
-              <div className={cn('min-w-0', n.read_at && 'pl-3.5')}>
-                <p className="text-xs font-medium truncate">{n.title || n.type}</p>
-                <p className="text-2xs text-muted-foreground mt-0.5 line-clamp-2">{n.highlight || n.body || n.detail}</p>
-                <p className="text-2xs text-muted-foreground/60 mt-0.5">{n.created_at ? new Date(n.created_at).toLocaleTimeString() : ''}</p>
+        ) : items.map((n, i) => {
+          const isSocialPublished = n.type === 'social_published';
+          const isSocialFailed = n.type === 'social_failed';
+          const isSocialPartial = n.type === 'social_partial';
+          const isSocial = isSocialPublished || isSocialFailed || isSocialPartial;
+          const SocialIcon = isSocialFailed ? AlertTriangle : Megaphone;
+          const socialColor = isSocialPublished ? 'text-emerald-500' : isSocialFailed ? 'text-destructive' : 'text-amber-500';
+          return (
+            <button key={i} onClick={() => markRead(n.id)}
+              className={cn('w-full text-left px-3 py-2.5 border-b border-border/50 hover:bg-accent/50 transition-colors', !n.read_at && 'bg-primary/5')}>
+              <div className="flex items-start gap-2">
+                {isSocial
+                  ? <SocialIcon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', socialColor)} />
+                  : !n.read_at && <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                }
+                <div className={cn('min-w-0', !isSocial && n.read_at && 'pl-3.5')}>
+                  <p className="text-xs font-medium truncate">{n.title || n.type}</p>
+                  <p className="text-2xs text-muted-foreground mt-0.5 line-clamp-2">{n.highlight || n.body || n.detail}</p>
+                  <p className="text-2xs text-muted-foreground/60 mt-0.5">{n.created_at ? new Date(n.created_at).toLocaleTimeString() : ''}</p>
+                </div>
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

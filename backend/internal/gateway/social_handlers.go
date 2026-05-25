@@ -7,6 +7,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -121,6 +122,8 @@ func (gw *Gateway) handlePublishSocialPost(w http.ResponseWriter, r *http.Reques
 	if len(platformIDs) > 0 {
 		store.StorePlatformPostIDs(r.Context(), postID, platformIDs)
 	}
+	// Emit in-app notification
+	gw.emitSocialPublishNotification(post.AgentID, allOK, results)
 	writeJSON(w, 200, map[string]any{"results": results})
 }
 
@@ -251,6 +254,43 @@ func (gw *Gateway) handleSocialCalendar(w http.ResponseWriter, r *http.Request) 
 			"drafts":    len(drafts),
 		},
 	})
+}
+
+// emitSocialPublishNotification fires an in-app notification after a publish attempt.
+func (gw *Gateway) emitSocialPublishNotification(agentID string, allOK bool, results []socialqor.PostResult) {
+	var ok, failed []string
+	for _, r := range results {
+		if r.Success {
+			ok = append(ok, string(r.Platform))
+		} else {
+			failed = append(failed, string(r.Platform))
+		}
+	}
+
+	var title, highlight, nType string
+	if allOK {
+		nType = "social_published"
+		title = "Post published"
+		if len(ok) == 1 {
+			highlight = "Published to " + ok[0]
+		} else {
+			highlight = fmt.Sprintf("Published to %d platforms", len(ok))
+		}
+	} else if len(ok) == 0 {
+		nType = "social_failed"
+		title = "Post failed"
+		if len(failed) == 1 {
+			highlight = "Failed on " + failed[0]
+		} else {
+			highlight = fmt.Sprintf("Failed on %d platforms", len(failed))
+		}
+	} else {
+		nType = "social_partial"
+		title = "Post partially published"
+		highlight = fmt.Sprintf("%d succeeded, %d failed", len(ok), len(failed))
+	}
+
+	gw.writeNotification(agentID, "", "", nType, title, highlight, "social", "")
 }
 
 // Unused import silencer
