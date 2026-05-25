@@ -8,7 +8,7 @@ import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-pr
 import { SidebarLayout } from './sidebar-layout';
 import { useAppDisplayName, useAppPagesForSlug } from '@/components/apps/app-registry-context';
 import useSWR from 'swr';
-import { listApps } from '@/lib/api-apps';
+import { listApps, type QorvenApp } from '@/lib/api-apps';
 
 // When inside /apps/{slug}/*, show that app's pages as the sidebar nav.
 // When at /apps or /apps/{slug} with no sub-page, show the launcher nav.
@@ -21,7 +21,7 @@ function AppNavSidebar({ slug }: { slug: string }) {
   const isSettings = pathname?.startsWith(`/apps/${slug}/settings`);
 
   const { data } = useSWR('apps-list', listApps, { refreshInterval: 60_000 });
-  const appData = data?.apps?.find(a => a.slug === slug);
+  const appData = data?.apps?.find((a: QorvenApp) => a.slug === slug);
   const icon = appData?.icon;
   const iconUrl = appData?.icon_url;
   const hasSettings = (appData?.settings_schema?.length ?? 0) > 0 || pages.some(p => p.path === 'settings');

@@ -88,9 +88,9 @@ export function Header() {
   const closeRightPanel = useStore((s) => s.closeRightPanel);
 
   const { data: appsData } = useSWR('apps-list', listApps, { refreshInterval: 30_000 });
-  const pinnedTopbarApps = (appsData?.apps ?? [])
-    .filter(a => a.enabled && a.pinned_topbar)
-    .sort((a, b) => a.topbar_order - b.topbar_order);
+  const pinnedTopbarApps = (appsData?.apps ?? [] as QorvenApp[])
+    .filter((a: QorvenApp) => a.enabled && a.pinned_topbar)
+    .sort((a: QorvenApp, b: QorvenApp) => a.topbar_order - b.topbar_order);
 
   const isSoulWorkspace = pathname?.match(/^\/(?:souls|qors)\/[^/]+$/);
   const isChat = pathname?.startsWith('/sessions/');
@@ -160,7 +160,7 @@ export function Header() {
           <TooltipProvider delayDuration={200}>
             <nav className="flex items-center gap-1 shrink-0">
               <div className="w-px h-5 bg-border mx-0.5" />
-              {pinnedTopbarApps.map(app => <TopbarAppBtn key={app.id} app={app} />)}
+              {pinnedTopbarApps.map((app: QorvenApp) => <TopbarAppBtn key={app.id} app={app} />)}
               <div className="w-px h-5 bg-border mx-0.5" />
             </nav>
           </TooltipProvider>

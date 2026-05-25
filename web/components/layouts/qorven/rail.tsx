@@ -88,9 +88,9 @@ export function Rail() {
   const activeRail = useActiveRail();
 
   const { data } = useSWR('apps-list', listApps, { refreshInterval: 30_000 });
-  const pinnedApps = (data?.apps ?? [])
-    .filter(a => a.enabled && a.pinned_rail)
-    .sort((a, b) => a.rail_order - b.rail_order);
+  const pinnedApps = (data?.apps ?? [] as QorvenApp[])
+    .filter((a: QorvenApp) => a.enabled && a.pinned_rail)
+    .sort((a: QorvenApp, b: QorvenApp) => a.rail_order - b.rail_order);
 
   const renderItem = ({ id, icon: Icon, label, href }: NavItem) => (
     <Tooltip key={id}>
@@ -127,7 +127,7 @@ export function Rail() {
           {pinnedApps.length > 0 && (
             <>
               <div className="w-6 border-t border-border my-1" />
-              {pinnedApps.map(app => <AppRailIcon key={app.id} app={app} />)}
+              {pinnedApps.map((app: QorvenApp) => <AppRailIcon key={app.id} app={app} />)}
             </>
           )}
         </nav>
