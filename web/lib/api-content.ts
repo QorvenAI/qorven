@@ -270,6 +270,14 @@ export const social = {
       `/social/calendar${agentId ? `?agent_id=${agentId}` : ''}`
     ),
 
+  // Analytics
+  analyticsSummary: (agentId?: string) => {
+    const p = new URLSearchParams();
+    if (agentId) p.set('agent_id', agentId);
+    return request<{ by_platform: any[]; top_posts: any[]; days: number }>(`/social/analytics?${p}`);
+  },
+  postMetrics: (id: string) => request<any[]>(`/social/posts/${id}/metrics`),
+
   // Media library
   listMedia: (params?: { agentId?: string; q?: string; type?: string; limit?: number; offset?: number }) => {
     const p = new URLSearchParams();

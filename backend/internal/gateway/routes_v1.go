@@ -776,6 +776,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/oauth/{platform}/status", gw.handleSocialOAuthStatus)
 		r.Post("/social/oauth/{platform}/revoke", gw.handleSocialOAuthRevoke)
 
+		// Social Analytics
+		r.Get("/social/analytics", gw.handleSocialAnalyticsSummary)
+		r.Get("/social/posts/{id}/metrics", gw.handleGetSocialPostMetrics)
+
 		// Social Media Library
 		r.Post("/social/media", gw.handleSocialMediaUpload)
 		r.Get("/social/media", gw.handleListSocialMedia)

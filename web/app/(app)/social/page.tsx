@@ -9,6 +9,7 @@ import {
   Plus, Trash2, Send, Loader2, Check, X,
   ChevronLeft, ChevronRight,
   Image as ImageIcon, Upload, Search, Grid, Video, Copy,
+  BarChart2, TrendingUp, Eye, Heart, Share2, MessageCircle,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
@@ -377,6 +378,7 @@ export default function SocialPage() {
           {tab === 'accounts'  && <AccountsTab agentId={agentFilter} />}
           {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
           {tab === 'media'     && <MediaTab agentId={agentFilter} />}
+          {tab === 'analytics' && <AnalyticsTab agentId={agentFilter} />}
         </div>
       </div>
     </ErrorBoundary>
@@ -1589,6 +1591,157 @@ function MediaTab({ agentId }: { agentId: string }) {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Analytics Tab ────────────────────────────────────────────────────────────
+
+function AnalyticsTab({ agentId }: { agentId: string }) {
+  const souls = useStore(s => s.souls);
+  const [data, setData] = useState<{ by_platform: any[]; top_posts: any[]; days: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedAgent, setSelectedAgent] = useState(agentId || (souls[0]?.id ?? ''));
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await socialApi.analyticsSummary(selectedAgent || undefined);
+      setData(d);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedAgent]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalEngagement = (data?.by_platform ?? []).reduce(
+    (sum, p) => sum + (p.likes || 0) + (p.shares || 0) + (p.comments || 0), 0,
+  );
+  const totalImpressions = (data?.by_platform ?? []).reduce((sum, p) => sum + (p.impressions || 0), 0);
+  const maxImpressions = Math.max(...(data?.by_platform ?? []).map(p => p.impressions || 0), 1);
+
+  const fmtNum = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+
+  return (
+    <div className="space-y-5">
+      {/* Agent selector */}
+      <div className="flex items-center gap-3">
+        <select
+          value={selectedAgent}
+          onChange={e => setSelectedAgent(e.target.value)}
+          className="qr-select w-52"
+        >
+          <option value="">All Agents</option>
+          {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+        </select>
+        {data && <span className="text-xs text-muted-foreground">Last {data.days} days</span>}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : !data || data.by_platform.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+          <BarChart2 className="h-12 w-12 opacity-20" />
+          <p className="text-sm">No analytics data yet</p>
+          <p className="text-xs opacity-60">Publish posts to start seeing engagement metrics</p>
+        </div>
+      ) : (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Impressions', value: fmtNum(totalImpressions), icon: Eye, color: 'text-blue-500' },
+              { label: 'Engagement', value: fmtNum(totalEngagement), icon: TrendingUp, color: 'text-emerald-500' },
+              { label: 'Likes', value: fmtNum((data.by_platform ?? []).reduce((s, p) => s + (p.likes || 0), 0)), icon: Heart, color: 'text-pink-500' },
+              { label: 'Shares', value: fmtNum((data.by_platform ?? []).reduce((s, p) => s + (p.shares || 0), 0)), icon: Share2, color: 'text-amber-500' },
+            ].map(card => (
+              <div key={card.label} className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+                <div className={cn('h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0', card.color)}>
+                  <card.icon className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">{card.label}</p>
+                  <p className="text-xl font-bold tabular-nums">{card.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Per-platform breakdown */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-muted/20">
+              <p className="text-sm font-semibold">By Platform</p>
+            </div>
+            <div className="divide-y divide-border/50">
+              {data.by_platform.map((p: any) => {
+                const platform = PLATFORMS.find(pl => pl.id === p.platform);
+                const barWidth = maxImpressions > 0 ? (p.impressions / maxImpressions) * 100 : 0;
+                return (
+                  <div key={p.platform} className="px-4 py-3">
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className={cn('h-7 w-7 rounded flex items-center justify-center text-xs font-bold shrink-0', platform?.color ?? 'bg-muted')}>
+                        {platform?.icon ?? p.platform[0].toUpperCase()}
+                      </span>
+                      <span className="text-sm font-medium flex-1">{platform?.label ?? p.platform}</span>
+                      <span className="text-xs text-muted-foreground">{p.post_count} post{p.post_count !== 1 ? 's' : ''}</span>
+                    </div>
+                    {/* Impressions bar */}
+                    <div className="relative h-1.5 rounded-full bg-muted overflow-hidden mb-2">
+                      <div
+                        className="absolute inset-y-0 left-0 rounded-full bg-primary/60 transition-all"
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtNum(p.impressions)}</span>
+                      <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtNum(p.likes)}</span>
+                      <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtNum(p.shares)}</span>
+                      <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{fmtNum(p.comments)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Top posts */}
+          {data.top_posts && data.top_posts.length > 0 && (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="px-4 py-3 border-b border-border bg-muted/20">
+                <p className="text-sm font-semibold">Top Posts by Engagement</p>
+              </div>
+              <div className="divide-y divide-border/50">
+                {data.top_posts.map((post: any, i: number) => {
+                  const platform = PLATFORMS.find(pl => pl.id === post.platform);
+                  return (
+                    <div key={`${post.post_id}-${i}`} className="px-4 py-3 flex items-start gap-3">
+                      <span className="text-xs text-muted-foreground w-4 shrink-0 mt-0.5 tabular-nums">{i + 1}</span>
+                      <span className={cn('h-5 w-5 rounded flex items-center justify-center text-xs font-bold shrink-0 mt-0.5', platform?.color ?? 'bg-muted')}>
+                        {platform?.icon ?? '?'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-foreground/80 line-clamp-2">{post.content}</p>
+                        <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                          <span>{fmtNum(post.impressions)} views</span>
+                          <span>{fmtNum(post.likes)} likes</span>
+                          <span>{fmtNum(post.shares)} shares</span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-semibold tabular-nums">{fmtNum(post.engagement)}</p>
+                        <p className="text-xs text-muted-foreground">engagement</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

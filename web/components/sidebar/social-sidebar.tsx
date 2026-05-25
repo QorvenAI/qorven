@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiBase } from '@/lib/api-url';
-import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon } from 'lucide-react';
+import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon, BarChart2 } from 'lucide-react';
 import { SidebarMenuItem } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
@@ -31,6 +31,7 @@ export function SocialSidebar() {
     { label: 'Accounts', sub: '/social?tab=accounts', icon: Users },
     { label: 'AutoPost', sub: '/social?tab=autopost', icon: Zap },
     { label: 'Media', sub: '/social?tab=media', icon: ImageIcon },
+    { label: 'Analytics', sub: '/social?tab=analytics', icon: BarChart2 },
   ];
 
   return (

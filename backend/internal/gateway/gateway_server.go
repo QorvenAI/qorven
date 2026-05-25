@@ -101,6 +101,8 @@ func (gw *Gateway) Start() error {
 	if gw.db != nil {
 		go gw.startSocialTokenRefreshWorker(context.Background())
 		slog.Info("social token refresh worker started")
+		go gw.startSocialAnalyticsWorker(context.Background())
+		slog.Info("social analytics worker started")
 	}
 
 	// Start background memory dreamer (consolidates memories on interval)

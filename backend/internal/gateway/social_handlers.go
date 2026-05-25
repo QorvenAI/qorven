@@ -19,6 +19,25 @@ func (gw *Gateway) socialStore() *socialqor.Store {
 	return socialqor.NewStore(gw.db.Pool)
 }
 
+// startSocialAnalyticsWorker launches the background analytics polling goroutine.
+func (gw *Gateway) startSocialAnalyticsWorker(ctx context.Context) {
+	store := gw.socialStore()
+	if store == nil {
+		return
+	}
+	worker := socialqor.NewAnalyticsWorker(store, func(ctx context.Context, agentID string, platform socialqor.Platform) (string, error) {
+		token, _, err := store.GetIntegrationToken(ctx, agentID, platform)
+		if err != nil {
+			return "", err
+		}
+		if plain, decErr := gw.decryptIntegrationKey(token); decErr == nil && plain != "" {
+			return plain, nil
+		}
+		return token, nil
+	})
+	worker.Start(ctx)
+}
+
 // startSocialTokenRefreshWorker launches the background token refresh goroutine.
 func (gw *Gateway) startSocialTokenRefreshWorker(ctx context.Context) {
 	store := gw.socialStore()
@@ -86,11 +105,49 @@ func (gw *Gateway) handlePublishSocialPost(w http.ResponseWriter, r *http.Reques
 	publisher := socialqor.NewPublisher()
 	results := publisher.PublishToAll(r.Context(), store, post)
 	allOK := true
-	for _, r := range results {
-		if !r.Success { allOK = false }
+	platformIDs := map[string]string{}
+	for _, res := range results {
+		if !res.Success { allOK = false }
+		if res.PostID != "" {
+			platformIDs[string(res.Platform)] = res.PostID
+		}
 	}
-	if allOK { store.MarkPublished(r.Context(), postID) } else { store.UpdatePostStatus(r.Context(), postID, socialqor.PostFailed) }
+	if allOK {
+		store.MarkPublished(r.Context(), postID)
+	} else {
+		store.UpdatePostStatus(r.Context(), postID, socialqor.PostFailed)
+	}
+	// Store platform post IDs for analytics polling (best-effort)
+	if len(platformIDs) > 0 {
+		store.StorePlatformPostIDs(r.Context(), postID, platformIDs)
+	}
 	writeJSON(w, 200, map[string]any{"results": results})
+}
+
+// handleGetSocialPostMetrics returns the latest engagement metrics for a post.
+func (gw *Gateway) handleGetSocialPostMetrics(w http.ResponseWriter, r *http.Request) {
+	store := gw.socialStore()
+	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }
+	metrics, err := store.GetMetrics(r.Context(), chi.URLParam(r, "id"))
+	if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
+	writeJSON(w, 200, metrics)
+}
+
+// handleSocialAnalyticsSummary returns aggregated metrics for an agent across all platforms.
+func (gw *Gateway) handleSocialAnalyticsSummary(w http.ResponseWriter, r *http.Request) {
+	store := gw.socialStore()
+	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }
+	agentID := r.URL.Query().Get("agent_id")
+	days := 30
+	since := time.Now().AddDate(0, 0, -days)
+	byPlatform, err := store.GetAggregateMetrics(r.Context(), agentID, since)
+	if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
+	topPosts, _ := store.GetTopPosts(r.Context(), agentID, 10, since)
+	writeJSON(w, 200, map[string]any{
+		"by_platform": byPlatform,
+		"top_posts":   topPosts,
+		"days":        days,
+	})
 }
 
 func (gw *Gateway) handleListSocialIntegrations(w http.ResponseWriter, r *http.Request) {
