@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.49-alpha — 2026-05-25
+
+### Fixed
+- **App builder: jq string ID comparisons** — tool script template now explicitly warns against `tonumber` coercions when comparing IDs in jq. IDs are stored as strings; using `($id | tonumber)` caused silent no-op matches on toggle/delete operations.
+
+---
+
 ## v0.1.48-alpha — 2026-05-25
 
 ### Fixed

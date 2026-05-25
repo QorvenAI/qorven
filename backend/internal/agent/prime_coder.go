@@ -394,7 +394,13 @@ Shell scripts that run server-side. Args arrive via STDIN as JSON (NOT as $1).
 ` + "```bash" + `
 #!/bin/bash
 INPUT=$(cat)   # read JSON from stdin
-NAME=$(echo "$INPUT" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('name',''))" 2>/dev/null)
+NAME=$(echo "$INPUT" | jq -r '.name')
+ID=$(echo "$INPUT" | jq -r '.id')
+# CRITICAL: IDs are stored as strings in JSON — always compare as strings in jq:
+#   jq --arg id "$ID" 'map(select(.id != $id))'       ← CORRECT (string compare)
+#   jq --arg id "$ID" 'map(select(.id != ($id|tonumber)))'  ← WRONG (type mismatch)
+# Write atomically to avoid corruption:
+#   jq '...' data.json > data.json.tmp && mv data.json.tmp data.json
 # then use psql $QORVEN_DB_DSN to query the DB
 ` + "```" + `
 
