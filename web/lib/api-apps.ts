@@ -2,6 +2,18 @@
 
 import { request } from './api-core';
 
+export interface SettingDef {
+  key: string;
+  label: string;
+  type: 'text' | 'secret' | 'number' | 'boolean' | 'select' | 'url';
+  description?: string;
+  placeholder?: string;
+  required?: boolean;
+  default?: string;
+  options?: Array<{ value: string; label: string }>;
+  help_url?: string;
+}
+
 export interface QorvenApp {
   id: string;
   tenant_id: string;
@@ -19,6 +31,13 @@ export interface QorvenApp {
   config: Record<string, unknown>;
   installed_at: string;
   updated_at: string;
+  // Display + pinning
+  icon: string;
+  pinned_rail: boolean;
+  rail_order: number;
+  pinned_topbar: boolean;
+  topbar_order: number;
+  settings_schema: SettingDef[];
 }
 
 export interface AppPageDef {
@@ -82,7 +101,15 @@ export const installApp = (path: string) =>
 
 export const patchApp = (
   id: string,
-  body: Partial<{ enabled: boolean; config: Record<string, unknown> }>
+  body: Partial<{
+    enabled: boolean;
+    config: Record<string, unknown>;
+    icon: string;
+    pinned_rail: boolean;
+    rail_order: number;
+    pinned_topbar: boolean;
+    topbar_order: number;
+  }>
 ) =>
   request<QorvenApp>(`/apps/${id}`, {
     method: 'PATCH',

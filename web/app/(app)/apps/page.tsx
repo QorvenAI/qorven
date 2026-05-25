@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import {
   Package, Trash2, RefreshCw,
   Loader2, ToggleLeft, ToggleRight,
+  SidebarClose, SidebarOpen, LayoutPanelTop, Settings,
 } from 'lucide-react';
 import { listApps, installApp, patchApp, uninstallApp, reloadApp } from '@/lib/api-apps';
 import type { QorvenApp } from '@/lib/api-apps';
@@ -28,6 +29,7 @@ function AppsContent() {
   const [reloadingId, setReloadingId] = useState<string | null>(null);
   const [uninstallingId, setUninstallingId] = useState<string | null>(null);
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null);
+  const [pinningId, setPinningId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +68,18 @@ function AppsContent() {
       toast.error('Failed to reload app');
     } finally {
       setReloadingId(null);
+    }
+  }
+
+  async function handlePin(app: QorvenApp, field: 'pinned_rail' | 'pinned_topbar') {
+    setPinningId(app.id + field);
+    try {
+      await patchApp(app.id, { [field]: !app[field] });
+      await load();
+    } catch {
+      toast.error('Failed to update pinning');
+    } finally {
+      setPinningId(null);
     }
   }
 
@@ -112,13 +126,15 @@ function AppsContent() {
                   !app.enabled && 'opacity-60'
                 )}
               >
-                {/* Icon / initials — click opens the app */}
+                {/* Icon — click opens the app */}
                 <div
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground cursor-pointer hover:bg-accent transition-colors"
-                  onClick={() => app.enabled && router.push(`/apps/${app.slug}/home`)}
+                  onClick={() => app.enabled && router.push(`/apps/${app.slug}`)}
                   title={app.enabled ? `Open ${app.display_name}` : undefined}
                 >
-                  {app.icon_url ? (
+                  {app.icon && /^\p{Emoji}/u.test(app.icon) && app.icon.length <= 4 ? (
+                    <span className="text-xl leading-none">{app.icon}</span>
+                  ) : app.icon_url ? (
                     <img src={app.icon_url} alt="" className="h-8 w-8 rounded" />
                   ) : (
                     <Package className="h-5 w-5" />
@@ -128,7 +144,7 @@ function AppsContent() {
                 {/* Info — click opens the app */}
                 <div
                   className={cn('flex-1 min-w-0', app.enabled && 'cursor-pointer')}
-                  onClick={() => app.enabled && router.push(`/apps/${app.slug}/home`)}
+                  onClick={() => app.enabled && router.push(`/apps/${app.slug}`)}
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-sm">{app.display_name}</span>
@@ -144,6 +160,53 @@ function AppsContent() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
+                  {/* Pin to rail */}
+                  <button
+                    title={app.pinned_rail ? 'Remove from rail' : 'Pin to left rail'}
+                    onClick={() => handlePin(app, 'pinned_rail')}
+                    disabled={pinningId === app.id + 'pinned_rail'}
+                    className={cn(
+                      'flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50',
+                      app.pinned_rail ? 'text-primary hover:text-muted-foreground hover:bg-accent' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                    )}
+                  >
+                    {pinningId === app.id + 'pinned_rail' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : app.pinned_rail ? (
+                      <SidebarClose className="h-4 w-4" />
+                    ) : (
+                      <SidebarOpen className="h-4 w-4" />
+                    )}
+                  </button>
+
+                  {/* Pin to topbar */}
+                  <button
+                    title={app.pinned_topbar ? 'Remove from top bar' : 'Pin to top bar'}
+                    onClick={() => handlePin(app, 'pinned_topbar')}
+                    disabled={pinningId === app.id + 'pinned_topbar'}
+                    className={cn(
+                      'flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50',
+                      app.pinned_topbar ? 'text-primary hover:text-muted-foreground hover:bg-accent' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                    )}
+                  >
+                    {pinningId === app.id + 'pinned_topbar' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <LayoutPanelTop className="h-4 w-4" />
+                    )}
+                  </button>
+
+                  {/* Settings */}
+                  <button
+                    title="App Settings"
+                    onClick={() => router.push(`/apps/${app.slug}/settings`)}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <Settings className="h-4 w-4" />
+                  </button>
+
+                  <div className="w-px h-4 bg-border mx-0.5" />
+
                   {/* Enable/disable toggle */}
                   <button
                     title={app.enabled ? 'Disable' : 'Enable'}

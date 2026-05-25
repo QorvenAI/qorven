@@ -5,15 +5,18 @@
 import Link from 'next/link';
 import { useStore } from '@/store';
 import { usePathname, useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import { cn } from '@/lib/utils';
 import { IconBadge } from '@/components/ui/badge';
 import {
   PanelLeftClose, PanelLeft, Bell, MessageSquare, Activity,
-  SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio,
+  SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio, Package,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { SoulActivity } from '@/types';
 import { notifications as notifApi, providers as providersApi } from '@/lib/api';
+import { listApps, type QorvenApp } from '@/lib/api-apps';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/qor/tooltip';
 
 // Page labels for breadcrumb
 const pageLabels: Record<string, string> = {
@@ -25,6 +28,40 @@ const pageLabels: Record<string, string> = {
   '/teams': 'Teams', '/mcp': 'MCP', '/knowledge-graph': 'Knowledge',
   '/heartbeat': 'Health', '/supervisor': 'Supervisor', '/models-hub': 'Models',
 };
+
+function TopbarAppBtn({ app }: { app: QorvenApp }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const href = `/apps/${app.slug}`;
+  const isActive = pathname?.startsWith(href);
+
+  const iconContent = (() => {
+    if (app.icon && /^\p{Emoji}/u.test(app.icon) && app.icon.length <= 4) {
+      return <span className="text-base leading-none">{app.icon}</span>;
+    }
+    if (app.icon_url) {
+      return <img src={app.icon_url} alt={app.display_name} className="h-[18px] w-[18px] rounded object-cover" />;
+    }
+    return <Package className="h-[18px] w-[18px]" strokeWidth={2.5} />;
+  })();
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => router.push(href)}
+          className={cn(
+            'h-9 w-9 flex items-center justify-center rounded-md transition-colors cursor-pointer',
+            isActive ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+          )}
+        >
+          {iconContent}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={4}>{app.display_name}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function Header() {
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
@@ -49,6 +86,11 @@ export function Header() {
   const rightPanelTab = useStore((s) => s.rightPanelTab);
   const openRightPanel = useStore((s) => s.openRightPanel);
   const closeRightPanel = useStore((s) => s.closeRightPanel);
+
+  const { data: appsData } = useSWR('apps-list', listApps, { refreshInterval: 30_000 });
+  const pinnedTopbarApps = (appsData?.apps ?? [])
+    .filter(a => a.enabled && a.pinned_topbar)
+    .sort((a, b) => a.topbar_order - b.topbar_order);
 
   const isSoulWorkspace = pathname?.match(/^\/(?:souls|qors)\/[^/]+$/);
   const isChat = pathname?.startsWith('/sessions/');
@@ -112,6 +154,17 @@ export function Header() {
             </nav>
           )}
         </div>
+
+        {/* CENTER: pinned topbar apps */}
+        {pinnedTopbarApps.length > 0 && (
+          <TooltipProvider delayDuration={200}>
+            <nav className="flex items-center gap-1 shrink-0">
+              <div className="w-px h-5 bg-border mx-0.5" />
+              {pinnedTopbarApps.map(app => <TopbarAppBtn key={app.id} app={app} />)}
+              <div className="w-px h-5 bg-border mx-0.5" />
+            </nav>
+          </TooltipProvider>
+        )}
 
         {/* RIGHT: 6 icon buttons */}
         <nav className="flex items-center gap-1.5 shrink-0">

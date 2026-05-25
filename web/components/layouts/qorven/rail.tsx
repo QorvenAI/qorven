@@ -4,6 +4,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import { cn } from '@/lib/utils';
 import type { RailSection } from '@/types';
 import {
@@ -14,6 +15,8 @@ import {
 } from 'lucide-react';
 import { useActiveRail } from '@/hooks/use-active-rail';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/qor/tooltip';
+import { listApps, type QorvenApp } from '@/lib/api-apps';
+import { usePathname } from 'next/navigation';
 
 type NavItem = { id: RailSection; icon: typeof MessageSquare; label: string; href: string };
 
@@ -42,9 +45,52 @@ export const SIDEBAR_SECTIONS = new Set<RailSection>([
   'labs', 'models', 'settings',
 ]);
 
+function AppRailIcon({ app }: { app: QorvenApp }) {
+  const pathname = usePathname();
+  const href = `/apps/${app.slug}`;
+  const isActive = pathname?.startsWith(href);
+  const router = useRouter();
+
+  const iconContent = (() => {
+    if (!app.icon && !app.icon_url) return <Package className="h-[18px] w-[18px]" strokeWidth={2.5} />;
+    // Emoji detection: single grapheme cluster starting with high codepoint
+    if (app.icon && /^\p{Emoji}/u.test(app.icon) && app.icon.length <= 4) {
+      return <span className="text-base leading-none">{app.icon}</span>;
+    }
+    if (app.icon_url) {
+      return <img src={app.icon_url} alt={app.display_name} className="h-[18px] w-[18px] rounded object-cover" />;
+    }
+    return <Package className="h-[18px] w-[18px]" strokeWidth={2.5} />;
+  })();
+
+  return (
+    <Tooltip key={app.id}>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => router.push(href)}
+          className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-md transition-colors',
+            isActive
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+          )}
+        >
+          {iconContent}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={8}>{app.display_name}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function Rail() {
   const router = useRouter();
   const activeRail = useActiveRail();
+
+  const { data } = useSWR('apps-list', listApps, { refreshInterval: 30_000 });
+  const pinnedApps = (data?.apps ?? [])
+    .filter(a => a.enabled && a.pinned_rail)
+    .sort((a, b) => a.rail_order - b.rail_order);
 
   const renderItem = ({ id, icon: Icon, label, href }: NavItem) => (
     <Tooltip key={id}>
@@ -78,6 +124,12 @@ export function Rail() {
         {/* Primary nav */}
         <nav className="flex flex-1 flex-col items-center gap-1 py-2 overflow-y-auto scrollbar-none">
           {primary.map(renderItem)}
+          {pinnedApps.length > 0 && (
+            <>
+              <div className="w-6 border-t border-border my-1" />
+              {pinnedApps.map(app => <AppRailIcon key={app.id} app={app} />)}
+            </>
+          )}
         </nav>
 
         {/* Bottom pinned */}

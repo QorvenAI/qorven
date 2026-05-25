@@ -291,10 +291,30 @@ display_name: My App
 version: 0.1.0
 description: What this app does
 author: qorven
+icon: 📝           # optional: emoji OR Lucide icon name (e.g. "FileText"). Shown in rail/topbar.
+pinned_rail: false # optional: show in left rail by default
+pinned_topbar: false # optional: show in top bar by default
 permissions:
   - db_write
   - tool_register   # REQUIRED for tool scripts to execute — without this, tools load with 0 entries
 migrations_dir: migrations
+# settings: schema-driven settings form. Each field is auto-rendered at /apps/{slug}/settings.
+# Tool scripts receive each setting as QORVEN_APP_{UPPER_KEY} env var automatically.
+settings:
+  - key: api_key
+    label: API Key
+    type: secret      # text | secret | number | boolean | select | url
+    description: Your service API key
+    placeholder: sk-...
+    required: true
+    help_url: https://example.com/keys
+  # - key: model
+  #   label: Model
+  #   type: select
+  #   options:
+  #     - { value: gpt-4o, label: GPT-4o }
+  #     - { value: gpt-4o-mini, label: GPT-4o Mini }
+  #   default: gpt-4o
 frontend:
   bundle: ui/frontend/bundle.js   # output path after build
   pages:

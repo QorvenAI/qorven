@@ -29,42 +29,48 @@ func (s *AppStore) Create(ctx context.Context, a App) (App, error) {
 	if scope == "" {
 		scope = "workspace"
 	}
+	schemaJSON, _ := json.Marshal(a.SettingsSchema)
 	var created App
-	var cfgRaw []byte
+	var cfgRaw, schemaRaw []byte
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO apps (tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, scope, owner_agent_id, owner_team_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		 RETURNING id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id`,
+		`INSERT INTO apps (tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+		 RETURNING id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema`,
 		a.TenantID, a.Slug, a.DisplayName, a.Description, a.Version, a.Author, a.IconURL, a.InstallPath, a.Enabled, cfgJSON, scope, a.OwnerAgentID, a.OwnerTeamID,
+		a.Icon, a.PinnedRail, a.RailOrder, a.PinnedTopbar, a.TopbarOrder, schemaJSON,
 	).Scan(&created.ID, &created.TenantID, &created.Slug, &created.DisplayName,
 		&created.Description, &created.Version, &created.Author, &created.IconURL,
 		&created.InstallPath, &created.Enabled, &cfgRaw, &created.InstalledAt, &created.UpdatedAt,
-		&created.Scope, &created.OwnerAgentID, &created.OwnerTeamID)
+		&created.Scope, &created.OwnerAgentID, &created.OwnerTeamID,
+		&created.Icon, &created.PinnedRail, &created.RailOrder, &created.PinnedTopbar, &created.TopbarOrder, &schemaRaw)
 	if err != nil {
 		return App{}, err
 	}
 	json.Unmarshal(cfgRaw, &created.Config)
+	if len(schemaRaw) > 0 {
+		json.Unmarshal(schemaRaw, &created.SettingsSchema)
+	}
 	return created, nil
 }
 
 // Get returns an app by ID scoped to tenantID.
 func (s *AppStore) Get(ctx context.Context, tenantID, id string) (App, error) {
 	return s.scanOne(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
 		 FROM apps WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 }
 
 // GetBySlug returns an app by slug scoped to tenantID.
 func (s *AppStore) GetBySlug(ctx context.Context, tenantID, slug string) (App, error) {
 	return s.scanOne(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
 		 FROM apps WHERE slug = $1 AND tenant_id = $2`, slug, tenantID)
 }
 
 // List returns all apps for a tenant ordered by display_name (admin view — unscoped).
 func (s *AppStore) List(ctx context.Context, tenantID string) ([]App, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
 		 FROM apps WHERE tenant_id = $1 ORDER BY display_name ASC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -90,7 +96,7 @@ func (s *AppStore) List(ctx context.Context, tenantID string) ([]App, error) {
 // agentID or teamID means those scoped apps are never returned.
 func (s *AppStore) ListScoped(ctx context.Context, tenantID, agentID, teamID string) ([]App, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
 		 FROM apps
 		 WHERE tenant_id = $1 AND enabled = true
 		   AND (
@@ -134,6 +140,30 @@ func (s *AppStore) SetConfig(ctx context.Context, tenantID, id string, cfg map[s
 	return err
 }
 
+// SetPinning updates icon and pin fields.
+func (s *AppStore) SetPinning(ctx context.Context, tenantID, id string, icon *string, pinnedRail *bool, railOrder *int, pinnedTopbar *bool, topbarOrder *int) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE apps SET
+		   icon          = COALESCE($1, icon),
+		   pinned_rail   = COALESCE($2, pinned_rail),
+		   rail_order    = COALESCE($3, rail_order),
+		   pinned_topbar = COALESCE($4, pinned_topbar),
+		   topbar_order  = COALESCE($5, topbar_order),
+		   updated_at    = $6
+		 WHERE id=$7 AND tenant_id=$8`,
+		icon, pinnedRail, railOrder, pinnedTopbar, topbarOrder, time.Now(), id, tenantID)
+	return err
+}
+
+// SetSettingsSchema replaces the settings schema for an app.
+func (s *AppStore) SetSettingsSchema(ctx context.Context, tenantID, id string, schema []SettingDef) error {
+	schemaJSON, _ := json.Marshal(schema)
+	_, err := s.pool.Exec(ctx,
+		`UPDATE apps SET settings_schema=$1, updated_at=$2 WHERE id=$3 AND tenant_id=$4`,
+		schemaJSON, time.Now(), id, tenantID)
+	return err
+}
+
 // Delete removes an app row.
 func (s *AppStore) Delete(ctx context.Context, tenantID, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM apps WHERE id=$1 AND tenant_id=$2`, id, tenantID)
@@ -153,11 +183,12 @@ func (s *AppStore) scanOne(ctx context.Context, query string, args ...any) (App,
 
 func (s *AppStore) scanRow(r rowScanner) (App, error) {
 	var a App
-	var cfgRaw []byte
+	var cfgRaw, schemaRaw []byte
 	if err := r.Scan(&a.ID, &a.TenantID, &a.Slug, &a.DisplayName, &a.Description,
 		&a.Version, &a.Author, &a.IconURL, &a.InstallPath, &a.Enabled,
 		&cfgRaw, &a.InstalledAt, &a.UpdatedAt,
-		&a.Scope, &a.OwnerAgentID, &a.OwnerTeamID); err != nil {
+		&a.Scope, &a.OwnerAgentID, &a.OwnerTeamID,
+		&a.Icon, &a.PinnedRail, &a.RailOrder, &a.PinnedTopbar, &a.TopbarOrder, &schemaRaw); err != nil {
 		return App{}, err
 	}
 	if len(cfgRaw) > 0 {
@@ -165,6 +196,12 @@ func (s *AppStore) scanRow(r rowScanner) (App, error) {
 	}
 	if a.Config == nil {
 		a.Config = map[string]any{}
+	}
+	if len(schemaRaw) > 0 {
+		json.Unmarshal(schemaRaw, &a.SettingsSchema)
+	}
+	if a.SettingsSchema == nil {
+		a.SettingsSchema = []SettingDef{}
 	}
 	if a.Scope == "" {
 		a.Scope = "workspace"

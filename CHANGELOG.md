@@ -4,6 +4,17 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.50-alpha — 2026-05-25
+
+### Added
+- **App icons** — apps can declare an emoji or icon name in their manifest; shown on app cards and in navigation
+- **Pin apps to left rail** — pin any app to the left sidebar for one-click access from anywhere
+- **Pin apps to top bar** — pin apps as icon shortcuts in the header bar
+- **App settings page** — schema-driven settings form at `/apps/{slug}/settings`; fields defined in `app.yaml` render automatically with no custom UI needed; values are injected as env vars into tool scripts
+- **Migration 002** — new columns on the `apps` table: `icon`, `pinned_rail`, `rail_order`, `pinned_topbar`, `topbar_order`, `settings_schema`
+
+---
+
 ## v0.1.49-alpha — 2026-05-25
 
 ### Fixed

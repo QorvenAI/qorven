@@ -8,22 +8,29 @@ import "time"
 
 // App is a row from the apps table — an installed Qorven App.
 type App struct {
-	ID          string         `json:"id"`
-	TenantID    string         `json:"tenant_id"`
-	Slug        string         `json:"slug"`
-	DisplayName string         `json:"display_name"`
-	Description string         `json:"description"`
-	Version     string         `json:"version"`
-	Author      string         `json:"author"`
-	IconURL     string         `json:"icon_url"`
-	InstallPath string         `json:"install_path"`
-	Enabled      bool           `json:"enabled"`
-	Config       map[string]any `json:"config"`
-	InstalledAt  time.Time      `json:"installed_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	Scope        string         `json:"scope"`          // workspace | agent | team
-	OwnerAgentID string         `json:"owner_agent_id"`
-	OwnerTeamID  string         `json:"owner_team_id"`
+	ID             string       `json:"id"`
+	TenantID       string       `json:"tenant_id"`
+	Slug           string       `json:"slug"`
+	DisplayName    string       `json:"display_name"`
+	Description    string       `json:"description"`
+	Version        string       `json:"version"`
+	Author         string       `json:"author"`
+	IconURL        string       `json:"icon_url"`
+	InstallPath    string       `json:"install_path"`
+	Enabled        bool         `json:"enabled"`
+	Config         map[string]any `json:"config"`
+	InstalledAt    time.Time    `json:"installed_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	Scope          string       `json:"scope"`           // workspace | agent | team
+	OwnerAgentID   string       `json:"owner_agent_id"`
+	OwnerTeamID    string       `json:"owner_team_id"`
+	// Display + pinning (migration 002)
+	Icon           string       `json:"icon"`            // emoji, Lucide icon name, or ""
+	PinnedRail     bool         `json:"pinned_rail"`     // show in left rail
+	RailOrder      int          `json:"rail_order"`      // sort order in rail
+	PinnedTopbar   bool         `json:"pinned_topbar"`   // show in top bar
+	TopbarOrder    int          `json:"topbar_order"`    // sort order in top bar
+	SettingsSchema []SettingDef `json:"settings_schema"` // schema-driven settings form
 }
 
 // Manifest is parsed from app.yaml inside every installed App directory.
@@ -34,16 +41,39 @@ type Manifest struct {
 	Description   string           `yaml:"description"`
 	Author        string           `yaml:"author"`
 	IconURL       string           `yaml:"icon_url"`
+	Icon          string           `yaml:"icon"`           // emoji or Lucide icon name
 	RequiresEnv   []string         `yaml:"requires_env"`
 	Permissions   []string         `yaml:"permissions"`
 	Tools         []ToolDef        `yaml:"tools"`
 	Hooks         []HookDef        `yaml:"hooks"`
 	Frontend      FrontendManifest `yaml:"frontend"`
-	MigrationsDir string           `yaml:"migrations_dir"`          // defaults to "migrations"
-	Scope         string           `yaml:"scope,omitempty"`         // workspace | agent | team; defaults to workspace
+	MigrationsDir string           `yaml:"migrations_dir"`           // defaults to "migrations"
+	Scope         string           `yaml:"scope,omitempty"`          // workspace | agent | team; defaults to workspace
 	OwnerAgentID  string           `yaml:"owner_agent_id,omitempty"` // set when scope=agent
 	OwnerTeamID   string           `yaml:"owner_team_id,omitempty"`  // set when scope=team
 	DataSource    *DataSourceConfig `yaml:"data_source,omitempty"`
+	Settings      []SettingDef     `yaml:"settings"`      // schema-driven settings form
+	PinnedRail    bool             `yaml:"pinned_rail"`   // default pinned to left rail
+	PinnedTopbar  bool             `yaml:"pinned_topbar"` // default pinned to top bar
+}
+
+// SettingDef declares one configurable field in an app's settings form.
+type SettingDef struct {
+	Key         string          `yaml:"key"  json:"key"`
+	Label       string          `yaml:"label" json:"label"`
+	Type        string          `yaml:"type" json:"type"` // text | secret | number | boolean | select | url
+	Description string          `yaml:"description,omitempty" json:"description,omitempty"`
+	Placeholder string          `yaml:"placeholder,omitempty" json:"placeholder,omitempty"`
+	Required    bool            `yaml:"required,omitempty" json:"required,omitempty"`
+	Default     string          `yaml:"default,omitempty" json:"default,omitempty"`
+	Options     []SettingOption `yaml:"options,omitempty" json:"options,omitempty"`
+	HelpURL     string          `yaml:"help_url,omitempty" json:"help_url,omitempty"`
+}
+
+// SettingOption is one choice in a select-type SettingDef.
+type SettingOption struct {
+	Value string `yaml:"value" json:"value"`
+	Label string `yaml:"label" json:"label"`
 }
 
 // DataSourceConfig describes the connector data source scheduling config in app.yaml.

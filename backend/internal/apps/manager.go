@@ -177,19 +177,25 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, err
 		scope = "workspace"
 	}
 	created, err := m.store.Create(ctx, App{
-		TenantID:     m.tenantID,
-		Slug:         manifest.Slug,
-		DisplayName:  manifest.DisplayName,
-		Description:  manifest.Description,
-		Version:      manifest.Version,
-		Author:       manifest.Author,
-		IconURL:      manifest.IconURL,
-		InstallPath:  absDir,
-		Enabled:      true,
-		Config:       map[string]any{},
-		Scope:        scope,
-		OwnerAgentID: manifest.OwnerAgentID,
-		OwnerTeamID:  manifest.OwnerTeamID,
+		TenantID:       m.tenantID,
+		Slug:           manifest.Slug,
+		DisplayName:    manifest.DisplayName,
+		Description:    manifest.Description,
+		Version:        manifest.Version,
+		Author:         manifest.Author,
+		IconURL:        manifest.IconURL,
+		Icon:           manifest.Icon,
+		InstallPath:    absDir,
+		Enabled:        true,
+		Config:         map[string]any{},
+		Scope:          scope,
+		OwnerAgentID:   manifest.OwnerAgentID,
+		OwnerTeamID:    manifest.OwnerTeamID,
+		PinnedRail:     manifest.PinnedRail,
+		PinnedTopbar:   manifest.PinnedTopbar,
+		RailOrder:      999,
+		TopbarOrder:    999,
+		SettingsSchema: manifest.Settings,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create app row: %w", err)
@@ -394,13 +400,18 @@ func (m *AppManager) registerTools(a App, manifest Manifest) []string {
 				c.Dir = dir
 				argsJSON, _ := json.Marshal(args)
 				c.Stdin = strings.NewReader(string(argsJSON))
-				c.Env = appToolEnv(dir,
-					"QORVEN_APP_SLUG="+manifest.Slug,
-					"QORVEN_TENANT_ID="+a.TenantID,
-					"QORVEN_APP_ID="+a.ID,
-					"QORVEN_AGENT_ID="+tools.AgentIDFromCtx(ctx),
-					"QORVEN_DB_DSN="+dsn,
-				)
+				toolEnv := []string{
+					"QORVEN_APP_SLUG=" + manifest.Slug,
+					"QORVEN_TENANT_ID=" + a.TenantID,
+					"QORVEN_APP_ID=" + a.ID,
+					"QORVEN_AGENT_ID=" + tools.AgentIDFromCtx(ctx),
+					"QORVEN_DB_DSN=" + dsn,
+				}
+				for k, v := range a.Config {
+					envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
+					toolEnv = append(toolEnv, envKey+"="+fmt.Sprintf("%v", v))
+				}
+				c.Env = appToolEnv(dir, toolEnv...)
 				if m.credLookup != nil {
 					if key := m.credLookup(a.TenantID, manifest.Slug); key != "" {
 						c.Env = append(c.Env, "CONNECTOR_"+strings.ToUpper(strings.ReplaceAll(manifest.Slug, "-", "_"))+"_KEY="+key)
@@ -596,13 +607,18 @@ func (m *AppManager) RunTool(ctx context.Context, slug, toolName string, args ma
 
 	argsJSON, _ := json.Marshal(args)
 	c.Stdin = strings.NewReader(string(argsJSON))
-	c.Env = appToolEnv(la.app.InstallPath,
-		"QORVEN_APP_SLUG="+la.app.Slug,
-		"QORVEN_TENANT_ID="+la.app.TenantID,
-		"QORVEN_APP_ID="+la.app.ID,
-		"QORVEN_AGENT_ID="+tools.AgentIDFromCtx(ctx),
-		"QORVEN_DB_DSN="+m.dsn,
-	)
+	baseEnv := []string{
+		"QORVEN_APP_SLUG=" + la.app.Slug,
+		"QORVEN_TENANT_ID=" + la.app.TenantID,
+		"QORVEN_APP_ID=" + la.app.ID,
+		"QORVEN_AGENT_ID=" + tools.AgentIDFromCtx(ctx),
+		"QORVEN_DB_DSN=" + m.dsn,
+	}
+	for k, v := range la.app.Config {
+		envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
+		baseEnv = append(baseEnv, envKey+"="+fmt.Sprintf("%v", v))
+	}
+	c.Env = appToolEnv(la.app.InstallPath, baseEnv...)
 	if m.credLookup != nil {
 		if key := m.credLookup(la.app.TenantID, la.manifest.Slug); key != "" {
 			c.Env = append(c.Env, "CONNECTOR_"+strings.ToUpper(strings.ReplaceAll(la.manifest.Slug, "-", "_"))+"_KEY="+key)

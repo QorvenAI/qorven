@@ -104,8 +104,13 @@ func (gw *Gateway) handlePatchApp(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	var req struct {
-		Enabled *bool          `json:"enabled"`
-		Config  map[string]any `json:"config"`
+		Enabled      *bool          `json:"enabled"`
+		Config       map[string]any `json:"config"`
+		Icon         *string        `json:"icon"`
+		PinnedRail   *bool          `json:"pinned_rail"`
+		RailOrder    *int           `json:"rail_order"`
+		PinnedTopbar *bool          `json:"pinned_topbar"`
+		TopbarOrder  *int           `json:"topbar_order"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -125,6 +130,12 @@ func (gw *Gateway) handlePatchApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Config != nil {
 		if err := gw.appMgr.Store().SetConfig(r.Context(), defaultTenant, id, req.Config); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+			return
+		}
+	}
+	if req.Icon != nil || req.PinnedRail != nil || req.RailOrder != nil || req.PinnedTopbar != nil || req.TopbarOrder != nil {
+		if err := gw.appMgr.Store().SetPinning(r.Context(), defaultTenant, id, req.Icon, req.PinnedRail, req.RailOrder, req.PinnedTopbar, req.TopbarOrder); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 			return
 		}
