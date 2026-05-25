@@ -17,6 +17,7 @@ import (
 	"github.com/qorvenai/qorven/internal/connectors"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/mcp"
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/memory"
 	"github.com/qorvenai/qorven/internal/permissions"
 	"github.com/qorvenai/qorven/internal/plugin"
@@ -433,7 +434,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 				}
 			}
 			if projectPath != "" {
-				systemPrompt += "\n\n" + PrimeCoderSystemPrompt(projectPath)
+				systemPrompt += "\n\n" + PrimeCoderSystemPrompt(projectPath, config.Sub("apps"))
 			}
 
 			// Load project-scoped memories (task scope)

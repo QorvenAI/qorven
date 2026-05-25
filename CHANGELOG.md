@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.43-alpha — 2026-05-25
+
+### Fixed
+- **App builder used wrong directory on production installs** — the agent's app-building instructions contained hardcoded `~/.qorven/apps` paths. On production installs where `QORVEN_DATA_DIR=/var/lib/qorven`, all `write_file` and `exec` steps were pointing at the wrong location. The paths now resolve from the configured data directory automatically.
+- **Removed dev-only template paths from agent instructions** — steps telling the agent to `cat` template files from the source tree (`backend/cmd/scaffold/templates/...`) don't exist on installed binaries. Replaced with inline guidance.
+
+---
+
 ## v0.1.42-alpha — 2026-05-25
 
 ### Fixed
