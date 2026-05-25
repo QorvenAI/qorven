@@ -780,6 +780,12 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/analytics", gw.handleSocialAnalyticsSummary)
 		r.Get("/social/posts/{id}/metrics", gw.handleGetSocialPostMetrics)
 
+		// Social Post Comments
+		r.Get("/social/posts/{id}/comments", gw.handleListSocialComments)
+		r.Post("/social/posts/{id}/comments", gw.handleCreateSocialComment)
+		r.Delete("/social/posts/{id}/comments/{comment_id}", gw.handleDeleteSocialComment)
+		r.Patch("/social/posts/{id}/comments/{comment_id}/resolve", gw.handleResolveSocialComment)
+
 		// Social Media Library
 		r.Post("/social/media", gw.handleSocialMediaUpload)
 		r.Get("/social/media", gw.handleListSocialMedia)
@@ -787,6 +793,12 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/media/{id}/content", gw.handleSocialMediaContent)
 		r.Patch("/social/media/{id}", gw.handleUpdateSocialMediaAsset)
 		r.Delete("/social/media/{id}", gw.handleDeleteSocialMedia)
+
+		// Social Content Sets
+		r.Get("/social/sets", gw.handleListSocialSets)
+		r.Post("/social/sets", gw.handleCreateSocialSet)
+		r.Patch("/social/sets/{id}", gw.handleUpdateSocialSet)
+		r.Delete("/social/sets/{id}", gw.handleDeleteSocialSet)
 
 		// Dead-letter queue (FU-021)
 		r.Get("/admin/dead-letters", gw.handleListDeadLetters)

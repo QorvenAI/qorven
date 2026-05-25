@@ -270,6 +270,17 @@ export const social = {
       `/social/calendar${agentId ? `?agent_id=${agentId}` : ''}`
     ),
 
+  // Post Comments
+  listComments: (postId: string) => request<any[]>(`/social/posts/${postId}/comments`),
+  createComment: (postId: string, body: { body: string; parent_id?: string; author_name?: string }) =>
+    request<any>(`/social/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteComment: (postId: string, commentId: string) =>
+    request<void>(`/social/posts/${postId}/comments/${commentId}`, { method: 'DELETE' }),
+  resolveComment: (postId: string, commentId: string, resolved: boolean) =>
+    request<any>(`/social/posts/${postId}/comments/${commentId}/resolve`, {
+      method: 'PATCH', body: JSON.stringify({ resolved }),
+    }),
+
   // Analytics
   analyticsSummary: (agentId?: string) => {
     const p = new URLSearchParams();
@@ -298,6 +309,16 @@ export const social = {
   deleteMedia: (id: string) => request<void>(`/social/media/${id}`, { method: 'DELETE' }),
   updateMedia: (id: string, body: { alt_text?: string; tags?: string[] }) =>
     request<any>(`/social/media/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  listSets: (agentId?: string) => {
+    const p = new URLSearchParams();
+    if (agentId) p.set('agent_id', agentId);
+    return request<any[]>(`/social/sets?${p}`);
+  },
+  createSet: (body: { agent_id?: string; name: string; description?: string; content: string; platforms?: string[] }) =>
+    request<any>('/social/sets', { method: 'POST', body: JSON.stringify(body) }),
+  updateSet: (id: string, body: { name?: string; description?: string; content?: string; platforms?: string[] }) =>
+    request<any>(`/social/sets/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteSet: (id: string) => request<void>(`/social/sets/${id}`, { method: 'DELETE' }),
 };
 
 // Research

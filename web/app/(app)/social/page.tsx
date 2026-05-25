@@ -11,6 +11,7 @@ import {
   Image as ImageIcon, Upload, Search, Grid, Video, Copy,
   BarChart2, TrendingUp, Eye, Heart, Share2, MessageCircle,
   CornerDownRight, CheckCheck,
+  BookOpen, Edit3,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
@@ -380,6 +381,7 @@ export default function SocialPage() {
           {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
           {tab === 'media'     && <MediaTab agentId={agentFilter} />}
           {tab === 'analytics' && <AnalyticsTab agentId={agentFilter} />}
+          {tab === 'sets'      && <SetsTab agentId={agentFilter} />}
         </div>
       </div>
     </ErrorBoundary>
@@ -402,6 +404,19 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
   const [selectedAgent, setSelectedAgent] = useState(agentId || (souls[0]?.id ?? ''));
   const [showPerPlatform, setShowPerPlatform] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load content set from sessionStorage if user clicked "Use" in SetsTab
+  useEffect(() => {
+    const raw = sessionStorage.getItem('social_set_load');
+    if (raw) {
+      try {
+        const set = JSON.parse(raw) as { content: string; platforms: string[] };
+        if (set.content) setContent(set.content);
+        if (set.platforms?.length) setSelectedPlatforms(set.platforms);
+      } catch { /* ignore */ }
+      sessionStorage.removeItem('social_set_load');
+    }
+  }, []);
 
   const activePlatform = PLATFORMS.find(p => selectedPlatforms[0] === p.id) ?? PLATFORMS[0]!;
   const charsLeft = activePlatform.maxChars - content.length;
@@ -1943,6 +1958,239 @@ function AnalyticsTab({ agentId }: { agentId: string }) {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── AutoPost Tab ─────────────────────────────────────────────────────────────
+
+// ─── Content Sets Tab ─────────────────────────────────────────────────────────
+
+function SetsTab({ agentId }: { agentId: string }) {
+  const souls = useStore(s => s.souls);
+  const [sets, setSets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
+  const [form, setForm] = useState({ name: '', description: '', content: '', platforms: [] as string[], agent_id: agentId || '' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await socialApi.listSets(agentId || undefined);
+      setSets(data ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function createSet() {
+    if (!form.name.trim()) return;
+    try {
+      await socialApi.createSet({
+        name: form.name,
+        description: form.description,
+        content: form.content,
+        platforms: form.platforms,
+        agent_id: form.agent_id || undefined,
+      });
+      setShowNew(false);
+      setForm({ name: '', description: '', content: '', platforms: [], agent_id: agentId || '' });
+      await load();
+      toast.success('Content set created');
+    } catch {
+      toast.error('Failed to create set');
+    }
+  }
+
+  async function saveEdit(id: string, patch: { name?: string; description?: string; content?: string; platforms?: string[] }) {
+    try {
+      await socialApi.updateSet(id, patch);
+      setEditingId(null);
+      await load();
+    } catch {
+      toast.error('Failed to update set');
+    }
+  }
+
+  async function del(id: string) {
+    try {
+      await socialApi.deleteSet(id);
+      setSets(prev => prev.filter(s => s.id !== id));
+    } catch {
+      toast.error('Failed to delete set');
+    }
+  }
+
+  function loadIntoComposer(set: any) {
+    // Store selected set in sessionStorage so ComposeTab can pick it up
+    sessionStorage.setItem('social_set_load', JSON.stringify({ content: set.content, platforms: set.platforms }));
+    toast.success(`"${set.name}" ready — open Compose to use it`);
+  }
+
+  function SetForm({
+    initial,
+    onSave,
+    onCancel,
+  }: {
+    initial: { name: string; description: string; content: string; platforms: string[] };
+    onSave: (v: typeof initial) => void;
+    onCancel: () => void;
+  }) {
+    const [v, setV] = useState(initial);
+    const togglePlatform = (pid: string) =>
+      setV(f => ({ ...f, platforms: f.platforms.includes(pid) ? f.platforms.filter(p => p !== pid) : [...f.platforms, pid] }));
+
+    return (
+      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground">Set name *</label>
+            <input value={v.name} onChange={e => setV(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. Product launch template"
+              className="mt-1 qr-input" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Description</label>
+            <input value={v.description} onChange={e => setV(f => ({ ...f, description: e.target.value }))}
+              placeholder="What is this set for?"
+              className="mt-1 qr-input" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Content template</label>
+          <textarea value={v.content} onChange={e => setV(f => ({ ...f, content: e.target.value }))}
+            placeholder="Write your template content here… Use {variable} placeholders if needed."
+            rows={5}
+            className="mt-1 qr-input font-mono resize-none w-full" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1.5">Target platforms</label>
+          <div className="flex flex-wrap gap-1.5">
+            {PLATFORMS.map(p => (
+              <button key={p.id} onClick={() => togglePlatform(p.id)}
+                className={cn(
+                  'text-xs px-2 py-0.5 rounded-full border transition-colors cursor-pointer',
+                  v.platforms.includes(p.id)
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
+                )}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => onSave(v)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
+            <Check className="h-3.5 w-3.5" /> Save
+          </button>
+          <button onClick={onCancel}
+            className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer">
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Reusable content templates — save a draft post as a set, then load it later to fill the composer instantly.
+        </p>
+        {!showNew && (
+          <button onClick={() => setShowNew(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 cursor-pointer shrink-0">
+            <Plus className="h-3.5 w-3.5" /> New Set
+          </button>
+        )}
+      </div>
+
+      {showNew && (
+        <SetForm
+          initial={{ name: '', description: '', content: '', platforms: [] }}
+          onSave={v => {
+            setForm(f => ({ ...f, ...v }));
+            createSet();
+          }}
+          onCancel={() => setShowNew(false)}
+        />
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      ) : sets.length === 0 ? (
+        <EmptyState icon={BookOpen} title="No content sets" description="Create your first template to speed up post creation." />
+      ) : (
+        <div className="space-y-2">
+          {sets.map(s => {
+            const soul = souls.find(a => a.id === s.agent_id);
+            const isEditing = editingId === s.id;
+            return (
+              <div key={s.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                {isEditing ? (
+                  <div className="p-4">
+                    <SetForm
+                      initial={{ name: s.name, description: s.description, content: s.content, platforms: s.platforms ?? [] }}
+                      onSave={v => saveEdit(s.id, v)}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  </div>
+                ) : (
+                  <div className="p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                        <BookOpen className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-sm font-medium">{s.name}</span>
+                          {soul && <span className="text-xs text-muted-foreground">{soul.display_name}</span>}
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {new Date(s.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        {s.description && <p className="text-xs text-muted-foreground mb-1">{s.description}</p>}
+                        <p className="text-sm text-foreground/70 line-clamp-2 font-mono whitespace-pre-wrap">{s.content || <em className="not-italic text-muted-foreground">(empty)</em>}</p>
+                        {(s.platforms ?? []).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {(s.platforms as string[]).map(pid => (
+                              <span key={pid} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{pid}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => loadIntoComposer(s)}
+                          className="h-7 px-2 flex items-center gap-1 rounded text-xs text-muted-foreground hover:text-primary hover:bg-accent transition-colors cursor-pointer"
+                          title="Load into composer">
+                          <Send className="h-3 w-3" /> Use
+                        </button>
+                        <button onClick={() => setEditingId(s.id)}
+                          className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                          title="Edit">
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => del(s.id)}
+                          className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                          title="Delete">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
