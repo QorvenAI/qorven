@@ -1601,6 +1601,7 @@ Type=simple
 User=qorven
 Group=qorven
 Environment=QORVEN_CONFIG=/etc/qorven/config.toml
+Environment=QORVEN_DATA_DIR=/var/lib/qorven
 EnvironmentFile=-/etc/qorven/.env
 ExecStart=/opt/qorven/bin/qorven start
 Restart=always

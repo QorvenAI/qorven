@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.1.42-alpha — 2026-05-25
+
+### Fixed
+- **App builder permission error on fresh installs** — the installer was not setting `QORVEN_DATA_DIR` in the systemd unit, so the service resolved its data directory to the home directory of the service user (which does not exist on production installs). All file writes from agents — creating apps, writing code files, running shell tools — now correctly go to `/var/lib/qorven`.
+
+---
+
 ## v0.1.41-alpha — 2026-05-25
 
 ### Fixed
