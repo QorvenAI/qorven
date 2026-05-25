@@ -20,7 +20,7 @@ var (
 //
 // Resolution order (first match wins):
 //  1. QORVEN_DATA_DIR environment variable — explicit override, used by systemd
-//     service units (e.g. QORVEN_DATA_DIR=/var/lib/qorven)
+//     service units (e.g. QORVEN_DATA_DIR=/var/lib/qorven) and tests
 //  2. Legacy ~/.qorven — if it already exists, honour it so existing installs
 //     continue working without migration
 //  3. Platform-default XDG/OS data directory:
@@ -28,9 +28,13 @@ var (
 //     - macOS:   ~/Library/Application Support/Qorven
 //     - Windows: %APPDATA%\Qorven
 //
-// The result is cached after the first call. The directory is NOT created here;
-// callers that need it to exist should call os.MkdirAll themselves.
+// QORVEN_DATA_DIR is always re-read from the environment so tests using
+// t.Setenv can override it without fighting the sync.Once cache.
+// All other resolution is cached after the first call.
 func DataDir() string {
+	if d := os.Getenv("QORVEN_DATA_DIR"); d != "" {
+		return d
+	}
 	dataDirOnce.Do(func() {
 		dataDirValue = resolveDataDir()
 	})
@@ -44,11 +48,7 @@ func Sub(parts ...string) string {
 }
 
 func resolveDataDir() string {
-	// 1. Explicit env override (systemd, Docker, CI)
-	if d := os.Getenv("QORVEN_DATA_DIR"); d != "" {
-		return d
-	}
-
+	// QORVEN_DATA_DIR is handled by DataDir() before this function is called.
 	home, _ := os.UserHomeDir()
 
 	// 2. Legacy path — honour existing installs
