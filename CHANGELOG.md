@@ -4,6 +4,30 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.0-alpha — 2026-05-25
+
+### Added
+- **Social Media Library** — full social publishing platform with support for 12 platforms: Twitter/X, LinkedIn, Facebook, Instagram, YouTube, TikTok, Reddit, Discord, Slack, Dev.to, Medium, WordPress, Google My Business, Nostr, and Telegram Bot
+- **Social analytics** — per-post metrics capture with background worker; analytics dashboard with reach, engagement, and growth charts
+- **Social content sets** — reusable post templates that can be loaded into the composer with one click
+- **Social team comments** — internal comment threads on post cards for team review before publishing
+- **Per-integration settings** — posting hours, active days, display nickname, group, and pause toggle per social account
+- **Outgoing webhooks for social events** — N8N/Make/Zapier-compatible webhook delivery on post publish, fail, and schedule events
+- **GitHub Copilot provider** — connect via OAuth; supports GPT-4o, o3, Claude Sonnet 4, Gemini 2.5 Pro, and more
+- **Google Vertex AI provider** — OAuth connect with full Gemini model list
+- **send_file tool** — agents can deliver workspace files to users as one-click download notifications; works in both host and sandbox execution environments
+- **Shell output widget** — exec tool results render as styled terminal cards with command header, exit code badge, and scrollable output; applies to both host and Docker sandbox paths
+- **Fallback model** — per-agent fallback model picker in the configuration panel; automatically used when the primary model is unavailable
+- **Cortex synthesis** — async post-turn knowledge extraction stores key facts and decisions as typed memories after each conversation turn
+- **Usage page** — tokens and budget columns added to per-agent usage table; budget progress bars; total token and call count stat cards
+
+### Fixed
+- **Channel setup guides** — Discord and Slack guides now include all required setup steps
+- **Social posting windows** — posts respect per-integration active hours and days configuration
+- **Nostr signing** — Ed25519 event signing wired correctly for Nostr posts
+
+---
+
 ## v0.1.50-alpha — 2026-05-25
 
 ### Added
