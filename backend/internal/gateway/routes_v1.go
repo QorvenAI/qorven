@@ -162,6 +162,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 
 		// AI Gateway admin
 		r.Get("/gateway/stats", gw.handleGatewayStats)
+		r.Get("/gateway/stats/stream", gw.handleGatewayStatsStream)
 		r.Get("/gateway/circuit", gw.handleGatewayCircuit)
 		r.Get("/gateway/queue", gw.handleGatewayQueue)
 		r.Get("/gateway/aliases", gw.handleGatewayAliasesList)

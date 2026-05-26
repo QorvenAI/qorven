@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -19,8 +20,53 @@ func (gw *Gateway) handleGatewayStats(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"uptime_seconds": int(time.Since(gw.startTime).Seconds()),
 		"pipeline":       gw.llmPipeline != nil,
+		"metrics":        gatewayllm.Metrics.Snapshot(),
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGatewayStatsStream sends gateway metrics as SSE events every 2 seconds.
+// The client opens this as an EventSource; each event is a JSON MetricsSnapshot.
+//
+// GET /v1/gateway/stats/stream
+func (gw *Gateway) handleGatewayStatsStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming not supported"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ctx := r.Context()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	send := func() {
+		snap := gatewayllm.Metrics.Snapshot()
+		data, _ := json.Marshal(map[string]any{
+			"uptime_seconds": int(time.Since(gw.startTime).Seconds()),
+			"pipeline":       gw.llmPipeline != nil,
+			"metrics":        snap,
+		})
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	send()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			send()
+		}
+	}
 }
 
 // handleGatewayCircuit returns the state of all circuit breakers.

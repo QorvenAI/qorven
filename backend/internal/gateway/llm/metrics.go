@@ -39,6 +39,53 @@ type GatewayMetrics struct {
 // Metrics is the singleton for the gateway LLM pipeline.
 var Metrics = &GatewayMetrics{}
 
+// MetricsSnapshot is a point-in-time copy of all gateway counters.
+type MetricsSnapshot struct {
+	RequestsTotal       int64   `json:"requests_total"`
+	RequestsErrors      int64   `json:"requests_errors"`
+	CacheHits           int64   `json:"cache_hits"`
+	CacheMisses         int64   `json:"cache_misses"`
+	BudgetDenials       int64   `json:"budget_denials"`
+	TokensIn            int64   `json:"tokens_in"`
+	TokensOut           int64   `json:"tokens_out"`
+	TokensThinking      int64   `json:"tokens_thinking"`
+	TokensCacheWrite    int64   `json:"tokens_cache_write"`
+	TokensCacheRead     int64   `json:"tokens_cache_read"`
+	CostTotalUUSD       int64   `json:"cost_total_uusd"`
+	CostTotalUSD        float64 `json:"cost_total_usd"`
+	CircuitTrips        int64   `json:"circuit_trips"`
+	PricingMissingCalls int64   `json:"pricing_missing_calls"`
+	CacheHitRate        float64 `json:"cache_hit_rate"`
+}
+
+// Snapshot atomically reads all counters into a MetricsSnapshot.
+func (m *GatewayMetrics) Snapshot() MetricsSnapshot {
+	total := m.RequestsTotal.Load()
+	hits := m.CacheHits.Load()
+	costUUSD := m.CostTotalUUSD.Load()
+	hitRate := float64(0)
+	if total > 0 {
+		hitRate = float64(hits) / float64(total)
+	}
+	return MetricsSnapshot{
+		RequestsTotal:       total,
+		RequestsErrors:      m.RequestsErrors.Load(),
+		CacheHits:           hits,
+		CacheMisses:         m.CacheMisses.Load(),
+		BudgetDenials:       m.BudgetDenials.Load(),
+		TokensIn:            m.TokensIn.Load(),
+		TokensOut:           m.TokensOut.Load(),
+		TokensThinking:      m.TokensThinking.Load(),
+		TokensCacheWrite:    m.TokensCacheWrite.Load(),
+		TokensCacheRead:     m.TokensCacheRead.Load(),
+		CostTotalUUSD:       costUUSD,
+		CostTotalUSD:        float64(costUUSD) / 1_000_000.0,
+		CircuitTrips:        m.CircuitTrips.Load(),
+		PricingMissingCalls: m.PricingMissingCalls.Load(),
+		CacheHitRate:        hitRate,
+	}
+}
+
 // recordRequest is called by the pipeline on every completed request.
 func recordRequest(resp *GatewayResponse, cacheHit bool, err error) {
 	Metrics.RequestsTotal.Add(1)

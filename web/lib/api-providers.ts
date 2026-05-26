@@ -281,7 +281,7 @@ export const wasmPlugins = {
 };
 
 export const gatewayAdmin = {
-  stats: () => request<{ uptime_seconds: number; pipeline: boolean }>('/gateway/stats'),
+  stats: () => request<{ uptime_seconds: number; pipeline: boolean; metrics: GatewayMetrics }>('/gateway/stats'),
   circuit: () => request<{ breakers: { key_id: string; state: string; requests: number; failures: number }[] }>('/gateway/circuit'),
   queue: () => request<{ interactive: number; background: number; batch: number; capacities: { interactive: number; background: number; batch: number } }>('/gateway/queue'),
   aliases: () => request<{ tenant_id: string; alias: string; model_id: string; priority: number }[]>('/gateway/aliases'),
@@ -310,6 +310,24 @@ export const gatewayAdmin = {
     ),
   pricingBackfill: () => request<{ rows_updated: number; models_fixed: number }>('/gateway/pricing/backfill', { method: 'POST' }),
 };
+
+export interface GatewayMetrics {
+  requests_total: number;
+  requests_errors: number;
+  cache_hits: number;
+  cache_misses: number;
+  budget_denials: number;
+  tokens_in: number;
+  tokens_out: number;
+  tokens_thinking: number;
+  tokens_cache_write: number;
+  tokens_cache_read: number;
+  cost_total_uusd: number;
+  cost_total_usd: number;
+  circuit_trips: number;
+  pricing_missing_calls: number;
+  cache_hit_rate: number;
+}
 
 export interface PricingGap {
   model_id:   string;

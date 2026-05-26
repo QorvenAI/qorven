@@ -1509,6 +1509,11 @@ func (gw *Gateway) registerTools() {
 	reg.Register(&tools.GetConnectorTemplateTool{})
 	slog.Info("get_connector_template tool registered")
 
+	// Carrier integration tools — scaffold shipping carrier connectors.
+	reg.Register(tools.NewBuildCarrierTool())
+	reg.Register(tools.NewListCarriersTool())
+	slog.Info("carrier tools registered", "tools", "build_carrier,list_carriers")
+
 	// Coding tools.
 	fileHistory := tools.NewFileHistory()
 	projectReg := tools.NewProjectRegistry(config.DataDir())

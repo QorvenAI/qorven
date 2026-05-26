@@ -11,10 +11,12 @@ import { cn } from '@/lib/utils';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { Button } from '@/components/qor/button';
 import { Badge } from '@/components/qor/badge';
-import { gatewayAdmin, type PricingGap } from '@/lib/api-providers';
+import { gatewayAdmin, type PricingGap, type GatewayMetrics } from '@/lib/api-providers';
 import { agents } from '@/lib/api-agents';
 import type { Soul } from '@/types';
 import { toast } from 'sonner';
+import { getToken } from '@/lib/api-core';
+import { apiBase } from '@/lib/api-url';
 
 // ─── Shared card ─────────────────────────────────────────────────────────────
 
@@ -50,6 +52,63 @@ function PipelineStatus({ active, uptime }: { active: boolean; uptime: number })
       </div>
     </div>
   );
+}
+
+// ─── Live throughput metrics ─────────────────────────────────────────────────
+
+function LiveMetrics({ metrics }: { metrics: GatewayMetrics | null }) {
+  if (!metrics) return <div className="h-20 rounded-lg bg-muted animate-pulse" />;
+
+  const stats = [
+    { label: 'Requests', value: metrics.requests_total.toLocaleString(), sub: `${metrics.requests_errors} errors` },
+    { label: 'Tokens In', value: fmtTokens(metrics.tokens_in), sub: `${fmtTokens(metrics.tokens_thinking)} thinking` },
+    { label: 'Tokens Out', value: fmtTokens(metrics.tokens_out), sub: `${fmtTokens(metrics.tokens_cache_read)} cache read` },
+    { label: 'Total Spend', value: `$${metrics.cost_total_usd.toFixed(4)}`, sub: `${(metrics.cache_hit_rate * 100).toFixed(1)}% cache hits` },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      {stats.map(s => (
+        <div key={s.label} className="rounded-lg border border-border px-3.5 py-3">
+          <p className="text-xs font-medium text-muted-foreground">{s.label}</p>
+          <p className="text-xl font-semibold mt-0.5 tabular-nums">{s.value}</p>
+          <p className="text-xs text-muted-foreground/70 mt-0.5">{s.sub}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function useGatewayStream() {
+  const [metrics, setMetrics] = useState<GatewayMetrics | null>(null);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+
+    const url = `${apiBase()}/v1/gateway/stats/stream?token=${token}`;
+    const es = new EventSource(url);
+
+    es.onopen = () => setConnected(true);
+    es.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (data.metrics) setMetrics(data.metrics);
+      } catch { /* ignore parse errors */ }
+    };
+    es.onerror = () => setConnected(false);
+
+    return () => { es.close(); setConnected(false); };
+  }, []);
+
+  return { metrics, connected };
 }
 
 // ─── Priority queue depths ────────────────────────────────────────────────────
@@ -480,7 +539,7 @@ function PricingGapsSection({ gaps, onSet, onBackfill, backfilling }: {
 
 export default function GatewayPage() {
   const [loading,      setLoading]      = useState(true);
-  const [stats,        setStats]        = useState<{ uptime_seconds: number; pipeline: boolean } | null>(null);
+  const [stats,        setStats]        = useState<{ uptime_seconds: number; pipeline: boolean; metrics?: GatewayMetrics } | null>(null);
   const [circuit,      setCircuit]      = useState<Breaker[]>([]);
   const [queue,        setQueue]        = useState<{ interactive: number; background: number; batch: number; capacities: { interactive: number; background: number; batch: number } } | null>(null);
   const [aliases,      setAliases]      = useState<AliasRow[]>([]);
@@ -489,6 +548,8 @@ export default function GatewayPage() {
   const [cacheStats,   setCacheStats]   = useState<{ size: number; capacity: number } | null>(null);
   const [pricingGaps,  setPricingGaps]  = useState<PricingGap[]>([]);
   const [backfilling,  setBackfilling]  = useState(false);
+
+  const { metrics: liveMetrics, connected: streamConnected } = useGatewayStream();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -581,6 +642,20 @@ export default function GatewayPage() {
           </Button>
         }
       />
+
+      {/* Row 0: Live Throughput */}
+      <Card
+        title="Live Throughput"
+        icon={Activity}
+        headerRight={
+          <span className={cn('flex items-center gap-1.5 text-xs', streamConnected ? 'text-emerald-500' : 'text-muted-foreground')}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', streamConnected ? 'bg-emerald-400 animate-pulse' : 'bg-muted-foreground/40')} />
+            {streamConnected ? 'Live' : 'Connecting…'}
+          </span>
+        }
+      >
+        <LiveMetrics metrics={liveMetrics ?? stats?.metrics ?? null} />
+      </Card>
 
       {/* Row 1: Pipeline + Queue */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
