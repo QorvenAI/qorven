@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.2-alpha — 2026-05-26
+
+### Added
+- **Live Gateway metrics stream** — Gateway Admin page now has a real-time Live Throughput card showing requests, tokens in/out, total spend, and cache hit rate; updates every 2 seconds via SSE
+- **Carrier integration scaffolding** — `build_carrier` tool auto-generates ready-to-compile Go connector code for any shipping carrier; `list_carriers` shows pre-configured specs for FedEx, UPS, DHL, USPS, Aramex, and Maersk; agents guide users through the full build-and-install flow
+
+---
+
 ## v0.2.1-alpha — 2026-05-26
 
 ### Added
