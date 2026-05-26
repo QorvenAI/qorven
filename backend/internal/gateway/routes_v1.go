@@ -114,6 +114,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/agents/{id}/runtime/override", gw.handleRuntimeOverride)
 		r.Get("/runtime/states", gw.handleRuntimeStates)
 
+		// Autonomous execution — long-running tasks (1-2+ hours)
+		r.Get("/autonomous/sessions", gw.handleAutonomousSessions)
+		r.Post("/autonomous/sessions/{id}/cancel", gw.handleAutonomousCancel)
+
 		// Sessions
 		r.Get("/sessions", gw.handleListSessions)
 		r.Get("/sessions/unified", gw.handleUnifiedTimeline) // merged cross-channel timeline for one agent

@@ -87,6 +87,11 @@ type RunRequest struct {
 	// When both are nil the default hierarchy search applies unchanged.
 	MemoryScopeAllow []string
 	MemoryScopeDeny  []string
+
+	// Autonomous enables long-running execution mode. When true, the agent
+	// self-continues past maxIter by checkpointing and re-waking until the
+	// task is complete, budget is exhausted, or the session is cancelled.
+	Autonomous bool
 }
 
 // ImageInput represents an image attached to a request.
@@ -112,23 +117,24 @@ type AudioInput struct {
 
 // RunResult contains the output of an agent run.
 type RunResult struct {
-	Content       string
-	Media         []MediaResult
-	ToolCalls     int
-	ToolsUsed     []string
-	Iterations    int
-	InputTokens   int
-	OutputTokens  int
-	TotalTokens   int
-	CostCents     float64
-	DurationMs    int64
-	Aborted       bool
-	Error         error
-	Parts         []MessagePart     // streaming parts
-	Metadata      map[string]any    // additional metadata
-	Sources       []Source          // web sources
-	Thinking      string            // thinking/reasoning content
-	TraceID       string            // distributed trace ID for this run
+	Content         string
+	Media           []MediaResult
+	ToolCalls       int
+	ToolsUsed       []string
+	Iterations      int
+	InputTokens     int
+	OutputTokens    int
+	TotalTokens     int
+	CostCents       float64
+	DurationMs      int64
+	Aborted         bool
+	HitIterationCap bool              // true if loop exited because maxIter was reached (not natural completion)
+	Error           error
+	Parts           []MessagePart     // streaming parts
+	Metadata        map[string]any    // additional metadata
+	Sources         []Source          // web sources
+	Thinking        string            // thinking/reasoning content
+	TraceID         string            // distributed trace ID for this run
 }
 
 // StreamEvent represents a streaming event from the agent loop.

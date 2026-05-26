@@ -83,6 +83,29 @@ func (gw *Gateway) handleRuntimeStates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"states": gw.runtimeMgr.States()})
 }
 
+// GET /v1/autonomous/sessions — list all active autonomous sessions
+func (gw *Gateway) handleAutonomousSessions(w http.ResponseWriter, r *http.Request) {
+	if gw.agentLoop == nil || gw.agentLoop.Autonomous == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"sessions": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": gw.agentLoop.Autonomous.ActiveSessions()})
+}
+
+// POST /v1/autonomous/sessions/{id}/cancel — stop an autonomous session
+func (gw *Gateway) handleAutonomousCancel(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if gw.agentLoop == nil || gw.agentLoop.Autonomous == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "autonomous controller not available"})
+		return
+	}
+	if !gw.agentLoop.Autonomous.Cancel(id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active autonomous session with that ID"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled", "session_id": id})
+}
+
 // GET /v1/tasks/{id}/events
 func (gw *Gateway) handleListTaskEvents(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

@@ -464,6 +464,12 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		req.NoTools = true
 	}
 
+	// Auto-enable autonomous mode for code sessions — allows self-continuation
+	// past maxIter so agents can run 1-2+ hour coding tasks without stopping.
+	if strings.HasPrefix(sessionID, "code-") {
+		req.Autonomous = true
+	}
+
 	// Check if council should run (non-streaming only)
 	if !stream && depthCfg.CouncilEnabled {
 		dims := providers.ScoreRequest(userMsg, !req.NoTools, false, 0)
@@ -505,7 +511,11 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		// in a background goroutine so the HTTP response closes immediately.
 		doneCh := make(chan struct{})
 		go func() {
-			gw.agentLoop.Run(context.Background(), req, func(event agent.StreamEvent) {
+			runFn := gw.agentLoop.Run
+			if req.Autonomous && gw.agentLoop.Autonomous != nil {
+				runFn = gw.agentLoop.Autonomous.RunAutonomous
+			}
+			runFn(context.Background(), req, func(event agent.StreamEvent) {
 				var data []byte
 				switch event.Type {
 				case "text_delta":

@@ -667,6 +667,10 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			}
 		}
 
+		// Wire autonomous controller for long-running agent execution.
+		gw.agentLoop.Autonomous = agent.NewAutonomousController(
+			gw.agentLoop, agent.DefaultAutonomousConfig())
+
 		// Wire project registry after tools are registered (deferred)
 		defer func() {
 			if gw.projectReg != nil {

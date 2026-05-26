@@ -72,6 +72,10 @@ type Loop struct {
 	// caching, and cost recording. nil = direct provider dispatch.
 	LLMPipeline *gatewayllm.Pipeline
 
+	// Autonomous enables long-running execution (1-2+ hours). When set,
+	// agents can self-continue past maxIter by checkpointing and re-waking.
+	Autonomous *AutonomousController
+
 	// PIIRedactor is invoked on inbound user messages and outbound
 	// assistant content. nil = disabled (default). Set via
 	// SetPIIRedactor from the gateway after reading the tenant config.
@@ -749,6 +753,12 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	// Cron tasks: cap at 3 iterations to prevent runaway tool loops
 	if req.Channel == "cron" && maxIter > 3 {
 		maxIter = 3
+	}
+	// Autonomous mode: raise iteration cap per cycle so each continuation
+	// gets meaningful work done before checkpointing. 50 iterations/cycle
+	// × 50 cycles = 2500 total iterations possible (like Claude Code).
+	if req.Autonomous && maxIter < 50 {
+		maxIter = 50
 	}
 
 	model := req.Model
@@ -1661,6 +1671,13 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 		}
 
 		// Loop continues — LLM will see tool results and decide next action
+	}
+
+	// Detect if the loop exited because it hit maxIter (not a natural break).
+	// Natural breaks happen when the LLM returns text without tool calls.
+	// If we exhausted all iterations while still calling tools, mark it.
+	if result.Iterations >= maxIter && len(result.ToolsUsed) > 0 && result.Content == "" {
+		result.HitIterationCap = true
 	}
 
 	// Self-healing: if tools were used but no text content, try fallback models
