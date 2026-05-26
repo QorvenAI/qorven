@@ -366,6 +366,12 @@ function handleEvent(event: WSEvent) {
       break;
     }
 
+    case 'dashboard_refresh': {
+      window.dispatchEvent(new CustomEvent('qorven:dashboard_refresh', { detail: event.data }));
+      store.pushEvent(liveEvent);
+      break;
+    }
+
     default: {
       // Phase 9 Step 1 — orchestrator telemetry.
       // `graph.node_*` + `agent.progress` events carry a session_id

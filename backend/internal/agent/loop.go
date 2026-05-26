@@ -66,7 +66,7 @@ type Loop struct {
 	primeDelegation *PrimeDelegation                                // Prime → specialist delegation
 	promptCache     *PromptCache                                    // system prompt cache
 	projectReg      *tools.ProjectRegistry                          // code project registry
-	auditFn         func(agent, tool, session string, isError bool) // tool execution audit callback
+	auditFn         func(agent, tool, session, args string, isError bool) // tool execution audit callback
 	// LLMPipeline is the AI Gateway middleware chain. When set, every LLM
 	// call routes through it for budget enforcement, circuit breaking,
 	// caching, and cost recording. nil = direct provider dispatch.
@@ -777,6 +777,29 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					model = decision.ModelID
 				} else {
 					slog.Warn("smart_router.model_not_available", "model", decision.ModelID, "keeping", model)
+				}
+			}
+		}
+	}
+
+	// Org-level model tier enforcement: when model is "auto" or empty, apply org tier floor.
+	// L1 executives get capable+ models, L2 managers get standard+, L3 workers use cheapest.
+	if (ag.Model == "auto" || ag.Model == "") && ag.OrgLevel != "" {
+		tier := ScoreComplexity(req.UserMessage)
+		floor := OrgTierFloor(ag.OrgLevel)
+		ceiling := OrgTierCeiling(ag.OrgLevel)
+		if tier < floor {
+			tier = floor
+		}
+		if tier > ceiling {
+			tier = ceiling
+		}
+		if l.SmartRouter != nil {
+			if tierModel := l.SmartRouter.ModelForTier(l.tenantID, int(tier)); tierModel != "" {
+				if l.providerReg == nil || l.providerReg.HasModel(tierModel) {
+					slog.Info("agent.loop.org_tier_route", "agent", ag.AgentKey, "org_level", ag.OrgLevel,
+						"tier", tier, "model", tierModel)
+					model = tierModel
 				}
 			}
 		}
@@ -1516,7 +1539,12 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 
 				// Audit: log tool execution
 				if l.auditFn != nil {
-					l.auditFn(ag.AgentKey, tc.Name, req.SessionID, toolResult.IsError)
+					argsJSON, _ := json.Marshal(tc.Arguments)
+					argsStr := string(argsJSON)
+					if len(argsStr) > 512 {
+						argsStr = argsStr[:512] + "…"
+					}
+					l.auditFn(ag.AgentKey, tc.Name, req.SessionID, argsStr, toolResult.IsError)
 				}
 			}
 

@@ -643,13 +643,13 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 
 		// Audit: log every tool execution to audit_log
 		if gw.auditStore != nil {
-			gw.agentLoop.SetAuditFn(func(agentKey, toolName, sessionID string, isError bool) {
+			gw.agentLoop.SetAuditFn(func(agentKey, toolName, sessionID, args string, isError bool) {
 				action := "tool_exec"
 				if isError {
 					action = "tool_error"
 				}
 				gw.auditStore.Log(context.Background(), defaultTenant, "agent", agentKey, agentKey, action, "tool", toolName, map[string]any{
-					"session_id": sessionID, "is_error": isError,
+					"session_id": sessionID, "args": args, "is_error": isError,
 				}, "")
 			})
 		}

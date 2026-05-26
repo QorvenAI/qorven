@@ -233,6 +233,10 @@ func (gw *Gateway) Start() error {
 			}
 
 			slog.Info("cron.delivered", "job", jobName, "session", sessionID)
+			// Signal dashboard to refresh (new spend data available)
+			gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventDashboardRefresh, Data: map[string]string{
+				"source": "cron", "agent_id": runAs,
+			}})
 			if gw.notifStore != nil && result != nil {
 				ag, _ := gw.agents.Get(ctx, agentID)
 				name := jobName

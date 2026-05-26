@@ -52,6 +52,10 @@ const (
 	// Payload: { "slug": "expense-tracker", "display_name": "Expense Tracker" }
 	// Clients use it to re-fetch /api/v1/apps and inject the new bundle script.
 	EventAppInstalled = "app_installed"
+
+	// EventDashboardRefresh signals the CEO dashboard to refresh data.
+	// Emitted after cost-ledger flush, agent status change, or session completion.
+	EventDashboardRefresh = "dashboard_refresh"
 )
 
 // Event is a real-time event pushed to all connected clients.

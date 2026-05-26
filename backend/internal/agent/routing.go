@@ -276,3 +276,30 @@ func countWords(s string) int {
 	}
 	return n
 }
+
+// OrgTierFloor returns the minimum model tier for an agent's org level.
+// L1 (executives) get reasoning-class models, L2 (managers) get complex-class,
+// L3 (specialists) get standard or light depending on query complexity.
+func OrgTierFloor(orgLevel string) Tier {
+	switch orgLevel {
+	case "l1":
+		return TierComplex // minimum: capable model (Sonnet+); upgrades to Reasoning by complexity
+	case "l2":
+		return TierStandard // minimum: Sonnet-class; can upgrade to Complex
+	default: // l3, customer_facing, empty
+		return TierLight // cheapest available; upgrades by complexity score
+	}
+}
+
+// OrgTierCeiling returns the maximum model tier an org level should use by default.
+// Prevents L3 workers from accidentally consuming expensive models.
+func OrgTierCeiling(orgLevel string) Tier {
+	switch orgLevel {
+	case "l1":
+		return TierReasoning // no ceiling — can use best available
+	case "l2":
+		return TierComplex // cap at Sonnet-class (no Opus unless explicit override)
+	default:
+		return TierStandard // cap at standard (no expensive models for routine work)
+	}
+}

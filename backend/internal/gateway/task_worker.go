@@ -161,14 +161,27 @@ func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *ta
 	// Build per-task lifecycle tools.
 	taskTools := gw.buildTaskTools(task.ID, agentID, signalCh)
 
+	// Inject delegate_task for agents with can_delegate=true (L1→L2→L3 hierarchy).
+	if gw.agents != nil && gw.runtimeMgr != nil {
+		if a, err := gw.agents.Get(ctx, agentID); err == nil && a.CanDelegate {
+			taskTools = append(taskTools, agent.NewDelegateTaskTool(task.ID, defaultTenant, gw.taskStore, gw.runtimeMgr))
+		}
+	}
+
 	// Build the exec tool scoped to this task's workspace.
 	execTool := gw.buildExecToolForTask(task.ID)
 	if execTool != nil {
 		taskTools = append(taskTools, execTool)
 	}
 
+	// Fetch subtask results for synthesis context (empty if no subtasks exist).
+	var subtaskResults []tasks.Task
+	if gw.taskStore != nil {
+		subtaskResults, _ = gw.taskStore.GetSubtasks(ctx, task.ID)
+	}
+
 	// Build task execution context (TEC) message.
-	tec := buildTEC(task)
+	tec := buildTEC(task, subtaskResults)
 
 	// Build the run request.
 	req := agent.RunRequest{
@@ -220,15 +233,36 @@ func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *ta
 
 // buildTEC constructs the XML task execution context that is prepended
 // to every iteration's user message so the agent knows its context.
-func buildTEC(task *tasks.Task) string {
+func buildTEC(task *tasks.Task, subtaskResults []tasks.Task) string {
 	idSnip := task.ID
 	if len(idSnip) > 8 {
 		idSnip = idSnip[:8]
 	}
+
+	var subtaskSection string
+	if len(subtaskResults) > 0 {
+		subtaskSection = "\n  <subtask_results>\n"
+		for _, st := range subtaskResults {
+			status := string(st.Status)
+			result := st.Result
+			if len(result) > 500 {
+				result = result[:500] + "…"
+			}
+			subtaskSection += fmt.Sprintf("    <subtask id=%q title=%q status=%q>%s</subtask>\n",
+				st.ID[:8], st.Title, status, result)
+		}
+		subtaskSection += "  </subtask_results>"
+	}
+
+	delegateRule := ""
+	if task.ParentID == nil {
+		delegateRule = "\n7. Use delegate_task to assign sub-work to specialist agents (if available)."
+	}
+
 	return fmt.Sprintf(`<task id=%q status=%q iteration="%d">
   <title>%s</title>
   <description>%s</description>
-  <scratchpad>%s</scratchpad>
+  <scratchpad>%s</scratchpad>%s
 </task>
 
 You are working the above task autonomously. Rules:
@@ -237,13 +271,15 @@ You are working the above task autonomously. Rules:
 3. Use task_blocked when you cannot proceed without human input.
 4. Use task_update_scratchpad to checkpoint state mid-iteration.
 5. Do not stop without calling one of these tools.
-6. Keep the scratchpad up-to-date so interrupted tasks can be resumed.`,
+6. Keep the scratchpad up-to-date so interrupted tasks can be resumed.%s`,
 		idSnip,
 		task.Status,
 		task.IterationCount+1,
 		task.Title,
 		task.Description,
 		task.Scratchpad,
+		subtaskSection,
+		delegateRule,
 	)
 }
 

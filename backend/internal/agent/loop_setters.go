@@ -31,7 +31,7 @@ func (l *Loop) SetBundleStore(bs *BundleStore) { l.bundleStore = bs }
 
 func (l *Loop) SetSystemKnowledge(content string)                              { l.systemKnowledge = content }
 func (l *Loop) SetProjectRegistry(reg *tools.ProjectRegistry)                 { l.projectReg = reg }
-func (l *Loop) SetAuditFn(fn func(agent, tool, session string, isError bool)) { l.auditFn = fn }
+func (l *Loop) SetAuditFn(fn func(agent, tool, session, args string, isError bool)) { l.auditFn = fn }
 
 func (l *Loop) SetSkillLearner(learner *skills.Learner) { l.skillLearner = learner }
 
