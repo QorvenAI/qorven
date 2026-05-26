@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.5-alpha — 2026-05-26
+
+### Fixed
+- **Self-update on private repositories** — the in-app Update button now works correctly; previously it failed to download assets from private GitHub repos because it relied on `browser_download_url` which is empty for private repos
+
+---
+
 ## v0.2.4-alpha — 2026-05-26
 
 ### Fixed
