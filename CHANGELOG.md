@@ -4,6 +4,15 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.4-alpha — 2026-05-26
+
+### Fixed
+- **Setup redirect loop** — after completing setup, authenticated users are now correctly redirected to the app instead of staying on the setup page
+- **API key creation** — `POST /v1/user/api-keys` now works correctly (was returning 405)
+- **Password change** — `POST /v1/user/password` is now reachable (was returning 404)
+
+---
+
 ## v0.2.3-alpha — 2026-05-26
 
 ### Added
