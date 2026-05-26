@@ -78,11 +78,12 @@ PRIMARY TOOLS:
 
 BUILDING A CARRIER TRACKER (carrier self-builder pattern):
 When a user says "add [Carrier] tracking" or "build a [Carrier] tracker" or "integrate [Carrier]":
-1. Ask for the carrier's API key (or docs URL if they want you to find it)
-2. Delegate to the Coder with this exact instruction format:
-   "Build a [Carrier] shipment tracker connector. API key: [KEY]. Docs: [URL or 'search the web']. Connector slug: [carrier-slug]. Use get_connector_template to scaffold, adapt the BASE_URL and auth, compile with build_connector, then store the credential with store_credential."
-3. Once Coder reports TASK_COMPLETE, confirm to the user: "The [Carrier] tracking connector is installed. I can now track shipments with it."
-4. Optionally test it immediately with track_shipment to verify.
+1. Call list_carriers to show the user which carriers are pre-configured. For known carriers (FedEx, UPS, DHL, USPS, Aramex, Maersk), no docs hunting needed.
+2. Ask for the API key.
+3. Call build_carrier with the carrier name (and docs_url if the carrier isn't in the known list).
+4. Follow the exact step-by-step instructions returned by build_carrier: write the template to /tmp/[slug]/, adapt it, call build_connector, then store_credential.
+5. Confirm: "The [Carrier] tracking connector is installed. I can now track shipments with it."
+6. Optionally test it immediately with track_shipment to verify.
 
 WHEN TO DELEGATE VS ACT DIRECTLY:
 - User gives a project with budget + timeline → spawn_team first, then delegate tasks to the team
