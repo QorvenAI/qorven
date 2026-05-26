@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/qorvenai/qorven/internal/session"
 )
 
@@ -66,6 +67,12 @@ func (gw *Gateway) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate that agent_id is now a proper UUID before touching the DB.
+	if _, err := uuid.Parse(in.AgentID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent_id: not a valid UUID or known agent key"})
+		return
+	}
+
 	// One-Qor-one-chat: for the chat-family channels (web, tui, telegram,
 	// whatsapp, slack DM, discord DM) we return the Qor's existing
 	// canonical session if one is active. POST /v1/sessions is the old
@@ -86,7 +93,7 @@ func (gw *Gateway) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	ownerActorID := actorFromContext(r.Context())
 	s, err := gw.sessions.CreateWithOwner(r.Context(), defaultTenant, in.AgentID, "operator", ownerActorID, in.Channel)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
 	writeJSON(w, 201, s)
