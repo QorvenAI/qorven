@@ -4,6 +4,17 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.3-alpha — 2026-05-26
+
+### Added
+- **Autonomous execution mode** — agents can now run continuously for 1-2+ hours on complex tasks; the system checkpoints progress and self-continues past iteration limits automatically, matching the sustained execution capability of tools like Claude Code
+- **Long-running session control** — new API endpoints to list and cancel autonomous sessions; code project sessions (`/code`) auto-enable autonomous mode with 2500-iteration capacity across 50 checkpoint cycles
+
+### Fixed
+- **A2A multi-turn conversations** — subsequent messages in an A2A task now actually invoke the agent and return the response; previously `handleSendMessage` appended the message but returned immediately without running the agent, leaving tasks stuck in "working" state
+
+---
+
 ## v0.2.2-alpha — 2026-05-26
 
 ### Added
