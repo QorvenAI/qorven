@@ -23,7 +23,8 @@ const releaseRepo = "qorvenai/qorven"
 
 type ghAsset struct {
 	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
+	URL                string `json:"url"`                  // API URL — works with auth for private repos
+	BrowserDownloadURL string `json:"browser_download_url"` // empty for private repos
 }
 
 type ghRelease struct {
@@ -152,6 +153,26 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Resolve GitHub token: request body → GITHUB_TOKEN env → vault credential "github".
+	// Used for private repo asset downloads.
+	var body struct {
+		Token   string `json:"token"`
+		Version string `json:"version"`
+	}
+	json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck — best-effort parse
+	ghToken := body.Token
+	if ghToken == "" {
+		ghToken = os.Getenv("GITHUB_TOKEN")
+	}
+	if ghToken == "" && gw.vault != nil {
+		if cred, err := gw.vault.Get(r.Context(), defaultTenant, "github"); err == nil {
+			ghToken = cred.Data.APIKey
+			if ghToken == "" {
+				ghToken = cred.Data.AccessToken
+			}
+		}
+	}
+
 	release, err := fetchLatestGHRelease()
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not reach GitHub: " + err.Error()})
@@ -191,7 +212,7 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Download binary
-	binPath, err := downloadGHAsset(binAsset)
+	binPath, err := downloadGHAsset(binAsset, ghToken)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "download failed: " + err.Error()})
 		return
@@ -199,7 +220,7 @@ func (gw *Gateway) handleAdminUpdateInstall(w http.ResponseWriter, r *http.Reque
 	defer os.Remove(binPath)
 
 	// Download checksum
-	shaPath, err := downloadGHAsset(shaAsset)
+	shaPath, err := downloadGHAsset(shaAsset, ghToken)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "checksum download failed: " + err.Error()})
 		return
@@ -341,19 +362,20 @@ func (gw *Gateway) backgroundUpdateChecker() {
 				shaAsset = a
 			}
 		}
-		if binAsset.BrowserDownloadURL == "" || shaAsset.BrowserDownloadURL == "" {
+		if binAsset.Name == "" || shaAsset.Name == "" {
 			slog.Warn("update.no_asset", "os", runtime.GOOS, "arch", runtime.GOARCH)
 			return
 		}
 
-		binPath, err := downloadGHAsset(binAsset)
+		bgToken := os.Getenv("GITHUB_TOKEN")
+		binPath, err := downloadGHAsset(binAsset, bgToken)
 		if err != nil {
 			slog.Warn("update.download_failed", "err", err)
 			return
 		}
 		defer os.Remove(binPath)
 
-		shaPath, err := downloadGHAsset(shaAsset)
+		shaPath, err := downloadGHAsset(shaAsset, bgToken)
 		if err != nil {
 			slog.Warn("update.sha_download_failed", "err", err)
 			return
@@ -388,11 +410,27 @@ func (gw *Gateway) backgroundUpdateChecker() {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-func downloadGHAsset(a ghAsset) (string, error) {
-	req, _ := http.NewRequest("GET", a.BrowserDownloadURL, nil)
+func downloadGHAsset(a ghAsset, token string) (string, error) {
+	// Private repos: browser_download_url is empty; use the API URL instead.
+	dlURL := a.BrowserDownloadURL
+	useAPIURL := dlURL == ""
+	if useAPIURL {
+		dlURL = a.URL
+	}
+	if dlURL == "" {
+		return "", fmt.Errorf("no download URL for asset %s", a.Name)
+	}
+	req, _ := http.NewRequest("GET", dlURL, nil)
 	req.Header.Set("User-Agent", "qorven-gateway")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+	if token == "" {
+		token = os.Getenv("GITHUB_TOKEN")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	// Required when downloading via the API URL (not browser_download_url)
+	if useAPIURL {
+		req.Header.Set("Accept", "application/octet-stream")
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
