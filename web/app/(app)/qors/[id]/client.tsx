@@ -28,6 +28,7 @@ import { soulGradient } from '@/components/soul-card';
 import { ChatPlayground } from '@/components/chat-v2/chat-playground';
 import { SoulSettingsPage } from '@/components/soul-settings-page';
 import { MailTab } from '@/components/qors/mail-tab';
+import { InboxTab } from '@/components/qors/inbox-tab';
 import { PermissionsTab } from '@/components/qors/permissions-tab';
 import { SchedulesTab } from '@/components/qors/schedules-tab';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -44,12 +45,13 @@ import {
   Plus, MessageSquare, Trash2, Download, ChevronRight,
   Save, ToggleLeft, ToggleRight, Search, Globe, Brain, Wrench,
   Loader2, Check, AlertCircle, X, Hash,
-  Settings2, Sparkles, Activity, BarChart3, Radio, Zap, Package, Mail, CalendarClock,
+  Settings2, Sparkles, Activity, BarChart3, Radio, Zap, Package, Mail, CalendarClock, Inbox,
 } from 'lucide-react';
 import type { Soul, Session, Channel, Message } from '@/types';
 
 const workspaceTabs = [
   { id: 'chat',       icon: MessageSquare, label: 'Chat' },
+  { id: 'inbox',      icon: Inbox,         label: 'Inbox' },
   { id: 'config',     icon: Settings2,     label: 'Config' },
   { id: 'skills',     icon: Sparkles,      label: 'Skills' },
   { id: 'memory',     icon: Brain,         label: 'Memory' },
@@ -67,7 +69,7 @@ const workspaceTabs = [
 // The Qor always opens on its single canonical chat. Long-running
 // context flows through the 'memory' tab instead.
 type TabId =
-  | 'chat' | 'config' | 'channels' | 'mail' | 'tools' | 'permissions' | 'schedules' | 'settings'
+  | 'chat' | 'inbox' | 'config' | 'channels' | 'mail' | 'tools' | 'permissions' | 'schedules' | 'settings'
   | 'skills' | 'memory' | 'background' | 'metrics';
 
 function TaskCard({ task }: { task: LiveTask }) {
@@ -436,6 +438,13 @@ export default function QorDetailPage() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Inbox tab — all non-web sessions (tasks, cron, A2A, external channels) */}
+          {activeTab === 'inbox' && (
+            <div className="flex h-full overflow-hidden">
+              <InboxTab agentId={soul.id} agentName={soul.display_name} />
             </div>
           )}
 

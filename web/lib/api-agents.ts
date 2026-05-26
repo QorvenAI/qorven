@@ -125,6 +125,8 @@ export const agents = {
 
 export const sessions = {
   list: () => listRequest<Session>('/sessions'),
+  listByAgent: (agentId: string) =>
+    request<{ sessions: Session[] }>(`/sessions?agent_id=${encodeURIComponent(agentId)}`),
   get: (id: string) => request<Session>(`/sessions/${id}`),
   messages: (id: string, limit?: number, offset?: number) => {
     const params = new URLSearchParams();

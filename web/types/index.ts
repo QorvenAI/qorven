@@ -52,7 +52,10 @@ export interface Session {
   summary: string;
   channel: string;
   status: string;
+  input_tokens?: number;
+  output_tokens?: number;
   created_at: string;
+  updated_at?: string;
   messages?: Message[];
 }
 
@@ -65,7 +68,7 @@ export interface Message {
   widgets?: any[];
   parts?: any[];
   tool_calls?: ToolCall[];
-  timestamp?: string;
+  timestamp?: number | string;
   channel?: string;
   sender_name?: string;
 }
