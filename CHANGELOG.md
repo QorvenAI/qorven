@@ -4,6 +4,18 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.1-alpha — 2026-05-26
+
+### Added
+- **CFO accounting system** — bank-grade cost reconciliation that verifies internal calculations match provider pricing to 100% accuracy; spend forecasting with anomaly detection; budget raise requests between agents
+- **Fleet status tools** — executive agents can query live fleet health, per-agent spend, and session counts in real time
+- **Hierarchical task delegation** — L1/L2 agents delegate subtasks down the org hierarchy; automatic synthesis rollup when all subtasks complete
+- **Live dashboard refresh** — home dashboard auto-refreshes on agent activity, task completions, and budget warnings via WebSocket
+- **Audit log enhancements** — billing and budget events tracked; improved audit detail views
+- **Smart router improvements** — better model selection for tiered routing across providers
+
+---
+
 ## v0.2.0-alpha — 2026-05-25
 
 ### Added
