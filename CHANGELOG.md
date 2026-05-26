@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.6-alpha — 2026-05-26
+
+### Fixed
+- **Invalid agent_id no longer crashes session creation** — `POST /v1/sessions` with a non-UUID `agent_id` (e.g. emoji, garbage text) now returns 400 instead of 500; DB errors on that path are also sanitized to avoid leaking SQL details
+
+---
+
 ## v0.2.5-alpha — 2026-05-26
 
 ### Fixed
