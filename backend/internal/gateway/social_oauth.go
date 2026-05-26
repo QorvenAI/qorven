@@ -523,3 +523,86 @@ func (gw *Gateway) socialFetchAccountInfo(platform, token string) (name, id stri
 	}
 	return platform + "-account", ""
 }
+
+// ─── Social OAuth App Credentials (operator configuration) ────────────────────
+//
+// Before users can click "Connect with Twitter", the operator must register
+// a Twitter developer app and paste the client_id + client_secret here.
+// Stored in the vault as __oauth_app_social_{platform}__.
+//
+// GET    /v1/social/oauth/apps                — list all platforms + status
+// POST   /v1/social/oauth/apps/{platform}     — save client_id + client_secret
+// DELETE /v1/social/oauth/apps/{platform}     — remove creds
+
+// handleSocialOAuthAppsGet lists all platforms with whether credentials are configured.
+func (gw *Gateway) handleSocialOAuthAppsGet(w http.ResponseWriter, r *http.Request) {
+	type platformStatus struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		HasCreds    bool   `json:"has_creds"`
+		PKCE        bool   `json:"pkce"`
+		RedirectURI string `json:"redirect_uri"`
+		DocsURL     string `json:"docs_url"`
+	}
+	out := make([]platformStatus, 0, len(socialOAuthDefs))
+	for id, def := range socialOAuthDefs {
+		clientID, _ := gw.socialOAuthCreds(id)
+		out = append(out, platformStatus{
+			ID:          id,
+			Name:        def.Name,
+			HasCreds:    clientID != "" || def.PKCE,
+			PKCE:        def.PKCE,
+			RedirectURI: gw.socialOAuthRedirectURI(id),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"apps": out})
+}
+
+// handleSocialOAuthAppSet saves client_id + client_secret for a social platform.
+func (gw *Gateway) handleSocialOAuthAppSet(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil || gw.vault == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	platform := chi.URLParam(r, "platform")
+	if _, ok := socialOAuthDefs[platform]; !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported platform: " + platform})
+		return
+	}
+
+	var body struct {
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.ClientID = strings.TrimSpace(body.ClientID)
+	body.ClientSecret = strings.TrimSpace(body.ClientSecret)
+	if body.ClientID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "client_id is required"})
+		return
+	}
+
+	if err := writeVaultOAuthApp(r.Context(), gw.vault, "default", "social_"+platform, body.ClientID, body.ClientSecret); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("vault write: %v", err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "platform": platform})
+}
+
+// handleSocialOAuthAppDelete removes stored credentials for a social platform.
+func (gw *Gateway) handleSocialOAuthAppDelete(w http.ResponseWriter, r *http.Request) {
+	if gw.vault == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault not available"})
+		return
+	}
+	platform := chi.URLParam(r, "platform")
+	if _, ok := socialOAuthDefs[platform]; !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported platform: " + platform})
+		return
+	}
+	_ = deleteVaultOAuthApp(r.Context(), gw.vault, "default", "social_"+platform)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}

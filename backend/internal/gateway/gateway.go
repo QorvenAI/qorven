@@ -456,6 +456,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 					oauthBase = "http://localhost:4200"
 				}
 				gw.llmOAuthMgr = gatewayllm.NewOAuthManager(db.Pool, cfg.Auth.EncryptionKey, oauthBase)
+				gw.hydrateLLMOAuthCredsFromVault(context.Background())
 			}
 			gw.voiceStore = voice.NewStore(db.Pool, cfg.Auth.EncryptionKey)
 			gw.mediaStore = mediagen.NewStore(db.Pool, cfg.Auth.EncryptionKey)

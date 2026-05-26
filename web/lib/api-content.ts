@@ -267,6 +267,7 @@ export const social = {
   createAutoPost: (body: Record<string, unknown>) =>
     request<any>('/social/autoposts', { method: 'POST', body: JSON.stringify(body) }),
   deleteAutoPost: (id: string) => request<void>(`/social/autoposts/${id}`, { method: 'DELETE' }),
+  toggleAutoPost: (id: string, active: boolean) => request<{ status: string }>(`/social/autoposts/${id}/toggle`, { method: 'PATCH', body: JSON.stringify({ active }) }),
   calendar: (agentId?: string) =>
     request<{ entries: any[]; total: number; stats: Record<string, number> }>(
       `/social/calendar${agentId ? `?agent_id=${agentId}` : ''}`
@@ -328,6 +329,15 @@ export const social = {
   updateSet: (id: string, body: { name?: string; description?: string; content?: string; platforms?: string[] }) =>
     request<any>(`/social/sets/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteSet: (id: string) => request<void>(`/social/sets/${id}`, { method: 'DELETE' }),
+
+  // OAuth app credentials (admin — sets client_id/secret for provider's OAuth app)
+  oauthAppsGet: () =>
+    request<{ apps: { id: string; name: string; platform: string; has_creds: boolean; pkce: boolean; redirect_uri: string }[] }>('/social/oauth/apps')
+      .then(d => (d as any)?.apps ?? []),
+  oauthAppSet: (platform: string, clientId: string, clientSecret: string) =>
+    request<{ status: string }>(`/social/oauth/apps/${platform}`, { method: 'POST', body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }) }),
+  oauthAppDelete: (platform: string) =>
+    request<{ status: string }>(`/social/oauth/apps/${platform}`, { method: 'DELETE' }),
 };
 
 // Research

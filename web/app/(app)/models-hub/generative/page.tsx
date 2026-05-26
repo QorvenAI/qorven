@@ -263,6 +263,12 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
   const [oauthConnected, setOauthConnected]   = useState(false);
   const oauthPopupRef = useRef<Window | null>(null);
 
+  // OAuth app credentials (for non-PKCE providers like github_copilot, google_vertex)
+  const [oauthAppInfo, setOauthAppInfo] = useState<{ pkce: boolean; redirect_uri: string; has_creds: boolean } | null>(null);
+  const [oauthAppClientId, setOauthAppClientId]     = useState('');
+  const [oauthAppClientSecret, setOauthAppClientSecret] = useState('');
+  const [savingOAuthApp, setSavingOAuthApp] = useState(false);
+
   // Models step — provider ID set after creation
   const [createdId, setCreatedId]   = useState<string | null>(null);
   const [creating, setCreating]     = useState(false);
@@ -281,6 +287,7 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
     setStrategy('priority'); setFailover('on_error');
     setOauthConnecting(false); setOauthConnected(false);
     oauthPopupRef.current = null;
+    setOauthAppInfo(null); setOauthAppClientId(''); setOauthAppClientSecret('');
   };
 
   const pickPreset = (p: CatalogPreset) => {
@@ -299,6 +306,7 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
   const isLocal    = preset?.auth_type === 'none';
   const isOAuth    = !!preset?.oauthId;
   const step1Valid = !!preset && !!name && (isBedrock ? (extras.aws_region && extras.aws_access_key && extras.aws_secret_key) : (base || preset?.base || isOAuth || isLocal));
+  const oauthNeedsCreds = isOAuth && oauthAppInfo !== null && !oauthAppInfo.pkce && !oauthAppInfo.has_creds;
   const step2Valid = isBedrock || isLocal || isOAuth || keys.some(k => k.key.trim());
 
   // Key management helpers
@@ -345,6 +353,28 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
     setVerifyingAll(true);
     await Promise.all(keys.map((_, i) => verifyKeyEntry(i)));
     setVerifyingAll(false);
+  };
+
+  // Load OAuth app info when switching to an OAuth preset
+  useEffect(() => {
+    if (!preset?.oauthId) { setOauthAppInfo(null); return; }
+    providersApi.oauthAppGet(preset.oauthId)
+      .then(d => setOauthAppInfo({ pkce: d.pkce, redirect_uri: d.redirect_uri, has_creds: d.has_creds }))
+      .catch(() => setOauthAppInfo(null));
+  }, [preset?.oauthId]);
+
+  const saveOAuthApp = async () => {
+    if (!preset?.oauthId) return;
+    setSavingOAuthApp(true);
+    try {
+      await providersApi.oauthAppSet(preset.oauthId, oauthAppClientId.trim(), oauthAppClientSecret.trim());
+      setOauthAppInfo(prev => prev ? { ...prev, has_creds: true } : null);
+      toast.success('OAuth app credentials saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save credentials');
+    } finally {
+      setSavingOAuthApp(false);
+    }
   };
 
   // OAuth connect — open popup, listen for postMessage from callback
@@ -578,6 +608,74 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
 
               {isOAuth ? (
                 <div className="space-y-3">
+                  {/* Step 1 (for non-PKCE): register OAuth app credentials */}
+                  {oauthAppInfo && !oauthAppInfo.pkce && (
+                    <div className={cn('rounded-lg border px-4 py-3.5 space-y-3',
+                      oauthAppInfo.has_creds ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border bg-muted/10')}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            {oauthAppInfo.has_creds
+                              ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> OAuth App Registered</>
+                              : <><Key className="h-3.5 w-3.5 text-muted-foreground" /> Register OAuth App</>}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {oauthAppInfo.has_creds
+                              ? 'Client credentials saved. You can update them below.'
+                              : `Create an OAuth app in ${preset?.name}'s developer console and paste the credentials here.`}
+                          </p>
+                        </div>
+                      </div>
+                      {/* Redirect URI */}
+                      {oauthAppInfo.redirect_uri && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">Callback URL to register in the developer console:</p>
+                          <div className="flex items-center gap-2">
+                            <code className="flex-1 font-mono text-xs bg-muted border border-border rounded px-2 py-1.5 text-foreground/80 break-all">
+                              {oauthAppInfo.redirect_uri}
+                            </code>
+                            <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(oauthAppInfo.redirect_uri); toast.success('Copied'); }}>
+                              Copy
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {/* Credential inputs */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Client ID</label>
+                          <input
+                            type="text"
+                            value={oauthAppClientId}
+                            onChange={e => setOauthAppClientId(e.target.value)}
+                            placeholder="Client ID"
+                            className="qr-input font-mono text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Client Secret</label>
+                          <input
+                            type="password"
+                            value={oauthAppClientSecret}
+                            onChange={e => setOauthAppClientSecret(e.target.value)}
+                            placeholder="Client Secret"
+                            className="qr-input font-mono text-xs"
+                          />
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={saveOAuthApp}
+                        disabled={savingOAuthApp || !oauthAppClientId.trim()}
+                      >
+                        {savingOAuthApp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        Save credentials
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Step 2: connect via OAuth popup */}
                   {oauthConnected ? (
                     <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3.5">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
@@ -590,21 +688,26 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
                       </Button>
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-border bg-muted/10 px-4 py-5 flex flex-col items-center gap-4 text-center">
+                    <div className={cn('rounded-lg border bg-muted/10 px-4 py-5 flex flex-col items-center gap-4 text-center',
+                      oauthNeedsCreds ? 'border-border opacity-50 pointer-events-none' : 'border-border')}>
                       <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted border border-border">
                         <ProviderIcon provider={preset?.id ?? ''} size={26} />
                       </div>
                       <div>
                         <p className="text-sm font-medium">Connect {preset?.name}</p>
                         <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                          Authorize Qorven to access {preset?.name} on your behalf. No API key needed.
+                          {oauthNeedsCreds
+                            ? 'Save OAuth app credentials above first.'
+                            : `Authorize Qorven to access ${preset?.name} on your behalf. No API key needed.`}
                         </p>
                       </div>
-                      <Button variant="primary" size="md" onClick={connectOAuth} disabled={oauthConnecting}>
-                        {oauthConnecting
-                          ? <><Loader2 className="h-4 w-4 animate-spin" /> Waiting for authorization…</>
-                          : <><ExternalLink className="h-4 w-4" /> Connect with {preset?.name}</>}
-                      </Button>
+                      {!oauthNeedsCreds && (
+                        <Button variant="primary" size="md" onClick={connectOAuth} disabled={oauthConnecting}>
+                          {oauthConnecting
+                            ? <><Loader2 className="h-4 w-4 animate-spin" /> Waiting for authorization…</>
+                            : <><ExternalLink className="h-4 w-4" /> Connect with {preset?.name}</>}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

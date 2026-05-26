@@ -279,6 +279,65 @@ func (gw *Gateway) handleSavePreferences(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, map[string]string{"status": "saved"})
 }
 
+// handleGetServerSettings returns mutable server settings exposed to the UI.
+// Currently: base_url (used to build OAuth callback URIs).
+//
+// GET /v1/admin/server-settings
+func (gw *Gateway) handleGetServerSettings(w http.ResponseWriter, r *http.Request) {
+	baseURL := ""
+	if gw.cfg != nil {
+		baseURL = gw.cfg.Server.BaseURL
+	}
+	// Also check for a runtime override stored in user_preferences.
+	if gw.db != nil {
+		var prefs map[string]any
+		var raw []byte
+		if err := gw.db.Pool.QueryRow(r.Context(),
+			`SELECT preferences FROM user_preferences WHERE tenant_id = $1 AND user_id = 'default'`, defaultTenant,
+		).Scan(&raw); err == nil {
+			if err2 := json.Unmarshal(raw, &prefs); err2 == nil {
+				if v, ok := prefs["server.base_url"].(string); ok && v != "" {
+					baseURL = v
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"base_url": baseURL,
+	})
+}
+
+// handlePatchServerSettings updates mutable server settings at runtime.
+// Currently supports: base_url.
+//
+// PATCH /v1/admin/server-settings
+func (gw *Gateway) handlePatchServerSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BaseURL string `json:"base_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.BaseURL = strings.TrimRight(strings.TrimSpace(body.BaseURL), "/")
+
+	// Persist in user_preferences so it survives restart.
+	if gw.db != nil {
+		gw.db.Pool.Exec(r.Context(),
+			`INSERT INTO user_preferences (tenant_id, user_id, preferences, updated_at)
+			 VALUES ($1, 'default', jsonb_build_object('server.base_url', $2::text), NOW())
+			 ON CONFLICT (tenant_id, user_id) DO UPDATE
+			   SET preferences = user_preferences.preferences || jsonb_build_object('server.base_url', $2::text),
+			       updated_at = NOW()`,
+			defaultTenant, body.BaseURL)
+	}
+	// Update in-memory config so OAuth flows use the new value immediately.
+	if gw.cfg != nil && body.BaseURL != "" {
+		gw.cfg.Server.BaseURL = body.BaseURL
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "base_url": body.BaseURL})
+}
+
 func (gw *Gateway) handleRunSubconscious(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "id")
 	if agentID == "" {

@@ -3,12 +3,17 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
+	"github.com/qorvenai/qorven/internal/vault"
 )
 
 // handleOAuthProviderStart redirects the user to the provider's authorization
@@ -135,6 +140,123 @@ func (gw *Gateway) handleOAuthProvidersList(w http.ResponseWriter, r *http.Reque
 // oauthProviderMgr returns the OAuthManager (pre-initialized in gateway.go).
 func (gw *Gateway) oauthProviderMgr() *gatewayllm.OAuthManager {
 	return gw.llmOAuthMgr
+}
+
+// handleOAuthProviderAppGet returns whether OAuth app credentials are
+// configured for a provider, plus the redirect URI to register.
+//
+// GET /v1/providers/oauth/{provider}/app
+func (gw *Gateway) handleOAuthProviderAppGet(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	spec, ok := gatewayllm.OAuthProviders[provider]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown provider"})
+		return
+	}
+	redirectURI := ""
+	if gw.llmOAuthMgr != nil {
+		redirectURI = gw.llmOAuthMgr.CallbackURI(provider)
+	}
+	hasCreds := false
+	if gw.llmOAuthMgr != nil {
+		hasCreds = gw.llmOAuthMgr.HasClientCreds(provider)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":     provider,
+		"name":         spec.Name,
+		"pkce":         spec.PKCE,
+		"redirect_uri": redirectURI,
+		"has_creds":    hasCreds,
+	})
+}
+
+// handleOAuthProviderAppSet saves OAuth app credentials (client_id + client_secret)
+// for a provider to the vault, then updates the in-memory OAuthManager.
+//
+// POST /v1/providers/oauth/{provider}/app
+func (gw *Gateway) handleOAuthProviderAppSet(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil || gw.vault == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	provider := chi.URLParam(r, "provider")
+	spec, ok := gatewayllm.OAuthProviders[provider]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown provider"})
+		return
+	}
+	if spec.PKCE {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "PKCE providers do not use client credentials"})
+		return
+	}
+
+	var body struct {
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.ClientID = strings.TrimSpace(body.ClientID)
+	body.ClientSecret = strings.TrimSpace(body.ClientSecret)
+	if body.ClientID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "client_id is required"})
+		return
+	}
+
+	data := vault.CredentialData{ClientID: body.ClientID, ClientSecret: body.ClientSecret}
+	if _, err := gw.vault.Save(r.Context(), defaultTenant, llmOAuthAppPlatformID(provider), "default", "llm_oauth_app", data, nil, nil); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("vault write: %v", err)})
+		return
+	}
+	if gw.llmOAuthMgr != nil {
+		gw.llmOAuthMgr.SetClientCreds(provider, body.ClientID, body.ClientSecret)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "provider": provider})
+}
+
+// handleOAuthProviderAppDelete removes stored OAuth app credentials for a provider.
+//
+// DELETE /v1/providers/oauth/{provider}/app
+func (gw *Gateway) handleOAuthProviderAppDelete(w http.ResponseWriter, r *http.Request) {
+	if gw.vault == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault not available"})
+		return
+	}
+	provider := chi.URLParam(r, "provider")
+	if _, ok := gatewayllm.OAuthProviders[provider]; !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown provider"})
+		return
+	}
+	_ = gw.vault.Delete(r.Context(), defaultTenant, llmOAuthAppPlatformID(provider))
+	if gw.llmOAuthMgr != nil {
+		gw.llmOAuthMgr.SetClientCreds(provider, "", "")
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// llmOAuthAppPlatformID returns the vault platform_id for an LLM provider's
+// OAuth app credentials. Prefixed to avoid collisions with user tokens.
+func llmOAuthAppPlatformID(provider string) string {
+	return "__llm_oauth_app_" + provider + "__"
+}
+
+// hydrateLLMOAuthCredsFromVault loads any previously-saved LLM OAuth app
+// credentials from the vault into llmOAuthMgr at startup.
+func (gw *Gateway) hydrateLLMOAuthCredsFromVault(ctx context.Context) {
+	if gw.llmOAuthMgr == nil || gw.vault == nil {
+		return
+	}
+	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for provider := range gatewayllm.OAuthProviders {
+		cred, err := gw.vault.Get(hctx, defaultTenant, llmOAuthAppPlatformID(provider))
+		if err != nil || cred == nil || cred.Data.ClientID == "" {
+			continue
+		}
+		gw.llmOAuthMgr.SetClientCreds(provider, cred.Data.ClientID, cred.Data.ClientSecret)
+	}
 }
 
 // writeHTML writes an HTML response.

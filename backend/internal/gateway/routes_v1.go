@@ -182,6 +182,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/providers/oauth/{provider}/callback", gw.handleOAuthProviderCallback)
 		r.Get("/providers/oauth/{provider}/status", gw.handleOAuthProviderStatus)
 		r.Post("/providers/oauth/{provider}/revoke", gw.handleOAuthProviderRevoke)
+		// OAuth app credentials — operator registers their client_id/secret here
+		r.Get("/providers/oauth/{provider}/app", gw.handleOAuthProviderAppGet)
+		r.Post("/providers/oauth/{provider}/app", gw.handleOAuthProviderAppSet)
+		r.Delete("/providers/oauth/{provider}/app", gw.handleOAuthProviderAppDelete)
 		r.Get("/providers", gw.handleListProviders)
 		r.Post("/providers", gw.handleCreateProviderDB)
 		r.Get("/providers/{id}", gw.handleGetProvider)
@@ -770,6 +774,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/autoposts", gw.handleListSocialAutoPosts)
 		r.Post("/social/autoposts", gw.handleCreateSocialAutoPost)
 		r.Delete("/social/autoposts/{id}", gw.handleDeleteSocialAutoPost)
+		r.Patch("/social/autoposts/{id}/toggle", gw.handleToggleSocialAutoPost)
 		r.Get("/social/calendar", gw.handleSocialCalendar)
 
 		// Social OAuth flows
@@ -777,6 +782,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/oauth/{platform}/callback", gw.handleSocialOAuthCallback)
 		r.Get("/social/oauth/{platform}/status", gw.handleSocialOAuthStatus)
 		r.Post("/social/oauth/{platform}/revoke", gw.handleSocialOAuthRevoke)
+		// Social OAuth app credentials (operator-level, not per-user)
+		r.Get("/social/oauth/apps", gw.handleSocialOAuthAppsGet)
+		r.Post("/social/oauth/apps/{platform}", gw.handleSocialOAuthAppSet)
+		r.Delete("/social/oauth/apps/{platform}", gw.handleSocialOAuthAppDelete)
 
 		// Social Analytics
 		r.Get("/social/analytics", gw.handleSocialAnalyticsSummary)
@@ -817,6 +826,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/admin/update/install", gw.handleAdminUpdateInstall)
 		r.Get("/admin/install-analytics", gw.handleInstallAnalytics)
 		r.Get("/admin/system/check-port", gw.handleCheckPort)
+		r.Get("/admin/server-settings", gw.handleGetServerSettings)
+		r.Patch("/admin/server-settings", gw.handlePatchServerSettings)
 
 		// Service accounts
 		r.Get("/service-accounts", gw.handleListServiceAccounts)

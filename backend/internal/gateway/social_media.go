@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/qorvenai/qorven/internal/config"
 )
 
 // SocialMediaAsset is a media file stored in the social media library.
@@ -35,9 +36,9 @@ type SocialMediaAsset struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// socialMediaDir returns the base directory for social media assets for an agent.
+// socialMediaDir returns the persistent directory for social media assets for an agent.
 func socialMediaDir(agentID string) string {
-	return filepath.Join("/tmp/qorven-workspace", "social-media", agentID)
+	return config.Sub("social-media", agentID)
 }
 
 // handleSocialMediaUpload handles POST /v1/social/media — multipart upload to media library.

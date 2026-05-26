@@ -8,7 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,6 +57,227 @@ func (gw *Gateway) startSocialTokenRefreshWorker(ctx context.Context) {
 		},
 	)
 	worker.Start(ctx)
+}
+
+// startScheduledPostDispatcher checks every minute for posts whose scheduled_at
+// has passed and publishes them via the normal publisher pipeline.
+func (gw *Gateway) startScheduledPostDispatcher(ctx context.Context) {
+	store := gw.socialStore()
+	if store == nil {
+		return
+	}
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			gw.dispatchDuePosts(ctx, store)
+		}
+	}
+}
+
+func (gw *Gateway) dispatchDuePosts(ctx context.Context, store *socialqor.Store) {
+	posts, err := store.ListScheduledDue(ctx)
+	if err != nil {
+		slog.Warn("social.scheduled_dispatch: list failed", "error", err)
+		return
+	}
+	for i := range posts {
+		post := &posts[i]
+		publisher := socialqor.NewPublisher()
+		results := publisher.PublishToAll(ctx, store, post)
+		allOK := true
+		platformIDs := map[string]string{}
+		for _, res := range results {
+			if !res.Success {
+				allOK = false
+			}
+			if res.PostID != "" {
+				platformIDs[string(res.Platform)] = res.PostID
+			}
+		}
+		if allOK {
+			store.MarkPublished(ctx, post.ID)
+		} else {
+			store.UpdatePostStatus(ctx, post.ID, socialqor.PostFailed)
+		}
+		if len(platformIDs) > 0 {
+			store.StorePlatformPostIDs(ctx, post.ID, platformIDs)
+		}
+		gw.emitSocialPublishNotification(post.AgentID, allOK, results)
+		slog.Info("social.scheduled_dispatch: published", "post_id", post.ID, "ok", allOK)
+	}
+}
+
+// startAutoPostWorker evaluates active autopost rules on their cron schedule,
+// fetches RSS content when applicable, and publishes generated posts.
+func (gw *Gateway) startAutoPostWorker(ctx context.Context) {
+	store := gw.socialStore()
+	if store == nil {
+		return
+	}
+	rssReader := socialqor.NewRSSReader(nil)
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	// Track last fire time per autopost rule to avoid double-firing.
+	lastFired := map[string]time.Time{}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			rules, err := store.ListAutoPosts(ctx, "")
+			if err != nil {
+				slog.Warn("social.autopost: list failed", "error", err)
+				continue
+			}
+			for _, rule := range rules {
+				if !rule.Active || rule.Schedule == "" {
+					continue
+				}
+				if !cronMatches(rule.Schedule, now) {
+					continue
+				}
+				// Debounce: only fire once per minute window.
+				if last, ok := lastFired[rule.ID]; ok && now.Sub(last) < 55*time.Second {
+					continue
+				}
+				lastFired[rule.ID] = now
+				go gw.fireAutoPost(ctx, store, rssReader, rule)
+			}
+		}
+	}
+}
+
+// cronMatches returns true if t matches the cron expression (minute precision).
+// Supports 5-field standard cron: min hour dom month dow.
+func cronMatches(expr string, t time.Time) bool {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return false
+	}
+	checks := []struct{ field string; val, max int }{
+		{fields[0], t.Minute(), 59},
+		{fields[1], t.Hour(), 23},
+		{fields[2], t.Day(), 31},
+		{fields[3], int(t.Month()), 12},
+		{fields[4], int(t.Weekday()), 6},
+	}
+	for _, c := range checks {
+		if !cronFieldMatches(c.field, c.val, c.max) {
+			return false
+		}
+	}
+	return true
+}
+
+func cronFieldMatches(field string, val, max int) bool {
+	if field == "*" {
+		return true
+	}
+	// Handle */n step syntax
+	if strings.HasPrefix(field, "*/") {
+		step := 0
+		fmt.Sscanf(field[2:], "%d", &step)
+		return step > 0 && val%step == 0
+	}
+	// Handle comma-separated list
+	for _, part := range strings.Split(field, ",") {
+		// Handle range a-b
+		if strings.Contains(part, "-") {
+			var lo, hi int
+			fmt.Sscanf(part, "%d-%d", &lo, &hi)
+			if val >= lo && val <= hi {
+				return true
+			}
+			continue
+		}
+		var n int
+		fmt.Sscanf(part, "%d", &n)
+		if n == val {
+			return true
+		}
+	}
+	return false
+}
+
+func (gw *Gateway) fireAutoPost(ctx context.Context, store *socialqor.Store, rssReader *socialqor.RSSReader, rule socialqor.AutoPost) {
+	var content string
+
+	switch rule.Source {
+	case "rss":
+		if rule.SourceURL == "" {
+			return
+		}
+		items, err := rssReader.ReadFeed(ctx, rule.SourceURL, 1)
+		if err != nil || len(items) == 0 {
+			slog.Warn("social.autopost: rss fetch failed", "rule", rule.ID, "url", rule.SourceURL, "error", err)
+			return
+		}
+		item := items[0]
+		if rule.Template != "" {
+			tmpl, err := template.New("").Parse(rule.Template)
+			if err == nil {
+				var b strings.Builder
+				tmpl.Execute(&b, map[string]any{
+					"Title":   item.Title,
+					"Content": item.Content,
+					"URL":     item.URL,
+					"Author":  item.Author,
+				})
+				content = b.String()
+			}
+		}
+		if content == "" {
+			content = item.Title
+			if item.URL != "" {
+				content += "\n" + item.URL
+			}
+		}
+	default:
+		// manual or webhook source — content must be provided in the template
+		if rule.Template == "" {
+			return
+		}
+		content = rule.Template
+	}
+
+	if content == "" {
+		return
+	}
+
+	post := socialqor.Post{
+		Content:   content,
+		Platforms: rule.Platforms,
+		AgentID:   rule.AgentID,
+		Status:    socialqor.PostDraft,
+	}
+	id, err := store.CreatePost(ctx, &post)
+	if err != nil {
+		slog.Warn("social.autopost: create post failed", "rule", rule.ID, "error", err)
+		return
+	}
+	post.ID = id
+
+	publisher := socialqor.NewPublisher()
+	results := publisher.PublishToAll(ctx, store, &post)
+	allOK := true
+	for _, res := range results {
+		if !res.Success {
+			allOK = false
+		}
+	}
+	if allOK {
+		store.MarkPublished(ctx, post.ID)
+	} else {
+		store.UpdatePostStatus(ctx, post.ID, socialqor.PostFailed)
+	}
+	gw.emitSocialPublishNotification(rule.AgentID, allOK, results)
+	slog.Info("social.autopost: fired", "rule", rule.ID, "post_id", post.ID, "ok", allOK)
 }
 
 func (gw *Gateway) handleListSocialPosts(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +504,18 @@ func (gw *Gateway) handleDeleteSocialAutoPost(w http.ResponseWriter, r *http.Req
 	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }
 	store.DeleteAutoPost(r.Context(), chi.URLParam(r, "id"))
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
+}
+
+func (gw *Gateway) handleToggleSocialAutoPost(w http.ResponseWriter, r *http.Request) {
+	store := gw.socialStore()
+	if store == nil { writeJSON(w, 503, map[string]string{"error": "database not configured"}); return }
+	var body struct{ Active bool `json:"active"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	if err := store.ToggleAutoPost(r.Context(), chi.URLParam(r, "id"), body.Active); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
 // handleSocialCalendar returns posts grouped by date for the content calendar view.

@@ -78,6 +78,12 @@ export const providers = {
   },
   oauthStatus: (provider: string) => request<{ connected: boolean; expires_at?: string; updated_at?: string }>(`/providers/oauth/${provider}/status`),
   oauthRevoke: (provider: string) => request<{ status: string }>(`/providers/oauth/${provider}/revoke`, { method: 'POST' }),
+  oauthAppGet: (provider: string) =>
+    request<{ provider: string; name: string; pkce: boolean; redirect_uri: string; has_creds: boolean }>(`/providers/oauth/${provider}/app`),
+  oauthAppSet: (provider: string, clientId: string, clientSecret: string) =>
+    request<{ status: string }>(`/providers/oauth/${provider}/app`, { method: 'POST', body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }) }),
+  oauthAppDelete: (provider: string) =>
+    request<{ status: string }>(`/providers/oauth/${provider}/app`, { method: 'DELETE' }),
   availableModels: (category?: string) => listRequest<any>(`/models/available${category ? '?category=' + category : ''}`),
   discoveredModels: (unnotifiedOnly?: boolean) => listRequest<any>(`/models/discovered${unnotifiedOnly ? '?unnotified=1' : ''}`),
   actionDiscoveredModel: (id: string, action: 'enable' | 'dismiss') =>

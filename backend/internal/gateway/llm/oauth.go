@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,7 @@ type oauthState struct {
 	challenge   string
 	tenantID    string
 	redirectURI string
+	clientID    string // non-PKCE: client_id used in token exchange
 	createdAt   time.Time
 }
 
@@ -92,21 +94,78 @@ type OAuthManager struct {
 	encryptKey string
 	baseURL    string // e.g. "http://localhost:4200" — used to build redirect URIs
 
-	mu     sync.Mutex
-	states map[string]*oauthState // state param → flow state
+	mu          sync.Mutex
+	states      map[string]*oauthState      // state param → flow state
+	clientCreds map[string]clientCredential // provider → runtime-injected creds (from vault)
+}
+
+// clientCredential holds per-provider OAuth app credentials supplied at
+// runtime (via the Settings UI) that override the env-var defaults.
+type clientCredential struct {
+	ClientID     string
+	ClientSecret string
 }
 
 // NewOAuthManager creates an OAuthManager. baseURL is the public URL of the
 // backend (used to build the OAuth callback redirect URI).
 func NewOAuthManager(db *pgxpool.Pool, encryptKey, baseURL string) *OAuthManager {
 	m := &OAuthManager{
-		db:         db,
-		encryptKey: encryptKey,
-		baseURL:    baseURL,
-		states:     make(map[string]*oauthState),
+		db:          db,
+		encryptKey:  encryptKey,
+		baseURL:     baseURL,
+		states:      make(map[string]*oauthState),
+		clientCreds: make(map[string]clientCredential),
 	}
 	go m.refreshWorker()
 	return m
+}
+
+// SetClientCreds registers runtime credentials for a provider. Called at
+// startup (vault hydration) and when the user saves new creds via the UI.
+func (m *OAuthManager) SetClientCreds(provider, clientID, clientSecret string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clientCreds[provider] = clientCredential{ClientID: clientID, ClientSecret: clientSecret}
+}
+
+// clientID returns the client ID for a provider, checking runtime creds
+// first, then the env-var override defined in the spec.
+func (m *OAuthManager) clientID(provider string) string {
+	m.mu.Lock()
+	c, ok := m.clientCreds[provider]
+	m.mu.Unlock()
+	if ok && c.ClientID != "" {
+		return c.ClientID
+	}
+	spec, ok := OAuthProviders[provider]
+	if ok && spec.ClientIDEnvVar != "" {
+		return os.Getenv(spec.ClientIDEnvVar)
+	}
+	return ""
+}
+
+// clientSecret returns the client secret for a provider from runtime creds.
+func (m *OAuthManager) clientSecret(provider string) string {
+	m.mu.Lock()
+	c, ok := m.clientCreds[provider]
+	m.mu.Unlock()
+	if ok {
+		return c.ClientSecret
+	}
+	return ""
+}
+
+// HasClientCreds reports whether a non-PKCE provider has the credentials
+// needed to start an OAuth flow.
+func (m *OAuthManager) HasClientCreds(provider string) bool {
+	spec, ok := OAuthProviders[provider]
+	if !ok {
+		return false
+	}
+	if spec.PKCE {
+		return true // PKCE needs no client credentials
+	}
+	return m.clientID(provider) != ""
 }
 
 // StartURL returns the authorization URL to redirect the user to.
@@ -143,7 +202,15 @@ func (m *OAuthManager) StartURL(tenantID, provider string) (redirectURL string, 
 		flow.challenge = challenge
 		params.Set("code_challenge", challenge)
 		params.Set("code_challenge_method", "S256")
-		// PKCE: no client_id needed (Anthropic's PKCE flow is client-agnostic).
+		// PKCE: Anthropic's flow is client-agnostic — no client_id in the request.
+	} else {
+		// Non-PKCE providers (GitHub Copilot, Google Vertex) require client_id.
+		cid := m.clientID(provider)
+		if cid == "" {
+			return "", "", fmt.Errorf("oauth: no client_id configured for provider %q — set via Settings or %s env var", provider, spec.ClientIDEnvVar)
+		}
+		params.Set("client_id", cid)
+		flow.clientID = cid
 	}
 
 	authURL, _ := url.Parse(spec.AuthURL)
@@ -189,6 +256,14 @@ func (m *OAuthManager) HandleCallback(ctx context.Context, provider, code, state
 	params.Set("redirect_uri", flow.redirectURI)
 	if spec.PKCE {
 		params.Set("code_verifier", flow.verifier)
+	} else {
+		// Non-PKCE: authenticate with client_id + client_secret.
+		if flow.clientID != "" {
+			params.Set("client_id", flow.clientID)
+		}
+		if secret := m.clientSecret(provider); secret != "" {
+			params.Set("client_secret", secret)
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, spec.TokenURL,
@@ -315,6 +390,11 @@ func (m *OAuthManager) storeToken(ctx context.Context, tenantID, provider, acces
 }
 
 func (m *OAuthManager) callbackURI(provider string) string {
+	return m.CallbackURI(provider)
+}
+
+// CallbackURI returns the OAuth callback URL for a provider.
+func (m *OAuthManager) CallbackURI(provider string) string {
 	return m.baseURL + "/v1/providers/oauth/" + provider + "/callback"
 }
 

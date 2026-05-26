@@ -2,8 +2,8 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Network, Zap, Lock, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Network, Zap, Lock, X, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { networkApi, type NetworkStatus } from '@/lib/api';
@@ -20,11 +20,41 @@ export function NetworkSettings() {
   const [checkingPort, setCheckingPort] = useState(false);
   const [portCheckResult, setPortCheckResult] = useState<{ port: number; available: boolean; reason?: string } | null>(null);
 
+  // Public base URL state
+  const [baseURL, setBaseURL] = useState('');
+  const [baseURLInput, setBaseURLInput] = useState('');
+  const [savingBaseURL, setSavingBaseURL] = useState(false);
+  const baseURLLoaded = useRef(false);
+
   const reload = () => {
     setLoading(true);
     networkApi.status().then(setNet).catch(() => setNet(null)).finally(() => setLoading(false));
   };
   useEffect(reload, []);
+
+  useEffect(() => {
+    if (baseURLLoaded.current) return;
+    baseURLLoaded.current = true;
+    request<{ base_url: string }>('/admin/server-settings')
+      .then(d => { setBaseURL(d?.base_url ?? ''); setBaseURLInput(d?.base_url ?? ''); })
+      .catch(() => {});
+  }, []);
+
+  const saveBaseURL = async () => {
+    setSavingBaseURL(true);
+    try {
+      await request('/admin/server-settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ base_url: baseURLInput.trim() }),
+      });
+      setBaseURL(baseURLInput.trim());
+      toast.success('Public URL saved — OAuth callbacks updated');
+    } catch {
+      toast.error('Failed to save public URL');
+    } finally {
+      setSavingBaseURL(false);
+    }
+  };
 
   const currentPort = useMemo(() => {
     if (!net?.listen) return 8486;
@@ -171,6 +201,51 @@ export function NetworkSettings() {
               </p>
             )}
           </div>
+        )}
+      </Card>
+
+      <Card id="public-base-url" title="Public Base URL"
+        description="The URL this Qorven instance is accessible at from the internet (or your Tailscale network). Used to build OAuth callback URIs — must match what you register in each provider's developer console.">
+        <Row label="Current URL">
+          {baseURL
+            ? <span className="font-mono text-sm text-foreground">{baseURL}</span>
+            : <span className="text-sm text-muted-foreground italic">Not configured — OAuth callbacks default to localhost:4200</span>}
+        </Row>
+        <Row label="Set URL">
+          <div className="flex gap-2 items-center flex-1">
+            <Input
+              type="text"
+              value={baseURLInput}
+              onChange={v => setBaseURLInput(v)}
+              placeholder="https://qorven.yourdomain.com or http://100.x.x.x"
+              className="flex-1"
+            />
+            <Btn
+              variant="primary"
+              onClick={saveBaseURL}
+              loading={savingBaseURL}
+              disabled={baseURLInput.trim() === baseURL}
+            >
+              Save
+            </Btn>
+          </div>
+        </Row>
+        {baseURL && (
+          <Row label="">
+            <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 space-y-1">
+              <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <Globe className="h-3.5 w-3.5" /> OAuth callback URLs (register these in each provider's developer console)
+              </p>
+              {['claude_code', 'github_copilot', 'google_vertex'].map(p => (
+                <p key={p} className="font-mono text-xs text-foreground/70 break-all">
+                  {baseURL}/v1/providers/oauth/{p}/callback
+                </p>
+              ))}
+              <p className="font-mono text-xs text-muted-foreground break-all">
+                {baseURL}/v1/social/oauth/&#123;platform&#125;/callback
+              </p>
+            </div>
+          </Row>
         )}
       </Card>
 

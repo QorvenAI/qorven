@@ -1338,6 +1338,14 @@ function AccountsTab({ agentId }: { agentId: string }) {
   const [form, setForm] = useState({ platform: 'twitter', account_name: '', account_id: '', access_token: '', agent_id: agentId || '' });
   const [extras, setExtras] = useState<Record<string, string>>({});
 
+  // OAuth app credentials panel (admin)
+  const [showOAuthApps, setShowOAuthApps] = useState(false);
+  const [oauthApps, setOauthApps] = useState<{ id: string; name: string; has_creds: boolean; pkce: boolean; redirect_uri: string }[]>([]);
+  const [oauthAppsLoading, setOauthAppsLoading] = useState(false);
+  const [oauthAppEditing, setOauthAppEditing] = useState<string | null>(null);
+  const [oauthAppForm, setOauthAppForm] = useState({ client_id: '', client_secret: '' });
+  const [oauthAppSaving, setOauthAppSaving] = useState(false);
+
   const load = useCallback(() => {
     setLoading(true);
     socialApi.listIntegrations(agentId || undefined)
@@ -1346,6 +1354,38 @@ function AccountsTab({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadOAuthApps = useCallback(() => {
+    setOauthAppsLoading(true);
+    socialApi.oauthAppsGet()
+      .then(d => { setOauthApps(Array.isArray(d) ? d : []); setOauthAppsLoading(false); })
+      .catch(() => { setOauthApps([]); setOauthAppsLoading(false); });
+  }, []);
+
+  const saveOAuthApp = async (platform: string) => {
+    setOauthAppSaving(true);
+    try {
+      await socialApi.oauthAppSet(platform, oauthAppForm.client_id.trim(), oauthAppForm.client_secret.trim());
+      toast.success(`${platform} OAuth app credentials saved`);
+      setOauthAppEditing(null);
+      setOauthAppForm({ client_id: '', client_secret: '' });
+      loadOAuthApps();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setOauthAppSaving(false);
+    }
+  };
+
+  const deleteOAuthApp = async (platform: string) => {
+    try {
+      await socialApi.oauthAppDelete(platform);
+      toast.success('Credentials removed');
+      loadOAuthApps();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
 
   const save = async () => {
     const auth = PLATFORM_AUTH[form.platform];
@@ -1607,6 +1647,136 @@ function AccountsTab({ agentId }: { agentId: string }) {
           })}
         </div>
       )}
+
+      {/* OAuth App Credentials (admin) */}
+      <div className="rounded-xl border border-border overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent/30 transition-colors cursor-pointer"
+          onClick={() => {
+            setShowOAuthApps(v => {
+              if (!v) loadOAuthApps();
+              return !v;
+            });
+          }}
+        >
+          <span className="flex items-center gap-2">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            OAuth App Credentials
+            <span className="text-xs font-normal text-muted-foreground">(admin — register your app on each platform)</span>
+          </span>
+          <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', showOAuthApps && 'rotate-90')} />
+        </button>
+
+        {showOAuthApps && (
+          <div className="border-t border-border p-4 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              For platforms that use OAuth 2.0 (Twitter, LinkedIn, Facebook, etc.), you must create an app in the platform&apos;s developer console and register the callback URL. Paste your client credentials here.
+            </p>
+
+            {oauthAppsLoading ? (
+              <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <div className="space-y-2">
+                {PLATFORMS.filter(p => OAUTH_PLATFORMS.has(p.id)).map(platform => {
+                  const app = oauthApps.find(a => a.id === platform.id);
+                  const isEditing = oauthAppEditing === platform.id;
+                  return (
+                    <div key={platform.id} className={cn(
+                      'rounded-lg border px-3 py-2.5',
+                      app?.has_creds ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border',
+                    )}>
+                      <div className="flex items-center gap-2">
+                        <span className={cn('h-7 w-7 rounded flex items-center justify-center text-xs font-bold shrink-0', platform.color)}>
+                          {platform.icon}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{platform.label}</p>
+                          {app?.redirect_uri && (
+                            <p className="text-xs text-muted-foreground truncate font-mono">{app.redirect_uri}</p>
+                          )}
+                        </div>
+                        <span className={cn('text-xs rounded-full px-2 py-0.5',
+                          app?.has_creds ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground')}>
+                          {app?.has_creds ? 'Configured' : 'Not set'}
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (isEditing) { setOauthAppEditing(null); return; }
+                            setOauthAppEditing(platform.id);
+                            setOauthAppForm({ client_id: '', client_secret: '' });
+                          }}
+                          className="text-xs text-primary hover:underline cursor-pointer"
+                        >
+                          {isEditing ? 'Cancel' : app?.has_creds ? 'Update' : 'Set'}
+                        </button>
+                        {app?.has_creds && !isEditing && (
+                          <button
+                            onClick={() => deleteOAuthApp(platform.id)}
+                            className="text-xs text-muted-foreground hover:text-destructive cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditing && (
+                        <div className="mt-3 space-y-2">
+                          {app?.redirect_uri && (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Callback URL to register:</p>
+                              <div className="flex items-center gap-2">
+                                <code className="flex-1 font-mono text-xs bg-muted border border-border rounded px-2 py-1 text-foreground/80 break-all">
+                                  {app.redirect_uri}
+                                </code>
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(app.redirect_uri); toast.success('Copied'); }}
+                                  className="text-xs text-primary hover:underline cursor-pointer shrink-0"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Client ID</label>
+                              <input
+                                type="text"
+                                value={oauthAppForm.client_id}
+                                onChange={e => setOauthAppForm(f => ({ ...f, client_id: e.target.value }))}
+                                placeholder="Client ID"
+                                className="qr-input text-xs font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Client Secret</label>
+                              <input
+                                type="password"
+                                value={oauthAppForm.client_secret}
+                                onChange={e => setOauthAppForm(f => ({ ...f, client_secret: e.target.value }))}
+                                placeholder="Client Secret"
+                                className="qr-input text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => saveOAuthApp(platform.id)}
+                            disabled={oauthAppSaving || !oauthAppForm.client_id.trim()}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
+                          >
+                            {oauthAppSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                            Save
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1966,6 +2136,9 @@ function AnalyticsTab({ agentId }: { agentId: string }) {
   const [data, setData] = useState<{ by_platform: any[]; top_posts: any[]; days: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(agentId || (souls[0]?.id ?? ''));
+  const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
+  const [postMetrics, setPostMetrics] = useState<any[] | null>(null);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1980,6 +2153,17 @@ function AnalyticsTab({ agentId }: { agentId: string }) {
   }, [selectedAgent]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadPostMetrics = async (postId: string) => {
+    if (expandedPostId === postId) { setExpandedPostId(null); setPostMetrics(null); return; }
+    setExpandedPostId(postId);
+    setLoadingMetrics(true);
+    try {
+      const m = await socialApi.postMetrics(postId);
+      setPostMetrics(Array.isArray(m) ? m : []);
+    } catch { setPostMetrics([]); }
+    finally { setLoadingMetrics(false); }
+  };
 
   const totalEngagement = (data?.by_platform ?? []).reduce(
     (sum, p) => sum + (p.likes || 0) + (p.shares || 0) + (p.comments || 0), 0,
@@ -2080,24 +2264,61 @@ function AnalyticsTab({ agentId }: { agentId: string }) {
               <div className="divide-y divide-border/50">
                 {data.top_posts.map((post: any, i: number) => {
                   const platform = PLATFORMS.find(pl => pl.id === post.platform);
+                  const isExpanded = expandedPostId === post.post_id;
                   return (
-                    <div key={`${post.post_id}-${i}`} className="px-4 py-3 flex items-start gap-3">
-                      <span className="text-xs text-muted-foreground w-4 shrink-0 mt-0.5 tabular-nums">{i + 1}</span>
-                      <span className={cn('h-5 w-5 rounded flex items-center justify-center text-xs font-bold shrink-0 mt-0.5', platform?.color ?? 'bg-muted')}>
-                        {platform?.icon ?? '?'}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-foreground/80 line-clamp-2">{post.content}</p>
-                        <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                          <span>{fmtNum(post.impressions)} views</span>
-                          <span>{fmtNum(post.likes)} likes</span>
-                          <span>{fmtNum(post.shares)} shares</span>
+                    <div key={`${post.post_id}-${i}`}>
+                      <div className="px-4 py-3 flex items-start gap-3">
+                        <span className="text-xs text-muted-foreground w-4 shrink-0 mt-0.5 tabular-nums">{i + 1}</span>
+                        <span className={cn('h-5 w-5 rounded flex items-center justify-center text-xs font-bold shrink-0 mt-0.5', platform?.color ?? 'bg-muted')}>
+                          {platform?.icon ?? '?'}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground/80 line-clamp-2">{post.content}</p>
+                          <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                            <span>{fmtNum(post.impressions)} views</span>
+                            <span>{fmtNum(post.likes)} likes</span>
+                            <span>{fmtNum(post.shares)} shares</span>
+                          </div>
                         </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-semibold tabular-nums">{fmtNum(post.engagement)}</p>
+                          <p className="text-xs text-muted-foreground">engagement</p>
+                        </div>
+                        <button
+                          onClick={() => loadPostMetrics(post.post_id)}
+                          title="View engagement history"
+                          className={cn('h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors shrink-0',
+                            isExpanded && 'bg-accent text-foreground')}
+                        >
+                          <TrendingUp className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-sm font-semibold tabular-nums">{fmtNum(post.engagement)}</p>
-                        <p className="text-xs text-muted-foreground">engagement</p>
-                      </div>
+                      {isExpanded && (
+                        <div className="px-4 pb-3 bg-muted/20 border-t border-border/50">
+                          {loadingMetrics ? (
+                            <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+                          ) : !postMetrics || postMetrics.length === 0 ? (
+                            <p className="text-xs text-muted-foreground py-2">No detailed metrics recorded yet.</p>
+                          ) : (
+                            <div className="pt-2 space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground mb-2">Engagement history</p>
+                              {postMetrics.map((m: any, mi: number) => (
+                                <div key={mi} className="flex items-center gap-2 text-xs">
+                                  <span className="text-muted-foreground w-28 shrink-0">
+                                    {m.recorded_at ? new Date(m.recorded_at).toLocaleString() : '—'}
+                                  </span>
+                                  <span className="flex gap-3 text-foreground/70">
+                                    <span>{fmtNum(m.impressions ?? 0)} views</span>
+                                    <span>{fmtNum(m.likes ?? 0)} likes</span>
+                                    <span>{fmtNum(m.shares ?? 0)} shares</span>
+                                    <span>{fmtNum(m.comments ?? 0)} comments</span>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -2557,6 +2778,13 @@ function AutoPostTab({ agentId }: { agentId: string }) {
     setAutoposts(prev => prev.filter(a => a.id !== id));
   };
 
+  const toggleRule = async (id: string, active: boolean) => {
+    try {
+      await socialApi.toggleAutoPost(id, active);
+      setAutoposts(prev => prev.map(a => a.id === id ? { ...a, active } : a));
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
@@ -2648,6 +2876,17 @@ function AutoPostTab({ agentId }: { agentId: string }) {
                   {a.source} · <code className="font-mono">{a.schedule}</code> · {(a.platforms || []).join(', ')}
                 </p>
               </div>
+              <button
+                onClick={() => toggleRule(a.id, !a.active)}
+                title={a.active ? 'Pause rule' : 'Resume rule'}
+                className={cn(
+                  'h-7 w-7 flex items-center justify-center rounded cursor-pointer transition-colors',
+                  a.active
+                    ? 'text-amber-500 hover:bg-amber-500/10'
+                    : 'text-emerald-500 hover:bg-emerald-500/10',
+                )}>
+                {a.active ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              </button>
               <button onClick={() => deleteRule(a.id)}
                 className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors">
                 <Trash2 className="h-3.5 w-3.5" />
