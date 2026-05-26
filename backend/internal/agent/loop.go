@@ -26,6 +26,7 @@ import (
 	"github.com/qorvenai/qorven/internal/skills"
 	supervisorpkg "github.com/qorvenai/qorven/internal/supervisor"
 	"github.com/qorvenai/qorven/internal/token"
+	"github.com/qorvenai/qorven/internal/store"
 	"github.com/qorvenai/qorven/internal/tools"
 	"github.com/qorvenai/qorven/internal/webintel"
 )
@@ -219,7 +220,12 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 		}
 	}
 
-	// 1b. Seed default permission profile for this Qor (idempotent — ON CONFLICT DO NOTHING).
+	// 1b. Stamp org context from agent record so tools can enforce role-based access.
+	if ag.OrgLevel != "" || ag.OrgRole != "" {
+		ctx = store.WithOrgContext(ctx, ag.OrgLevel, ag.OrgRole)
+	}
+
+	// 1c. Seed default permission profile for this Qor (idempotent — ON CONFLICT DO NOTHING).
 	// For channel messages (Telegram, WhatsApp), req.UserID may be a non-UUID sender ID.
 	// Fall back to the tenant admin user so the permission gate can find auto-approved policies.
 	if l.PermGate != nil {

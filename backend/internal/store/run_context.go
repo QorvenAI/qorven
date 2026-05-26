@@ -50,6 +50,10 @@ type RunContext struct {
 	TeamTaskID       string
 	LeaderAgentID    string
 	AgentToolKey     string
+
+	// Org hierarchy — used by hr_manage and other tools for access control
+	OrgLevel string // l1, l2, l3, customer_facing
+	OrgRole  string // coo, cto, cmo, chro, ciso, cko, cfo, caio, cco, cso, specialist…
 }
 
 // WithRunContext stores a RunContext on the context.

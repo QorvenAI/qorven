@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
 import { agents } from '@/lib/api';
+import { orgApi } from '@/lib/api-agents';
 import { cn } from '@/lib/utils';
 import { SoulCardSkeleton } from '@/components/skeletons';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -279,6 +280,27 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
   );
 }
 
+const ORG_ROLES = [
+  { value: '', label: 'None (general)' },
+  { value: 'caio',     label: 'CAIO — Fleet Overseer' },
+  { value: 'coo',      label: 'COO — Operations' },
+  { value: 'cto',      label: 'CTO — Engineering' },
+  { value: 'cmo',      label: 'CMO — Marketing' },
+  { value: 'cso',      label: 'CSO — Sales' },
+  { value: 'cco',      label: 'CCO — Customer' },
+  { value: 'chro',     label: 'CHRO — HR' },
+  { value: 'ciso',     label: 'CISO — Security' },
+  { value: 'cko',      label: 'CKO — Knowledge' },
+  { value: 'cfo',      label: 'CFO — Finance' },
+  { value: 'specialist', label: 'Specialist (L3)' },
+];
+
+const ORG_LEVEL_FOR_ROLE: Record<string, string> = {
+  caio: 'l1', coo: 'l1',
+  cto: 'l2', cmo: 'l2', cso: 'l2', cco: 'l2', chro: 'l2', ciso: 'l2', cko: 'l2', cfo: 'l2',
+  specialist: 'l3',
+};
+
 // ─── Create Dialog ─────────────────────────────────────────────────────────────
 function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { models } = useSelectedModels();
@@ -288,16 +310,26 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     role: 'worker',
     system_prompt: '',
     temperature: 0.5,
+    org_role: '',
+    org_level: 'l3',
+    monthly_budget_usd: 10,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Auto-set org_level when org_role changes
+  const handleOrgRoleChange = (orgRole: string) => {
+    const level = ORG_LEVEL_FOR_ROLE[orgRole] ?? 'l3';
+    const budget = level === 'l1' ? 0 : level === 'l2' ? 50 : 10;
+    setForm((f) => ({ ...f, org_role: orgRole, org_level: level, monthly_budget_usd: budget }));
+  };
 
   const handleCreate = async () => {
     if (!form.display_name) return;
     setSaving(true);
     setError('');
     try {
-      await agents.create({
+      const created = await agents.create({
         display_name: form.display_name,
         agent_key: form.display_name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
         model: form.model || models[0]?.model_id || 'kimi-k2.5',
@@ -308,7 +340,17 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
         tool_profile: 'full',
         max_tool_iterations: 20,
         context_window: 128000,
+        org_role: form.org_role || undefined,
+        org_level: form.org_level,
       } as any);
+      // Register in org_roster if an org role was set
+      if (form.org_role && (created as any)?.id) {
+        try {
+          await orgApi.hire((created as any).id, form.org_level, form.org_role);
+        } catch {
+          // non-fatal — agent still created
+        }
+      }
       toast.success(`${form.display_name} created`);
       onCreated();
     } catch (e) {
@@ -318,6 +360,8 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
       setSaving(false);
     }
   };
+
+  const hasOrgRole = !!form.org_role;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
@@ -376,6 +420,53 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
               </select>
             </div>
           </div>
+
+          {/* Org Role — optional C-suite designation */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">
+              Org Role <span className="text-muted-foreground/50">(optional — place in org hierarchy)</span>
+            </label>
+            <select
+              value={form.org_role}
+              onChange={(e) => handleOrgRoleChange(e.target.value)}
+              className="qr-select mt-1"
+            >
+              {ORG_ROLES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Org level + budget — shown only when org_role is set */}
+          {hasOrgRole && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Org Level</label>
+                <select
+                  value={form.org_level}
+                  onChange={(e) => setForm({ ...form, org_level: e.target.value })}
+                  className="qr-select mt-1"
+                >
+                  <option value="l1">L1 — Executive</option>
+                  <option value="l2">L2 — C-Suite</option>
+                  <option value="l3">L3 — Specialist</option>
+                  <option value="customer_facing">Customer-Facing</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Monthly Budget (USD)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={5}
+                  value={form.monthly_budget_usd}
+                  onChange={(e) => setForm({ ...form, monthly_budget_usd: parseFloat(e.target.value) || 0 })}
+                  className="qr-input mt-1"
+                  placeholder="0 = unlimited"
+                />
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">System Prompt</label>

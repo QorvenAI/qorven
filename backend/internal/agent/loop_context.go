@@ -26,6 +26,9 @@ type RunContext struct {
 	Workspace   string
 	ChannelType string
 	SessionKey  string
+	// Org fields — populated from agents table at session start
+	OrgLevel string // l1, l2, l3, customer_facing
+	OrgRole  string // coo, cto, cmo, chro, ciso, cko, cfo, caio, cco, cso, specialist…
 }
 
 type runContextKey struct{}
@@ -52,6 +55,8 @@ type ContextInjector struct {
 	inputGuard    *InputGuard
 	injectionAction string // "log", "warn", "block", "off"
 	maxMessageChars int
+	orgLevel      string
+	orgRole       string
 }
 
 // NewContextInjector creates a new injector.
@@ -64,6 +69,13 @@ func NewContextInjector(agentID uuid.UUID, agentKey, tenantID, workspace string)
 		injectionAction: "warn",
 		maxMessageChars: 32000,
 	}
+}
+
+// SetOrgContext stamps the agent's org level and role into the injector so they
+// propagate into RunContext and are accessible to tools via context.
+func (ci *ContextInjector) SetOrgContext(orgLevel, orgRole string) {
+	ci.orgLevel = orgLevel
+	ci.orgRole = orgRole
 }
 
 // SetInputGuard configures input guard for injection detection.
@@ -194,6 +206,8 @@ func (ci *ContextInjector) Inject(ctx context.Context, req *InjectRequest) Injec
 		Workspace:   tools.WorkspaceFromCtx(ctx),
 		ChannelType: req.ChannelType,
 		SessionKey:  req.SessionKey,
+		OrgLevel:    ci.orgLevel,
+		OrgRole:     ci.orgRole,
 	}
 	ctx = WithRunContext(ctx, rc)
 

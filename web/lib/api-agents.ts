@@ -304,7 +304,7 @@ export const training = {
 };
 
 export const orgChart = {
-  get: () => request<{ agents: any[] }>('/org-chart'),
+  get: () => request<{ agents: OrgChartAgent[] }>('/org-chart'),
 };
 
 export interface OrgChartAgent {
@@ -312,9 +312,58 @@ export interface OrgChartAgent {
   display_name: string;
   agent_key?: string;
   role?: string;
+  title?: string;
   manager_id?: string;
+  org_level?: string;
+  org_role?: string;
+  avatar?: string;
+  customer_facing?: boolean;
+  monthly_budget_usd?: number;
+  hired_at?: string;
+  terminated_at?: string;
+  status?: string;
   [extra: string]: unknown;
 }
+
+export interface OrgRosterEntry {
+  id: string;
+  agent_id?: string;
+  display_name: string;
+  role?: string;
+  title?: string;
+  org_level: string;
+  org_role: string;
+  avatar?: string;
+  customer_facing: boolean;
+  status: string;
+  monthly_budget_usd: number;
+  hired_at?: string;
+  terminated_at?: string;
+  total_spend_usd: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+}
+
+export interface OrgAgentSpend {
+  agent_id: string;
+  display_name: string;
+  org_role: string;
+  org_level: string;
+  month_cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export const orgApi = {
+  chart: () => request<{ agents: OrgChartAgent[] }>('/org-chart'),
+  roster: () => request<{ roster: OrgRosterEntry[] }>('/org/roster'),
+  financeSummary: () => request<{ agents: OrgAgentSpend[]; total_month_usd: number }>('/org/finance/summary'),
+  financeDaily: (days = 30) => request<{ daily: { date: string; cost_usd: number; tokens_in: number; tokens_out: number }[] }>(`/org/finance/daily?days=${days}`),
+  hire: (agentId: string, orgLevel: string, orgRole: string) =>
+    request<{ status: string }>('/org/roster/hire', { method: 'POST', body: JSON.stringify({ agent_id: agentId, org_level: orgLevel, org_role: orgRole }) }),
+  terminate: (id: string, reason: string) =>
+    request<{ status: string }>(`/org/roster/${id}/terminate`, { method: 'POST', body: JSON.stringify({ reason }) }),
+};
 
 export const teamsApi = {
   list: () => listRequest<any>('/teams'),

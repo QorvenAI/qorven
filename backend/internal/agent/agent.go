@@ -30,6 +30,11 @@ type Agent struct {
 	Title             *string         `json:"title,omitempty"`
 	ManagerID         *string         `json:"manager_id,omitempty"`
 
+	// Org chart
+	OrgLevel          string          `json:"org_level,omitempty"`  // l1, l2, l3, customer_facing
+	OrgRole           string          `json:"org_role,omitempty"`   // coo, cto, cmo, chro, …
+	CustomerFacing    bool            `json:"customer_facing,omitempty"`
+
 	// LLM
 	ProviderID        *string         `json:"provider_id,omitempty"`
 	Model             string          `json:"model"`
@@ -88,6 +93,9 @@ type CreateAgentInput struct {
 	Title             string   `json:"title"`
 	ManagerID         string   `json:"manager_id"`
 	ProviderID        string   `json:"provider_id"`
+	OrgLevel          string   `json:"org_level"`   // l1, l2, l3, customer_facing
+	OrgRole           string   `json:"org_role"`    // coo, cto, cmo, chro, …
+	CustomerFacing    bool     `json:"customer_facing"`
 	Model             string   `json:"model"`
 	SystemPrompt      string   `json:"system_prompt"`
 	Temperature       float64  `json:"temperature"`
@@ -158,17 +166,23 @@ func (s *Store) Create(ctx context.Context, tenantID string, in CreateAgentInput
 	}
 
 	now := time.Now()
+	orgLevel := in.OrgLevel
+	if orgLevel == "" {
+		orgLevel = "l3"
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO agents (id, tenant_id, agent_key, display_name, avatar,
 		 role, title, manager_id, provider_id, model, system_prompt, temperature,
 		 context_window, max_tool_iterations, tool_profile, tools_allowed, tools_denied,
-		 skills, memory_enabled, memory_sharing, auto_compact, status, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+		 skills, memory_enabled, memory_sharing, auto_compact, status, created_at, updated_at,
+		 org_level, org_role, customer_facing)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
 		id, tenantID, in.AgentKey, in.DisplayName, in.Avatar,
 		nilStr(in.Role), nilStr(in.Title), nilStr(in.ManagerID), nilStr(in.ProviderID),
 		in.Model, in.SystemPrompt, in.Temperature,
 		in.ContextWindow, in.MaxToolIterations, in.ToolProfile, toolsAllowed, toolsDenied,
-		in.Skills, memEnabled, in.MemorySharing, autoCompact, "active", now, now)
+		in.Skills, memEnabled, in.MemorySharing, autoCompact, "active", now, now,
+		orgLevel, in.OrgRole, in.CustomerFacing)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
@@ -197,7 +211,8 @@ const agentSelectCols = `SELECT id, tenant_id, agent_key, display_name, COALESCE
         COALESCE(thinking_level,'off'),
         COALESCE(runtime_mode,''), COALESCE(can_delegate,false),
         COALESCE(project_brief_id::text,''),
-        COALESCE(mail_policy,'')
+        COALESCE(mail_policy,''),
+        COALESCE(org_level,'l3'), COALESCE(org_role,''), COALESCE(customer_facing,false)
  FROM agents`
 
 func (s *Store) scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
@@ -208,7 +223,8 @@ func (s *Store) scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 		&a.Skills, &a.MemoryEnabled, &a.MemorySharing, &a.AutoCompact,
 		&a.WebSearchEnabled, &a.OutboundApproval,
 		&a.CreditBudgetCents, &a.CreditUsedCents, &a.Status, &a.CreatedAt, &a.UpdatedAt,
-		&a.ThinkingLevel, &a.RuntimeMode, &a.CanDelegate, &a.ProjectBriefID, &a.MailPolicy)
+		&a.ThinkingLevel, &a.RuntimeMode, &a.CanDelegate, &a.ProjectBriefID, &a.MailPolicy,
+		&a.OrgLevel, &a.OrgRole, &a.CustomerFacing)
 	return a, err
 }
 

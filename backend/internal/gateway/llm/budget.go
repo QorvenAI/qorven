@@ -55,8 +55,9 @@ func (e *BudgetEngine) Check(ctx context.Context, req GatewayRequest) error {
 }
 
 // AddSpend credits costUSD to the agent's current-day spend and invalidates
-// the cache so the next Check reads fresh data.
-func (e *BudgetEngine) AddSpend(ctx context.Context, tenantID, agentID string, costUSD float64) {
+// the cache so the next Check reads fresh data. Also upserts into org_daily_spend
+// so the org finance dashboard has per-agent cost history.
+func (e *BudgetEngine) AddSpend(ctx context.Context, tenantID, agentID string, costUSD float64, tokensIn, tokensOut int) {
 	if agentID == "" || e.db == nil {
 		return
 	}
@@ -66,6 +67,18 @@ func (e *BudgetEngine) AddSpend(ctx context.Context, tenantID, agentID string, c
 		ON CONFLICT (tenant_id, agent_id, period)
 		DO UPDATE SET cost_usd = gateway_spend.cost_usd + $3
 	`, tenantID, agentID, costUSD)
+
+	// Upsert org_daily_spend for CFO/CHRO finance visibility.
+	e.db.Exec(ctx, `
+		INSERT INTO org_daily_spend (tenant_id, agent_id, cost_usd, tokens_in, tokens_out, date, org_role)
+		SELECT $1, $2, $3, $4, $5, CURRENT_DATE, COALESCE(org_role,'')
+		FROM agents WHERE id = $2
+		ON CONFLICT (tenant_id, agent_id, date)
+		DO UPDATE SET
+		    cost_usd   = org_daily_spend.cost_usd   + $3,
+		    tokens_in  = org_daily_spend.tokens_in  + $4,
+		    tokens_out = org_daily_spend.tokens_out + $5
+	`, tenantID, agentID, costUSD, tokensIn, tokensOut)
 
 	// Invalidate cache entry so the next Check re-reads from DB.
 	e.mu.Lock()

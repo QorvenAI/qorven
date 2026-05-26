@@ -599,8 +599,13 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/agents/{id}/messages", gw.handleGetAgentMessages)
 		r.Post("/agents/{id}/messages", gw.handleSendAgentMessage)
 
-		// Org Chart
+		// Org Chart + Roster
 		r.Get("/org-chart", gw.handleGetOrgChart)
+		r.Get("/org/roster", gw.handleGetOrgRoster)
+		r.Get("/org/finance/summary", gw.handleGetOrgFinanceSummary)
+		r.Get("/org/finance/daily", gw.handleGetOrgFinanceDaily)
+		r.Post("/org/roster/hire", gw.handleOrgHireAgent)
+		r.Post("/org/roster/{id}/terminate", gw.handleOrgTerminateAgent)
 
 		// Budget tracking (P4.1)
 		r.Get("/budgets", gw.handleGetBudgets)

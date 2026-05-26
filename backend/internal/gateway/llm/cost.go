@@ -402,7 +402,7 @@ func (l *CostLedger) flush(e spendEntry) {
 	}
 
 	if l.budget != nil && e.cost.TotalUUSD > 0 {
-		l.budget.AddSpend(ctx, e.tenantID, e.agentID, e.cost.TotalUSD())
+		l.budget.AddSpend(ctx, e.tenantID, e.agentID, e.cost.TotalUSD(), e.cost.TokensIn, e.cost.TokensOut)
 	}
 
 	// 3. Upsert a trace row (one per session) and append a span (one per LLM call).

@@ -258,3 +258,37 @@ func ShellDenyGroupsFromContext(ctx context.Context) map[string]bool {
 	}
 	return nil
 }
+
+// --- Org Level / Org Role ---
+// These are populated from the agents table at session start and used by
+// tools like hr_manage to enforce who can hire/terminate whom.
+
+const (
+	OrgLevelKey contextKey = "qorven_org_level"
+	OrgRoleKey  contextKey = "qorven_org_role"
+)
+
+func WithOrgContext(ctx context.Context, orgLevel, orgRole string) context.Context {
+	ctx = context.WithValue(ctx, OrgLevelKey, orgLevel)
+	return context.WithValue(ctx, OrgRoleKey, orgRole)
+}
+
+func OrgLevelFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(OrgLevelKey).(string); ok && v != "" {
+		return v
+	}
+	if rc := RunContextFromCtx(ctx); rc != nil {
+		return rc.OrgLevel
+	}
+	return "l3"
+}
+
+func OrgRoleFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(OrgRoleKey).(string); ok && v != "" {
+		return v
+	}
+	if rc := RunContextFromCtx(ctx); rc != nil {
+		return rc.OrgRole
+	}
+	return ""
+}

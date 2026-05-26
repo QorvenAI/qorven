@@ -437,8 +437,139 @@ func (gw *Gateway) registerTools() {
 		tools.OnAgentDelete = func(ctx context.Context, id string) error {
 			return gw.agents.Delete(ctx, id)
 		}
+
+		// Wire hr_manage callbacks — CHRO/COO org lifecycle tool
+		tools.OnHRHireAgent = func(ctx context.Context, name, model, role, orgRole, orgLevel, dept, prompt string, monthlyBudgetUSD float64, managerAgentID string) (string, error) {
+			a, err := gw.agents.Create(ctx, defaultTenant, agent.CreateAgentInput{
+				AgentKey:       strings.ToLower(strings.ReplaceAll(name, " ", "-")),
+				DisplayName:    name,
+				Model:          model,
+				Role:           role,
+				OrgRole:        orgRole,
+				OrgLevel:       orgLevel,
+				ManagerID:      managerAgentID,
+				SystemPrompt:   prompt,
+				Temperature:    0.5,
+				ContextWindow:  128000,
+				MaxToolIterations: 20,
+				ToolProfile:    "full",
+			})
+			if err != nil {
+				return "", err
+			}
+			// Set monthly budget
+			if monthlyBudgetUSD > 0 {
+				_, _ = gw.db.Pool.Exec(ctx,
+					`UPDATE agents SET monthly_budget_usd=$1 WHERE id=$2`,
+					monthlyBudgetUSD, a.ID)
+			}
+			// Seed archetype soul + defaults
+			if gw.bundleStore != nil {
+				soulContent := prompt
+				if soulContent == "" {
+					if seed, ok := agent.AgentSeeds[orgRole]; ok && seed.Soul != "" {
+						soulContent = seed.Soul
+					} else if seed, ok := agent.AgentSeeds[role]; ok && seed.Soul != "" {
+						soulContent = seed.Soul
+					} else {
+						soulContent = fmt.Sprintf("You are %s, an AI specialist in the %s department.", name, dept)
+					}
+				}
+				gw.bundleStore.Upsert(ctx, agent.Bundle{
+					AgentID: a.ID, BundleType: "soul", Name: "soul",
+					Content: soulContent, Priority: 200, Enabled: true,
+				})
+				gw.bundleStore.SeedDefaults(ctx, a.ID, role)
+			}
+			// Write to org_roster
+			gw.db.Pool.Exec(ctx,
+				`INSERT INTO org_roster (tenant_id, agent_id, org_level, org_role, display_name, status, hired_by)
+				 VALUES ($1,$2,$3,$4,$5,'active',$6) ON CONFLICT DO NOTHING`,
+				defaultTenant, a.ID, orgLevel, orgRole, name, managerAgentID)
+			// Activate runtime
+			if gw.runtimeMgr != nil {
+				gw.runtimeMgr.EnsureRuntime(a.ID, defaultTenant)
+			}
+			return a.ID, nil
+		}
+
+		tools.OnHRTerminateAgent = func(ctx context.Context, agentID, reason, terminatedBy string) error {
+			_, err := gw.db.Pool.Exec(ctx,
+				`UPDATE agents SET terminated_at=now(), status='suspended' WHERE id=$1 AND tenant_id=$2`,
+				agentID, defaultTenant)
+			if err != nil {
+				return err
+			}
+			// Snapshot spend into org_roster
+			gw.db.Pool.Exec(ctx,
+				`UPDATE org_roster SET
+				    status='terminated', terminated_at=now(), terminated_by=$1, termination_reason=$2,
+				    total_spend_usd=(SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend WHERE agent_id=$3),
+				    total_tokens_in=(SELECT COALESCE(SUM(tokens_in),0) FROM org_daily_spend WHERE agent_id=$3),
+				    total_tokens_out=(SELECT COALESCE(SUM(tokens_out),0) FROM org_daily_spend WHERE agent_id=$3)
+				 WHERE agent_id=$3 AND status='active'`,
+				terminatedBy, reason, agentID)
+			return nil
+		}
+
+		tools.OnHRListOrg = func(ctx context.Context) ([]map[string]any, error) {
+			rows, err := gw.db.Pool.Query(ctx,
+				`SELECT id, display_name, COALESCE(org_level,'l3'), COALESCE(org_role,''), status,
+				        COALESCE(monthly_budget_usd,0), hired_at
+				 FROM agents WHERE tenant_id=$1 AND deleted_at IS NULL
+				 ORDER BY CASE COALESCE(org_level,'l3') WHEN 'l1' THEN 0 WHEN 'l2' THEN 1 ELSE 2 END, display_name`,
+				defaultTenant)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var out []map[string]any
+			for rows.Next() {
+				var id, name, orgLevel, orgRole, status string
+				var budget float64
+				var hiredAt *string
+				rows.Scan(&id, &name, &orgLevel, &orgRole, &status, &budget, &hiredAt)
+				entry := map[string]any{"id": id, "name": name, "org_level": orgLevel, "org_role": orgRole, "status": status, "monthly_budget_usd": budget}
+				if hiredAt != nil {
+					entry["hired_at"] = *hiredAt
+				}
+				out = append(out, entry)
+			}
+			return out, nil
+		}
+
+		tools.OnHRGetAgent = func(ctx context.Context, idOrName string) (map[string]any, error) {
+			var a agent.Agent
+			var err error
+			if len(idOrName) == 36 { // UUID
+				ap, e := gw.agents.Get(ctx, idOrName)
+				if e == nil {
+					a = *ap
+				}
+				err = e
+			} else {
+				ap, e := gw.agents.GetByKey(ctx, strings.ToLower(strings.ReplaceAll(idOrName, " ", "-")))
+				if e == nil {
+					a = *ap
+				}
+				err = e
+			}
+			if err != nil {
+				return nil, fmt.Errorf("agent not found: %s", idOrName)
+			}
+			role := ""
+			if a.Role != nil {
+				role = *a.Role
+			}
+			return map[string]any{
+				"id": a.ID, "name": a.DisplayName, "role": role,
+				"org_level": a.OrgLevel, "org_role": a.OrgRole,
+				"status": a.Status, "model": a.Model,
+			}, nil
+		}
 	}
 
+	reg.Register(tools.NewHRManageTool())
 	reg.Register(emailSend)
 	reg.Register(emailRead)
 

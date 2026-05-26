@@ -93,10 +93,13 @@ func GetSubordinates(ctx context.Context, pool *pgxpool.Pool, managerID string) 
 	return agents, nil
 }
 
-// GetOrgChart returns the full agent hierarchy for a tenant.
+// GetOrgChart returns the full agent hierarchy for a tenant including org-level metadata.
 func GetOrgChart(ctx context.Context, pool *pgxpool.Pool, tenantID string) ([]map[string]any, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, agent_key, display_name, role, title, manager_id, model, status
+		`SELECT id, agent_key, display_name, role, title, manager_id, model, status,
+		        COALESCE(org_level,'l3'), COALESCE(org_role,''), COALESCE(avatar,''),
+		        COALESCE(customer_facing,false), COALESCE(monthly_budget_usd,0),
+		        hired_at, terminated_at
 		 FROM agents WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY display_name`, tenantID)
 	if err != nil {
 		return nil, err
@@ -105,13 +108,19 @@ func GetOrgChart(ctx context.Context, pool *pgxpool.Pool, tenantID string) ([]ma
 
 	chart := []map[string]any{}
 	for rows.Next() {
-		var id, key, name, model, status string
-		var role, title *string
-		var managerID *string
-		rows.Scan(&id, &key, &name, &role, &title, &managerID, &model, &status)
+		var id, key, name, model, status, orgLevel, orgRole, avatar string
+		var role, title, managerID *string
+		var customerFacing bool
+		var monthlyBudget float64
+		var hiredAt, terminatedAt *time.Time
+		rows.Scan(&id, &key, &name, &role, &title, &managerID, &model, &status,
+			&orgLevel, &orgRole, &avatar, &customerFacing, &monthlyBudget,
+			&hiredAt, &terminatedAt)
 		entry := map[string]any{
 			"id": id, "agent_key": key, "display_name": name,
 			"model": model, "status": status,
+			"org_level": orgLevel, "org_role": orgRole, "avatar": avatar,
+			"customer_facing": customerFacing, "monthly_budget_usd": monthlyBudget,
 		}
 		if role != nil {
 			entry["role"] = *role
@@ -121,6 +130,12 @@ func GetOrgChart(ctx context.Context, pool *pgxpool.Pool, tenantID string) ([]ma
 		}
 		if managerID != nil {
 			entry["manager_id"] = *managerID
+		}
+		if hiredAt != nil {
+			entry["hired_at"] = hiredAt.Format(time.RFC3339)
+		}
+		if terminatedAt != nil {
+			entry["terminated_at"] = terminatedAt.Format(time.RFC3339)
 		}
 		chart = append(chart, entry)
 	}
