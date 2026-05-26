@@ -56,6 +56,7 @@ type AuthScheme struct {
 // States: submitted → working → input-required → completed / failed / cancelled
 type Task struct {
 	ID        string       `json:"id"`
+	AgentID   string       `json:"agent_id"` // internal UUID — used to re-invoke on subsequent sends
 	Status    TaskStatus   `json:"status"`
 	Messages  []Message    `json:"messages,omitempty"`
 	Artifacts []Artifact   `json:"artifacts,omitempty"`

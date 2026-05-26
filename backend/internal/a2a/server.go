@@ -141,6 +141,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	task := &Task{
 		ID:        uuid.New().String(),
+		AgentID:   ag.ID,
 		Status:    TaskWorking,
 		Messages:  []Message{{Role: "user", Content: req.Message}},
 		CreatedAt: time.Now(),
@@ -150,7 +151,6 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	s.tasks[task.ID] = task
 	s.mu.Unlock()
 
-	// Run agent synchronously
 	resp, err := s.runAgent(r.Context(), ag.ID, req.Message)
 	s.mu.Lock()
 	if err != nil {
@@ -193,11 +193,20 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find agent from first message context
-	// For now, use the task's existing agent
 	s.mu.Lock()
 	task.Messages = append(task.Messages, Message{Role: "user", Content: req.Message})
 	task.Status = TaskWorking
+	s.mu.Unlock()
+
+	resp, err := s.runAgent(r.Context(), task.AgentID, req.Message)
+	s.mu.Lock()
+	if err != nil {
+		task.Status = TaskFailed
+	} else {
+		task.Status = TaskCompleted
+		task.Messages = append(task.Messages, Message{Role: "agent", Content: resp})
+	}
+	task.UpdatedAt = time.Now()
 	s.mu.Unlock()
 
 	json.NewEncoder(w).Encode(TaskResponse{Task: task})
