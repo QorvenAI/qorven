@@ -6,11 +6,13 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/qorvenai/qorven/internal/agent"
 )
 
 // handleGetOrgRoster returns all agents with org-level metadata for the roster table.
@@ -209,16 +211,55 @@ func (gw *Gateway) handleOrgHireAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var displayName, orgRole string
+	var displayName, existingPrompt string
 	_ = gw.db.Pool.QueryRow(r.Context(),
-		`SELECT COALESCE(display_name,''), COALESCE(org_role,'') FROM agents WHERE id=$1`, body.AgentID).
-		Scan(&displayName, &orgRole)
+		`SELECT COALESCE(display_name,''), COALESCE(system_prompt,'') FROM agents WHERE id=$1`, body.AgentID).
+		Scan(&displayName, &existingPrompt)
 
 	_, _ = gw.db.Pool.Exec(r.Context(),
 		`INSERT INTO org_roster (tenant_id, agent_id, org_level, org_role, display_name, status, hired_by)
 		 VALUES ($1,$2,$3,$4,$5,'active',$6)
 		 ON CONFLICT DO NOTHING`,
 		defaultTenant, body.AgentID, body.OrgLevel, body.OrgRole, displayName, hiredBy)
+
+	// Seed soul bundle from archetype if agent has no system prompt yet
+	if gw.bundleStore != nil && body.OrgRole != "" {
+		var soulContent string
+		if seed, ok := agent.AgentSeeds[body.OrgRole]; ok && seed.Soul != "" {
+			soulContent = seed.Soul
+		} else if existingPrompt == "" {
+			soulContent = fmt.Sprintf("You are %s, an AI %s at this organisation.", displayName, body.OrgRole)
+		}
+		if soulContent != "" {
+			gw.bundleStore.Upsert(r.Context(), agent.Bundle{
+				AgentID:    body.AgentID,
+				BundleType: "soul",
+				Name:       "soul",
+				Content:    soulContent,
+				Priority:   200,
+				Enabled:    true,
+			})
+		}
+		// Seed default tool bundles for the org role's archetype
+		archetype := ""
+		switch body.OrgRole {
+		case "cto":
+			archetype = "code"
+		case "cmo":
+			archetype = "marketer"
+		case "cso":
+			archetype = "sales"
+		case "cco":
+			archetype = "support"
+		case "ciso", "cko":
+			archetype = "researcher"
+		case "cfo":
+			archetype = "analyst"
+		default:
+			archetype = "general"
+		}
+		gw.bundleStore.SeedDefaults(r.Context(), body.AgentID, archetype)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "hired", "agent_id": body.AgentID})
 }

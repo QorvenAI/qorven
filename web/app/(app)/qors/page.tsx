@@ -16,8 +16,37 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { soulGradient } from '@/components/soul-card';
 import { useSoulRun } from '@/hooks/use-soul';
 import { useSelectedModels } from '@/hooks/use-selected-models';
-import { Plus, X, Search, MessageSquare, Settings, Trash2, MoreHorizontal } from 'lucide-react';
+import { Plus, X, Search, MessageSquare, Settings, Trash2, MoreHorizontal,
+  Cpu, Building2, Code2, Megaphone, ShoppingCart, HeadphonesIcon,
+  UserCheck, Shield, BookOpen, DollarSign, User,
+} from 'lucide-react';
 import type { Soul } from '@/types';
+
+// ─── Org role display helpers ─────────────────────────────────────────────────
+const ORG_ROLE_META: Record<string, { label: string; color: string; Icon: React.ElementType }> = {
+  caio:  { label: 'CAIO',  color: 'bg-violet-500/15 text-violet-500 border-violet-500/20', Icon: Cpu },
+  coo:   { label: 'COO',   color: 'bg-amber-500/15 text-amber-500 border-amber-500/20',   Icon: Building2 },
+  cto:   { label: 'CTO',   color: 'bg-blue-500/15 text-blue-500 border-blue-500/20',       Icon: Code2 },
+  cmo:   { label: 'CMO',   color: 'bg-pink-500/15 text-pink-500 border-pink-500/20',       Icon: Megaphone },
+  cso:   { label: 'CSO',   color: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20', Icon: ShoppingCart },
+  cco:   { label: 'CCO',   color: 'bg-cyan-500/15 text-cyan-500 border-cyan-500/20',       Icon: HeadphonesIcon },
+  chro:  { label: 'CHRO',  color: 'bg-orange-500/15 text-orange-500 border-orange-500/20', Icon: UserCheck },
+  ciso:  { label: 'CISO',  color: 'bg-red-500/15 text-red-500 border-red-500/20',          Icon: Shield },
+  cko:   { label: 'CKO',   color: 'bg-teal-500/15 text-teal-500 border-teal-500/20',       Icon: BookOpen },
+  cfo:   { label: 'CFO',   color: 'bg-lime-500/15 text-lime-600 border-lime-500/20',       Icon: DollarSign },
+};
+
+function OrgRoleBadge({ orgRole }: { orgRole?: string }) {
+  if (!orgRole || orgRole === 'specialist') return null;
+  const meta = ORG_ROLE_META[orgRole];
+  if (!meta) return null;
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded border px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide ${meta.color}`}>
+      <meta.Icon className="h-2 w-2" />
+      {meta.label}
+    </span>
+  );
+}
 
 export default function QorsPage() {
   const souls = useStore((s) => s.souls);
@@ -28,6 +57,7 @@ export default function QorsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [orgFilter, setOrgFilter] = useState<string>('all'); // all | csuite | specialists
 
   const load = useCallback((showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -43,6 +73,8 @@ export default function QorsPage() {
     return Array.from(r);
   }, [souls]);
 
+  const hasCsuite = useMemo(() => souls.some((s) => s.org_role && ORG_ROLE_META[s.org_role]), [souls]);
+
   const filtered = useMemo(() => {
     let list = souls;
     if (search) {
@@ -50,12 +82,15 @@ export default function QorsPage() {
       list = list.filter((s) =>
         s.display_name.toLowerCase().includes(q) ||
         s.role?.toLowerCase().includes(q) ||
+        s.org_role?.toLowerCase().includes(q) ||
         s.model?.toLowerCase().includes(q),
       );
     }
     if (roleFilter !== 'all') list = list.filter((s) => s.role === roleFilter);
+    if (orgFilter === 'csuite') list = list.filter((s) => s.org_level === 'l1' || s.org_level === 'l2');
+    if (orgFilter === 'specialists') list = list.filter((s) => !s.org_level || s.org_level === 'l3');
     return list;
-  }, [souls, search, roleFilter]);
+  }, [souls, search, roleFilter, orgFilter]);
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load Qors">
@@ -74,10 +109,10 @@ export default function QorsPage() {
           </button>
         </div>
 
-        {/* Search + role filter */}
+        {/* Search + filter */}
         {souls.length > 0 && (
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 max-w-sm min-w-40">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={search}
@@ -91,6 +126,24 @@ export default function QorsPage() {
                 </button>
               )}
             </div>
+            {hasCsuite && (
+              <div className="flex items-center gap-1">
+                {(['all', 'csuite', 'specialists'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setOrgFilter(f)}
+                    className={cn(
+                      'rounded-full border px-3 py-1 text-xs transition-colors',
+                      orgFilter === f
+                        ? 'border-primary bg-primary/10 text-primary font-medium'
+                        : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent/40',
+                    )}
+                  >
+                    {f === 'all' ? 'All' : f === 'csuite' ? 'C-Suite' : 'Specialists'}
+                  </button>
+                ))}
+              </div>
+            )}
             {roles.length > 1 && (
               <details className="relative">
                 <summary className="list-none cursor-pointer rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
@@ -196,10 +249,15 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
     error: 'Error',
   }[activity] ?? 'Idle';
 
+  const orgMeta = soul.org_role ? ORG_ROLE_META[soul.org_role] : null;
+
   return (
     <div
       className={cn(
-        'group relative rounded-xl border border-border bg-card p-4 transition-all hover:border-primary/30',
+        'group relative rounded-xl border bg-card p-4 transition-all hover:border-primary/30',
+        soul.org_level === 'l1' ? 'border-amber-400/30 hover:border-amber-400/50' :
+        soul.org_level === 'l2' ? 'border-blue-400/20 hover:border-blue-400/40' :
+        'border-border',
         activity === 'thinking' && 'ring-1 ring-amber-400/30',
         activity === 'running' && 'ring-1 ring-blue-400/30',
         deleting && 'opacity-50 pointer-events-none',
@@ -210,8 +268,15 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
           {soul.display_name.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{soul.display_name}</p>
-          <p className="truncate text-xs text-muted-foreground">{soul.title || soul.role || 'Assistant'}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="truncate text-sm font-semibold">{soul.display_name}</p>
+            <OrgRoleBadge orgRole={soul.org_role} />
+          </div>
+          <p className="truncate text-xs text-muted-foreground">
+            {soul.org_role && ORG_ROLE_META[soul.org_role]
+              ? `${ORG_ROLE_META[soul.org_role]!.label} — ${soul.org_level === 'l1' ? 'Executive' : soul.org_level === 'l2' ? 'C-Suite' : 'Specialist'}`
+              : soul.title || soul.role || 'Assistant'}
+          </p>
           <span className={cn('mt-1 inline-flex items-center gap-1 text-2xs', activityColor)}>
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
             {activityLabel}

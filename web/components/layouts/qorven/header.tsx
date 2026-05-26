@@ -18,6 +18,19 @@ import { notifications as notifApi, providers as providersApi } from '@/lib/api'
 import { listApps, type QorvenApp } from '@/lib/api-apps';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/qor/tooltip';
 
+const ORG_ROLE_COLORS: Record<string, string> = {
+  caio:  'bg-violet-500/15 text-violet-500 border-violet-500/20',
+  coo:   'bg-amber-500/15 text-amber-500 border-amber-500/20',
+  cto:   'bg-blue-500/15 text-blue-500 border-blue-500/20',
+  cmo:   'bg-pink-500/15 text-pink-500 border-pink-500/20',
+  cso:   'bg-emerald-500/15 text-emerald-500 border-emerald-500/20',
+  cco:   'bg-cyan-500/15 text-cyan-500 border-cyan-500/20',
+  chro:  'bg-orange-500/15 text-orange-500 border-orange-500/20',
+  ciso:  'bg-red-500/15 text-red-500 border-red-500/20',
+  cko:   'bg-teal-500/15 text-teal-500 border-teal-500/20',
+  cfo:   'bg-lime-500/15 text-lime-600 border-lime-500/20',
+};
+
 // Page labels for breadcrumb
 const pageLabels: Record<string, string> = {
   '/': 'Dashboard', '/qors': 'Qors', '/code': 'Code', '/terminal': 'Terminal',
@@ -128,10 +141,20 @@ export function Header() {
 
           {soul ? (
             <div className="flex flex-col justify-center min-w-0">
-              <div className="flex items-center gap-1.5 text-2sm text-muted-foreground leading-none">
+              <div className="flex items-center gap-1.5 text-2sm text-muted-foreground leading-none flex-wrap">
                 <Link href="/qors" className="hover:text-foreground transition-colors">Qors</Link>
                 <span className="text-muted-foreground/50">/</span>
-                <span className="text-foreground font-medium truncate max-w-[160px]">{soul.display_name}</span>
+                <span className="text-foreground font-medium truncate max-w-[140px]">{soul.display_name}</span>
+                {(soul as any).org_role && ORG_ROLE_COLORS[(soul as any).org_role] && (
+                  <span className={`inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide leading-none ${ORG_ROLE_COLORS[(soul as any).org_role]}`}>
+                    {((soul as any).org_role as string).toUpperCase()}
+                  </span>
+                )}
+                {(soul as any).org_level === 'l1' && (
+                  <span className="inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide leading-none bg-amber-500/10 text-amber-500 border-amber-500/20">
+                    Executive
+                  </span>
+                )}
               </div>
             </div>
           ) : isCodePage ? (

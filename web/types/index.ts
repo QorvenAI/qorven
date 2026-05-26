@@ -35,6 +35,11 @@ export interface Soul {
   status: SoulStatus;
   runtime_mode?: string;
   can_delegate?: boolean;
+  org_level?: string;     // l1 | l2 | l3 | customer_facing
+  org_role?: string;      // coo | cto | cmo | chro | ciso | cko | cfo | caio | cco | cso | specialist
+  customer_facing?: boolean;
+  monthly_budget_usd?: number;
+  hired_at?: string;
   created_at: string;
   updated_at: string;
 }

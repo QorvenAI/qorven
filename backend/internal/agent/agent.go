@@ -31,9 +31,11 @@ type Agent struct {
 	ManagerID         *string         `json:"manager_id,omitempty"`
 
 	// Org chart
-	OrgLevel          string          `json:"org_level,omitempty"`  // l1, l2, l3, customer_facing
-	OrgRole           string          `json:"org_role,omitempty"`   // coo, cto, cmo, chro, …
+	OrgLevel          string          `json:"org_level,omitempty"`        // l1, l2, l3, customer_facing
+	OrgRole           string          `json:"org_role,omitempty"`         // coo, cto, cmo, chro, …
 	CustomerFacing    bool            `json:"customer_facing,omitempty"`
+	MonthlyBudgetUSD  float64         `json:"monthly_budget_usd,omitempty"`
+	HiredAt           *time.Time      `json:"hired_at,omitempty"`
 
 	// LLM
 	ProviderID        *string         `json:"provider_id,omitempty"`
@@ -212,7 +214,8 @@ const agentSelectCols = `SELECT id, tenant_id, agent_key, display_name, COALESCE
         COALESCE(runtime_mode,''), COALESCE(can_delegate,false),
         COALESCE(project_brief_id::text,''),
         COALESCE(mail_policy,''),
-        COALESCE(org_level,'l3'), COALESCE(org_role,''), COALESCE(customer_facing,false)
+        COALESCE(org_level,'l3'), COALESCE(org_role,''), COALESCE(customer_facing,false),
+        COALESCE(monthly_budget_usd,0), hired_at
  FROM agents`
 
 func (s *Store) scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
@@ -224,7 +227,7 @@ func (s *Store) scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 		&a.WebSearchEnabled, &a.OutboundApproval,
 		&a.CreditBudgetCents, &a.CreditUsedCents, &a.Status, &a.CreatedAt, &a.UpdatedAt,
 		&a.ThinkingLevel, &a.RuntimeMode, &a.CanDelegate, &a.ProjectBriefID, &a.MailPolicy,
-		&a.OrgLevel, &a.OrgRole, &a.CustomerFacing)
+		&a.OrgLevel, &a.OrgRole, &a.CustomerFacing, &a.MonthlyBudgetUSD, &a.HiredAt)
 	return a, err
 }
 
@@ -298,14 +301,8 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) e
 
 func (s *Store) List(ctx context.Context, tenantID string) ([]*Agent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, agent_key, display_name, COALESCE(avatar,''),
-		        role, title, manager_id, COALESCE(model,'default'),
-		        COALESCE(tool_profile,'full'), status,
-		        COALESCE(credit_budget_cents,0), COALESCE(credit_used_cents,0),
-		        COALESCE(memory_enabled,true), COALESCE(memory_sharing,'private'), COALESCE(outbound_approval,'supervisor'),
-		        created_at, updated_at, COALESCE(thinking_level,'off'),
-		        COALESCE(runtime_mode,''), COALESCE(can_delegate,false)
-		 FROM agents WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`, tenantID)
+		fmt.Sprintf(`%s WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`, agentSelectCols),
+		tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -313,11 +310,10 @@ func (s *Store) List(ctx context.Context, tenantID string) ([]*Agent, error) {
 
 	agents := []*Agent{}
 	for rows.Next() {
-		a := &Agent{}
-		rows.Scan(&a.ID, &a.TenantID, &a.AgentKey, &a.DisplayName, &a.Avatar, &a.Role, &a.Title, &a.ManagerID,
-			&a.Model, &a.ToolProfile, &a.Status, &a.CreditBudgetCents, &a.CreditUsedCents,
-			&a.MemoryEnabled, &a.MemorySharing, &a.OutboundApproval, &a.CreatedAt, &a.UpdatedAt, &a.ThinkingLevel,
-			&a.RuntimeMode, &a.CanDelegate)
+		a, err := s.scanAgent(rows)
+		if err != nil {
+			continue
+		}
 		agents = append(agents, a)
 	}
 	return agents, nil
@@ -457,25 +453,13 @@ func (s *Store) GetDefault(ctx context.Context, tenantID string) (*Agent, error)
 func (s *Store) GetByIDs(ctx context.Context, ids []string) ([]*Agent, error) {
 	if len(ids) == 0 { return nil, nil }
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, agent_key, display_name, COALESCE(avatar,''), role, title, manager_id,
-		        provider_id, model, COALESCE(fallback_model,''), system_prompt, temperature,
-		        context_window, max_tool_iterations, tool_profile, tools_allowed, tools_denied,
-		        memory_enabled, COALESCE(memory_sharing,'private'), auto_compact,
-		        credit_budget_cents, credit_used_cents, status, created_at, updated_at,
-		        COALESCE(thinking_level,'off')
-		 FROM agents WHERE id = ANY($1)`, ids)
+		fmt.Sprintf(`%s WHERE id = ANY($1)`, agentSelectCols), ids)
 	if err != nil { return nil, err }
 	defer rows.Close()
 	agents := []*Agent{}
 	for rows.Next() {
-		a := &Agent{}
-		rows.Scan(&a.ID, &a.TenantID, &a.AgentKey, &a.DisplayName, &a.Avatar,
-			&a.Role, &a.Title, &a.ManagerID, &a.ProviderID, &a.Model, &a.FallbackModel,
-			&a.SystemPrompt, &a.Temperature, &a.ContextWindow, &a.MaxToolIterations,
-			&a.ToolProfile, &a.ToolsAllowed, &a.ToolsDenied,
-			&a.MemoryEnabled, &a.MemorySharing, &a.AutoCompact,
-			&a.CreditBudgetCents, &a.CreditUsedCents, &a.Status, &a.CreatedAt, &a.UpdatedAt,
-			&a.ThinkingLevel)
+		a, err := s.scanAgent(rows)
+		if err != nil { continue }
 		agents = append(agents, a)
 	}
 	return agents, nil
@@ -484,25 +468,13 @@ func (s *Store) GetByIDs(ctx context.Context, ids []string) ([]*Agent, error) {
 // ListAll returns all agents for a tenant (including inactive).
 func (s *Store) ListAll(ctx context.Context, tenantID string) ([]*Agent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, agent_key, display_name, COALESCE(avatar,''), role, title, manager_id,
-		        provider_id, model, COALESCE(fallback_model,''), system_prompt, temperature,
-		        context_window, max_tool_iterations, tool_profile, tools_allowed, tools_denied,
-		        memory_enabled, COALESCE(memory_sharing,'private'), auto_compact,
-		        credit_budget_cents, credit_used_cents, status, created_at, updated_at,
-		        COALESCE(thinking_level,'off')
-		 FROM agents WHERE tenant_id = $1 ORDER BY created_at`, tenantID)
+		fmt.Sprintf(`%s WHERE tenant_id = $1 ORDER BY created_at`, agentSelectCols), tenantID)
 	if err != nil { return nil, err }
 	defer rows.Close()
 	agents := []*Agent{}
 	for rows.Next() {
-		a := &Agent{}
-		rows.Scan(&a.ID, &a.TenantID, &a.AgentKey, &a.DisplayName, &a.Avatar,
-			&a.Role, &a.Title, &a.ManagerID, &a.ProviderID, &a.Model, &a.FallbackModel,
-			&a.SystemPrompt, &a.Temperature, &a.ContextWindow, &a.MaxToolIterations,
-			&a.ToolProfile, &a.ToolsAllowed, &a.ToolsDenied,
-			&a.MemoryEnabled, &a.MemorySharing, &a.AutoCompact,
-			&a.CreditBudgetCents, &a.CreditUsedCents, &a.Status, &a.CreatedAt, &a.UpdatedAt,
-			&a.ThinkingLevel)
+		a, err := s.scanAgent(rows)
+		if err != nil { continue }
 		agents = append(agents, a)
 	}
 	return agents, nil
