@@ -8,15 +8,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/agent"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
 	"github.com/qorvenai/qorven/internal/connectors"
+	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/dashboard"
+	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/permissions"
 	"github.com/qorvenai/qorven/internal/providers"
 	"github.com/qorvenai/qorven/internal/qor/browser"
@@ -27,7 +31,6 @@ import (
 	"github.com/qorvenai/qorven/internal/skills"
 	"github.com/qorvenai/qorven/internal/storage"
 	supervisorpkg "github.com/qorvenai/qorven/internal/supervisor"
-	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/tools"
 )
 
@@ -463,6 +466,11 @@ func (gw *Gateway) registerTools() {
 					`UPDATE agents SET monthly_budget_usd=$1 WHERE id=$2`,
 					monthlyBudgetUSD, a.ID)
 			}
+			// L1/L2 agents can delegate tasks down the hierarchy
+			if orgLevel == "l1" || orgLevel == "l2" {
+				_, _ = gw.db.Pool.Exec(ctx,
+					`UPDATE agents SET can_delegate=true WHERE id=$1`, a.ID)
+			}
 			// Seed archetype soul + defaults
 			if gw.bundleStore != nil {
 				soulContent := prompt
@@ -567,9 +575,585 @@ func (gw *Gateway) registerTools() {
 				"status": a.Status, "model": a.Model,
 			}, nil
 		}
+
+		// Wire fleet_status callback — live fleet health for executive agents
+		tools.OnFleetStatus = func(ctx context.Context) (tools.FleetStatusData, error) {
+			pool := gw.db.Pool
+			data := tools.FleetStatusData{TierBreakdown: map[string]int{}}
+
+			// Agent counts by status and tier
+			rows, err := pool.Query(ctx,
+				`SELECT id, display_name, COALESCE(org_role,''), COALESCE(org_level,'l3'), status, updated_at
+				 FROM agents WHERE tenant_id=$1 AND deleted_at IS NULL`, defaultTenant)
+			if err != nil {
+				return data, err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id, name, orgRole, orgLevel, status string
+				var updatedAt time.Time
+				rows.Scan(&id, &name, &orgRole, &orgLevel, &status, &updatedAt)
+				data.TotalAgents++
+				data.TierBreakdown[orgLevel]++
+				switch status {
+				case "active":
+					data.ActiveAgents++
+				case "error":
+					data.ErrorAgents++
+					data.RecentErrors = append(data.RecentErrors, tools.AgentError{
+						AgentName: name, Error: "agent in error state", At: updatedAt.Format(time.RFC3339),
+					})
+				default:
+					data.IdleAgents++
+				}
+				data.Agents = append(data.Agents, tools.AgentSummary{
+					ID: id, DisplayName: name, OrgRole: orgRole, OrgLevel: orgLevel,
+					Status: status, LastActive: updatedAt.Format(time.RFC3339),
+				})
+			}
+
+			// Today's spend per agent
+			spendRows, err := pool.Query(ctx,
+				`SELECT agent_id, cost_usd FROM org_daily_spend WHERE tenant_id=$1 AND date=CURRENT_DATE`, defaultTenant)
+			if err == nil {
+				defer spendRows.Close()
+				spendMap := map[string]float64{}
+				for spendRows.Next() {
+					var aid string
+					var cost float64
+					spendRows.Scan(&aid, &cost)
+					spendMap[aid] = cost
+				}
+				for i := range data.Agents {
+					data.Agents[i].SpendToday = spendMap[data.Agents[i].ID]
+				}
+			}
+
+			// Sessions today
+			var sessCount int
+			pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND created_at >= CURRENT_DATE`, defaultTenant).Scan(&sessCount)
+			data.SessionsToday = sessCount
+
+			return data, nil
+		}
+
+		// Wire org_finance callback — cost/budget data for CFO/CAIO agents
+		tools.OnOrgFinance = func(ctx context.Context, days int) (tools.OrgFinanceData, error) {
+			pool := gw.db.Pool
+			data := tools.OrgFinanceData{}
+
+			// Month-to-date total
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date >= date_trunc('month', CURRENT_DATE)`, defaultTenant).Scan(&data.TotalMonthUSD)
+
+			// Today's total
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date = CURRENT_DATE`, defaultTenant).Scan(&data.TotalTodayUSD)
+
+			// Yesterday for day-over-day
+			var yesterday float64
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date = CURRENT_DATE - 1`, defaultTenant).Scan(&yesterday)
+			if yesterday > 0 {
+				pct := ((data.TotalTodayUSD - yesterday) / yesterday) * 100
+				if pct >= 0 {
+					data.DayOverDay = fmt.Sprintf("+%.0f%%", pct)
+				} else {
+					data.DayOverDay = fmt.Sprintf("%.0f%%", pct)
+				}
+			} else {
+				data.DayOverDay = "n/a"
+			}
+
+			// Top spenders this month
+			spenderRows, err := pool.Query(ctx,
+				`SELECT a.display_name, COALESCE(a.org_role,''), SUM(s.cost_usd), SUM(s.tokens_in), SUM(s.tokens_out)
+				 FROM org_daily_spend s JOIN agents a ON a.id = s.agent_id
+				 WHERE s.tenant_id=$1 AND s.date >= date_trunc('month', CURRENT_DATE)
+				 GROUP BY a.display_name, a.org_role ORDER BY SUM(s.cost_usd) DESC LIMIT 10`, defaultTenant)
+			if err == nil {
+				defer spenderRows.Close()
+				for spenderRows.Next() {
+					var sp tools.SpenderAgent
+					spenderRows.Scan(&sp.DisplayName, &sp.OrgRole, &sp.MonthCostUSD, &sp.TokensIn, &sp.TokensOut)
+					data.TopSpenders = append(data.TopSpenders, sp)
+				}
+			}
+
+			// Budget utilization
+			budgetRows, err := pool.Query(ctx,
+				`SELECT a.display_name, COALESCE(a.org_role,''), a.monthly_budget_usd,
+				        COALESCE((SELECT SUM(cost_usd) FROM org_daily_spend WHERE agent_id=a.id AND date >= date_trunc('month', CURRENT_DATE)),0)
+				 FROM agents a
+				 WHERE a.tenant_id=$1 AND a.deleted_at IS NULL AND a.monthly_budget_usd > 0
+				 ORDER BY a.monthly_budget_usd DESC`, defaultTenant)
+			if err == nil {
+				defer budgetRows.Close()
+				for budgetRows.Next() {
+					var b tools.BudgetAgent
+					budgetRows.Scan(&b.DisplayName, &b.OrgRole, &b.MonthlyBudget, &b.SpentUSD)
+					if b.MonthlyBudget > 0 {
+						b.PercentUsed = (b.SpentUSD / b.MonthlyBudget) * 100
+					}
+					data.BudgetUsage = append(data.BudgetUsage, b)
+				}
+			}
+
+			// Daily trend
+			trendRows, err := pool.Query(ctx,
+				`SELECT date::text, SUM(cost_usd) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date >= CURRENT_DATE - $2
+				 GROUP BY date ORDER BY date`, defaultTenant, days)
+			if err == nil {
+				defer trendRows.Close()
+				for trendRows.Next() {
+					var d tools.DailySpend
+					trendRows.Scan(&d.Date, &d.CostUSD)
+					data.DailyTrend = append(data.DailyTrend, d)
+				}
+			}
+
+			return data, nil
+		}
+
+		// ── CFO Accounting Tools — bank-grade cost reconciliation, forecasting, budget management ──
+
+		// Reconcile: verify our µUSD math matches provider pricing tables 100%
+		tools.OnReconcile = func(ctx context.Context) (tools.ReconciliationReport, error) {
+			pool := gw.db.Pool
+			report := tools.ReconciliationReport{RunAt: time.Now().UTC().Format(time.RFC3339)}
+
+			// Query all non-cache-hit spend grouped by model
+			rows, err := pool.Query(ctx, `
+				SELECT model_id, COUNT(*), SUM(tokens_in), SUM(tokens_out),
+				       SUM(tokens_thinking), SUM(tokens_cache_write), SUM(tokens_cache_read),
+				       SUM(cost_total_uusd)
+				FROM gateway_spend_raw
+				WHERE tenant_id=$1 AND NOT cache_hit
+				GROUP BY model_id
+				ORDER BY SUM(cost_total_uusd) DESC`, defaultTenant)
+			if err != nil {
+				return report, err
+			}
+			defer rows.Close()
+
+			pricing := gatewayllm.GetPricingSnapshot()
+			var totalOurUUSD, totalExpectedUUSD int64
+			var totalCalls int
+			var modelsWithPricing, modelsTotal int
+
+			for rows.Next() {
+				var modelID string
+				var calls int
+				var tokIn, tokOut, tokThink, tokCacheW, tokCacheR, costUUSD int64
+				rows.Scan(&modelID, &calls, &tokIn, &tokOut, &tokThink, &tokCacheW, &tokCacheR, &costUUSD)
+
+				modelsTotal++
+				totalCalls += calls
+				totalOurUUSD += costUUSD
+
+				mc := tools.ModelReconciliation{
+					Model:       modelID,
+					TotalCalls:  calls,
+					TokensIn:    tokIn,
+					TokensOut:   tokOut,
+					OurCostUUSD: costUUSD,
+				}
+
+				p, ok := pricing[modelID]
+				if !ok {
+					report.MissingModels = append(report.MissingModels, modelID)
+					mc.Match = true // can't check — treat as non-drift
+					report.PerModelCheck = append(report.PerModelCheck, mc)
+					continue
+				}
+
+				modelsWithPricing++
+				mc.InputRate = p.InputPer1M
+				mc.OutputRate = p.OutputPer1M
+
+				// Recompute expected cost using same toUUSD formula
+				expectedIn := int64(math.Round(float64(tokIn) * p.InputPer1M))
+				expectedOut := int64(math.Round(float64(tokOut) * p.OutputPer1M))
+				expectedThink := int64(math.Round(float64(tokThink) * p.OutputPer1M))
+				expectedCacheW := int64(math.Round(float64(tokCacheW) * p.CacheWrite))
+				expectedCacheR := int64(math.Round(float64(tokCacheR) * p.CacheRead))
+				expected := expectedIn + expectedOut + expectedThink + expectedCacheW + expectedCacheR
+
+				mc.ExpectedCostUUSD = expected
+				mc.DriftUUSD = costUUSD - expected
+				mc.Match = mc.DriftUUSD == 0
+				totalExpectedUUSD += expected
+
+				report.PerModelCheck = append(report.PerModelCheck, mc)
+			}
+
+			report.TotalRawUUSD = totalOurUUSD
+			report.TotalAggregateUSD = float64(totalOurUUSD) / 1_000_000
+			report.DriftUUSD = totalOurUUSD - totalExpectedUUSD
+			if totalExpectedUUSD > 0 {
+				report.DriftPercent = (float64(report.DriftUUSD) / float64(totalExpectedUUSD)) * 100
+			}
+			if modelsTotal > 0 {
+				report.PricingCoverage = float64(modelsWithPricing) / float64(modelsTotal) * 100
+			}
+
+			if report.DriftUUSD == 0 && len(report.MissingModels) == 0 {
+				report.Status = "balanced"
+				report.Explanation = fmt.Sprintf("Perfect match across %d calls on %d models. Zero drift.", totalCalls, modelsWithPricing)
+			} else if report.DriftUUSD == 0 {
+				report.Status = "balanced"
+				report.Explanation = fmt.Sprintf("Zero drift on priced models. %d model(s) lack pricing data.", len(report.MissingModels))
+			} else {
+				report.Status = "drift_detected"
+				report.Explanation = fmt.Sprintf("Drift of %d µUSD detected. Likely cause: pricing table update mid-period or rounding across %d calls.", report.DriftUUSD, totalCalls)
+			}
+
+			return report, nil
+		}
+
+		// Forecast: project month-end spend + anomaly detection
+		tools.OnForecastSpend = func(ctx context.Context, lookbackDays int) (tools.SpendForecast, error) {
+			pool := gw.db.Pool
+			now := time.Now()
+			forecast := tools.SpendForecast{
+				AsOf:        now.Format("2006-01-02"),
+				DaysInMonth: daysInMonth(now),
+				DaysElapsed: now.Day(),
+			}
+			forecast.DaysRemaining = forecast.DaysInMonth - forecast.DaysElapsed
+
+			// Month-to-date total
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date >= date_trunc('month', CURRENT_DATE)`, defaultTenant).Scan(&forecast.SpentSoFarUSD)
+
+			if forecast.DaysElapsed > 0 {
+				forecast.DailyAvgUSD = forecast.SpentSoFarUSD / float64(forecast.DaysElapsed)
+				forecast.ProjectedMonthUSD = forecast.DailyAvgUSD * float64(forecast.DaysInMonth)
+			}
+
+			// Trend direction: compare last 3 days avg vs previous 3 days
+			var recentAvg, olderAvg float64
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(AVG(cost_usd),0) FROM (
+					SELECT SUM(cost_usd) as cost_usd FROM org_daily_spend
+					WHERE tenant_id=$1 AND date >= CURRENT_DATE - 3
+					GROUP BY date) t`, defaultTenant).Scan(&recentAvg)
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(AVG(cost_usd),0) FROM (
+					SELECT SUM(cost_usd) as cost_usd FROM org_daily_spend
+					WHERE tenant_id=$1 AND date >= CURRENT_DATE - 6 AND date < CURRENT_DATE - 3
+					GROUP BY date) t`, defaultTenant).Scan(&olderAvg)
+			if olderAvg > 0 {
+				ratio := recentAvg / olderAvg
+				if ratio > 1.15 {
+					forecast.TrendDirection = "increasing"
+				} else if ratio < 0.85 {
+					forecast.TrendDirection = "decreasing"
+				} else {
+					forecast.TrendDirection = "stable"
+				}
+			} else {
+				forecast.TrendDirection = "stable"
+			}
+
+			// Per-agent forecast
+			agentRows, err := pool.Query(ctx, `
+				SELECT a.id, a.display_name, COALESCE(a.org_role,''), COALESCE(a.monthly_budget_usd,0),
+				       COALESCE((SELECT SUM(cost_usd) FROM org_daily_spend WHERE agent_id=a.id AND date >= date_trunc('month', CURRENT_DATE)),0)
+				FROM agents a
+				WHERE a.tenant_id=$1 AND a.deleted_at IS NULL
+				ORDER BY 5 DESC`, defaultTenant)
+			if err == nil {
+				defer agentRows.Close()
+				for agentRows.Next() {
+					var af tools.AgentForecast
+					agentRows.Scan(&af.AgentID, &af.DisplayName, &af.OrgRole, &af.MonthlyBudget, &af.SpentThisMonth)
+					if forecast.DaysElapsed > 0 {
+						af.ProjectedMonth = (af.SpentThisMonth / float64(forecast.DaysElapsed)) * float64(forecast.DaysInMonth)
+					}
+					if af.MonthlyBudget > 0 {
+						af.BudgetUtilPct = (af.SpentThisMonth / af.MonthlyBudget) * 100
+						if af.ProjectedMonth > af.MonthlyBudget {
+							af.WillExceedBudget = true
+							af.ExceedByUSD = af.ProjectedMonth - af.MonthlyBudget
+						}
+					}
+					forecast.AgentForecasts = append(forecast.AgentForecasts, af)
+				}
+			}
+
+			// Anomaly detection: 3σ spikes per agent over lookback period
+			anomalyRows, err := pool.Query(ctx, `
+				SELECT a.display_name, s.date::text, s.cost_usd, a.id
+				FROM org_daily_spend s JOIN agents a ON a.id = s.agent_id
+				WHERE s.tenant_id=$1 AND s.date >= CURRENT_DATE - $2
+				ORDER BY a.id, s.date`, defaultTenant, lookbackDays)
+			if err == nil {
+				defer anomalyRows.Close()
+				type dailyPoint struct {
+					name string
+					date string
+					cost float64
+				}
+				agentDays := map[string][]dailyPoint{}
+				for anomalyRows.Next() {
+					var name, date, agID string
+					var cost float64
+					anomalyRows.Scan(&name, &date, &cost, &agID)
+					agentDays[agID] = append(agentDays[agID], dailyPoint{name: name, date: date, cost: cost})
+				}
+				for _, days := range agentDays {
+					if len(days) < 3 {
+						continue
+					}
+					costs := make([]float64, len(days))
+					for i, d := range days {
+						costs[i] = d.cost
+					}
+					avg := tools.Mean(costs)
+					sd := tools.StdDev(costs)
+					if sd == 0 {
+						continue
+					}
+					for _, d := range days {
+						sigma := (d.cost - avg) / sd
+						if sigma >= 3.0 {
+							forecast.Anomalies = append(forecast.Anomalies, tools.SpendAnomaly{
+								AgentName:   d.name,
+								Date:        d.date,
+								SpendUSD:    d.cost,
+								AvgUSD:      avg,
+								StdDev:      sd,
+								Sigma:       sigma,
+								Description: fmt.Sprintf("%.1fσ above mean — investigate workload spike", sigma),
+							})
+						}
+					}
+				}
+			}
+
+			return forecast, nil
+		}
+
+		// SetBudget: CFO sets monthly/daily cap for an agent
+		tools.OnSetBudget = func(ctx context.Context, agentID string, monthlyUSD, dailyUSD float64) error {
+			pool := gw.db.Pool
+			_, err := pool.Exec(ctx,
+				`UPDATE agents SET monthly_budget_usd=$1 WHERE id=$2 AND tenant_id=$3`,
+				monthlyUSD, agentID, defaultTenant)
+			if err != nil {
+				return err
+			}
+			// Also update/insert gateway_budgets for the daily cap
+			if dailyUSD > 0 {
+				_, err = pool.Exec(ctx, `
+					INSERT INTO gateway_budgets (tenant_id, agent_id, monthly_usd, daily_usd)
+					VALUES ($1, $2, $3, $4)
+					ON CONFLICT (tenant_id, agent_id) WHERE agent_id IS NOT NULL
+					DO UPDATE SET monthly_usd=$3, daily_usd=$4, updated_at=now()`,
+					defaultTenant, agentID, monthlyUSD, dailyUSD)
+			}
+			return err
+		}
+
+		// RequestBudgetRaise: any agent can request a budget increase
+		tools.OnRequestBudgetRaise = func(ctx context.Context, agentID, reason string, requestedUSD float64) (string, error) {
+			pool := gw.db.Pool
+			var currentBudget float64
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(monthly_budget_usd,0) FROM agents WHERE id=$1`, agentID).Scan(&currentBudget)
+
+			var id string
+			err := pool.QueryRow(ctx, `
+				INSERT INTO budget_requests (tenant_id, agent_id, current_usd, requested_usd, reason)
+				VALUES ($1, $2, $3, $4, $5)
+				RETURNING id`, defaultTenant, agentID, currentBudget, requestedUSD, reason).Scan(&id)
+			if err != nil {
+				return "", err
+			}
+			// Notify via WebSocket
+			if gw.rtHub != nil {
+				gw.rtHub.Broadcast(realtime.Event{
+					Type: "budget_warning",
+					Data: map[string]string{"type": "raise_request", "agent_id": agentID, "request_id": id},
+				})
+			}
+			return id, nil
+		}
+
+		// ListBudgetRequests: CFO reviews all pending + recent requests
+		tools.OnListBudgetRequests = func(ctx context.Context) ([]tools.BudgetRequest, error) {
+			pool := gw.db.Pool
+			rows, err := pool.Query(ctx, `
+				SELECT br.id, br.agent_id, COALESCE(a.display_name,''), COALESCE(a.org_role,''),
+				       br.current_usd, br.requested_usd, br.reason, br.status,
+				       COALESCE(br.decided_by,''), COALESCE(br.decision_note,''),
+				       br.created_at::text, COALESCE(br.decided_at::text,'')
+				FROM budget_requests br
+				LEFT JOIN agents a ON a.id = br.agent_id
+				WHERE br.tenant_id=$1
+				ORDER BY CASE br.status WHEN 'pending' THEN 0 ELSE 1 END, br.created_at DESC
+				LIMIT 50`, defaultTenant)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var out []tools.BudgetRequest
+			for rows.Next() {
+				var r tools.BudgetRequest
+				rows.Scan(&r.ID, &r.AgentID, &r.AgentName, &r.OrgRole,
+					&r.CurrentUSD, &r.RequestedUSD, &r.Reason, &r.Status,
+					&r.DecidedBy, &r.DecisionNote, &r.CreatedAt, &r.DecidedAt)
+				out = append(out, r)
+			}
+			return out, nil
+		}
+
+		// DecideBudgetRequest: CFO approves or denies a raise
+		tools.OnDecideBudgetRequest = func(ctx context.Context, requestID, decision, note string) error {
+			pool := gw.db.Pool
+			deciderID := tools.AgentIDFromCtx(ctx)
+
+			// Update the request
+			_, err := pool.Exec(ctx, `
+				UPDATE budget_requests SET status=$1, decided_by=$2, decision_note=$3, decided_at=now()
+				WHERE id=$4 AND tenant_id=$5 AND status='pending'`,
+				decision, deciderID, note, requestID, defaultTenant)
+			if err != nil {
+				return err
+			}
+
+			// If approved, update the agent's budget
+			if decision == "approved" {
+				var agentID string
+				var requestedUSD float64
+				pool.QueryRow(ctx,
+					`SELECT agent_id, requested_usd FROM budget_requests WHERE id=$1`, requestID).Scan(&agentID, &requestedUSD)
+				if agentID != "" {
+					pool.Exec(ctx, `UPDATE agents SET monthly_budget_usd=$1 WHERE id=$2`, requestedUSD, agentID)
+				}
+			}
+			return nil
+		}
+
+		// CFOReport: comprehensive financial report combining all data
+		tools.OnCFOReport = func(ctx context.Context, days int) (tools.CFOReportData, error) {
+			pool := gw.db.Pool
+			report := tools.CFOReportData{
+				GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+				Period:      time.Now().Format("January 2006"),
+			}
+
+			// Get totals
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date >= date_trunc('month', CURRENT_DATE)`, defaultTenant).Scan(&report.TotalMonthUSD)
+			pool.QueryRow(ctx,
+				`SELECT COALESCE(SUM(cost_usd),0) FROM org_daily_spend
+				 WHERE tenant_id=$1 AND date = CURRENT_DATE`, defaultTenant).Scan(&report.TotalTodayUSD)
+
+			// Run reconciliation
+			if tools.OnReconcile != nil {
+				recon, err := tools.OnReconcile(ctx)
+				if err == nil {
+					report.Reconciliation = recon
+				}
+			}
+
+			// Run forecast
+			if tools.OnForecastSpend != nil {
+				fc, err := tools.OnForecastSpend(ctx, days)
+				if err == nil {
+					report.Forecast = fc
+				}
+			}
+
+			// Budget status per agent
+			budgetRows, err := pool.Query(ctx, `
+				SELECT a.display_name, COALESCE(a.org_role,''), COALESCE(a.monthly_budget_usd,0),
+				       COALESCE((SELECT SUM(cost_usd) FROM org_daily_spend WHERE agent_id=a.id AND date >= date_trunc('month', CURRENT_DATE)),0)
+				FROM agents a
+				WHERE a.tenant_id=$1 AND a.deleted_at IS NULL AND a.monthly_budget_usd > 0
+				ORDER BY a.monthly_budget_usd DESC`, defaultTenant)
+			if err == nil {
+				defer budgetRows.Close()
+				for budgetRows.Next() {
+					var bs tools.AgentBudgetStatus
+					budgetRows.Scan(&bs.DisplayName, &bs.OrgRole, &bs.MonthlyBudget, &bs.SpentUSD)
+					if bs.MonthlyBudget > 0 {
+						bs.PercentUsed = (bs.SpentUSD / bs.MonthlyBudget) * 100
+					}
+					switch {
+					case bs.PercentUsed >= 100:
+						bs.Status = "exceeded"
+					case bs.PercentUsed >= 80:
+						bs.Status = "critical"
+					case bs.PercentUsed >= 60:
+						bs.Status = "warning"
+					default:
+						bs.Status = "healthy"
+					}
+					report.BudgetStatus = append(report.BudgetStatus, bs)
+				}
+			}
+
+			// Pending budget requests
+			if tools.OnListBudgetRequests != nil {
+				allReqs, err := tools.OnListBudgetRequests(ctx)
+				if err == nil {
+					for _, r := range allReqs {
+						if r.Status == "pending" {
+							report.PendingRequests = append(report.PendingRequests, r)
+						}
+					}
+				}
+			}
+
+			// Generate recommendations
+			for _, bs := range report.BudgetStatus {
+				if bs.Status == "exceeded" {
+					report.Recommendations = append(report.Recommendations,
+						fmt.Sprintf("URGENT: %s has exceeded budget (%.0f%%). Suspend non-critical tasks or increase budget.", bs.DisplayName, bs.PercentUsed))
+				} else if bs.Status == "critical" {
+					report.Recommendations = append(report.Recommendations,
+						fmt.Sprintf("WARNING: %s at %.0f%% budget utilization. Review workload or plan increase.", bs.DisplayName, bs.PercentUsed))
+				}
+			}
+			for _, af := range report.Forecast.AgentForecasts {
+				if af.WillExceedBudget {
+					report.Recommendations = append(report.Recommendations,
+						fmt.Sprintf("FORECAST: %s projected to exceed budget by $%.2f. Consider preemptive raise.", af.DisplayName, af.ExceedByUSD))
+				}
+			}
+			if len(report.Reconciliation.MissingModels) > 0 {
+				report.Recommendations = append(report.Recommendations,
+					fmt.Sprintf("PRICING: %d model(s) lack pricing data. Add rates for accurate accounting.", len(report.Reconciliation.MissingModels)))
+			}
+			if report.Reconciliation.DriftUUSD != 0 {
+				report.Recommendations = append(report.Recommendations,
+					fmt.Sprintf("AUDIT: Cost drift of %d µUSD detected. Investigate pricing table changes.", report.Reconciliation.DriftUUSD))
+			}
+
+			return report, nil
+		}
 	}
 
 	reg.Register(tools.NewHRManageTool())
+	reg.Register(tools.NewFleetStatusTool())
+	reg.Register(tools.NewOrgFinanceTool())
+	reg.Register(tools.NewReconcileTool())
+	reg.Register(tools.NewForecastSpendTool())
+	reg.Register(tools.NewSetBudgetTool())
+	reg.Register(tools.NewRequestBudgetRaiseTool())
+	reg.Register(tools.NewListBudgetRequestsTool())
+	reg.Register(tools.NewDecideBudgetRequestTool())
+	reg.Register(tools.NewCFOReportTool())
 	reg.Register(emailSend)
 	reg.Register(emailRead)
 
@@ -1183,4 +1767,8 @@ func (gw *Gateway) loadProvidersFromDB() {
 			slog.Info("LLM provider verified", "provider", defProv.Name(), "test_response", testResp.Content[:min(len(testResp.Content), 20)])
 		}
 	}
+}
+
+func daysInMonth(t time.Time) int {
+	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
 }

@@ -74,6 +74,17 @@ func UpdatePricingTable(entries map[string]ModelPricing) {
 	}
 }
 
+// GetPricingSnapshot returns a copy of the current pricing table for reconciliation.
+func GetPricingSnapshot() map[string]ModelPricing {
+	pricingMu.RLock()
+	defer pricingMu.RUnlock()
+	out := make(map[string]ModelPricing, len(pricingTable))
+	for k, v := range pricingTable {
+		out[k] = v
+	}
+	return out
+}
+
 // toUUSD converts a rate (USD per 1M tokens) and a token count to integer µUSD.
 //
 // Math: ratePerMillion (USD/1M tokens) = ratePerMillion µUSD/token
