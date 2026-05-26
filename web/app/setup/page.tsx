@@ -102,9 +102,9 @@ export default function SetupPage() {
         if (!r.setup_required) { setAccepted(true); setStep(2); }
 
         if (!r.setup_required && isAuthenticated()) {
-          const agentList = await listAgents();
-          const prime = agentList.find(a => a.agent_key === 'chief') ?? agentList.find(a => a.agent_key === 'prime');
-          if (prime) setPrimeID(prime.id);
+          // Setup is complete and user is logged in — redirect to app
+          router.replace('/');
+          return;
         }
       } catch (e) {
         setGlobalError(e instanceof Error ? e.message : 'Setup check failed');
