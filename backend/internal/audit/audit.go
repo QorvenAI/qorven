@@ -58,6 +58,16 @@ func (s *Store) Query(ctx context.Context, tenantID string, opts QueryOpts) ([]E
 		args = append(args, opts.ActorID)
 		n++
 	}
+	if opts.ActorType != "" {
+		where += " AND actor_type = $" + itoa(n)
+		args = append(args, opts.ActorType)
+		n++
+	}
+	if opts.AgentKey != "" {
+		where += " AND actor_type = 'agent' AND actor_id = $" + itoa(n)
+		args = append(args, opts.AgentKey)
+		n++
+	}
 	if opts.Resource != "" {
 		where += " AND resource = $" + itoa(n)
 		args = append(args, opts.Resource)
@@ -99,12 +109,14 @@ func (s *Store) Query(ctx context.Context, tenantID string, opts QueryOpts) ([]E
 }
 
 type QueryOpts struct {
-	ActorID  string
-	Resource string
-	Action   string
-	Since    time.Time
-	Limit    int
-	Offset   int
+	ActorID   string
+	ActorType string // "user" | "agent" | "system"
+	AgentKey  string // filter by actor_id when actor_type=agent
+	Resource  string
+	Action    string
+	Since     time.Time
+	Limit     int
+	Offset    int
 }
 
 func itoa(n int) string {

@@ -557,6 +557,26 @@ func (r *SmartRouter) BestModelForTier(tier string) string {
 	return ""
 }
 
+// ModelForTier maps an integer tier (from agent.Tier) to the best available
+// model string. Used by org-level enforcement in the agent loop.
+//   0=Light→simple, 1=Standard→standard, 2=Complex→complex, 3=Reasoning→reasoning
+func (r *SmartRouter) ModelForTier(tenantID string, tier int) string {
+	var tierStr string
+	switch tier {
+	case 0:
+		tierStr = TierSimple
+	case 1:
+		tierStr = TierStandard
+	case 2:
+		tierStr = TierComplex
+	case 3:
+		tierStr = TierReasoning
+	default:
+		tierStr = TierStandard
+	}
+	return r.BestModelForTier(tierStr)
+}
+
 // Exclusion returns the model exclusion list.
 func (r *SmartRouter) Exclusion() *ModelExclusion {
 	if r.exclusion == nil { r.exclusion = NewModelExclusion() }

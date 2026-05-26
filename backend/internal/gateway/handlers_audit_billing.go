@@ -26,8 +26,15 @@ func (gw *Gateway) auditMiddleware(next http.Handler) http.Handler {
 			resource, resourceID := parseAuditPath(path)
 			action := methodToAction(r.Method)
 
+			actorID := "api"
+			actorName := ""
+			if u := userFromContext(r.Context()); u != nil {
+				actorID = u.ID
+				actorName = u.Username
+			}
+
 			gw.auditStore.Log(r.Context(), defaultTenant,
-				audit.ActorUser, "api", "",
+				audit.ActorUser, actorID, actorName,
 				action, resource, resourceID,
 				map[string]string{"method": r.Method, "path": path, "query": r.URL.RawQuery},
 				r.RemoteAddr,
@@ -72,11 +79,13 @@ func (gw *Gateway) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	opts := audit.QueryOpts{
-		ActorID:  q.Get("actor_id"),
-		Resource: q.Get("resource"),
-		Action:   q.Get("action"),
-		Limit:    50,
-		Offset:   0,
+		ActorID:   q.Get("actor_id"),
+		ActorType: q.Get("actor_type"),
+		AgentKey:  q.Get("agent_key"),
+		Resource:  q.Get("resource"),
+		Action:    q.Get("action"),
+		Limit:     50,
+		Offset:    0,
 	}
 	if l := q.Get("limit"); l != "" {
 		fmt.Sscanf(l, "%d", &opts.Limit)

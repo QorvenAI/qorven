@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/agent"
+	cronpkg "github.com/qorvenai/qorven/internal/cron"
 )
 
 // handleGetOrgRoster returns all agents with org-level metadata for the roster table.
@@ -259,6 +260,45 @@ func (gw *Gateway) handleOrgHireAgent(w http.ResponseWriter, r *http.Request) {
 			archetype = "general"
 		}
 		gw.bundleStore.SeedDefaults(r.Context(), body.AgentID, archetype)
+	}
+
+	// Seed default cron schedules for org roles (proactive activation)
+	if gw.db != nil && body.OrgRole != "" {
+		type cronSeed struct {
+			expr string
+			name string
+			task string
+		}
+		var schedules []cronSeed
+		switch body.OrgRole {
+		case "caio":
+			schedules = []cronSeed{
+				{"*/15 * * * *", "Fleet health check", "Check fleet health: look for stuck sessions, agents with errors, or unusually high token burn. Report anomalies."},
+				{"0 9 * * *", "Daily org digest", "Generate daily org digest: agent status, total spend yesterday, open delegations, any escalations."},
+			}
+		case "cfo":
+			schedules = []cronSeed{
+				{"0 9 * * 1", "Weekly finance report", "Generate weekly finance report: month-to-date spend vs previous, top 5 agents by cost, agents over 80% of budget cap, model cost breakdown, optimization recommendations."},
+				{"0 18 * * *", "Daily spend check", "Daily spend check: flag any agent that spent more than 50% of their daily budget, report total org spend today."},
+			}
+		case "coo":
+			schedules = []cronSeed{
+				{"0 8 * * *", "Morning ops summary", "Morning operations summary: what tasks are in progress, what completed yesterday, what's blocked, who's idle."},
+			}
+		case "chro":
+			schedules = []cronSeed{
+				{"0 9 * * 1", "Weekly org health", "Weekly org health check: total headcount, any agents idle >48h, budget utilisation per tier, recommend hiring or termination."},
+			}
+		}
+		for _, s := range schedules {
+			payload := fmt.Sprintf(`{"instruction":%q}`, s.task)
+			nextRun := cronpkg.NextRunFromExpr(s.expr)
+			gw.db.Pool.Exec(r.Context(),
+				`INSERT INTO cron_jobs (tenant_id, agent_id, name, cron_expression, payload, next_run_at, enabled)
+				 VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, true)
+				 ON CONFLICT DO NOTHING`,
+				defaultTenant, body.AgentID, s.name, s.expr, payload, nextRun)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "hired", "agent_id": body.AgentID})
