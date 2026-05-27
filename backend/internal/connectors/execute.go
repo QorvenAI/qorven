@@ -10,10 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-	"log/slog"
 
 	"github.com/qorvenai/qorven/internal/vault"
 )
@@ -22,6 +22,8 @@ import (
 type Executor struct {
 	knowledge *KnowledgeStore
 	vault     *vault.Vault
+	relay     *RelayStore
+	guard     *ExportGuard
 	tenantID  string
 	client    *http.Client
 	// RefreshFns maps platform ID → OAuth refresh function
@@ -30,47 +32,130 @@ type Executor struct {
 
 func NewExecutor(ks *KnowledgeStore, v *vault.Vault, tenantID string) *Executor {
 	return &Executor{
-		knowledge:  ks,
-		vault:      v,
-		tenantID:   tenantID,
-		client:     &http.Client{
+		knowledge: ks,
+		vault:     v,
+		tenantID:  tenantID,
+		client: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				Proxy: nil, // Ignore HTTP_PROXY/HTTPS_PROXY — defense against env injection
+				Proxy: nil,
 			},
 		},
 		RefreshFns: make(map[string]func(string) (*vault.CredentialData, *time.Time, error)),
 	}
 }
 
+func (e *Executor) SetRelay(rs *RelayStore) {
+	e.relay = rs
+}
+
+func (e *Executor) SetExportGuard(eg *ExportGuard) {
+	e.guard = eg
+}
+
 // Execute runs a connector action. Returns the API response as string.
 func (e *Executor) Execute(ctx context.Context, platformID, actionKey string, params map[string]any) (string, error) {
-	// 1. Look up action
 	action, err := e.knowledge.GetAction(ctx, platformID, actionKey)
 	if err != nil {
 		return "", fmt.Errorf("unknown action %s.%s", platformID, actionKey)
 	}
 
-	// 2. Look up platform
 	platform, err := e.knowledge.GetPlatform(ctx, platformID)
 	if err != nil {
 		return "", fmt.Errorf("platform %s not found", platformID)
 	}
 
-	// 3. Get credential
+	if e.guard != nil {
+		agentID := agentIDFromContext(ctx)
+		if err := e.guard.Check(ctx, e.tenantID, agentID, platformID, actionKey, platform.Category, params); err != nil {
+			return "", err
+		}
+	}
+
+	var result string
+	var backendUsed string
+
+	if e.shouldUsePipedream(ctx, platformID, action) {
+		result, err = e.executePipedream(ctx, platformID, action, params)
+		backendUsed = "pipedream"
+	} else {
+		result, err = e.executeDirect(ctx, platform, action, params)
+		backendUsed = "direct"
+	}
+
+	if e.relay != nil {
+		agentID := agentIDFromContext(ctx)
+		go func() {
+			_ = e.relay.LogAction(context.Background(), ActionLogEntry{
+				TenantID:     e.tenantID,
+				AgentID:      agentID,
+				PlatformID:   platformID,
+				ActionKey:    actionKey,
+				BackendUsed:  backendUsed,
+				Success:      err == nil,
+				ErrorMessage: errStr(err),
+			})
+		}()
+	}
+
+	return result, err
+}
+
+func (e *Executor) shouldUsePipedream(ctx context.Context, platformID string, action *ActionDef) bool {
+	if action.ExecutionBackend == "pipedream" {
+		return true
+	}
 	refreshFn := e.RefreshFns[platformID]
-	token, err := e.vault.GetToken(ctx, e.tenantID, platformID, refreshFn)
+	_, vaultErr := e.vault.GetToken(ctx, e.tenantID, platformID, refreshFn)
+	if vaultErr == nil {
+		return false
+	}
+	if e.relay == nil || action.PipedreamActionID == "" {
+		return false
+	}
+	acc, _ := e.relay.GetAccountForPlatform(ctx, e.tenantID, platformID)
+	return acc != nil
+}
+
+func (e *Executor) executePipedream(ctx context.Context, platformID string, action *ActionDef, params map[string]any) (string, error) {
+	if e.relay == nil {
+		return "", fmt.Errorf("no relay configured — add Pipedream API key in Settings → Integrations")
+	}
+	apiKey, err := e.relay.GetRelayKey(ctx, e.tenantID, "pipedream")
+	if err != nil {
+		return "", fmt.Errorf("pipedream not configured — add API key in Settings → Integrations")
+	}
+	acc, err := e.relay.GetAccountForPlatform(ctx, e.tenantID, platformID)
+	if err != nil || acc == nil {
+		return "", fmt.Errorf("no %s account connected — connect in Settings → Integrations", platformID)
+	}
+
+	client := NewPipedreamClient(apiKey, "")
+	result, err := client.RunAction(ctx, e.tenantID, action.PipedreamActionID, acc.ExternalAccountID, params)
+	if err != nil {
+		return "", err
+	}
+
+	out, _ := json.Marshal(result.Exports)
+	s := string(out)
+	if len(s) > 4000 {
+		s = s[:4000] + "\n...(truncated)"
+	}
+	return s, nil
+}
+
+func (e *Executor) executeDirect(ctx context.Context, platform *Platform, action *ActionDef, params map[string]any) (string, error) {
+	refreshFn := e.RefreshFns[platform.ID]
+	token, err := e.vault.GetToken(ctx, e.tenantID, platform.ID, refreshFn)
 	if err != nil {
 		return "", fmt.Errorf("not connected to %s — connect in Settings → Connections", platform.Name)
 	}
 
-	// 4. Build request
 	fullURL := strings.TrimRight(platform.BaseURL, "/") + action.Path
 	if params == nil {
 		params = make(map[string]any)
 	}
 
-	// Substitute path params: /users/{user_id} → /users/me
 	for k, v := range params {
 		ph := "{" + k + "}"
 		if strings.Contains(fullURL, ph) {
@@ -79,7 +164,6 @@ func (e *Executor) Execute(ctx context.Context, platformID, actionKey string, pa
 		}
 	}
 
-	// Query params for GET
 	if action.Method == "GET" && len(params) > 0 {
 		parts := make([]string, 0, len(params))
 		for k, v := range params {
@@ -103,7 +187,6 @@ func (e *Executor) Execute(ctx context.Context, platformID, actionKey string, pa
 		return "", fmt.Errorf("build request: %w", err)
 	}
 
-	// Auth header
 	switch platform.AuthType {
 	case "oauth2", "bearer":
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -131,7 +214,6 @@ func (e *Executor) Execute(ctx context.Context, platformID, actionKey string, pa
 		req.Header.Set(k, v)
 	}
 
-	// 5. Execute
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("%s request failed: %w", platform.Name, err)
@@ -155,7 +237,6 @@ func (e *Executor) Execute(ctx context.Context, platformID, actionKey string, pa
 }
 
 // ExecuteSafe wraps Execute with per-action error recovery.
-// Prevents one failed action from cascading to others in a pipeline.
 func (e *Executor) ExecuteSafe(ctx context.Context, platformID, actionKey string, params map[string]any) (string, error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -163,4 +244,20 @@ func (e *Executor) ExecuteSafe(ctx context.Context, platformID, actionKey string
 		}
 	}()
 	return e.Execute(ctx, platformID, actionKey, params)
+}
+
+func agentIDFromContext(ctx context.Context) string {
+	if v := ctx.Value("agent_id"); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

@@ -30,18 +30,20 @@ type Platform struct {
 
 // ActionDef is a DB-backed action definition.
 type ActionDef struct {
-	ID           string          `json:"id"`
-	PlatformID   string          `json:"platform_id"`
-	ActionKey    string          `json:"action_key"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	WhenToUse    string          `json:"when_to_use"`
-	Method       string          `json:"method"`
-	Path         string          `json:"path"`
-	Headers      json.RawMessage `json:"headers"`
-	Params       json.RawMessage `json:"params"`
-	BodyTemplate string          `json:"body_template"`
-	ResponseDesc string          `json:"response_desc"`
+	ID                string          `json:"id"`
+	PlatformID        string          `json:"platform_id"`
+	ActionKey         string          `json:"action_key"`
+	Name              string          `json:"name"`
+	Description       string          `json:"description"`
+	WhenToUse         string          `json:"when_to_use"`
+	Method            string          `json:"method"`
+	Path              string          `json:"path"`
+	Headers           json.RawMessage `json:"headers"`
+	Params            json.RawMessage `json:"params"`
+	BodyTemplate      string          `json:"body_template"`
+	ResponseDesc      string          `json:"response_desc"`
+	ExecutionBackend  string          `json:"execution_backend"`
+	PipedreamActionID string          `json:"pipedream_action_id"`
 }
 
 // KnowledgeStore provides CRUD for connector platforms and actions,
@@ -97,20 +99,20 @@ func (s *KnowledgeStore) GetPlatform(ctx context.Context, id string) (*Platform,
 // --- Action CRUD ---
 
 func (s *KnowledgeStore) UpsertAction(ctx context.Context, a ActionDef) error {
-	// Default empty JSON objects for NOT NULL JSONB fields
 	if a.Headers == nil { a.Headers = json.RawMessage("{}") }
 	if a.Params == nil { a.Params = json.RawMessage("{}") }
+	if a.ExecutionBackend == "" { a.ExecutionBackend = "direct" }
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO connector_actions (platform_id, action_key, name, description, when_to_use, method, path, headers, params, body_template, response_desc)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		 ON CONFLICT (platform_id, action_key) DO UPDATE SET name=$3, description=$4, when_to_use=$5, method=$6, path=$7, headers=$8, params=$9, body_template=$10, response_desc=$11`,
-		a.PlatformID, a.ActionKey, a.Name, a.Description, a.WhenToUse, a.Method, a.Path, a.Headers, a.Params, a.BodyTemplate, a.ResponseDesc)
+		`INSERT INTO connector_actions (platform_id, action_key, name, description, when_to_use, method, path, headers, params, body_template, response_desc, execution_backend, pipedream_action_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 ON CONFLICT (platform_id, action_key) DO UPDATE SET name=$3, description=$4, when_to_use=$5, method=$6, path=$7, headers=$8, params=$9, body_template=$10, response_desc=$11, execution_backend=$12, pipedream_action_id=$13`,
+		a.PlatformID, a.ActionKey, a.Name, a.Description, a.WhenToUse, a.Method, a.Path, a.Headers, a.Params, a.BodyTemplate, a.ResponseDesc, a.ExecutionBackend, a.PipedreamActionID)
 	return err
 }
 
 func (s *KnowledgeStore) ListActions(ctx context.Context, platformID string) ([]ActionDef, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, platform_id, action_key, name, description, when_to_use, method, path, headers, params, body_template, response_desc
+		`SELECT id, platform_id, action_key, name, description, when_to_use, method, path, headers, params, body_template, response_desc, COALESCE(execution_backend, 'direct'), COALESCE(pipedream_action_id, '')
 		 FROM connector_actions WHERE platform_id = $1 ORDER BY action_key`, platformID)
 	if err != nil {
 		return nil, err
@@ -119,7 +121,7 @@ func (s *KnowledgeStore) ListActions(ctx context.Context, platformID string) ([]
 	out := []ActionDef{}
 	for rows.Next() {
 		var a ActionDef
-		rows.Scan(&a.ID, &a.PlatformID, &a.ActionKey, &a.Name, &a.Description, &a.WhenToUse, &a.Method, &a.Path, &a.Headers, &a.Params, &a.BodyTemplate, &a.ResponseDesc)
+		rows.Scan(&a.ID, &a.PlatformID, &a.ActionKey, &a.Name, &a.Description, &a.WhenToUse, &a.Method, &a.Path, &a.Headers, &a.Params, &a.BodyTemplate, &a.ResponseDesc, &a.ExecutionBackend, &a.PipedreamActionID)
 		out = append(out, a)
 	}
 	return out, nil
@@ -128,9 +130,9 @@ func (s *KnowledgeStore) ListActions(ctx context.Context, platformID string) ([]
 func (s *KnowledgeStore) GetAction(ctx context.Context, platformID, actionKey string) (*ActionDef, error) {
 	var a ActionDef
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, platform_id, action_key, name, description, when_to_use, method, path, headers, params, body_template, response_desc
+		`SELECT id, platform_id, action_key, name, description, when_to_use, method, path, headers, params, body_template, response_desc, COALESCE(execution_backend, 'direct'), COALESCE(pipedream_action_id, '')
 		 FROM connector_actions WHERE platform_id = $1 AND action_key = $2`, platformID, actionKey,
-	).Scan(&a.ID, &a.PlatformID, &a.ActionKey, &a.Name, &a.Description, &a.WhenToUse, &a.Method, &a.Path, &a.Headers, &a.Params, &a.BodyTemplate, &a.ResponseDesc)
+	).Scan(&a.ID, &a.PlatformID, &a.ActionKey, &a.Name, &a.Description, &a.WhenToUse, &a.Method, &a.Path, &a.Headers, &a.Params, &a.BodyTemplate, &a.ResponseDesc, &a.ExecutionBackend, &a.PipedreamActionID)
 	if err != nil {
 		return nil, err
 	}
