@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ExternalLink, Check, AlertTriangle, Trash2, Plus, Key, Search, Puzzle, Loader2, ChevronDown } from 'lucide-react';
+import { ExternalLink, Check, AlertTriangle, Trash2, Plus, Key, Search, Puzzle, Loader2, ChevronDown, Shield } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, Btn, Input } from './primitives';
-import { integrationsApi, RelayKeyRecord, CatalogEntry } from '@/lib/api-integrations';
+import { Card, Btn, Input, Toggle } from './primitives';
+import { integrationsApi, RelayKeyRecord, CatalogEntry, ConnectedAccount, IntegrationPermission } from '@/lib/api-integrations';
+import { agents as agentsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import type { Soul } from '@/types';
 
 const RELAY_PROVIDERS = [
   { id: 'outstand', name: 'Outstand', category: 'social', description: 'Unified social API — handles OAuth, token refresh, rate limits', pricing: '$5/mo (1000 posts)', keyPrefix: 'sk_', keyHint: 'Get key from Outstand dashboard → Settings → API Keys', docsUrl: 'https://www.outstand.so/docs/getting-started' },
@@ -362,6 +364,147 @@ function CatalogBrowser() {
   );
 }
 
+function PermissionsPanel() {
+  const [agentsList, setAgentsList] = useState<Soul[]>([]);
+  const [platforms, setPlatforms] = useState<ConnectedAccount[]>([]);
+  const [permissions, setPermissions] = useState<IntegrationPermission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [agentsRes, accountsRes, permsRes] = await Promise.all([
+        agentsApi.list(),
+        integrationsApi.listConnectedAccounts(),
+        integrationsApi.listPermissions(),
+      ]);
+      setAgentsList(agentsRes || []);
+      setPlatforms(accountsRes || []);
+      setPermissions(permsRes || []);
+    } catch {
+      /* silently handle — panels may not be ready */
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const isAllowed = useCallback((agentId: string, platformId: string): boolean => {
+    const perm = permissions.find(
+      p => p.agent_id === agentId && p.platform_id === platformId && p.action_key === ''
+    );
+    return perm ? perm.allowed : true; // default allowed if no explicit permission set
+  }, [permissions]);
+
+  const handleToggle = useCallback(async (agentId: string, platformId: string, currentAllowed: boolean) => {
+    const key = `${agentId}:${platformId}`;
+    setToggling(key);
+    try {
+      await integrationsApi.setPermission({
+        agent_id: agentId,
+        platform_id: platformId,
+        action_key: '',
+        allowed: !currentAllowed,
+      });
+      setPermissions(prev => {
+        const idx = prev.findIndex(
+          p => p.agent_id === agentId && p.platform_id === platformId && p.action_key === ''
+        );
+        if (idx >= 0) {
+          const updated: IntegrationPermission[] = [...prev];
+          updated[idx] = { id: prev[idx]!.id, agent_id: agentId, platform_id: platformId, action_key: '', allowed: !currentAllowed };
+          return updated;
+        }
+        const newPerm: IntegrationPermission = { id: '', agent_id: agentId, platform_id: platformId, action_key: '', allowed: !currentAllowed };
+        return [...prev, newPerm];
+      });
+      toast.success(`Permission ${!currentAllowed ? 'granted' : 'revoked'}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update permission');
+    }
+    setToggling(null);
+  }, []);
+
+  // Deduplicate platforms by platform_id
+  const uniquePlatforms = platforms.reduce<ConnectedAccount[]>((acc, p) => {
+    if (!acc.find(x => x.platform_id === p.platform_id)) acc.push(p);
+    return acc;
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading permissions...
+        </div>
+      </div>
+    );
+  }
+
+  if (agentsList.length === 0 || uniquePlatforms.length === 0) {
+    return (
+      <Card id="connector-permissions" title="Connector Permissions" description="Control which agents can access connected platforms.">
+        <p className="text-sm text-muted-foreground">
+          {agentsList.length === 0
+            ? 'No agents found. Create an agent first.'
+            : 'No connected platforms. Connect a platform from the catalog above.'}
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      id="connector-permissions"
+      title="Connector Permissions"
+      description="Control which agents can use each connected platform."
+      headerRight={
+        <div className="flex items-center gap-1 text-muted-foreground">
+          <Shield className="h-3.5 w-3.5" />
+        </div>
+      }
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left py-2 pr-4 text-xs font-medium text-muted-foreground">Agent</th>
+              {uniquePlatforms.map(p => (
+                <th key={p.platform_id} className="text-center py-2 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                  {p.display_name || p.platform_id}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {agentsList.map(agent => (
+              <tr key={agent.id} className="border-b border-border last:border-0">
+                <td className="py-2.5 pr-4 text-sm font-medium text-foreground whitespace-nowrap">
+                  {agent.display_name}
+                </td>
+                {uniquePlatforms.map(p => {
+                  const allowed = isAllowed(agent.id, p.platform_id);
+                  const key = `${agent.id}:${p.platform_id}`;
+                  const isToggling = toggling === key;
+                  return (
+                    <td key={p.platform_id} className="text-center py-2.5 px-3">
+                      <div className={cn('inline-flex', isToggling && 'opacity-50 pointer-events-none')}>
+                        <Toggle checked={allowed} onChange={() => handleToggle(agent.id, p.platform_id, allowed)} />
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 export function IntegrationsSettings() {
   const [keys, setKeys] = useState<RelayKeyRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -433,6 +576,10 @@ export function IntegrationsSettings() {
 
       <div className="mt-6">
         <CatalogBrowser />
+      </div>
+
+      <div className="mt-6">
+        <PermissionsPanel />
       </div>
     </div>
   );
