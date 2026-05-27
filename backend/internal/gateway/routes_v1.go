@@ -397,6 +397,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		// GET variant: q= and optional agent_id= / max_results= — for the command palette
 		r.Get("/memory/search", gw.handleMemorySearchGET)
 		r.Post("/memory/save", gw.handleMemorySave)
+		r.Delete("/memory/{id}", gw.handleMemoryDelete)
+		r.Patch("/memory/{id}", gw.handleMemoryUpdate)
 		r.Get("/memory/scopes", func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]any{"scopes": []string{"company", "team", "agent", "task", "session", "prime"}})
 		})

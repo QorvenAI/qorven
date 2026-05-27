@@ -566,3 +566,32 @@ func (s *Store) HybridSearch(ctx context.Context, tenantID, agentID, query strin
 
 // SetEmbeddingClient enables automatic embedding generation on Save.
 func (s *Store) SetEmbeddingClient(c *EmbeddingClient) { s.embedClient = c }
+
+// Delete removes a memory by id, scoped to the tenant.
+func (s *Store) Delete(ctx context.Context, tenantID, id string) error {
+	res, err := s.pool.Exec(ctx,
+		`DELETE FROM memories WHERE id = $1 AND tenant_id = $2`,
+		id, tenantID,
+	)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return fmt.Errorf("memory not found")
+	}
+	return nil
+}
+
+func (s *Store) UpdateContent(ctx context.Context, tenantID, id, content string) error {
+	res, err := s.pool.Exec(ctx,
+		`UPDATE memories SET content = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+		content, id, tenantID,
+	)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return fmt.Errorf("memory not found")
+	}
+	return nil
+}

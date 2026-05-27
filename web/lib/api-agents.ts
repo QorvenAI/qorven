@@ -290,6 +290,8 @@ export const memoryApi = {
       method: 'POST',
       body: JSON.stringify({ scope: 'agent', agent_id: agentId, query: '', limit: 50 }),
     }).then((d) => (Array.isArray(d) ? d : (d?.memories ?? []))).catch(() => [] as MemoryRecord[]),
+  delete: (id: string) => request<void>('/memory/' + id, { method: 'DELETE' }),
+  update: (id: string, content: string) => request<{status:string}>('/memory/'+id, { method: 'PATCH', body: JSON.stringify({content}) }),
 };
 
 export const feedback = {

@@ -85,6 +85,53 @@ func (gw *Gateway) handleMemorySearchGET(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, map[string]any{"memories": results, "count": len(results)})
 }
 
+func (gw *Gateway) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if gw.memStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	if err := gw.memStore.Delete(r.Context(), user.TenantID, id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (gw *Gateway) handleMemoryUpdate(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content required"})
+		return
+	}
+	if err := gw.memStore.UpdateContent(r.Context(), user.TenantID, id, body.Content); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
 func (gw *Gateway) handleMemorySave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Content string `json:"content"`
