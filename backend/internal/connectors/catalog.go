@@ -214,3 +214,51 @@ func (c *Catalog) Count() int {
 	defer c.mu.RUnlock()
 	return len(c.entries)
 }
+
+// DiscoverAndStoreActions fetches Pipedream action components for a platform and stores them.
+func (c *Catalog) DiscoverAndStoreActions(ctx context.Context, platformID, apiKey string) (int, error) {
+	client := NewPipedreamClient(apiKey, "")
+	actions, err := client.DiscoverActions(ctx, platformID)
+	if err != nil {
+		return 0, err
+	}
+
+	stored := 0
+	for _, a := range actions {
+		actionKey := sanitizeActionKey(a.Key, platformID)
+		whenToUse := fmt.Sprintf("When user needs to %s", strings.ToLower(a.Name))
+		if a.Description != "" {
+			whenToUse = fmt.Sprintf("When user needs to: %s", a.Description)
+		}
+
+		def := ActionDef{
+			PlatformID:        platformID,
+			ActionKey:         actionKey,
+			Name:              a.Name,
+			Description:       a.Description,
+			WhenToUse:         whenToUse,
+			Method:            "POST",
+			Path:              "/connect/actions/run",
+			Params:            json.RawMessage(`{}`),
+			ResponseDesc:      "Action result",
+			ExecutionBackend:  "pipedream",
+			PipedreamActionID: a.Key,
+		}
+		if err := c.knowledge.UpsertAction(ctx, def); err == nil {
+			stored++
+		}
+	}
+	return stored, nil
+}
+
+// sanitizeActionKey converts a Pipedream component key like "salesforce-create-lead"
+// to a clean action_key like "create_lead"
+func sanitizeActionKey(key, platformID string) string {
+	k := strings.TrimPrefix(key, platformID+"-")
+	k = strings.TrimPrefix(k, platformID+"_")
+	k = strings.ReplaceAll(k, "-", "_")
+	if k == "" {
+		k = key
+	}
+	return k
+}

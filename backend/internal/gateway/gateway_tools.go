@@ -1348,6 +1348,13 @@ func (gw *Gateway) registerTools() {
 		reg.Register(connectors.NewExecuteActionTool(gw.connExec))
 		slog.Info("execute_action tool registered")
 	}
+
+	// Register list_connected_platforms tool for agent awareness
+	if gw.relayStore != nil && gw.connKB != nil {
+		awareness := connectors.NewPlatformAwareness(gw.relayStore, gw.connKB)
+		reg.Register(connectors.NewConnectedPlatformsTool(awareness))
+		slog.Info("list_connected_platforms tool registered")
+	}
 	slog.Info("connectors registered", "count", len(gw.connReg.List()))
 
 	slog.Info("tools registered", "count", reg.Count())

@@ -163,6 +163,56 @@ func (c *PipedreamClient) DeleteAccount(ctx context.Context, accountID string) e
 	return nil
 }
 
+// DiscoveredAction represents a single action component found via the Pipedream registry.
+type DiscoveredAction struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// DiscoverActions fetches available action components for an app from Pipedream.
+func (c *PipedreamClient) DiscoverActions(ctx context.Context, appSlug string) ([]DiscoveredAction, error) {
+	url := fmt.Sprintf("%s/components?app=%s&component_type=action&limit=20", pipedreamBaseURL, appSlug)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("discover actions for %s: %w", appSlug, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("pipedream components API %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Data []struct {
+			Key         string `json:"key"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Version     string `json:"version"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode components: %w", err)
+	}
+
+	var actions []DiscoveredAction
+	for _, comp := range result.Data {
+		actions = append(actions, DiscoveredAction{
+			Key:         comp.Key,
+			Name:        comp.Name,
+			Description: comp.Description,
+		})
+	}
+	return actions, nil
+}
+
 func (c *PipedreamClient) RunAction(
 	ctx context.Context,
 	externalUserID string,

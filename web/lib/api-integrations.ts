@@ -97,6 +97,20 @@ export const integrationsApi = {
       method: 'POST',
       body: JSON.stringify({ slug, name, categories }),
     }),
+
+  connectPlatformOAuth: (platformId: string) =>
+    request<{ connect_link_url: string; expires_at: number }>(
+      `/integrations/connect/${platformId}`, { method: 'POST' }
+    ),
+
+  discoverActions: (platformId: string) =>
+    request<{ platform_id: string; actions_stored: number }>('/connectors/catalog/discover', {
+      method: 'POST',
+      body: JSON.stringify({ platform_id: platformId }),
+    }),
+
+  listConnectedAccounts: () =>
+    request<ConnectedAccount[]>('/integrations/accounts'),
 };
 
 export interface ConnectedAccount {

@@ -147,7 +147,19 @@ function CatalogBrowser() {
   const [loading, setLoading] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [activatingSlug, setActivatingSlug] = useState<string | null>(null);
+  const [connectedPlatforms, setConnectedPlatforms] = useState<Set<string>>(new Set());
+  const [activatedSlugs, setActivatedSlugs] = useState<Set<string>>(new Set());
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [discovering, setDiscovering] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadConnected = useCallback(() => {
+    integrationsApi.listConnectedAccounts()
+      .then(accounts => setConnectedPlatforms(new Set(accounts.map(a => a.platform_id))))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { loadConnected(); }, [loadConnected]);
 
   const fetchCatalog = useCallback(async (q: string) => {
     setLoading(true);
@@ -189,10 +201,42 @@ function CatalogBrowser() {
       toast.success(`${entry.name} activated`);
       // Mark as installed locally
       setResults(prev => prev.map(r => r.slug === entry.slug ? { ...r, installed: true } : r));
+      setActivatedSlugs(prev => new Set(prev).add(entry.slug));
     } catch (e: any) {
       toast.error(e?.message || `Failed to activate ${entry.name}`);
     }
     setActivatingSlug(null);
+  };
+
+  const connectPlatform = async (slug: string) => {
+    setConnecting(slug);
+    try {
+      const res = await integrationsApi.connectPlatformOAuth(slug);
+      const popup = window.open(res.connect_link_url, 'pipedream_connect', 'width=600,height=700');
+      const poll = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(poll);
+          loadConnected();
+          setConnecting(null);
+          toast.success(`${slug} account connected`);
+        }
+      }, 1000);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to start connect');
+      setConnecting(null);
+    }
+  };
+
+  const discoverActions = async (slug: string) => {
+    setDiscovering(slug);
+    try {
+      const res = await integrationsApi.discoverActions(slug);
+      toast.success(`Discovered ${res.actions_stored} actions for ${slug}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Discovery failed');
+    } finally {
+      setDiscovering(null);
+    }
   };
 
   return (
@@ -238,47 +282,69 @@ function CatalogBrowser() {
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {results.map(entry => (
-                      <div
-                        key={entry.id}
-                        className="flex flex-col items-center gap-2 rounded-lg border border-border p-3 bg-background"
-                      >
-                        {entry.img_src ? (
-                          <img
-                            src={entry.img_src}
-                            alt={entry.name}
-                            className="h-8 w-8 rounded object-contain"
-                          />
-                        ) : (
-                          <Puzzle className="h-8 w-8 text-muted-foreground" />
-                        )}
-                        <span className="text-sm font-medium text-foreground text-center leading-tight">
-                          {entry.name}
-                        </span>
-                        {entry.categories.length > 0 && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                            {entry.categories[0]}
+                    {results.map(entry => {
+                      const isInstalled = entry.installed || activatedSlugs.has(entry.slug);
+                      const isConnected = connectedPlatforms.has(entry.slug);
+
+                      return (
+                        <div
+                          key={entry.id}
+                          className="flex flex-col items-center gap-2 rounded-lg border border-border p-3 bg-background"
+                        >
+                          {entry.img_src ? (
+                            <img
+                              src={entry.img_src}
+                              alt={entry.name}
+                              className="h-8 w-8 rounded object-contain"
+                            />
+                          ) : (
+                            <Puzzle className="h-8 w-8 text-muted-foreground" />
+                          )}
+                          <span className="text-sm font-medium text-foreground text-center leading-tight">
+                            {entry.name}
                           </span>
-                        )}
-                        {entry.installed ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-green-600">
-                            <Check className="h-3 w-3" /> Installed
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleActivate(entry)}
-                            disabled={activatingSlug === entry.slug}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                          >
-                            {activatingSlug === entry.slug ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              'Activate'
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                          {entry.categories.length > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {entry.categories[0]}
+                            </span>
+                          )}
+                          {isConnected ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-emerald-600 flex items-center gap-1">
+                                <Check className="h-3 w-3" /> Connected
+                              </span>
+                              <button
+                                onClick={() => discoverActions(entry.slug)}
+                                disabled={discovering === entry.slug}
+                                className="text-xs px-2 py-0.5 rounded border border-border hover:bg-accent transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {discovering === entry.slug ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Discover Actions'}
+                              </button>
+                            </div>
+                          ) : isInstalled ? (
+                            <button
+                              onClick={() => connectPlatform(entry.slug)}
+                              disabled={connecting === entry.slug}
+                              className="text-xs px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                            >
+                              {connecting === entry.slug ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Connect'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleActivate(entry)}
+                              disabled={activatingSlug === entry.slug}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                            >
+                              {activatingSlug === entry.slug ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                'Activate'
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {results.length === 0 && !loading && (

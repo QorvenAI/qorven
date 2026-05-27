@@ -74,3 +74,42 @@ func (gw *Gateway) handleCatalogActivate(w http.ResponseWriter, r *http.Request)
 
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "activated", "platform_id": body.Slug})
 }
+
+// handleCatalogDiscover fetches and stores actions for an activated platform.
+// POST /v1/connectors/catalog/discover
+func (gw *Gateway) handleCatalogDiscover(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if gw.catalog == nil || gw.relayStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "catalog not available"})
+		return
+	}
+
+	var body struct {
+		PlatformID string `json:"platform_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PlatformID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "platform_id required"})
+		return
+	}
+
+	apiKey, err := gw.relayStore.GetRelayKey(r.Context(), defaultTenant, "pipedream")
+	if err != nil || apiKey == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pipedream not configured"})
+		return
+	}
+
+	count, err := gw.catalog.DiscoverAndStoreActions(r.Context(), body.PlatformID, apiKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"platform_id":    body.PlatformID,
+		"actions_stored": count,
+	})
+}
