@@ -4,6 +4,31 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.2.9-alpha — 2026-05-27
+
+### Fixed
+- **Workflow partial updates no longer corrupt records** — `PATCH /v1/workflows/{id}` now reads the existing workflow before applying the patch, preventing NULL constraint violations when only some fields are supplied
+- **Memory save now reaches the database** — `POST /v1/memory/save` was passing the literal string `"default"` as the tenant ID instead of the actual tenant UUID, causing every agent memory write to fail with an invalid UUID parse error
+- **Social integrations UNIQUE constraint** — added missing UNIQUE index on `(agent_id, platform, account_id)` to match the ON CONFLICT clause used by the social publishing store (migration 020)
+- **`provider_configs` table now present** — migration 021 creates the table used by search providers, OAuth app config, and integration settings; its absence caused 500 errors on those endpoints
+
+---
+
+## v0.2.8-alpha — 2026-05-27
+
+### Fixed
+- **Channel list no longer silently drops rows** — channels with a NULL `last_error` were being excluded from list results due to a scan error; all channels now appear correctly
+
+---
+
+## v0.2.7-alpha — 2026-05-27
+
+### Fixed
+- **`GET /v1/channels/{id}` returns channel data** — a NULL scan on the nullable `last_error` column caused the endpoint to return 404 on every request; fixed with a pointer scan
+- **Memory access controller compile fix** — `memory.SearchResult` was missing the `Classification` field referenced by the clearance filter
+
+---
+
 ## v0.2.6-alpha — 2026-05-26
 
 ### Fixed
