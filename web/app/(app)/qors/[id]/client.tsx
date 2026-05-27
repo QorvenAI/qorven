@@ -39,7 +39,7 @@ import { SearchableSelect } from '@/components/searchable-select';
 import { useToolbarContent } from '@/hooks/use-toolbar-content';
 import {
   ProfileSkillsTab, ProfileMemoryTab, ProfileBackgroundTab,
-  ProfileMetricsTab,
+  ProfileMetricsTab, RecalledMemoryPanel,
 } from '@/components/qor-profile-tabs';
 import {
   Plus, MessageSquare, Trash2, Download, ChevronRight,
@@ -121,6 +121,8 @@ export default function QorDetailPage() {
 
   const [runtimeState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [liveTasks, setLiveTasks] = useState<Record<string, LiveTask>>({});
+
+  const agentEventCount = useStore(s => s.liveEvents.filter(e => (e as any).agent_id === id).length);
 
   const activeTab = useStore((s) => s.workspaceTab) as TabId | string;
   const setWorkspaceTab = useStore((s) => s.setWorkspaceTab);
@@ -413,14 +415,19 @@ export default function QorDetailPage() {
               )}
               {activeSession ? (
                 <>
-                  <ChatPlayground
-                    key={activeSession.id}
-                    sessionId={activeSession.id}
-                    agentId={soul.id}
-                    agentName={soul.display_name}
-                    initialThinkingLevel={(soul.thinking_level as 'off' | 'medium' | 'high') || 'off'}
-                    className="flex-1 min-h-0"
-                  />
+                  <div className="flex flex-1 min-h-0 overflow-hidden">
+                    <ChatPlayground
+                      key={activeSession.id}
+                      sessionId={activeSession.id}
+                      agentId={soul.id}
+                      agentName={soul.display_name}
+                      initialThinkingLevel={(soul.thinking_level as 'off' | 'medium' | 'high') || 'off'}
+                      className="flex-1 min-h-0"
+                    />
+                    {soul.memory_enabled !== false && (
+                      <RecalledMemoryPanel agentId={soul.id} sessionId={activeSession.id} messageVersion={agentEventCount} />
+                    )}
+                  </div>
                   {/* Live task cards */}
                   {Object.values(liveTasks).length > 0 && (
                     <div className="shrink-0 mt-2 pb-2">

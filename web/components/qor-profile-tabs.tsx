@@ -19,19 +19,21 @@
  * component that owns its own fetch state.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   Sparkles, Brain, Activity, Moon, BarChart3,
   Search, Loader2, Plus, Minus,
   Play, Pause, RefreshCw, Download, Zap, HeartPulse, Wrench,
+  Trash2, Pencil, Check, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SearchableSelect } from '@/components/searchable-select';
 import {
   skills as skillsApi,
   memoryApi, type MemoryRecord,
+  sessions as sessionsApi,
   heartbeats, type HeartbeatConfig,
   qoros, type QorosStatus,
   agents, type DreamingConfig,
@@ -230,6 +232,166 @@ export function ProfileSkillsTab({ agentId }: { agentId: string }) {
 
 // ─── Memory tab ────────────────────────────────────────────────────
 
+const MEMORY_TYPE_COLORS: Record<string, string> = {
+  identity:    'bg-violet-500/10 text-violet-400',
+  preference:  'bg-sky-500/10 text-sky-400',
+  fact:        'bg-emerald-500/10 text-emerald-400',
+  decision:    'bg-amber-500/10 text-amber-400',
+  goal:        'bg-pink-500/10 text-pink-400',
+  observation: 'bg-orange-500/10 text-orange-400',
+  todo:        'bg-slate-500/10 text-slate-400',
+};
+
+function MemoryList({ items, loading, onDelete, onUpdate }: {
+  items: MemoryRecord[];
+  loading: boolean;
+  onDelete?: (id: string) => void;
+  onUpdate?: (id: string, content: string) => void;
+}) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingId, setEditingId]   = useState<string | null>(null);
+  const [editDraft, setEditDraft]   = useState('');
+  const [savingId, setSavingId]     = useState<string | null>(null);
+
+  if (loading) {
+    return <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  }
+  if (items.length === 0) return null;
+
+  const handleDelete = async (memId: string) => {
+    if (!onDelete) return;
+    setDeletingId(memId);
+    try {
+      await memoryApi.delete(memId);
+      onDelete(memId);
+    } catch {
+      toast.error('Failed to delete memory');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const startEdit = (memId: string, current: string) => {
+    setEditingId(memId);
+    setEditDraft(current);
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditDraft(''); };
+
+  const saveEdit = async (memId: string) => {
+    const trimmed = editDraft.trim();
+    if (!trimmed) return;
+    setSavingId(memId);
+    try {
+      await memoryApi.update(memId, trimmed);
+      onUpdate?.(memId, trimmed);
+      setEditingId(null);
+      setEditDraft('');
+      toast.success('Memory updated');
+    } catch {
+      toast.error('Failed to update memory');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <ul className="space-y-2">
+      {items.map((m, idx) => {
+        const raw = m as any;
+        const memId: string = raw.memory?.id ?? m.id ?? String(idx);
+        const memType: string = raw.memory?.memory_type ?? raw.memory_type ?? m.scope ?? '';
+        const content: string = raw.memory?.content ?? m.content ?? '';
+        const createdAt: string = raw.memory?.created_at ?? m.created_at ?? '';
+        const importance: number = raw.memory?.importance ?? 0;
+        const typeClass = MEMORY_TYPE_COLORS[memType] ?? 'bg-muted text-muted-foreground';
+        const isEditing = editingId === memId;
+        return (
+          <li key={memId} className="group rounded-lg border border-border bg-card p-3 text-xs">
+            <div className="flex items-center gap-2 text-[11px]">
+              {memType && (
+                <span className={`rounded-sm px-1.5 py-0.5 font-mono capitalize ${typeClass}`}>
+                  {memType}
+                </span>
+              )}
+              {m.relevance != null && (
+                <span className="text-muted-foreground">
+                  {Math.round((m.relevance as number) * 100)}% match
+                </span>
+              )}
+              {importance > 0 && (
+                <span className="text-muted-foreground/60">
+                  importance {importance.toFixed(1)}
+                </span>
+              )}
+              <span className="ml-auto text-muted-foreground">
+                {createdAt ? new Date(createdAt).toLocaleDateString() : ''}
+              </span>
+              {!isEditing && (
+                <>
+                  <button
+                    onClick={() => startEdit(memId, content)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                    title="Edit memory"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  {onDelete && (
+                    <button
+                      onClick={() => handleDelete(memId)}
+                      disabled={deletingId === memId}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive disabled:opacity-50"
+                      title="Delete memory"
+                    >
+                      {deletingId === memId
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Trash2 className="h-3 w-3" />}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+            {isEditing ? (
+              <div className="mt-2 space-y-1.5">
+                <textarea
+                  value={editDraft}
+                  onChange={e => setEditDraft(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md border border-border bg-background px-2.5 py-2 text-xs leading-relaxed outline-none focus:border-primary resize-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') cancelEdit();
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveEdit(memId);
+                  }}
+                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => saveEdit(memId)}
+                    disabled={savingId === memId || !editDraft.trim()}
+                    className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {savingId === memId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    Save
+                  </button>
+                  <button
+                    onClick={cancelEdit}
+                    className="rounded-md px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent"
+                  >
+                    Cancel
+                  </button>
+                  <span className="ml-auto text-[10px] text-muted-foreground">⌘↵ to save · Esc to cancel</span>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-1.5 whitespace-pre-wrap leading-relaxed">{content || m.content}</p>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function ProfileMemoryTab({ agentId, agentName }: { agentId: string; agentName: string }) {
   const [query, setQuery] = useState('');
   const [list, setList] = useState<MemoryRecord[]>([]);
@@ -286,51 +448,20 @@ export function ProfileMemoryTab({ agentId, agentName }: { agentId: string; agen
           </p>
         </div>
       ) : (
-        <ul className="space-y-2">
-          {list.map((m, idx) => {
+        <MemoryList
+          items={list}
+          loading={false}
+          onDelete={(id) => setList(prev => prev.filter(m => {
             const raw = m as any;
-            const memId: string = raw.memory?.id ?? m.id ?? String(idx);
-            const memType: string = raw.memory?.memory_type ?? raw.memory_type ?? m.scope ?? '';
-            const content: string = raw.memory?.content ?? m.content ?? '';
-            const createdAt: string = raw.memory?.created_at ?? m.created_at ?? '';
-            const importance: number = raw.memory?.importance ?? 0;
-            const typeColors: Record<string, string> = {
-              identity:    'bg-violet-500/10 text-violet-400',
-              preference:  'bg-sky-500/10 text-sky-400',
-              fact:        'bg-emerald-500/10 text-emerald-400',
-              decision:    'bg-amber-500/10 text-amber-400',
-              goal:        'bg-pink-500/10 text-pink-400',
-              observation: 'bg-orange-500/10 text-orange-400',
-              todo:        'bg-slate-500/10 text-slate-400',
-            };
-            const typeClass = typeColors[memType] ?? 'bg-muted text-muted-foreground';
-            return (
-              <li key={memId} className="rounded-lg border border-border bg-card p-3 text-xs">
-                <div className="flex items-center gap-2 text-[11px]">
-                  {memType && (
-                    <span className={`rounded-sm px-1.5 py-0.5 font-mono capitalize ${typeClass}`}>
-                      {memType}
-                    </span>
-                  )}
-                  {m.relevance != null && (
-                    <span className="text-muted-foreground">
-                      {Math.round((m.relevance as number) * 100)}% match
-                    </span>
-                  )}
-                  {importance > 0 && (
-                    <span className="text-muted-foreground/60">
-                      importance {importance.toFixed(1)}
-                    </span>
-                  )}
-                  <span className="ml-auto text-muted-foreground">
-                    {createdAt ? new Date(createdAt).toLocaleDateString() : ''}
-                  </span>
-                </div>
-                <p className="mt-1.5 whitespace-pre-wrap leading-relaxed">{content || m.content}</p>
-              </li>
-            );
-          })}
-        </ul>
+            return (raw.memory?.id ?? m.id) !== id;
+          }))}
+          onUpdate={(id, content) => setList(prev => prev.map(m => {
+            const raw = m as any;
+            if ((raw.memory?.id ?? m.id) !== id) return m;
+            if (raw.memory) return { ...m, memory: { ...raw.memory, content } };
+            return { ...m, content };
+          }))}
+        />
       )}
     </Section>
   );
@@ -593,6 +724,90 @@ export function ProfileBackgroundTab({ agentId }: { agentId: string }) {
 
 // ProfileDreamingTab kept as re-export alias so any stale imports don't hard-error
 export const ProfileDreamingTab = ProfileBackgroundTab;
+
+export function RecalledMemoryPanel({
+  agentId,
+  sessionId,
+  messageVersion,
+}: {
+  agentId: string;
+  sessionId: string;
+  messageVersion: number;
+}) {
+  const [recalled, setRecalled] = useState<MemoryRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
+  const lastVersionRef = useRef(-1);
+
+  useEffect(() => {
+    if (lastVersionRef.current === messageVersion) return;
+    lastVersionRef.current = messageVersion;
+
+    setLoading(true);
+    sessionsApi.messages(sessionId, 30, 0)
+      .then(({ messages: msgs }) => {
+        const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
+        const text = (lastUserMsg?.content ?? '').trim().slice(0, 200);
+        if (!text) { setLoading(false); return; }
+        setQuery(text);
+        return memoryApi.search(agentId, text, 6);
+      })
+      .then(res => { if (res) setRecalled(res); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [agentId, sessionId, messageVersion]);
+
+  if (!loading && recalled.length === 0) return null;
+
+  return (
+    <div className="flex h-full w-56 shrink-0 flex-col border-s border-border bg-background/60 text-xs">
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
+        <Brain className="h-3.5 w-3.5 text-primary shrink-0" />
+        <span className="font-medium text-foreground/80 flex-1">Recalled</span>
+        {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        <button
+          onClick={() => setCollapsed(v => !v)}
+          className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
+          <ChevronRight className={cn('h-3 w-3 transition-transform', !collapsed && 'rotate-90')} />
+        </button>
+      </div>
+
+      {!collapsed && (
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {query && (
+            <p className="text-[10px] text-muted-foreground line-clamp-2 mb-2 px-1">
+              ↳ &ldquo;{query.slice(0, 80)}{query.length > 80 ? '…' : ''}&rdquo;
+            </p>
+          )}
+          {recalled.map((m, idx) => {
+            const raw = m as any;
+            const memType: string = raw.memory?.memory_type ?? raw.memory_type ?? m.scope ?? '';
+            const content: string = raw.memory?.content ?? m.content ?? '';
+            const typeClass = MEMORY_TYPE_COLORS[memType] ?? 'bg-muted text-muted-foreground';
+            return (
+              <div key={raw.memory?.id ?? m.id ?? idx} className="rounded-md border border-border bg-card p-2 space-y-1">
+                {memType && (
+                  <span className={`rounded-sm px-1 py-0.5 text-[10px] font-mono capitalize ${typeClass}`}>
+                    {memType}
+                  </span>
+                )}
+                {m.relevance != null && (
+                  <span className="ml-1 text-[10px] text-muted-foreground">
+                    {Math.round((m.relevance as number) * 100)}%
+                  </span>
+                )}
+                <p className="leading-relaxed text-[11px]">{content.slice(0, 180)}{content.length > 180 ? '…' : ''}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Metrics tab ───────────────────────────────────────────────────
 
