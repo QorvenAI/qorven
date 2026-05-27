@@ -253,11 +253,16 @@ func (gw *Gateway) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	list := []map[string]any{}
 	for rows.Next() {
-		var id, chType, name, status, lastErr, agentName, agentKey string
+		var id, chType, name, status, agentName, agentKey string
 		var agentID *string
+		var lastErr *string
 		var enabled bool
 		rows.Scan(&id, &agentID, &chType, &name, &enabled, &status, &lastErr, &agentName, &agentKey)
-		entry := map[string]any{"id": id, "channel_type": chType, "name": name, "enabled": enabled, "status": status, "last_error": lastErr, "agent_name": agentName, "agent_key": agentKey}
+		lastErrStr := ""
+		if lastErr != nil {
+			lastErrStr = *lastErr
+		}
+		entry := map[string]any{"id": id, "channel_type": chType, "name": name, "enabled": enabled, "status": status, "last_error": lastErrStr, "agent_name": agentName, "agent_key": agentKey}
 		if agentID != nil {
 			entry["agent_id"] = *agentID
 		}
