@@ -4,6 +4,23 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.1-alpha — 2026-05-27
+
+### Added
+- **Memory edit** — individual memory records can now be edited inline in the Memory tab; a PATCH `/v1/memory/{id}` endpoint persists the change
+- **Recalled memory panel** — the agent chat sidebar now shows which memories were retrieved for the current conversation turn
+
+### Changed
+- **Build plan file enforcement** — when the user edits the file list on the build approval screen, each pending `agent_task` node's instruction is updated to enforce that exact file set before execution begins
+
+### Fixed
+- **Provider wizard Step 1/2 validation driven by auth profile fields** — Step 1 now validates required extra fields from the auth profile; Step 2 correctly skips key entry for providers that use non-API-key auth (e.g. Bedrock)
+- **Help text banner in key input** — `KeyPoolSheet` now renders `help_text` from auth profiles as a banner above the key entry form when present
+- **OAuth status refresh on provider list load** — OAuth connection statuses are now derived from the actual provider list's `oauth_provider` field rather than a hardcoded list, and are refreshed every time providers load
+- **OAuth popup error feedback** — if the OAuth authorization popup is blocked by the browser, or the user closes it before completing authorization, a descriptive toast is shown immediately
+
+---
+
 ## v0.2.9-alpha — 2026-05-27
 
 ### Fixed
