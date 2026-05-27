@@ -176,6 +176,7 @@ type Gateway struct {
 	connExec         *connectors.Executor
 	relayStore       *connectors.RelayStore
 	exportGuard      *connectors.ExportGuard
+	catalog          *connectors.Catalog
 	socialRelayStore *socialqor.RelayStore
 	vault            *vault.Vault
 	oauthMgr         *oauth.Manager
@@ -526,8 +527,13 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.connExec.SetRelay(gw.relayStore)
 			gw.connExec.SetExportGuard(gw.exportGuard)
 			gw.socialRelayStore = socialqor.NewRelayStore(db.Pool, []byte(cfg.Auth.EncryptionKey))
+			// Initialize Pipedream catalog (best-effort — requires relay key)
+			if apiKey, err := gw.relayStore.GetRelayKey(context.Background(), defaultTenant, "pipedream"); err == nil && apiKey != "" {
+				gw.catalog = connectors.NewCatalog(apiKey, gw.connKB)
+			}
 			connectors.SeedPlatforms(context.Background(), gw.connKB)
 			connectors.SeedExpandedPlatforms(context.Background(), gw.connKB)
+			connectors.SeedTopConnectors(context.Background(), gw.connKB)
 			gw.mcpManager = mcp.NewManager(db.Pool, gw.mcpClient)
 			gw.loadProvidersFromDB()
 		}

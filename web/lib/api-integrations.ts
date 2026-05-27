@@ -86,6 +86,17 @@ export const integrationsApi = {
       method: 'PUT',
       body: JSON.stringify(rules),
     }),
+
+  searchCatalog: (query?: string, limit?: number) =>
+    request<{ results: CatalogEntry[]; total: number }>(
+      `/connectors/catalog?q=${encodeURIComponent(query || '')}&limit=${limit || 50}`
+    ),
+
+  activateCatalog: (slug: string, name: string, categories: string[]) =>
+    request<{ status: string; platform_id: string }>('/connectors/catalog/activate', {
+      method: 'POST',
+      body: JSON.stringify({ slug, name, categories }),
+    }),
 };
 
 export interface ConnectedAccount {
@@ -129,4 +140,13 @@ export interface AccountRules {
   posting_guidelines: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface CatalogEntry {
+  id: string;
+  slug: string;
+  name: string;
+  img_src: string;
+  categories: string[];
+  installed: boolean;
 }

@@ -763,6 +763,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/github/tasks/{id}", gw.handleGetGitHubTask)
 		r.Post("/github/tasks/{id}/advance", gw.handleAdvanceGitHubTask)
 		r.Post("/github/tasks/{id}/block", gw.handleBlockGitHubTask)
+		r.Get("/connectors/catalog", gw.handleCatalogSearch)
+		r.Post("/connectors/catalog/activate", gw.handleCatalogActivate)
 		r.Get("/connectors/platforms", gw.handleListPlatforms)
 		r.Get("/connectors/platforms/{id}/actions", gw.handleListPlatformActions)
 		r.Post("/connectors/execute-action", gw.handleExecuteAction)

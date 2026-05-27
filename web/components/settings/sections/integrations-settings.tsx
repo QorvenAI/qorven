@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, Check, AlertTriangle, Trash2, Plus, Key } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ExternalLink, Check, AlertTriangle, Trash2, Plus, Key, Search, Puzzle, Loader2, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, Btn, Input } from './primitives';
-import { integrationsApi, RelayKeyRecord } from '@/lib/api-integrations';
+import { integrationsApi, RelayKeyRecord, CatalogEntry } from '@/lib/api-integrations';
+import { cn } from '@/lib/utils';
 
 const RELAY_PROVIDERS = [
   { id: 'outstand', name: 'Outstand', category: 'social', description: 'Unified social API — handles OAuth, token refresh, rate limits', pricing: '$5/mo (1000 posts)', keyPrefix: 'sk_', keyHint: 'Get key from Outstand dashboard → Settings → API Keys', docsUrl: 'https://www.outstand.so/docs/getting-started' },
@@ -138,6 +139,163 @@ function ProviderCard({
   );
 }
 
+function CatalogBrowser() {
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<CatalogEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [available, setAvailable] = useState<boolean | null>(null);
+  const [activatingSlug, setActivatingSlug] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchCatalog = useCallback(async (q: string) => {
+    setLoading(true);
+    try {
+      const data = await integrationsApi.searchCatalog(q, 50);
+      setResults(data.results || []);
+      setTotal(data.total || 0);
+      setAvailable(true);
+    } catch (e: any) {
+      if (e?.status === 503 || e?.message?.includes('503')) {
+        setAvailable(false);
+      } else {
+        setAvailable(true);
+        setResults([]);
+        setTotal(0);
+      }
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (expanded && available === null) {
+      fetchCatalog('');
+    }
+  }, [expanded, available, fetchCatalog]);
+
+  const handleSearch = (value: string) => {
+    setQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchCatalog(value);
+    }, 300);
+  };
+
+  const handleActivate = async (entry: CatalogEntry) => {
+    setActivatingSlug(entry.slug);
+    try {
+      await integrationsApi.activateCatalog(entry.slug, entry.name, entry.categories);
+      toast.success(`${entry.name} activated`);
+      // Mark as installed locally
+      setResults(prev => prev.map(r => r.slug === entry.slug ? { ...r, installed: true } : r));
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to activate ${entry.name}`);
+    }
+    setActivatingSlug(null);
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Puzzle className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">Pipedream Integration Catalog</span>
+        </div>
+        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border px-4 py-4 space-y-4">
+          {available === false ? (
+            <p className="text-sm text-muted-foreground">
+              Add a Pipedream API key above to browse 2,400+ integrations.
+            </p>
+          ) : (
+            <>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search integrations..."
+                  value={query}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Showing {results.length} of {total.toLocaleString()} available integrations
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {results.map(entry => (
+                      <div
+                        key={entry.id}
+                        className="flex flex-col items-center gap-2 rounded-lg border border-border p-3 bg-background"
+                      >
+                        {entry.img_src ? (
+                          <img
+                            src={entry.img_src}
+                            alt={entry.name}
+                            className="h-8 w-8 rounded object-contain"
+                          />
+                        ) : (
+                          <Puzzle className="h-8 w-8 text-muted-foreground" />
+                        )}
+                        <span className="text-sm font-medium text-foreground text-center leading-tight">
+                          {entry.name}
+                        </span>
+                        {entry.categories.length > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {entry.categories[0]}
+                          </span>
+                        )}
+                        {entry.installed ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-600">
+                            <Check className="h-3 w-3" /> Installed
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleActivate(entry)}
+                            disabled={activatingSlug === entry.slug}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                          >
+                            {activatingSlug === entry.slug ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              'Activate'
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {results.length === 0 && !loading && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No integrations found{query ? ` for "${query}"` : ''}.
+                    </p>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function IntegrationsSettings() {
   const [keys, setKeys] = useState<RelayKeyRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,6 +364,10 @@ export function IntegrationsSettings() {
           onDelete={handleDelete}
         />
       ))}
+
+      <div className="mt-6">
+        <CatalogBrowser />
+      </div>
     </div>
   );
 }
