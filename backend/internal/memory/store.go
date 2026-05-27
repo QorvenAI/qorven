@@ -64,8 +64,9 @@ type Edge struct {
 
 // SearchResult is a memory with a relevance score.
 type SearchResult struct {
-	Memory Memory  `json:"memory"`
-	Score  float64 `json:"score"`
+	Memory         Memory  `json:"memory"`
+	Score          float64 `json:"score"`
+	Classification int     `json:"classification"`
 }
 
 // Store handles typed memory CRUD with graph edges and hybrid search.

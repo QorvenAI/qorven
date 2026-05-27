@@ -383,7 +383,7 @@ func (gw *Gateway) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 		Name        string  `json:"name"`
 		Enabled     bool    `json:"enabled"`
 		Status      string  `json:"status"`
-		LastError   string  `json:"last_error,omitempty"`
+		LastError   *string `json:"last_error,omitempty"`
 		AgentName   string  `json:"agent_name,omitempty"`
 		AgentKey    string  `json:"agent_key,omitempty"`
 	}
