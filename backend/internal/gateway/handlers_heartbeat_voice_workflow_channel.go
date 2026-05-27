@@ -180,10 +180,45 @@ func (gw *Gateway) handleUpdateWorkflow(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
-	var wf workflow.Workflow
-	json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&wf)
-	if err := gw.wfStore.Update(r.Context(), chi.URLParam(r, "id"), wf); err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+	id := chi.URLParam(r, "id")
+	existing, err := gw.wfStore.Get(r.Context(), id)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "workflow not found"})
+		return
+	}
+	// Decode partial update into a map and merge onto existing
+	var patch map[string]json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&patch); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	merged := *existing
+	if v, ok := patch["name"]; ok {
+		json.Unmarshal(v, &merged.Name)
+	}
+	if v, ok := patch["description"]; ok {
+		json.Unmarshal(v, &merged.Description)
+	}
+	if v, ok := patch["agent_id"]; ok {
+		json.Unmarshal(v, &merged.AgentID)
+	}
+	if v, ok := patch["trigger_type"]; ok {
+		json.Unmarshal(v, &merged.TriggerType)
+	}
+	if v, ok := patch["trigger_config"]; ok {
+		merged.TriggerConfig = v
+	}
+	if v, ok := patch["steps"]; ok {
+		merged.Steps = v
+	}
+	if v, ok := patch["variables"]; ok {
+		merged.Variables = v
+	}
+	if v, ok := patch["enabled"]; ok {
+		json.Unmarshal(v, &merged.Enabled)
+	}
+	if err := gw.wfStore.Update(r.Context(), id, merged); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "updated"})
