@@ -729,12 +729,12 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
 // ─── Calendar Tab ─────────────────────────────────────────────────────────────
 
 function CalendarTab({ agentId }: { agentId: string }) {
-  const router = useRouter();
   const [today] = useState(() => new Date());
   const [current, setCurrent] = useState(() => new Date());
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
 
   const year = current.getFullYear();
   const month = current.getMonth();
@@ -750,15 +750,37 @@ function CalendarTab({ agentId }: { agentId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Build date-to-posts map
   const byDate: Record<string, any[]> = {};
   entries.forEach(e => { byDate[e.date] = e.posts || []; });
 
   const todayKey = today.toISOString().slice(0, 10);
+
+  // Month stats
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const allMonthPosts = entries
+    .filter(e => e.date?.startsWith(monthPrefix))
+    .flatMap(e => e.posts || []);
+  const scheduledCount = allMonthPosts.filter((p: any) => p.status === 'scheduled').length;
+  const publishedCount = allMonthPosts.filter((p: any) => p.status === 'published').length;
+  const todayPosts = byDate[todayKey] ?? [];
+
+  // Month view cells
   const cells: (number | null)[] = [
     ...Array(firstDay).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
   while (cells.length % 7 !== 0) cells.push(null);
+
+  // Week view: get the week containing today or selected day
+  const weekAnchor = selectedDay ? new Date(selectedDay + 'T00:00:00') : today;
+  const weekStart = new Date(weekAnchor);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
 
   const selectedPosts = selectedDay ? (byDate[selectedDay] ?? []) : [];
 
@@ -766,111 +788,328 @@ function CalendarTab({ agentId }: { agentId: string }) {
     scheduled: 'bg-blue-400', published: 'bg-emerald-400', draft: 'bg-muted-foreground', failed: 'bg-destructive',
   };
 
+  const goToToday = () => {
+    setCurrent(new Date());
+    setSelectedDay(todayKey);
+  };
+
+  const navigate = (dir: -1 | 1) => {
+    if (viewMode === 'month') {
+      setCurrent(new Date(year, month + dir, 1));
+    } else {
+      const next = new Date(weekStart);
+      next.setDate(next.getDate() + dir * 7);
+      setCurrent(next);
+    }
+  };
+
+  const publishPost = async (id: string) => {
+    try {
+      const result = await socialApi.publishNow(id) as any;
+      const ok = result?.results?.filter((r: any) => r.success).length ?? 0;
+      toast.success(`Published to ${ok} platform${ok !== 1 ? 's' : ''}`);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Publish failed'); }
+  };
+
+  const deletePost = async (id: string) => {
+    if (!confirm('Delete this post?')) return;
+    try {
+      await socialApi.deletePost(id);
+      toast.success('Post deleted');
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Delete failed'); }
+  };
+
+  const formatDateKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
   return (
-    <div className="flex gap-5">
-      {/* Calendar grid */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-3">
-          <button onClick={() => setCurrent(new Date(year, month - 1, 1))}
+    <div className="space-y-4">
+      {/* Stats row */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-border bg-card px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-blue-400" />
+            <span className="text-xs text-muted-foreground">Scheduled</span>
+          </div>
+          <p className="text-lg font-semibold mt-1">{scheduledCount}</p>
+          <p className="text-xs text-muted-foreground">this month</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card px-4 py-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+            <span className="text-xs text-muted-foreground">Published</span>
+          </div>
+          <p className="text-lg font-semibold mt-1">{publishedCount}</p>
+          <p className="text-xs text-muted-foreground">this month</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-primary" />
+            <span className="text-xs text-muted-foreground">Today</span>
+          </div>
+          <p className="text-lg font-semibold mt-1">{todayPosts.length}</p>
+          <p className="text-xs text-muted-foreground">post{todayPosts.length !== 1 ? 's' : ''}</p>
+        </div>
+      </div>
+
+      {/* Navigation bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button onClick={() => navigate(-1)}
             className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-accent cursor-pointer">
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <h2 className="text-base font-semibold">{MONTHS[month]} {year}</h2>
-          <button onClick={() => setCurrent(new Date(year, month + 1, 1))}
+          <h2 className="text-base font-semibold min-w-[160px] text-center">
+            {viewMode === 'month'
+              ? `${MONTHS[month]} ${year}`
+              : `${weekDays[0]!.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDays[6]!.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+            }
+          </h2>
+          <button onClick={() => navigate(1)}
             className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-accent cursor-pointer">
             <ChevronRight className="h-4 w-4" />
           </button>
+          <button onClick={goToToday}
+            className="ml-2 h-8 px-3 text-xs font-medium rounded-lg border border-border hover:bg-accent cursor-pointer">
+            Today
+          </button>
         </div>
-
-        <div className="grid grid-cols-7 mb-1">
-          {DAYS_SHORT.map(d => (
-            <div key={d} className="text-center text-xs font-medium text-muted-foreground py-1">{d}</div>
-          ))}
+        <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
+          <button onClick={() => setViewMode('month')}
+            className={cn(
+              'h-7 px-3 text-xs font-medium rounded-md cursor-pointer transition-colors',
+              viewMode === 'month' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+            )}>
+            Month
+          </button>
+          <button onClick={() => setViewMode('week')}
+            className={cn(
+              'h-7 px-3 text-xs font-medium rounded-md cursor-pointer transition-colors',
+              viewMode === 'week' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+            )}>
+            Week
+          </button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-7 gap-px bg-border rounded-xl overflow-hidden border border-border">
-          {cells.map((day, i) => {
-            if (!day) return <div key={i} className="bg-background/50 min-h-[80px] p-1" />;
-            const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      {loading && (
+        <div className="flex justify-center py-3 gap-2 text-muted-foreground text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading calendar…
+        </div>
+      )}
+
+      {/* Month View */}
+      {viewMode === 'month' && !loading && (
+        <div className="flex gap-5">
+          <div className="flex-1 min-w-0">
+            <div className="grid grid-cols-7 mb-1">
+              {DAYS_SHORT.map(d => (
+                <div key={d} className="text-center text-xs font-medium text-muted-foreground py-1">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-px bg-border rounded-xl overflow-hidden border border-border">
+              {cells.map((day, i) => {
+                if (!day) return <div key={i} className="bg-background/50 min-h-[80px] p-1" />;
+                const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dayPosts = byDate[key] ?? [];
+                const isToday = key === todayKey;
+                const isSelected = key === selectedDay;
+                const scheduledDots = dayPosts.filter((p: any) => p.status === 'scheduled').length;
+                const publishedDots = dayPosts.filter((p: any) => p.status === 'published').length;
+                const failedDots = dayPosts.filter((p: any) => p.status === 'failed').length;
+                return (
+                  <div key={i} onClick={() => setSelectedDay(isSelected ? null : key)}
+                    className={cn(
+                      'bg-background min-h-[80px] p-1.5 cursor-pointer hover:bg-accent/30 transition-colors',
+                      isSelected && 'ring-2 ring-primary ring-inset bg-primary/5',
+                    )}>
+                    <div className={cn(
+                      'text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full mb-1',
+                      isToday ? 'bg-primary text-primary-foreground' : 'text-muted-foreground',
+                    )}>
+                      {day}
+                    </div>
+                    {dayPosts.length > 0 && (
+                      <div className="space-y-0.5">
+                        {/* Status dots row */}
+                        <div className="flex items-center gap-0.5 mb-0.5">
+                          {scheduledDots > 0 && <span className="h-2 w-2 rounded-full bg-blue-400" title={`${scheduledDots} scheduled`} />}
+                          {publishedDots > 0 && <span className="h-2 w-2 rounded-full bg-emerald-400" title={`${publishedDots} published`} />}
+                          {failedDots > 0 && <span className="h-2 w-2 rounded-full bg-destructive" title={`${failedDots} failed`} />}
+                          {dayPosts.length > 1 && (
+                            <span className="text-xs text-muted-foreground ml-0.5">{dayPosts.length}</span>
+                          )}
+                        </div>
+                        {/* Mini preview of first 2 posts */}
+                        {dayPosts.slice(0, 2).map((post: any, pi: number) => (
+                          <div key={pi} className={cn(
+                            'text-[10px] rounded px-1 py-0.5 truncate',
+                            post.status === 'scheduled' ? 'bg-blue-500/10 text-blue-500' :
+                            post.status === 'published' ? 'bg-emerald-500/10 text-emerald-500' :
+                            post.status === 'failed' ? 'bg-destructive/10 text-destructive' :
+                            'bg-muted text-muted-foreground'
+                          )}>
+                            {post.content?.slice(0, 18) || 'Post'}
+                          </div>
+                        ))}
+                        {dayPosts.length > 2 && (
+                          <div className="text-[10px] text-muted-foreground pl-1">+{dayPosts.length - 2}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Day detail sidebar */}
+          <div className="w-80 shrink-0">
+            {selectedDay ? (
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-4 py-3 border-b border-border bg-muted/20">
+                  <p className="text-sm font-semibold">
+                    {new Date(selectedDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{selectedPosts.length} post{selectedPosts.length !== 1 ? 's' : ''}</p>
+                </div>
+                <div className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                  {selectedPosts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground px-4 py-6 text-center">No posts this day</p>
+                  ) : selectedPosts.map((post: any, i: number) => (
+                    <div key={i} className="px-4 py-3 group">
+                      <div className="flex items-start gap-2">
+                        <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium shrink-0', STATUS_COLORS[post.status] ?? STATUS_COLORS.draft)}>
+                          {post.status}
+                        </span>
+                        <p className="text-xs text-foreground/80 flex-1 line-clamp-2">{post.content?.slice(0, 60) || 'Untitled post'}</p>
+                      </div>
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        {(post.platforms || []).map((p: string) => {
+                          const plat = PLATFORMS.find(pl => pl.id === p);
+                          return (
+                            <span key={p} className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', plat?.color || 'bg-muted text-muted-foreground')}>
+                              {plat?.icon || p}
+                            </span>
+                          );
+                        })}
+                        {post.scheduled_at && (
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            {new Date(post.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      {/* Quick actions */}
+                      {post.id && (post.status === 'scheduled' || post.status === 'draft') && (
+                        <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => publishPost(post.id)}
+                            className="h-6 px-2 text-[10px] font-medium rounded bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer flex items-center gap-1">
+                            <Send className="h-3 w-3" /> Publish
+                          </button>
+                          <button onClick={() => deletePost(post.id)}
+                            className="h-6 px-2 text-[10px] font-medium rounded bg-destructive/10 text-destructive hover:bg-destructive/20 cursor-pointer flex items-center gap-1">
+                            <Trash2 className="h-3 w-3" /> Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border p-6 text-center">
+                <Calendar className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">Click a day to see posts</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Week View */}
+      {viewMode === 'week' && !loading && (
+        <div className="grid grid-cols-7 gap-2">
+          {weekDays.map((wd, i) => {
+            const key = formatDateKey(wd);
             const dayPosts = byDate[key] ?? [];
             const isToday = key === todayKey;
             const isSelected = key === selectedDay;
             return (
-              <div key={i} onClick={() => setSelectedDay(isSelected ? null : key)}
+              <div key={i}
+                onClick={() => setSelectedDay(isSelected ? null : key)}
                 className={cn(
-                  'bg-background min-h-[80px] p-1.5 cursor-pointer hover:bg-accent/30 transition-colors',
-                  isSelected && 'bg-primary/5',
+                  'rounded-xl border bg-card p-2 min-h-[300px] cursor-pointer transition-colors',
+                  isSelected ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-primary/50',
                 )}>
                 <div className={cn(
-                  'text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full mb-1',
-                  isToday ? 'bg-primary text-primary-foreground' : 'text-muted-foreground',
+                  'text-center mb-2 pb-2 border-b border-border',
                 )}>
-                  {day}
+                  <div className="text-xs text-muted-foreground">{DAYS_SHORT[i]}</div>
+                  <div className={cn(
+                    'text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full mx-auto mt-0.5',
+                    isToday ? 'bg-primary text-primary-foreground' : '',
+                  )}>
+                    {wd.getDate()}
+                  </div>
                 </div>
-                <div className="space-y-0.5">
-                  {dayPosts.slice(0, 3).map((post: any, pi: number) => (
+                <div className="space-y-1.5">
+                  {dayPosts.length === 0 && (
+                    <p className="text-[10px] text-muted-foreground/50 text-center mt-4">No posts</p>
+                  )}
+                  {dayPosts.map((post: any, pi: number) => (
                     <div key={pi} className={cn(
-                      'text-xs rounded px-1 py-0.5 truncate flex items-center gap-1',
-                      post.status === 'scheduled' ? 'bg-blue-500/10 text-blue-500' :
-                      post.status === 'published' ? 'bg-emerald-500/10 text-emerald-500' :
-                      'bg-muted text-muted-foreground'
+                      'rounded-lg p-2 text-xs group/card',
+                      post.status === 'scheduled' ? 'bg-blue-500/10 border border-blue-500/20' :
+                      post.status === 'published' ? 'bg-emerald-500/10 border border-emerald-500/20' :
+                      post.status === 'failed' ? 'bg-destructive/10 border border-destructive/20' :
+                      'bg-muted/50 border border-border'
                     )}>
-                      <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', statusDot[post.status])} />
-                      {post.content?.slice(0, 20) || 'Post'}
+                      <div className="flex items-center gap-1 mb-1">
+                        <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', statusDot[post.status] || statusDot.draft)} />
+                        {post.scheduled_at && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(post.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] line-clamp-2 text-foreground/80 leading-relaxed">
+                        {post.content?.slice(0, 60) || 'Untitled'}
+                      </p>
+                      <div className="flex items-center gap-0.5 mt-1">
+                        {(post.platforms || []).slice(0, 3).map((p: string) => {
+                          const plat = PLATFORMS.find(pl => pl.id === p);
+                          return (
+                            <span key={p} className={cn('text-[9px] px-1 py-0.5 rounded', plat?.color || 'bg-muted text-muted-foreground')}>
+                              {plat?.icon || p}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      {/* Quick actions on hover */}
+                      {post.id && (post.status === 'scheduled' || post.status === 'draft') && (
+                        <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity">
+                          <button onClick={(e) => { e.stopPropagation(); publishPost(post.id); }}
+                            className="h-5 w-5 flex items-center justify-center rounded bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                            title="Publish now">
+                            <Send className="h-2.5 w-2.5" />
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); deletePost(post.id); }}
+                            className="h-5 w-5 flex items-center justify-center rounded bg-destructive/10 text-destructive hover:bg-destructive/20 cursor-pointer"
+                            title="Delete">
+                            <Trash2 className="h-2.5 w-2.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
-                  {dayPosts.length > 3 && (
-                    <div className="text-xs text-muted-foreground pl-1">+{dayPosts.length - 3} more</div>
-                  )}
                 </div>
               </div>
             );
           })}
         </div>
-        {loading && (
-          <div className="flex justify-center py-3 gap-2 text-muted-foreground text-sm">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
-        )}
-      </div>
-
-      {/* Day detail */}
-      <div className="w-72 shrink-0">
-        {selectedDay ? (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-4 py-3 border-b border-border bg-muted/20">
-              <p className="text-sm font-semibold">
-                {new Date(selectedDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-              </p>
-              <p className="text-xs text-muted-foreground">{selectedPosts.length} post{selectedPosts.length !== 1 ? 's' : ''}</p>
-            </div>
-            <div className="divide-y divide-border/50">
-              {selectedPosts.length === 0 ? (
-                <p className="text-sm text-muted-foreground px-4 py-6 text-center">No posts this day</p>
-              ) : selectedPosts.map((post: any, i: number) => (
-                <div key={i} className="px-4 py-3">
-                  <div className="flex items-start gap-2">
-                    <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium shrink-0', STATUS_COLORS[post.status] ?? STATUS_COLORS.draft)}>
-                      {post.status}
-                    </span>
-                    <p className="text-xs text-foreground/80 truncate flex-1">{post.content}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {(post.platforms || []).map((p: string) => (
-                      <span key={p} className="text-xs bg-muted px-1.5 py-0.5 rounded">{p}</span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-border p-6 text-center">
-            <Calendar className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
-            <p className="text-sm text-muted-foreground">Click a day to see scheduled posts</p>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
