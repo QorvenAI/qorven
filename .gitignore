@@ -57,6 +57,11 @@ web/.qorven-smoke.mjs
 .claude/
 web/.qorven-nav.mjs
 .superpowers/
+# Test suite (internal, not for CI)
+web/tests/
+web/playwright-report/
+web/test-results/
+web/playwright.remote.config.ts
 
 .air.toml
 # Dev tool artifacts
