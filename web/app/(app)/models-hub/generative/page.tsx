@@ -305,9 +305,21 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
   const isCustom   = preset?.id === 'custom';
   const isLocal    = preset?.auth_type === 'none';
   const isOAuth    = !!preset?.oauthId;
-  const step1Valid = !!preset && !!name && (isBedrock ? (extras.aws_region && extras.aws_access_key && extras.aws_secret_key) : (base || preset?.base || isOAuth || isLocal));
+
+  // Derive extra required fields from auth profile
+  const activeProfile = preset?.driver_type ? authProfiles[preset.driver_type] : undefined;
+  const requiredExtraFields = (activeProfile?.fields ?? []).filter(f => f.required && f.key !== 'api_key');
+  const hasRequiredExtras = requiredExtraFields.length === 0 || requiredExtraFields.every(f => extras[f.key]?.trim());
+  const profileHasNoApiKey = activeProfile ? !activeProfile.fields.some(f => f.key === 'api_key') : false;
+  const skipKeyEntry = profileHasNoApiKey;
+
+  const step1Valid = !!preset && !!name && (
+    isBedrock
+      ? (extras.aws_region && extras.aws_access_key && extras.aws_secret_key)
+      : (base || preset?.base || isOAuth || isLocal) && (requiredExtraFields.length === 0 || hasRequiredExtras)
+  );
   const oauthNeedsCreds = isOAuth && oauthAppInfo !== null && !oauthAppInfo.pkce && !oauthAppInfo.has_creds;
-  const step2Valid = isBedrock || isLocal || isOAuth || keys.some(k => k.key.trim());
+  const step2Valid = skipKeyEntry || isBedrock || isLocal || isOAuth || keys.some(k => k.key.trim());
 
   // Key management helpers
   const updateKey = (idx: number, patch: Partial<KeyEntry>) =>
@@ -383,10 +395,18 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
     setOauthConnecting(true);
     const url = providersApi.oauthStartUrl(preset.oauthId);
     const popup = window.open(url, 'oauth_popup', 'width=600,height=700,scrollbars=yes,resizable=yes');
+    if (!popup) {
+      setOauthConnecting(false);
+      toast.error('Popup blocked — please allow popups for this site and try again.');
+      return;
+    }
     oauthPopupRef.current = popup;
+
+    let poll: ReturnType<typeof setInterval>;
 
     const onMessage = (evt: MessageEvent) => {
       if (evt.data?.type === 'oauth_complete' && evt.data?.provider === preset.oauthId) {
+        clearInterval(poll);
         window.removeEventListener('message', onMessage);
         setOauthConnecting(false);
         setOauthConnected(true);
@@ -397,12 +417,13 @@ function AddProviderSheet({ open, onOpenChange, onAdded, authProfiles, catalog }
     window.addEventListener('message', onMessage);
 
     // Poll for popup closed without completing (user cancelled)
-    const poll = setInterval(() => {
+    poll = setInterval(() => {
       if (oauthPopupRef.current?.closed) {
         clearInterval(poll);
         window.removeEventListener('message', onMessage);
         setOauthConnecting(false);
         oauthPopupRef.current = null;
+        toast.error('Authorization window closed — please try again.');
       }
     }, 500);
   };
@@ -902,7 +923,7 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
   const provTypeProfile = provider ? authProfiles[provider.provider_type] : undefined;
   const provTypeApiKeyField = provTypeProfile?.fields.find(f => f.key === 'api_key');
   const help = provTypeApiKeyField
-    ? { keyFormat: provTypeApiKeyField.placeholder ?? '', getKeyUrl: provTypeApiKeyField.help_url ?? '' }
+    ? { keyFormat: provTypeApiKeyField.placeholder ?? '', getKeyUrl: provTypeApiKeyField.help_url ?? '', helpText: provTypeApiKeyField.help_text ?? '' }
     : null;
 
   const loadData = useCallback(async () => {
@@ -1039,17 +1060,21 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
             {/* New key form */}
             {showAdd && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
-                {help && (
+                {help && (help.helpText || help.keyFormat || help.getKeyUrl) && (
                   <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-2.5">
                     <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                    <div className="text-xs text-muted-foreground min-w-0">
-                      <span className="font-medium text-foreground">Format: </span>
-                      <span className="font-mono">{help.keyFormat}</span>
-                      <span className="mx-2">·</span>
-                      <a href={help.getKeyUrl} target="_blank" rel="noopener noreferrer"
-                        className="text-primary hover:underline inline-flex items-center gap-0.5">
-                        Get key ↗
-                      </a>
+                    <div className="text-xs text-muted-foreground min-w-0 space-y-0.5">
+                      {help.helpText && <p className="text-foreground/80">{help.helpText}</p>}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {help.keyFormat && <><span className="font-medium text-foreground">Format: </span><span className="font-mono">{help.keyFormat}</span></>}
+                        {help.keyFormat && help.getKeyUrl && <span className="mx-1">·</span>}
+                        {help.getKeyUrl && (
+                          <a href={help.getKeyUrl} target="_blank" rel="noopener noreferrer"
+                            className="text-primary hover:underline inline-flex items-center gap-0.5">
+                            Get key ↗
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1455,6 +1480,18 @@ export default function GenerativePage() {
   const [authProfiles, setAuthProfiles]     = useState<Record<string, ProviderAuthProfile>>({});
   const [catalog, setCatalog]               = useState<CatalogPreset[]>([]);
 
+  const refreshOAuthStatuses = useCallback((provs: ProviderItem[]) => {
+    const oauthIds = [...new Set(provs.map(p => (p as any).oauth_provider).filter(Boolean))];
+    if (oauthIds.length === 0) return;
+    Promise.allSettled(oauthIds.map((id: string) =>
+      providersApi.oauthStatus(id).then((s: any) => ({ id, connected: s?.connected ?? false }))
+    )).then(results => {
+      const statuses: Record<string, boolean> = {};
+      results.forEach(r => { if (r.status === 'fulfilled') statuses[(r.value as any).id] = (r.value as any).connected; });
+      setOauthStatuses(prev => ({ ...prev, ...statuses }));
+    });
+  }, []);
+
   useEffect(() => {
     providersApi.authProfiles().then(p => { if (p) setAuthProfiles(p); }).catch(() => {});
     providersApi.catalog().then(items => {
@@ -1465,15 +1502,6 @@ export default function GenerativePage() {
         setCatalog([...presets, LLAMAFILE_PRESET]);
       }
     }).catch(() => { setCatalog([LLAMAFILE_PRESET]); });
-    // Fetch OAuth connection statuses
-    const oauthIds = ['claude_code', 'github_copilot', 'google_vertex'];
-    Promise.allSettled(oauthIds.map(id =>
-      providersApi.oauthStatus(id).then(s => ({ id, connected: s?.connected ?? false }))
-    )).then(results => {
-      const statuses: Record<string, boolean> = {};
-      results.forEach(r => { if (r.status === 'fulfilled') statuses[r.value.id] = r.value.connected; });
-      setOauthStatuses(statuses);
-    });
   }, []);
 
   const load = useCallback(() => {
@@ -1482,17 +1510,20 @@ export default function GenerativePage() {
       providersApi.list().catch(() => [] as ProviderItem[]),
       providersApi.selectedModels().catch(() => [] as SelModel[]),
     ]).then(async ([provs, mods]) => {
-      setProviderList(Array.isArray(provs) ? provs : []);
+      const provList = Array.isArray(provs) ? provs : [];
+      setProviderList(provList);
       setSelectedModels(Array.isArray(mods) ? mods : []);
       // Fetch key counts
       const counts: Record<string, number> = {};
-      await Promise.allSettled((Array.isArray(provs) ? provs : []).map(async p => {
+      await Promise.allSettled(provList.map(async p => {
         const keys = await providersApi.listKeys(p.id).catch(() => []);
         counts[p.id] = Array.isArray(keys) ? keys.length : 0;
       }));
       setKeyCounts(counts);
+      // Refresh OAuth statuses based on actual provider list
+      refreshOAuthStatuses(provList);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [refreshOAuthStatuses]);
 
   useEffect(() => { load(); }, [load]);
 
