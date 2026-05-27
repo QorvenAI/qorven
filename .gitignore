@@ -1,26 +1,23 @@
-# Backend
-backend/config.toml
-backend/.env
-.env.dev
-.env.local
-.env.*.local
-backend/*.log
-backend/tmp/
-backend/dist/
-
-# Secrets / certs
+# ── Secrets & credentials ────────────────────────────────────────────────────
 *.pem
 *.key
 *.p12
 *.pfx
 *.sql.dump
 *.sqldump
+.env
+.env.*
+.env.*.local
+backend/.env
+backend/config.toml
 
-# Coredumps
-*.core
-core.*
-
-# Web + examples — never commit node_modules / build output
+# ── Compiled binaries & build output ─────────────────────────────────────────
+/dist/
+backend/qorven
+backend/qorven-*
+backend/dist/
+backend/tmp/
+backend/web/
 web/node_modules/
 web/.next/
 web/out/
@@ -28,46 +25,52 @@ web/out/
 **/.next/
 **/.turbo/
 **/tsconfig.tsbuildinfo
-
-# Sidecar artifacts
 sidecar/whatsapp/node_modules/
 sidecar/whatsapp/dist/
 
-# Compiled binaries (use release artifacts instead)
-backend/qorven
-backend/qorven-*
-/dist/
-
-# OS
-.DS_Store
+# ── Dev machine tooling (never public) ───────────────────────────────────────
+.air.toml
+backend/.air.toml
+dev.sh
+dev-up.sh
+install-dev-tools.sh
+*.log
+backend/*.log
+core.*
+*.core
 *.swp
 *.swo
-config.toml
-backend/web/
+.DS_Store
 
-# Internal docs — never push
-AUDIT-*.md
-CLAUDE.md
-*.prompt
-*.plan
-TODO*.md
-NOTES*.md
-# local smoke-test script + its artifacts
-web/.qorven-smoke.mjs
-.claude/
-web/.qorven-nav.mjs
-.superpowers/
-# Test suite (internal, not for CI)
+# ── Test suite (internal, not for CI) ────────────────────────────────────────
 web/tests/
 web/playwright-report/
 web/test-results/
 web/playwright.remote.config.ts
-
-.air.toml
-# Dev tool artifacts
+web/tests/.shared-token.json
 .playwright-mcp/
+
+# ── AI agent / internal context files ────────────────────────────────────────
+CLAUDE.md
+web/CLAUDE.md
+.claude/
+.superpowers/
 docs/superpowers/
-# Root-level debug screenshots
+
+# ── Internal scripts & generated artifacts ───────────────────────────────────
+web/.qorven-smoke.mjs
+web/.qorven-nav.mjs
+
+# ── Debug screenshots & test artifacts ───────────────────────────────────────
 *.png
 *.jpeg
 *.jpg
+tmp/
+
+# ── Internal docs (plans, audits, notes) ─────────────────────────────────────
+AUDIT-*.md
+TODO*.md
+NOTES*.md
+*.prompt
+*.plan
+config.toml
