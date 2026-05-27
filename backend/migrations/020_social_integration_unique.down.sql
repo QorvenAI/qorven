@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS uq_social_integrations_agent_platform_account;

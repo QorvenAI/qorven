@@ -123,7 +123,7 @@ func (gw *Gateway) handleMemorySave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		m := memory.Memory{AgentID: req.AgentID, Type: "agent", Content: req.Content, Source: req.Source, Importance: 0.7}
-		id, err = gw.memStore.Save(r.Context(), "default", m)
+		id, err = gw.memStore.Save(r.Context(), defaultTenant, m)
 	}
 
 	if err != nil {
