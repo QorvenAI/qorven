@@ -4,7 +4,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
-import { User, Palette, Globe, Mic, Bell, Key, Building2, Code, Network, Monitor, Package } from 'lucide-react';
+import { User, Palette, Globe, Mic, Bell, Key, Building2, Code, Network, Monitor, Package, Plug } from 'lucide-react';
 import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 import { useAppSettingTabs } from '@/components/apps/app-registry-context';
@@ -25,6 +25,7 @@ export function SettingsSidebar() {
     { icon: Building2, label: 'Workspace',     tab: 'workspace' },
     { icon: Code,      label: 'Developer',     tab: 'developer' },
     { icon: Network,   label: 'Network',       tab: 'network' },
+    { icon: Plug,      label: 'Integrations',  tab: 'integrations' },
     { icon: Monitor,   label: 'System',        tab: 'system' },
   ];
 

@@ -338,6 +338,18 @@ export const social = {
     request<{ status: string }>(`/social/oauth/apps/${platform}`, { method: 'POST', body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }) }),
   oauthAppDelete: (platform: string) =>
     request<{ status: string }>(`/social/oauth/apps/${platform}`, { method: 'DELETE' }),
+
+  // Relay connect flow
+  relayConnect: (relayKeyId: string, platform: string, agentId: string) =>
+    request<{ auth_url: string; relay_key_id: string }>('/social/connect', {
+      method: 'POST',
+      body: JSON.stringify({ relay_key_id: relayKeyId, platform, agent_id: agentId }),
+    }),
+  relayConnectFinalize: (relayKeyId: string, sessionToken: string, agentId: string) =>
+    request<{ status: string }>('/social/connect/finalize', {
+      method: 'POST',
+      body: JSON.stringify({ relay_key_id: relayKeyId, session_token: sessionToken, agent_id: agentId }),
+    }),
 };
 
 // Research

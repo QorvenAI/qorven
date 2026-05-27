@@ -90,6 +90,7 @@ import (
 	"github.com/qorvenai/qorven/internal/inbound"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/pricing"
+	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/rules"
 )
 
@@ -173,6 +174,9 @@ type Gateway struct {
 	connReg          *connectors.Registry
 	connKB           *connectors.KnowledgeStore
 	connExec         *connectors.Executor
+	relayStore       *connectors.RelayStore
+	exportGuard      *connectors.ExportGuard
+	socialRelayStore *socialqor.RelayStore
 	vault            *vault.Vault
 	oauthMgr         *oauth.Manager
 	mailStore        *mail.Store
@@ -517,7 +521,13 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			// (which self-hosted users typically don't have).
 			gw.hydrateOAuthAppsFromVault(context.Background())
 			gw.connExec = connectors.NewExecutor(gw.connKB, gw.vault, defaultTenant)
+			gw.relayStore = connectors.NewRelayStore(db.Pool, cfg.Auth.EncryptionKey)
+			gw.exportGuard = connectors.NewExportGuard(gw.relayStore)
+			gw.connExec.SetRelay(gw.relayStore)
+			gw.connExec.SetExportGuard(gw.exportGuard)
+			gw.socialRelayStore = socialqor.NewRelayStore(db.Pool, []byte(cfg.Auth.EncryptionKey))
 			connectors.SeedPlatforms(context.Background(), gw.connKB)
+			connectors.SeedExpandedPlatforms(context.Background(), gw.connKB)
 			gw.mcpManager = mcp.NewManager(db.Pool, gw.mcpClient)
 			gw.loadProvidersFromDB()
 		}

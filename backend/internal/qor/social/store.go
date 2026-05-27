@@ -123,15 +123,19 @@ func (s *Store) ListScheduledDue(ctx context.Context) ([]Post, error) {
 
 func (s *Store) SaveIntegration(ctx context.Context, i Integration) (string, error) {
 	var id string
+	relayMeta, _ := json.Marshal(i.RelayMetadata)
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO social_integrations (platform, account_name, account_id, access_token, refresh_token,
-		 token_expiry, agent_id, active, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 token_expiry, agent_id, active, created_at, relay_provider, relay_provider_key_id, relay_account_id, relay_metadata)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE(NULLIF($10,''),'direct'), NULLIF($11,'')::uuid, $12, $13)
 		 ON CONFLICT (agent_id, platform, account_id) DO UPDATE SET
-		   access_token = $4, refresh_token = $5, token_expiry = $6, active = $8
+		   access_token = $4, refresh_token = $5, token_expiry = $6, active = $8,
+		   relay_provider = COALESCE(NULLIF($10,''),'direct'), relay_provider_key_id = NULLIF($11,'')::uuid,
+		   relay_account_id = $12, relay_metadata = $13
 		 RETURNING id`,
 		i.Platform, i.AccountName, i.AccountID, i.AccessToken, i.RefreshToken,
-		i.TokenExpiry, i.AgentID, i.Active, time.Now()).Scan(&id)
+		i.TokenExpiry, i.AgentID, i.Active, time.Now(),
+		i.RelayProvider, i.RelayProviderKeyID, i.RelayAccountID, relayMeta).Scan(&id)
 	return id, err
 }
 
@@ -139,21 +143,52 @@ func (s *Store) ListIntegrations(ctx context.Context, agentID string) ([]Integra
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, platform, account_name, account_id, token_expiry, agent_id, active, created_at,
 		        COALESCE(nickname,''), COALESCE(avatar_url,''), COALESCE(post_hours,'[]'::jsonb),
-		        COALESCE(post_days,'[0,1,2,3,4,5,6]'::jsonb), COALESCE(group_name,''), COALESCE(paused,false)
+		        COALESCE(post_days,'[0,1,2,3,4,5,6]'::jsonb), COALESCE(group_name,''), COALESCE(paused,false),
+		        COALESCE(relay_provider,'direct'), COALESCE(relay_provider_key_id::text,''), COALESCE(relay_account_id,''), COALESCE(relay_metadata,'{}'::jsonb)
 		 FROM social_integrations WHERE agent_id = $1 ORDER BY platform`, agentID)
 	if err != nil { return nil, err }
 	defer rows.Close()
 	integrations := []Integration{}
 	for rows.Next() {
 		var i Integration
-		var hoursJSON, daysJSON []byte
+		var hoursJSON, daysJSON, relayMetaJSON []byte
 		rows.Scan(&i.ID, &i.Platform, &i.AccountName, &i.AccountID, &i.TokenExpiry, &i.AgentID, &i.Active, &i.CreatedAt,
-			&i.Nickname, &i.AvatarURL, &hoursJSON, &daysJSON, &i.GroupName, &i.Paused)
+			&i.Nickname, &i.AvatarURL, &hoursJSON, &daysJSON, &i.GroupName, &i.Paused,
+			&i.RelayProvider, &i.RelayProviderKeyID, &i.RelayAccountID, &relayMetaJSON)
 		jsonUnmarshalInts(hoursJSON, &i.PostHours)
 		jsonUnmarshalInts(daysJSON, &i.PostDays)
+		if len(relayMetaJSON) > 0 {
+			json.Unmarshal(relayMetaJSON, &i.RelayMetadata) //nolint:errcheck
+		}
 		integrations = append(integrations, i)
 	}
 	return integrations, nil
+}
+
+// GetIntegrationByID fetches a single integration by its ID (including relay fields).
+func (s *Store) GetIntegrationByID(ctx context.Context, integrationID string) (*Integration, error) {
+	var i Integration
+	var hoursJSON, daysJSON, relayMetaJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, platform, account_name, account_id, access_token, COALESCE(refresh_token,''),
+		 token_expiry, agent_id, active, created_at,
+		 COALESCE(nickname,''), COALESCE(avatar_url,''), COALESCE(post_hours,'[]'::jsonb),
+		 COALESCE(post_days,'[0,1,2,3,4,5,6]'::jsonb), COALESCE(group_name,''), COALESCE(paused,false),
+		 COALESCE(relay_provider,'direct'), COALESCE(relay_provider_key_id::text,''), COALESCE(relay_account_id,''), COALESCE(relay_metadata,'{}'::jsonb)
+		 FROM social_integrations WHERE id = $1`, integrationID).Scan(
+		&i.ID, &i.Platform, &i.AccountName, &i.AccountID, &i.AccessToken, &i.RefreshToken,
+		&i.TokenExpiry, &i.AgentID, &i.Active, &i.CreatedAt,
+		&i.Nickname, &i.AvatarURL, &hoursJSON, &daysJSON, &i.GroupName, &i.Paused,
+		&i.RelayProvider, &i.RelayProviderKeyID, &i.RelayAccountID, &relayMetaJSON)
+	if err != nil {
+		return nil, err
+	}
+	jsonUnmarshalInts(hoursJSON, &i.PostHours)
+	jsonUnmarshalInts(daysJSON, &i.PostDays)
+	if len(relayMetaJSON) > 0 {
+		json.Unmarshal(relayMetaJSON, &i.RelayMetadata) //nolint:errcheck
+	}
+	return &i, nil
 }
 
 // UpdateIntegrationSettings patches per-channel settings for an integration.
@@ -340,4 +375,67 @@ func (s *Store) ToggleAutoPost(ctx context.Context, autopostID string, active bo
 func (s *Store) DeleteAutoPost(ctx context.Context, autopostID string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM social_autoposts WHERE id = $1`, autopostID)
 	return err
+}
+
+// --- Account Rules ---
+
+func (s *Store) GetAccountRules(ctx context.Context, integrationID string) (*AccountRules, error) {
+	var r AccountRules
+	var hashtagsJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, tenant_id, agent_id, integration_id, voice_style, content_rules,
+		 knowledge_context, hashtag_sets, posting_guidelines, created_at, updated_at
+		 FROM social_account_rules WHERE integration_id = $1`, integrationID).Scan(
+		&r.ID, &r.TenantID, &r.AgentID, &r.IntegrationID, &r.VoiceStyle, &r.ContentRules,
+		&r.KnowledgeContext, &hashtagsJSON, &r.PostingGuidelines, &r.CreatedAt, &r.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if len(hashtagsJSON) > 0 {
+		json.Unmarshal(hashtagsJSON, &r.HashtagSets)
+	}
+	if r.HashtagSets == nil {
+		r.HashtagSets = map[string][]string{}
+	}
+	return &r, nil
+}
+
+func (s *Store) UpsertAccountRules(ctx context.Context, rules *AccountRules) error {
+	hashtagsJSON, _ := json.Marshal(rules.HashtagSets)
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO social_account_rules (tenant_id, agent_id, integration_id, voice_style, content_rules,
+		 knowledge_context, hashtag_sets, posting_guidelines, updated_at)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, now())
+		 ON CONFLICT (agent_id, integration_id) DO UPDATE SET
+		   voice_style = $4, content_rules = $5, knowledge_context = $6,
+		   hashtag_sets = $7, posting_guidelines = $8, updated_at = now()`,
+		rules.TenantID, rules.AgentID, rules.IntegrationID, rules.VoiceStyle, rules.ContentRules,
+		rules.KnowledgeContext, hashtagsJSON, rules.PostingGuidelines)
+	return err
+}
+
+func (s *Store) ListAccountRulesByAgent(ctx context.Context, agentID string) ([]AccountRules, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, tenant_id, agent_id, integration_id, voice_style, content_rules,
+		 knowledge_context, hashtag_sets, posting_guidelines, created_at, updated_at
+		 FROM social_account_rules WHERE agent_id = $1::uuid ORDER BY created_at`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AccountRules{}
+	for rows.Next() {
+		var r AccountRules
+		var hashtagsJSON []byte
+		rows.Scan(&r.ID, &r.TenantID, &r.AgentID, &r.IntegrationID, &r.VoiceStyle, &r.ContentRules,
+			&r.KnowledgeContext, &hashtagsJSON, &r.PostingGuidelines, &r.CreatedAt, &r.UpdatedAt)
+		if len(hashtagsJSON) > 0 {
+			json.Unmarshal(hashtagsJSON, &r.HashtagSets)
+		}
+		if r.HashtagSets == nil {
+			r.HashtagSets = map[string][]string{}
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }

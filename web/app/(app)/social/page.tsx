@@ -16,6 +16,7 @@ import {
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { cn } from '@/lib/utils';
 import { social as socialApi } from '@/lib/api';
+import { integrationsApi, RelayKeyRecord } from '@/lib/api-integrations';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState } from '@/components/empty-state';
@@ -325,6 +326,18 @@ const OAUTH_PLATFORMS = new Set([
   'youtube', 'pinterest', 'reddit', 'discord', 'slack', 'medium', 'googlemybusiness',
 ]);
 
+const RELAY_PLATFORM_SUPPORT: Record<string, string[]> = {
+  outstand: ['twitter', 'instagram', 'facebook', 'tiktok', 'linkedin', 'threads', 'bluesky', 'youtube', 'pinterest', 'googlemybusiness'],
+  postforme: ['twitter', 'instagram', 'facebook', 'tiktok', 'linkedin', 'threads', 'bluesky', 'youtube', 'pinterest'],
+  buffer: ['twitter', 'instagram', 'facebook', 'tiktok', 'linkedin', 'threads', 'bluesky', 'youtube', 'pinterest', 'googlemybusiness', 'mastodon'],
+};
+
+const RELAY_LABELS: Record<string, string> = {
+  outstand: 'Outstand',
+  postforme: 'PostForMe',
+  buffer: 'Buffer',
+};
+
 const STATUS_COLORS: Record<string, string> = {
   draft:     'bg-muted text-muted-foreground',
   scheduled: 'bg-blue-500/10 text-blue-500',
@@ -405,6 +418,38 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
   const [selectedAgent, setSelectedAgent] = useState(agentId || (souls[0]?.id ?? ''));
   const [showPerPlatform, setShowPerPlatform] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load connected integrations for relay account display
+  const [composeIntegrations, setComposeIntegrations] = useState<any[]>([]);
+  useEffect(() => {
+    socialApi.listIntegrations(agentId || undefined)
+      .then(d => setComposeIntegrations(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [agentId]);
+
+  // Build per-platform account summary (only for platforms with multiple accounts or relay accounts)
+  const platformAccountHints = useCallback((): Record<string, string> => {
+    const hints: Record<string, string> = {};
+    const byPlatform: Record<string, any[]> = {};
+    for (const integ of composeIntegrations) {
+      const pid = integ.platform;
+      if (!byPlatform[pid]) byPlatform[pid] = [];
+      byPlatform[pid].push(integ);
+    }
+    for (const [pid, accounts] of Object.entries(byPlatform)) {
+      if (accounts.length > 1 || accounts.some((a: any) => a.relay_provider && a.relay_provider !== 'direct')) {
+        const labels = accounts.map((a: any) => {
+          const name = a.nickname || a.account_name || a.account_id || '';
+          const relay = a.relay_provider && a.relay_provider !== 'direct'
+            ? ` via ${RELAY_LABELS[a.relay_provider] ?? a.relay_provider}`
+            : '';
+          return name + relay;
+        });
+        hints[pid] = labels.join(', ');
+      }
+    }
+    return hints;
+  }, [composeIntegrations]);
 
   // Load content set from sessionStorage if user clicked "Use" in SetsTab
   useEffect(() => {
@@ -503,8 +548,9 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Platforms</p>
           <div className="flex flex-wrap gap-2">
-            {PLATFORMS.map(p => (
+            {(() => { const hints = platformAccountHints(); return PLATFORMS.map(p => (
               <button key={p.id} onClick={() => togglePlatform(p.id)}
+                title={hints[p.id] ? `Accounts: ${hints[p.id]}` : undefined}
                 className={cn(
                   'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all cursor-pointer',
                   selectedPlatforms.includes(p.id)
@@ -512,9 +558,12 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
                     : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
                 )}>
                 <span>{p.icon}</span> {p.label}
+                {hints[p.id] && selectedPlatforms.includes(p.id) && (
+                  <span className="text-[10px] text-muted-foreground font-normal max-w-[120px] truncate">({hints[p.id]})</span>
+                )}
                 {selectedPlatforms.includes(p.id) && <Check className="h-3 w-3" />}
               </button>
-            ))}
+            )); })()}
           </div>
         </div>
 
@@ -1346,6 +1395,54 @@ function AccountsTab({ agentId }: { agentId: string }) {
   const [oauthAppForm, setOauthAppForm] = useState({ client_id: '', client_secret: '' });
   const [oauthAppSaving, setOauthAppSaving] = useState(false);
 
+  // Relay connect flow
+  const [showRelayConnect, setShowRelayConnect] = useState(false);
+  const [relayKeys, setRelayKeys] = useState<RelayKeyRecord[]>([]);
+  const [relayKeysLoading, setRelayKeysLoading] = useState(false);
+  const [relayForm, setRelayForm] = useState({ relay_key_id: '', platform: '', agent_id: agentId || '' });
+  const [relayConnecting, setRelayConnecting] = useState(false);
+
+  const loadRelayKeys = useCallback(() => {
+    setRelayKeysLoading(true);
+    integrationsApi.listRelayKeys()
+      .then(keys => { setRelayKeys(keys.filter(k => k.status === 'active')); setRelayKeysLoading(false); })
+      .catch(() => { setRelayKeys([]); setRelayKeysLoading(false); });
+  }, []);
+
+  const startRelayConnect = async () => {
+    if (!relayForm.relay_key_id || !relayForm.platform) {
+      toast.error('Select a relay key and platform');
+      return;
+    }
+    setRelayConnecting(true);
+    try {
+      const res = await socialApi.relayConnect(relayForm.relay_key_id, relayForm.platform, relayForm.agent_id);
+      // Open auth URL in popup
+      const popup = window.open(res.auth_url, 'relay_connect', 'width=600,height=700,scrollbars=yes,resizable=yes');
+      // Poll for new integration appearing
+      const before = integrations.length;
+      const poll = setInterval(async () => {
+        if (popup?.closed) {
+          clearInterval(poll);
+          // Check if new integration appeared
+          try {
+            const updated = await socialApi.listIntegrations(agentId || undefined);
+            if (Array.isArray(updated) && updated.length > before) {
+              setIntegrations(updated);
+              toast.success('Account connected via relay');
+              setShowRelayConnect(false);
+              setRelayForm({ relay_key_id: '', platform: '', agent_id: agentId || '' });
+            }
+          } catch { /* ignore */ }
+          setRelayConnecting(false);
+        }
+      }, 1000);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to start relay connect');
+      setRelayConnecting(false);
+    }
+  };
+
   const load = useCallback(() => {
     setLoading(true);
     socialApi.listIntegrations(agentId || undefined)
@@ -1560,10 +1657,89 @@ function AccountsTab({ agentId }: { agentId: string }) {
           })()}
         </div>
       ) : (
-        <button onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-accent/30 transition-colors cursor-pointer w-full">
-          <Plus className="h-4 w-4" /> Connect Social Account
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-accent/30 transition-colors cursor-pointer flex-1">
+            <Plus className="h-4 w-4" /> Connect Social Account
+          </button>
+          <button onClick={() => { setShowRelayConnect(true); loadRelayKeys(); }}
+            className="flex items-center gap-1.5 rounded-lg border border-dashed border-emerald-500/40 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400 hover:border-emerald-500 hover:bg-emerald-500/5 transition-colors cursor-pointer">
+            <Zap className="h-4 w-4" /> Connect via Relay
+          </button>
+        </div>
+      )}
+
+      {/* Relay connect form */}
+      {showRelayConnect && (
+        <div className="rounded-xl border border-emerald-500/30 bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-emerald-500/5">
+            <p className="text-sm font-semibold">Connect via Relay Provider</p>
+            <button onClick={() => setShowRelayConnect(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="p-4 space-y-4">
+            {relayKeysLoading ? (
+              <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            ) : relayKeys.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No active relay keys. Add one in Settings &rarr; Integrations.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Relay Key</label>
+                    <select
+                      value={relayForm.relay_key_id}
+                      onChange={e => setRelayForm(f => ({ ...f, relay_key_id: e.target.value, platform: '' }))}
+                      className="qr-select"
+                    >
+                      <option value="">Choose relay key...</option>
+                      {relayKeys.map(k => (
+                        <option key={k.id} value={k.id}>{k.label} ({RELAY_LABELS[k.provider] ?? k.provider})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Platform</label>
+                    <select
+                      value={relayForm.platform}
+                      onChange={e => setRelayForm(f => ({ ...f, platform: e.target.value }))}
+                      className="qr-select"
+                      disabled={!relayForm.relay_key_id}
+                    >
+                      <option value="">Choose platform...</option>
+                      {(() => {
+                        const key = relayKeys.find(k => k.id === relayForm.relay_key_id);
+                        const supported = key ? (RELAY_PLATFORM_SUPPORT[key.provider] ?? []) : [];
+                        return supported.map(pid => {
+                          const p = PLATFORMS.find(x => x.id === pid);
+                          return p ? <option key={pid} value={pid}>{p.label}</option> : null;
+                        });
+                      })()}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Assign to Agent</label>
+                  <select value={relayForm.agent_id} onChange={e => setRelayForm(f => ({ ...f, agent_id: e.target.value }))}
+                    className="qr-select">
+                    <option value="">No agent</option>
+                    {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={startRelayConnect} disabled={relayConnecting || !relayForm.relay_key_id || !relayForm.platform}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 cursor-pointer">
+                    {relayConnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                    Connect
+                  </button>
+                  <button onClick={() => setShowRelayConnect(false)}
+                    className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer">
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Account list */}
@@ -1597,6 +1773,16 @@ function AccountsTab({ agentId }: { agentId: string }) {
                       <p className="text-sm font-medium">{i.nickname || i.account_name || i.account_id}</p>
                       {i.group_name && (
                         <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{i.group_name}</span>
+                      )}
+                      {i.relay_provider && i.relay_provider !== 'direct' && (
+                        <span className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                          i.relay_provider === 'outstand' && "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+                          i.relay_provider === 'postforme' && "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                          i.relay_provider === 'buffer' && "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+                        )}>
+                          {RELAY_LABELS[i.relay_provider] ?? i.relay_provider}
+                        </span>
                       )}
                       {i.paused && <span className="text-xs text-muted-foreground">(paused)</span>}
                     </div>

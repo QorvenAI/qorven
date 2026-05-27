@@ -17,6 +17,7 @@ import { WorkspaceSettings }     from '@/components/settings/sections/workspace-
 import { DeveloperSettings }     from '@/components/settings/sections/developer-settings';
 import { SystemSettings }        from '@/components/settings/sections/system-settings';
 import { NetworkSettings }       from '@/components/settings/sections/network-settings';
+import { IntegrationsSettings }  from '@/components/settings/sections/integrations-settings';
 import { VoiceSettingsWrapper }  from '@/components/settings/sections/voice-settings-wrapper';
 
 export default function SettingsPage() {
@@ -37,6 +38,7 @@ export default function SettingsPage() {
         {activeTab === 'workspace'     && <WorkspaceSettings />}
         {activeTab === 'developer'     && <DeveloperSettings />}
         {activeTab === 'network'       && <NetworkSettings />}
+        {activeTab === 'integrations'  && <IntegrationsSettings />}
         {activeTab === 'system'        && <SystemSettings />}
         {appSettingTabs.map((tab) =>
           activeTab === `app-${tab.appId}-${tab.id}` ? (

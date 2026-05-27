@@ -94,6 +94,12 @@ type Integration struct {
 	PostDays   []int  `json:"post_days,omitempty"`   // 0=Sun,1=Mon,...,6=Sat; empty = any day
 	GroupName  string `json:"group_name,omitempty"`  // channel group label
 	Paused     bool   `json:"paused"`                // temporarily pause this channel
+
+	// Relay publishing fields
+	RelayProvider      string            `json:"relay_provider,omitempty"`        // "direct", "outstand", "postforme", "buffer"
+	RelayProviderKeyID string            `json:"relay_provider_key_id,omitempty"` // FK to relay_providers
+	RelayAccountID     string            `json:"relay_account_id,omitempty"`      // account ID within the relay provider
+	RelayMetadata      map[string]string `json:"relay_metadata,omitempty"`
 }
 
 // PostResult holds the outcome of publishing to a platform.
@@ -115,4 +121,19 @@ type Analytics struct {
 	Comments    int    `json:"comments"`
 	Clicks      int    `json:"clicks"`
 	FetchedAt   time.Time `json:"fetched_at"`
+}
+
+// AccountRules holds per-agent per-account content rules and voice settings.
+type AccountRules struct {
+	ID                string              `json:"id"`
+	TenantID          string              `json:"tenant_id"`
+	AgentID           string              `json:"agent_id"`
+	IntegrationID     string              `json:"integration_id"`
+	VoiceStyle        string              `json:"voice_style"`
+	ContentRules      string              `json:"content_rules"`
+	KnowledgeContext  string              `json:"knowledge_context"`
+	HashtagSets       map[string][]string `json:"hashtag_sets"`
+	PostingGuidelines string              `json:"posting_guidelines"`
+	CreatedAt         time.Time           `json:"created_at"`
+	UpdatedAt         time.Time           `json:"updated_at"`
 }

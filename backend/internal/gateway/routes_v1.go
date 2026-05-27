@@ -766,6 +766,18 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/connectors/platforms", gw.handleListPlatforms)
 		r.Get("/connectors/platforms/{id}/actions", gw.handleListPlatformActions)
 		r.Post("/connectors/execute-action", gw.handleExecuteAction)
+
+		// Integration relay (Pipedream)
+		r.Get("/integrations/status", gw.handleIntegrationsStatus)
+		r.Post("/integrations/relay/key", gw.handleSaveRelayKey)
+		r.Delete("/integrations/relay/key", gw.handleDeleteRelayKey)
+		r.Get("/integrations/accounts", gw.handleListConnectedAccounts)
+		r.Post("/integrations/connect/{platform}", gw.handleConnectPlatform)
+		r.Delete("/integrations/accounts/{id}", gw.handleDisconnectAccount)
+		r.Get("/integrations/log", gw.handleIntegrationLog)
+		r.Get("/integrations/permissions", gw.handleListIntegrationPermissions)
+		r.Post("/integrations/permissions", gw.handleSetIntegrationPermission)
+
 		r.Get("/oauth/{provider}/authorize", gw.handleOAuthAuthorize)
 		r.Get("/oauth/{provider}/callback", gw.handleOAuthCallback)
 		// Per-tenant OAuth app credentials — operators register
@@ -831,6 +843,19 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/social/sets", gw.handleCreateSocialSet)
 		r.Patch("/social/sets/{id}", gw.handleUpdateSocialSet)
 		r.Delete("/social/sets/{id}", gw.handleDeleteSocialSet)
+
+		// Social Relay Providers (multi-key management)
+		r.Get("/social/relay-providers", gw.handleListRelayKeys)
+		r.Post("/social/relay-providers", gw.handleAddRelayKey)
+		r.Patch("/social/relay-providers/{id}", gw.handleUpdateRelayKey)
+		r.Delete("/social/relay-providers/{id}", gw.handleDeleteSocialRelayKey)
+		r.Post("/social/relay-providers/{id}/test", gw.handleTestRelayKey)
+		r.Get("/social/relay-providers/{id}/accounts", gw.handleListRelayKeyAccounts)
+		r.Post("/social/connect", gw.handleRelayConnect)
+		r.Post("/social/connect/finalize", gw.handleRelayConnectFinalize)
+		r.Get("/social/integrations/{id}/rules", gw.handleGetAccountRules)
+		r.Put("/social/integrations/{id}/rules", gw.handleSetAccountRules)
+		r.Get("/social/platforms", gw.handlePlatformMatrix)
 
 		// Dead-letter queue (FU-021)
 		r.Get("/admin/dead-letters", gw.handleListDeadLetters)
@@ -1013,4 +1038,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		})
 
 	})
+
+	// Public webhook endpoint (HMAC-verified, no user auth)
+	parent.Post("/v1/integrations/webhook", gw.handlePipedreamWebhook)
 }

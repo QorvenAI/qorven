@@ -777,3 +777,18 @@ func (p *Publisher) PublishToAll(ctx context.Context, store *Store, post *Post) 
 	}
 	return results
 }
+
+// PublishToIntegrations publishes via specific integration IDs (multi-account aware).
+func (p *Publisher) PublishToIntegrations(ctx context.Context, store *Store, router *RelayRouter, post *Post, integrationIDs []string) []PostResult {
+	results := []PostResult{}
+	for _, intID := range integrationIDs {
+		integration, err := store.GetIntegrationByID(ctx, intID)
+		if err != nil {
+			results = append(results, PostResult{Success: false, Error: "integration not found: " + intID})
+			continue
+		}
+		result := router.PublishToIntegration(ctx, integration, post.Content, post.MediaURLs)
+		results = append(results, *result)
+	}
+	return results
+}
