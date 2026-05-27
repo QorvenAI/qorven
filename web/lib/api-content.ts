@@ -231,7 +231,7 @@ export const mail = {
   markRead: (id: string, read: boolean) =>
     request<void>(`/mail/messages/${id}/read`, { method: 'POST', body: JSON.stringify({ read }) }),
   identities: () => request<MailIdentity[]>('/mail/identities'),
-  createIdentity: (body: { agent_id?: string; address: string; display_name: string; identity_type?: string }) =>
+  createIdentity: (body: { agent_id?: string; address: string; display_name: string; identity_type?: string; smtp_host?: string; smtp_port?: number; smtp_user?: string; smtp_pass?: string; imap_host?: string; imap_port?: number; imap_user?: string; imap_pass?: string }) =>
     request<MailIdentity>('/mail/identities', { method: 'POST', body: JSON.stringify(body) }),
   updateIdentity: (id: string, body: Partial<MailIdentity> & { smtp_pass?: string; imap_pass?: string }) =>
     request<void>(`/mail/identities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

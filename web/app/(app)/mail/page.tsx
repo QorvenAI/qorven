@@ -5,11 +5,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Mail, Send, RefreshCw, ArrowLeft, Loader2, Star, Reply,
-  MoreHorizontal, Search, Plus,
+  MoreHorizontal, Search, Plus, Settings,
   AlertCircle, Check, Shield, ShieldAlert, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { mail as mailApi } from '@/lib/api';
+import { mail as mailApi, MailIdentity } from '@/lib/api';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -40,6 +40,7 @@ export default function MailPage() {
   const [messages, setMessages] = useState<MailMsg[]>([]);
   const [selected, setSelected] = useState<MailMsg | null>(null);
   const [composing, setComposing] = useState(false);
+  const [showAccounts, setShowAccounts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -101,6 +102,13 @@ export default function MailPage() {
             <button onClick={load} className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent cursor-pointer shrink-0" title="Refresh">
               <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
             </button>
+            <button
+              onClick={() => { setShowAccounts(true); setSelected(null); setComposing(false); }}
+              className={cn('h-7 w-7 flex items-center justify-center rounded-md cursor-pointer shrink-0', showAccounts ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-accent')}
+              title="Email Accounts"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </button>
           </div>
 
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-border/50">
@@ -132,9 +140,11 @@ export default function MailPage() {
           </div>
         </div>
 
-        {/* Pane 2 — Message view or compose */}
+        {/* Pane 2 — Message view or compose or accounts */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
-          {composing ? (
+          {showAccounts ? (
+            <EmailAccountsPanel onClose={() => setShowAccounts(false)} />
+          ) : composing ? (
             <ComposePane
               souls={souls}
               onClose={() => setComposing(false)}
@@ -441,6 +451,413 @@ function ComposePane({ souls, onClose, onSent }: {
         <button onClick={onClose}
           className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors">
           Discard
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Email Accounts Panel ────────────────────────────────────────────────────
+
+type ProviderPreset = {
+  id: string;
+  name: string;
+  icon: string;
+  smtp_host: string;
+  smtp_port: number;
+  imap_host: string;
+  imap_port: number;
+};
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: 'gmail', name: 'Gmail', icon: 'G', smtp_host: 'smtp.gmail.com', smtp_port: 587, imap_host: 'imap.gmail.com', imap_port: 993 },
+  { id: 'outlook', name: 'Outlook', icon: 'O', smtp_host: 'smtp.office365.com', smtp_port: 587, imap_host: 'outlook.office365.com', imap_port: 993 },
+  { id: 'zoho', name: 'Zoho', icon: 'Z', smtp_host: 'smtp.zoho.com', smtp_port: 587, imap_host: 'imap.zoho.com', imap_port: 993 },
+  { id: 'custom', name: 'Custom IMAP/SMTP', icon: '⚙', smtp_host: '', smtp_port: 587, imap_host: '', imap_port: 993 },
+];
+
+function getProviderForIdentity(identity: MailIdentity): ProviderPreset | undefined {
+  if (identity.smtp_host?.includes('gmail')) return PROVIDER_PRESETS[0];
+  if (identity.smtp_host?.includes('office365') || identity.smtp_host?.includes('outlook')) return PROVIDER_PRESETS[1];
+  if (identity.smtp_host?.includes('zoho')) return PROVIDER_PRESETS[2];
+  if (identity.smtp_host) return PROVIDER_PRESETS[3];
+  return undefined;
+}
+
+function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
+  const [identities, setIdentities] = useState<MailIdentity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const loadIdentities = useCallback(() => {
+    setLoading(true);
+    mailApi.identities()
+      .then(data => { setIdentities(Array.isArray(data) ? data : []); })
+      .catch(() => toast.error('Failed to load email accounts'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { loadIdentities(); }, [loadIdentities]);
+
+  const toggleActive = async (identity: MailIdentity) => {
+    try {
+      await mailApi.updateIdentity(identity.id, { is_active: !identity.is_active });
+      setIdentities(prev => prev.map(i => i.id === identity.id ? { ...i, is_active: !i.is_active } : i));
+      toast.success(`Account ${!identity.is_active ? 'activated' : 'deactivated'}`);
+    } catch {
+      toast.error('Failed to update account');
+    }
+  };
+
+  const editingIdentity = editingId ? identities.find(i => i.id === editingId) : undefined;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border shrink-0">
+        <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
+          <ArrowLeft className="h-4 w-4" />
+        </button>
+        <span className="text-sm font-semibold flex-1">Email Accounts</span>
+        {!showForm && !editingId && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Account
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {showForm ? (
+          <AccountForm
+            onCancel={() => setShowForm(false)}
+            onSaved={() => { setShowForm(false); loadIdentities(); }}
+          />
+        ) : editingIdentity ? (
+          <AccountForm
+            identity={editingIdentity}
+            onCancel={() => setEditingId(null)}
+            onSaved={() => { setEditingId(null); loadIdentities(); }}
+          />
+        ) : loading ? (
+          <div className="px-6 py-8 space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : identities.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center">
+            <Mail className="h-10 w-10 text-muted-foreground mb-3" />
+            <p className="text-sm font-medium mb-1">No email accounts connected</p>
+            <p className="text-xs text-muted-foreground mb-4">Connect a Gmail, Outlook, Zoho, or custom IMAP/SMTP account to start sending and receiving mail.</p>
+            <button
+              onClick={() => setShowForm(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer"
+            >
+              <Plus className="h-4 w-4" /> Add Account
+            </button>
+          </div>
+        ) : (
+          <div className="px-6 py-4 space-y-3">
+            {identities.map(identity => {
+              const provider = getProviderForIdentity(identity);
+              return (
+                <div
+                  key={identity.id}
+                  className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 group hover:border-primary/30 transition-colors"
+                >
+                  {/* Provider icon */}
+                  <div className={cn(
+                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold',
+                    provider?.id === 'gmail' ? 'bg-red-500/10 text-red-500' :
+                    provider?.id === 'outlook' ? 'bg-blue-500/10 text-blue-500' :
+                    provider?.id === 'zoho' ? 'bg-yellow-500/10 text-yellow-600' :
+                    'bg-muted text-muted-foreground'
+                  )}>
+                    {provider?.icon || 'M'}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">{identity.display_name || identity.address}</span>
+                      {provider && provider.id !== 'custom' && (
+                        <span className="text-xs text-muted-foreground">{provider.name}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">{identity.address}</p>
+                  </div>
+
+                  {/* Status badge */}
+                  <button
+                    onClick={() => toggleActive(identity)}
+                    className={cn(
+                      'rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer transition-colors',
+                      identity.is_active
+                        ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    )}
+                  >
+                    {identity.is_active ? 'Active' : 'Inactive'}
+                  </button>
+
+                  {/* Edit button */}
+                  <button
+                    onClick={() => setEditingId(identity.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Edit"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Account Form (Add / Edit) ───────────────────────────────────────────────
+
+function AccountForm({ identity, onCancel, onSaved }: {
+  identity?: MailIdentity;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = !!identity;
+  const [provider, setProvider] = useState<string>(() => {
+    if (!identity) return '';
+    const p = getProviderForIdentity(identity);
+    return p?.id || 'custom';
+  });
+  const [address, setAddress] = useState(identity?.address || '');
+  const [displayName, setDisplayName] = useState(identity?.display_name || '');
+  const [smtpHost, setSmtpHost] = useState(identity?.smtp_host || '');
+  const [smtpPort, setSmtpPort] = useState<number>(identity?.smtp_port || 587);
+  const [smtpUser, setSmtpUser] = useState(identity?.smtp_user || '');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [imapHost, setImapHost] = useState(identity?.imap_host || '');
+  const [imapPort, setImapPort] = useState<number>(identity?.imap_port || 993);
+  const [imapUser, setImapUser] = useState(identity?.imap_user || '');
+  const [imapPass, setImapPass] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const selectProvider = (id: string) => {
+    setProvider(id);
+    const preset = PROVIDER_PRESETS.find(p => p.id === id);
+    if (preset) {
+      setSmtpHost(preset.smtp_host);
+      setSmtpPort(preset.smtp_port);
+      setImapHost(preset.imap_host);
+      setImapPort(preset.imap_port);
+    }
+  };
+
+  const save = async () => {
+    if (!address.trim()) { toast.error('Email address is required'); return; }
+    if (!displayName.trim()) { toast.error('Display name is required'); return; }
+    setSaving(true);
+    try {
+      if (isEdit) {
+        const body: Partial<MailIdentity> & { smtp_pass?: string; imap_pass?: string } = {
+          display_name: displayName,
+          smtp_host: smtpHost || undefined,
+          smtp_port: smtpPort || undefined,
+          smtp_user: smtpUser || undefined,
+          imap_host: imapHost || undefined,
+          imap_port: imapPort || undefined,
+          imap_user: imapUser || undefined,
+        };
+        if (smtpPass) body.smtp_pass = smtpPass;
+        if (imapPass) body.imap_pass = imapPass;
+        await mailApi.updateIdentity(identity!.id, body);
+        toast.success('Account updated');
+      } else {
+        await mailApi.createIdentity({
+          address,
+          display_name: displayName,
+          identity_type: 'dedicated',
+          smtp_host: smtpHost || undefined,
+          smtp_port: smtpPort || undefined,
+          smtp_user: smtpUser || undefined,
+          smtp_pass: smtpPass || undefined,
+          imap_host: imapHost || undefined,
+          imap_port: imapPort || undefined,
+          imap_user: imapUser || undefined,
+          imap_pass: imapPass || undefined,
+        });
+        toast.success('Account added');
+      }
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save account');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="px-6 py-5 max-w-lg">
+      <h3 className="text-sm font-semibold mb-4">{isEdit ? 'Edit Account' : 'Add Email Account'}</h3>
+
+      {/* Provider selection (only for new accounts) */}
+      {!isEdit && (
+        <div className="mb-5">
+          <label className="text-xs font-medium text-muted-foreground mb-2 block">Provider</label>
+          <div className="grid grid-cols-2 gap-2">
+            {PROVIDER_PRESETS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => selectProvider(p.id)}
+                className={cn(
+                  'flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left cursor-pointer transition-colors',
+                  provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+                )}
+              >
+                <span className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+                  p.id === 'gmail' ? 'bg-red-500/10 text-red-500' :
+                  p.id === 'outlook' ? 'bg-blue-500/10 text-blue-500' :
+                  p.id === 'zoho' ? 'bg-yellow-500/10 text-yellow-600' :
+                  'bg-muted text-muted-foreground'
+                )}>
+                  {p.icon}
+                </span>
+                <span className="text-sm font-medium">{p.name}</span>
+              </button>
+            ))}
+          </div>
+          {provider === 'gmail' && (
+            <p className="text-xs text-muted-foreground mt-2 px-1">
+              Gmail requires an App Password. Go to Google Account &gt; Security &gt; 2-Step Verification &gt; App passwords to generate one.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Basic fields */}
+      <div className="space-y-3 mb-5">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Email Address</label>
+          <input
+            value={address}
+            onChange={e => setAddress(e.target.value)}
+            placeholder="you@example.com"
+            className="qr-input w-full text-sm"
+            disabled={isEdit}
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Display Name</label>
+          <input
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            placeholder="Your Name"
+            className="qr-input w-full text-sm"
+          />
+        </div>
+      </div>
+
+      {/* SMTP Settings */}
+      {(provider || isEdit) && (
+        <>
+          <div className="mb-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">SMTP (Outgoing)</h4>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <div className="col-span-2">
+                <input
+                  value={smtpHost}
+                  onChange={e => setSmtpHost(e.target.value)}
+                  placeholder="smtp.example.com"
+                  className="qr-input w-full text-sm"
+                />
+              </div>
+              <div>
+                <input
+                  type="number"
+                  value={smtpPort}
+                  onChange={e => setSmtpPort(Number(e.target.value))}
+                  placeholder="587"
+                  className="qr-input w-full text-sm"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={smtpUser}
+                onChange={e => setSmtpUser(e.target.value)}
+                placeholder="Username"
+                className="qr-input w-full text-sm"
+              />
+              <input
+                type="password"
+                value={smtpPass}
+                onChange={e => setSmtpPass(e.target.value)}
+                placeholder={isEdit ? '••••••••' : 'Password'}
+                className="qr-input w-full text-sm"
+              />
+            </div>
+          </div>
+
+          {/* IMAP Settings */}
+          <div className="mb-5">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">IMAP (Incoming)</h4>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <div className="col-span-2">
+                <input
+                  value={imapHost}
+                  onChange={e => setImapHost(e.target.value)}
+                  placeholder="imap.example.com"
+                  className="qr-input w-full text-sm"
+                />
+              </div>
+              <div>
+                <input
+                  type="number"
+                  value={imapPort}
+                  onChange={e => setImapPort(Number(e.target.value))}
+                  placeholder="993"
+                  className="qr-input w-full text-sm"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={imapUser}
+                onChange={e => setImapUser(e.target.value)}
+                placeholder="Username"
+                className="qr-input w-full text-sm"
+              />
+              <input
+                type="password"
+                value={imapPass}
+                onChange={e => setImapPass(e.target.value)}
+                placeholder={isEdit ? '••••••••' : 'Password'}
+                className="qr-input w-full text-sm"
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-2 border-t border-border">
+        <button
+          onClick={save}
+          disabled={saving || !address.trim() || !displayName.trim()}
+          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          {isEdit ? 'Save Changes' : 'Add Account'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors"
+        >
+          Cancel
         </button>
       </div>
     </div>
