@@ -397,6 +397,45 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 		p.BuildPhase = "spawning"
 	})
 
+	// If the user edited the file list before approving, amend each pending
+	// agent_task node's instruction to enforce the edited file set.
+	if planID != "" && gw.plans != nil && project.Notes != "" {
+		var editedPlan map[string]any
+		if err := json.Unmarshal([]byte(project.Notes), &editedPlan); err == nil {
+			if rawFiles, ok := editedPlan["files"].([]any); ok && len(rawFiles) > 0 {
+				var files []string
+				for _, f := range rawFiles {
+					if s, ok := f.(string); ok {
+						files = append(files, s)
+					}
+				}
+				if len(files) > 0 {
+					fileConstraint := "\n\nIMPORTANT: Create ONLY these files (user-approved list):\n"
+					for _, f := range files {
+						fileConstraint += "- " + f + "\n"
+					}
+					nodes, err := gw.plans.ListNodesByPlan(r.Context(), planID)
+					if err == nil {
+						for _, n := range nodes {
+							if n.Kind != plans.KindAgentTask {
+								continue
+							}
+							var inp map[string]any
+							if json.Unmarshal(n.Inputs, &inp) == nil {
+								if instr, ok := inp["instruction"].(string); ok {
+									inp["instruction"] = instr + fileConstraint
+									if updErr := gw.plans.UpdateNodeInputs(r.Context(), n.ID, inp); updErr != nil {
+										slog.Warn("project.approve: UpdateNodeInputs failed", "node", n.ID, "err", updErr)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if planID != "" && gw.orchestrator != nil {
 		go func() {
 			if err := gw.orchestrator.ExecutePlan(context.Background(), planID); err != nil {

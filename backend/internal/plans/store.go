@@ -442,6 +442,21 @@ func (s *Store) UpdateNodeState(ctx context.Context, in UpdateNodeStateInput) (*
 	return &n, nil
 }
 
+// UpdateNodeInputs replaces the inputs column for a single pending node.
+// It is safe to call only before the node enters Running state.
+func (s *Store) UpdateNodeInputs(ctx context.Context, nodeID string, inputs any) error {
+	b, err := json.Marshal(inputs)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx,
+		`UPDATE plan_nodes SET inputs = $2, updated_at = NOW()
+		  WHERE id = $1 AND state IN ('pending','blocked')`,
+		nodeID, b,
+	)
+	return err
+}
+
 // ─────────────────────────── Edge operations ────────────────────────────
 
 // AddEdge inserts a directed edge. Returns the canonical Edge struct.
