@@ -4,6 +4,18 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.2-alpha — 2026-05-27
+
+### Added
+- **Multi-relay social publishing** — connect Outstand, PostForMe, and Buffer as relay providers for social media publishing; add multiple keys per provider and multiple accounts per platform ([a915248](https://github.com/QorvenAI/qorven/commit/a915248))
+- **Per-agent per-account social rules** — each agent can have dedicated voice style, content rules, knowledge context, hashtag sets, and posting guidelines for every social account it manages ([a915248](https://github.com/QorvenAI/qorven/commit/a915248))
+- **Platform relay matrix** — 19 social platforms mapped to their supported relay providers with availability warnings ([a915248](https://github.com/QorvenAI/qorven/commit/a915248))
+- **Pipedream integration relay** — execute connector actions through Pipedream with export guard for secure outbound data flow ([8b6308e](https://github.com/QorvenAI/qorven/commit/8b6308e))
+- **Knowledge governance tools** — tiered access control for memory and knowledge with classification levels and PII vault ([8b6308e](https://github.com/QorvenAI/qorven/commit/8b6308e))
+- **Integrations settings panel** — new Settings section for managing relay provider keys with multi-key card layout and connection testing ([a915248](https://github.com/QorvenAI/qorven/commit/a915248))
+
+---
+
 ## v0.3.1-alpha — 2026-05-27
 
 ### Added
