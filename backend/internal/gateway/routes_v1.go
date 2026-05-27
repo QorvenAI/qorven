@@ -1041,4 +1041,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 
 	// Public webhook endpoint (HMAC-verified, no user auth)
 	parent.Post("/v1/integrations/webhook", gw.handlePipedreamWebhook)
+
+	// Public OAuth callback — relay providers redirect here after user authorizes
+	parent.Get("/v1/social/connect/callback", gw.handleRelayConnectCallback)
 }

@@ -77,6 +77,15 @@ export const integrationsApi = {
 
   getPlatformMatrix: () =>
     request<Record<string, PlatformMatrixEntry>>('/social/platforms'),
+
+  getAccountRules: (integrationId: string, agentId: string) =>
+    request<AccountRules>(`/social/integrations/${integrationId}/rules?agent_id=${agentId}`),
+
+  setAccountRules: (integrationId: string, rules: Partial<AccountRules>) =>
+    request<{ status: string }>(`/social/integrations/${integrationId}/rules`, {
+      method: 'PUT',
+      body: JSON.stringify(rules),
+    }),
 };
 
 export interface ConnectedAccount {
@@ -106,4 +115,18 @@ export interface IntegrationPermission {
   platform_id: string;
   action_key: string;
   allowed: boolean;
+}
+
+export interface AccountRules {
+  id?: string;
+  tenant_id?: string;
+  agent_id: string;
+  integration_id: string;
+  voice_style: string;
+  content_rules: string;
+  knowledge_context: string;
+  hashtag_sets: Record<string, string[]>;
+  posting_guidelines: string;
+  created_at?: string;
+  updated_at?: string;
 }

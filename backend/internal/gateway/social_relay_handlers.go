@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -286,7 +287,7 @@ func (gw *Gateway) handleRelayConnect(w http.ResponseWriter, r *http.Request) {
 	if baseURL == "" {
 		baseURL = "http://localhost"
 	}
-	redirectURL := baseURL + "/v1/social/connect/callback"
+	redirectURL := baseURL + "/v1/social/connect/callback?relay_key_id=" + body.RelayKeyID
 
 	authURL, err := client.GetAuthURL(r.Context(), body.Platform, user.TenantID, redirectURL)
 	if err != nil {
@@ -499,4 +500,25 @@ func (gw *Gateway) handlePlatformMatrix(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleRelayConnectCallback handles the OAuth redirect from relay providers.
+// GET /v1/social/connect/callback?session_token=...&relay_key_id=...
+func (gw *Gateway) handleRelayConnectCallback(w http.ResponseWriter, r *http.Request) {
+	sessionToken := r.URL.Query().Get("session_token")
+	relayKeyID := r.URL.Query().Get("relay_key_id")
+	errMsg := r.URL.Query().Get("error")
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(200)
+	fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>Connecting...</title></head><body>
+<script>
+(function(){
+  var data = {type:"relay_connect_callback", session_token:%q, relay_key_id:%q, error:%q};
+  if(window.opener){window.opener.postMessage(data,"*");window.close();}
+  else{document.body.innerText="Connection complete. You can close this window.";}
+})();
+</script>
+<p>Connecting your account...</p>
+</body></html>`, sessionToken, relayKeyID, errMsg)
 }

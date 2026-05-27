@@ -1269,6 +1269,7 @@ function IntegrationSettingsPanel({
   integration: any;
   onSaved: (updated: any) => void;
 }) {
+  const [tab, setTab] = useState<'schedule' | 'rules'>('schedule');
   const [form, setForm] = useState({
     nickname:   integration.nickname   ?? '',
     avatar_url: integration.avatar_url ?? '',
@@ -1278,6 +1279,32 @@ function IntegrationSettingsPanel({
     paused:     integration.paused ?? false,
   });
   const [saving, setSaving] = useState(false);
+
+  // Content rules state
+  const [rules, setRules] = useState({ voice_style: '', content_rules: '', knowledge_context: '', posting_guidelines: '', hashtag_sets: '' });
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [rulesSaving, setRulesSaving] = useState(false);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
+
+  const loadRules = useCallback(() => {
+    if (!integration.agent_id || rulesLoaded) return;
+    setRulesLoading(true);
+    integrationsApi.getAccountRules(integration.id, integration.agent_id)
+      .then(r => {
+        setRules({
+          voice_style: r.voice_style || '',
+          content_rules: r.content_rules || '',
+          knowledge_context: r.knowledge_context || '',
+          posting_guidelines: r.posting_guidelines || '',
+          hashtag_sets: r.hashtag_sets?.default ? r.hashtag_sets.default.join(', ') : '',
+        });
+        setRulesLoaded(true);
+      })
+      .catch(() => setRulesLoaded(true))
+      .finally(() => setRulesLoading(false));
+  }, [integration.id, integration.agent_id, rulesLoaded]);
+
+  useEffect(() => { if (tab === 'rules') loadRules(); }, [tab, loadRules]);
 
   const toggleHour = (h: number) =>
     setForm(f => ({ ...f, post_hours: f.post_hours.includes(h) ? f.post_hours.filter(x => x !== h) : [...f.post_hours, h].sort((a,b)=>a-b) }));
@@ -1298,80 +1325,170 @@ function IntegrationSettingsPanel({
     }
   }
 
+  async function saveRules() {
+    if (!integration.agent_id) { toast.error('No agent assigned to this account'); return; }
+    setRulesSaving(true);
+    try {
+      const hashtagArr = rules.hashtag_sets.split(',').map(s => s.trim()).filter(Boolean);
+      await integrationsApi.setAccountRules(integration.id, {
+        agent_id: integration.agent_id,
+        integration_id: integration.id,
+        voice_style: rules.voice_style,
+        content_rules: rules.content_rules,
+        knowledge_context: rules.knowledge_context,
+        posting_guidelines: rules.posting_guidelines,
+        hashtag_sets: hashtagArr.length > 0 ? { default: hashtagArr } : {},
+      });
+      toast.success('Content rules saved');
+    } catch {
+      toast.error('Failed to save rules');
+    } finally {
+      setRulesSaving(false);
+    }
+  }
+
+  const hasAgent = !!integration.agent_id;
+
   return (
-    <div className="border-t border-border px-4 py-4 bg-muted/20 space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Display name override</label>
-          <input value={form.nickname} onChange={e => setForm(f => ({ ...f, nickname: e.target.value }))}
-            placeholder={integration.account_name || 'Channel nickname'}
-            className="qr-input" />
+    <div className="border-t border-border bg-muted/20">
+      {/* Tabs */}
+      {hasAgent && (
+        <div className="flex border-b border-border">
+          <button onClick={() => setTab('schedule')} className={cn('px-4 py-2 text-xs font-medium transition-colors cursor-pointer', tab === 'schedule' ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground')}>
+            Schedule & Display
+          </button>
+          <button onClick={() => setTab('rules')} className={cn('px-4 py-2 text-xs font-medium transition-colors cursor-pointer', tab === 'rules' ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground')}>
+            Content Rules
+          </button>
         </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Channel group</label>
-          <input value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
-            placeholder="e.g. Marketing, Product, Personal"
-            className="qr-input" />
-        </div>
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground block mb-1">Avatar URL override</label>
-        <input value={form.avatar_url} onChange={e => setForm(f => ({ ...f, avatar_url: e.target.value }))}
-          placeholder="https://… (optional)"
-          className="qr-input" />
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground block mb-1.5">
-          Allowed posting hours <span className="text-muted-foreground/60">(empty = any hour)</span>
-        </label>
-        <div className="flex flex-wrap gap-1">
-          {ALL_HOURS.map(h => (
-            <button key={h} onClick={() => toggleHour(h)}
+      )}
+
+      {tab === 'schedule' && (
+        <div className="px-4 py-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Display name override</label>
+              <input value={form.nickname} onChange={e => setForm(f => ({ ...f, nickname: e.target.value }))}
+                placeholder={integration.account_name || 'Channel nickname'}
+                className="qr-input" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Channel group</label>
+              <input value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
+                placeholder="e.g. Marketing, Product, Personal"
+                className="qr-input" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Avatar URL override</label>
+            <input value={form.avatar_url} onChange={e => setForm(f => ({ ...f, avatar_url: e.target.value }))}
+              placeholder="https://… (optional)"
+              className="qr-input" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1.5">
+              Allowed posting hours <span className="text-muted-foreground/60">(empty = any hour)</span>
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {ALL_HOURS.map(h => (
+                <button key={h} onClick={() => toggleHour(h)}
+                  className={cn(
+                    'w-8 h-6 text-xs rounded border transition-colors cursor-pointer',
+                    form.post_hours.includes(h)
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40',
+                  )}>
+                  {h}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1.5">Allowed posting days</label>
+            <div className="flex gap-1.5">
+              {DAY_LABELS.map((label, d) => (
+                <button key={d} onClick={() => toggleDay(d)}
+                  className={cn(
+                    'flex-1 h-7 text-xs rounded border transition-colors cursor-pointer',
+                    form.post_days.includes(d)
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40',
+                  )}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setForm(f => ({ ...f, paused: !f.paused }))}
               className={cn(
-                'w-8 h-6 text-xs rounded border transition-colors cursor-pointer',
-                form.post_hours.includes(h)
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border text-muted-foreground hover:border-primary/40',
-              )}>
-              {h}
+                'flex items-center gap-1.5 text-sm rounded-lg border px-3 py-1.5 transition-colors cursor-pointer',
+                form.paused
+                  ? 'border-amber-500/40 text-amber-600 bg-amber-500/10 hover:bg-amber-500/20'
+                  : 'border-border text-muted-foreground hover:bg-accent',
+              )}
+            >
+              {form.paused ? <><Play className="h-3.5 w-3.5" /> Resume channel</> : <><Pause className="h-3.5 w-3.5" /> Pause channel</>}
             </button>
-          ))}
-        </div>
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground block mb-1.5">Allowed posting days</label>
-        <div className="flex gap-1.5">
-          {DAY_LABELS.map((label, d) => (
-            <button key={d} onClick={() => toggleDay(d)}
-              className={cn(
-                'flex-1 h-7 text-xs rounded border transition-colors cursor-pointer',
-                form.post_days.includes(d)
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border text-muted-foreground hover:border-primary/40',
-              )}>
-              {label}
+            <button onClick={save} disabled={saving}
+              className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              Save
             </button>
-          ))}
+          </div>
         </div>
-      </div>
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => setForm(f => ({ ...f, paused: !f.paused }))}
-          className={cn(
-            'flex items-center gap-1.5 text-sm rounded-lg border px-3 py-1.5 transition-colors cursor-pointer',
-            form.paused
-              ? 'border-amber-500/40 text-amber-600 bg-amber-500/10 hover:bg-amber-500/20'
-              : 'border-border text-muted-foreground hover:bg-accent',
+      )}
+
+      {tab === 'rules' && (
+        <div className="px-4 py-4 space-y-4">
+          {rulesLoading ? (
+            <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Voice & tone style</label>
+                <input value={rules.voice_style} onChange={e => setRules(r => ({ ...r, voice_style: e.target.value }))}
+                  placeholder="Professional and witty, Casual Gen-Z, Formal corporate..."
+                  className="qr-input" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Content rules</label>
+                <textarea value={rules.content_rules} onChange={e => setRules(r => ({ ...r, content_rules: e.target.value }))}
+                  placeholder="Never post about politics. Always include CTA. Keep under 280 chars for X..."
+                  rows={3}
+                  className="qr-input resize-none" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Knowledge context</label>
+                <textarea value={rules.knowledge_context} onChange={e => setRules(r => ({ ...r, knowledge_context: e.target.value }))}
+                  placeholder="SaaS product for logistics. Target audience: supply chain managers..."
+                  rows={2}
+                  className="qr-input resize-none" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Posting guidelines</label>
+                <input value={rules.posting_guidelines} onChange={e => setRules(r => ({ ...r, posting_guidelines: e.target.value }))}
+                  placeholder="Max 2 posts per day, morning and evening"
+                  className="qr-input" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Hashtag sets <span className="text-muted-foreground/60">(comma-separated)</span></label>
+                <input value={rules.hashtag_sets} onChange={e => setRules(r => ({ ...r, hashtag_sets: e.target.value }))}
+                  placeholder="#logistics, #ai, #saas, #supplychain"
+                  className="qr-input" />
+              </div>
+              <div className="flex justify-end">
+                <button onClick={saveRules} disabled={rulesSaving}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+                  {rulesSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Save Rules
+                </button>
+              </div>
+            </>
           )}
-        >
-          {form.paused ? <><Play className="h-3.5 w-3.5" /> Resume channel</> : <><Pause className="h-3.5 w-3.5" /> Pause channel</>}
-        </button>
-        <button onClick={save} disabled={saving}
-          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-          Save
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1417,24 +1534,44 @@ function AccountsTab({ agentId }: { agentId: string }) {
     setRelayConnecting(true);
     try {
       const res = await socialApi.relayConnect(relayForm.relay_key_id, relayForm.platform, relayForm.agent_id);
-      // Open auth URL in popup
       const popup = window.open(res.auth_url, 'relay_connect', 'width=600,height=700,scrollbars=yes,resizable=yes');
-      // Poll for new integration appearing
-      const before = integrations.length;
-      const poll = setInterval(async () => {
-        if (popup?.closed) {
-          clearInterval(poll);
-          // Check if new integration appeared
-          try {
-            const updated = await socialApi.listIntegrations(agentId || undefined);
-            if (Array.isArray(updated) && updated.length > before) {
-              setIntegrations(updated);
-              toast.success('Account connected via relay');
-              setShowRelayConnect(false);
-              setRelayForm({ relay_key_id: '', platform: '', agent_id: agentId || '' });
-            }
-          } catch { /* ignore */ }
+
+      const handleMessage = async (event: MessageEvent) => {
+        if (event.data?.type !== 'relay_connect_callback') return;
+        window.removeEventListener('message', handleMessage);
+        const { session_token, relay_key_id, error } = event.data;
+        if (error) {
+          toast.error(`Relay authorization failed: ${error}`);
           setRelayConnecting(false);
+          return;
+        }
+        if (!session_token) {
+          toast.error('No session token received from relay');
+          setRelayConnecting(false);
+          return;
+        }
+        try {
+          await socialApi.relayConnectFinalize(relay_key_id || relayForm.relay_key_id, session_token, relayForm.agent_id);
+          const updated = await socialApi.listIntegrations(agentId || undefined);
+          setIntegrations(Array.isArray(updated) ? updated : []);
+          toast.success('Account connected via relay');
+          setShowRelayConnect(false);
+          setRelayForm({ relay_key_id: '', platform: '', agent_id: agentId || '' });
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Failed to finalize connection');
+        }
+        setRelayConnecting(false);
+      };
+      window.addEventListener('message', handleMessage);
+
+      // Fallback: if popup closes without postMessage (user cancelled)
+      const fallback = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(fallback);
+          setTimeout(() => {
+            window.removeEventListener('message', handleMessage);
+            setRelayConnecting(false);
+          }, 1500);
         }
       }, 1000);
     } catch (e) {

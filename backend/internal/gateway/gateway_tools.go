@@ -1217,6 +1217,11 @@ func (gw *Gateway) registerTools() {
 	if gw.db != nil {
 		socialStore := socialqor.NewStore(gw.db.Pool)
 		reg.Register(socialqor.NewSocialTool(socialStore))
+		// Social relay management tool — COO/agent can manage relay providers and accounts conversationally
+		if gw.socialRelayStore != nil {
+			reg.Register(socialqor.NewSocialRelayTool(gw.socialRelayStore, socialStore, gw.db.Pool))
+			slog.Info("manage_social_relay tool registered")
+		}
 		// Start the social post scheduler daemon
 		go gw.runSocialScheduler(socialStore)
 	}
