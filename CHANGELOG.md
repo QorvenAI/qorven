@@ -4,6 +4,23 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.4-alpha — 2026-05-28
+
+### Added
+- **Steering files** — projects can define `.qorven/RULES.md` and `.qorven/context/*.md` files that are automatically injected into every agent session for project-specific coding standards and context
+- **Live preview** — auto-detects project framework (Next.js, Vite, CRA, Go, Django, Rails, static) and starts a dev server with reverse proxy for real-time preview inside the IDE
+- **Event hooks** — `.qorven/hooks.yaml` configuration for 9 lifecycle events (file created/changed/deleted, build started/completed/failed, test passed/failed, agent task completed) with run_command, run_agent, and notify actions
+- **Command Center** — real-time background agent job tracking with status (queued/running/completed/failed), progress bars, duration, and cost visibility
+- **One-click deploy** — generates framework-specific Dockerfiles for 8 project types, executes real Docker build and run when available, simulated edge deploy as fallback
+- **Inline code completions** — AI-powered ghost text suggestions in the editor via fastest available model (haiku/flash), wired through Monaco's inline completion provider
+- **Read-before-edit safety** — agents must read a file before editing it; prevents stale writes and ensures agents have current file context
+
+### Changed
+- **Deploy panel** — now features a prominent "Deploy to qorven.run" button with live status tracking (building → pushing → live), alongside existing Vercel/Netlify/GitHub Pages options
+- **Code editor** — upgraded with inline suggestion support, sub-word smart completions, and AI completion provider registration
+
+---
+
 ## v0.3.3-alpha — 2026-05-28
 
 ### Added
