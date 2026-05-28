@@ -152,11 +152,21 @@ func (r *ProjectRegistry) Create(name, displayName, path string) *CodeProject {
 }
 
 // CreateFromInception creates a project and records the Inception brief ID.
-// save() is called synchronously so persistence is guaranteed before the caller reads disk.
+// Saves synchronously (no background goroutine) so persistence is guaranteed
+// before the caller reads disk and TempDir cleanup can't race.
 func (r *ProjectRegistry) CreateFromInception(name, displayName, path, briefID string) *CodeProject {
-	p := r.Create(name, displayName, path)
+	if displayName == "" {
+		displayName = name
+	}
 	r.mu.Lock()
-	p.InceptionBriefID = briefID
+	id := fmt.Sprintf("proj-%d", time.Now().UnixMilli())
+	p := &CodeProject{
+		ID: id, Name: name, DisplayName: displayName, Path: path,
+		SessionID:        uuid.New().String(),
+		InceptionBriefID: briefID,
+		CreatedAt:        time.Now(), UpdatedAt: time.Now(),
+	}
+	r.projects[id] = p
 	r.mu.Unlock()
 	r.save()
 	return p
