@@ -4,6 +4,22 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.3-alpha — 2026-05-28
+
+### Added
+- **ERP governance engine** — full organizational compliance layer with designation catalog, approval matrix, policy enforcement, segregation of duties, and exception tracking ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Designation catalog** — 42 pre-seeded agent positions across 8 departments with skill families, model tiers, tool permissions, and approval scopes ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Approval matrix** — configurable rules for budget exceeds, model upgrades, production deploys, and policy overrides with human-required escalation paths ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Policy engine** — real-time evaluation of agent actions against configurable policies with deny, warn, throttle, require-approval, and log actions ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Segregation of duties** — prevents same agent from performing conflicting actions (e.g. writing code and approving its deploy) ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Exception & variance dashboard** — tracks policy violations, cost overruns, and quality failures with severity classification and resolution workflow ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Task state machine** — enforced lifecycle transitions (draft → submitted → routed → in_progress → completed) with full audit history ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **SLA tracking** — define service level targets per metric and measure compliance over time windows ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Asset library** — reusable intelligence store for prompts, workflows, templates, and knowledge packs with versioning ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+- **Governance dashboard** — 4-tab UI with designation browser, approval decisions, policy event log, and exception resolution ([58d7f26](https://github.com/QorvenAI/qorven/commit/58d7f26))
+
+---
+
 ## v0.3.2-alpha — 2026-05-27
 
 ### Added
