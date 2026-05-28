@@ -171,6 +171,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/command-center", gw.handleCommandCenter)
 		r.Get("/command-center/stats", gw.handleCommandCenterStats)
 
+		// AI code completions (ghost text)
+		r.Post("/code/completions", gw.handleCodeCompletions)
+
 		// One-click deploy
 		r.Post("/projects/{id}/deploy", gw.handleDeploy)
 		r.Get("/projects/{id}/deploy/status", gw.handleDeployStatus)

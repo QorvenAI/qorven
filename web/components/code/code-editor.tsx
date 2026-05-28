@@ -2,10 +2,11 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
 import { detectLang } from './code-utils';
+import { request } from '@/lib/api-core';
 
 const MonacoEditor = dynamic(
   () => import('@monaco-editor/react').then(m => m.default),
@@ -19,10 +20,13 @@ const MonacoEditor = dynamic(
   }
 );
 
-export function CodeEditor({ content, path, onChange }: {
-  content: string; path: string; onChange?: (v: string) => void;
+export function CodeEditor({ content, path, onChange, projectId }: {
+  content: string; path: string; onChange?: (v: string) => void; projectId?: string;
 }) {
   const [isDark, setIsDark] = useState(true);
+  const completionDisposable = useRef<{ dispose: () => void } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     const update = () => setIsDark(document.documentElement.classList.contains('dark'));
     update();
@@ -30,6 +34,75 @@ export function CodeEditor({ content, path, onChange }: {
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => obs.disconnect();
   }, []);
+
+  const handleEditorMount = useCallback((editor: any, monaco: any) => {
+    // Register inline completion provider for AI ghost text
+    completionDisposable.current?.dispose();
+    completionDisposable.current = monaco.languages.registerInlineCompletionsProvider('*', {
+      provideInlineCompletions: async (model: any, position: any, _context: any, token: any) => {
+        abortRef.current?.abort();
+        const abort = new AbortController();
+        abortRef.current = abort;
+
+        token.onCancellationRequested(() => abort.abort());
+
+        const textUntilPosition = model.getValueInRange({
+          startLineNumber: Math.max(1, position.lineNumber - 50),
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        });
+
+        const textAfterPosition = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          startColumn: position.column,
+          endLineNumber: Math.min(model.getLineCount(), position.lineNumber + 10),
+          endColumn: model.getLineMaxColumn(Math.min(model.getLineCount(), position.lineNumber + 10)),
+        });
+
+        if (textUntilPosition.trim().length < 3) return { items: [] };
+
+        try {
+          const res = await request('/code/completions', {
+            method: 'POST',
+            body: JSON.stringify({
+              file_path: path,
+              prefix: textUntilPosition.slice(-2000),
+              suffix: textAfterPosition.slice(0, 500),
+              language: detectLang(path),
+              project_id: projectId || '',
+            }),
+            signal: abort.signal,
+          }) as { completion?: string };
+
+          if (!res.completion || abort.signal.aborted) return { items: [] };
+
+          return {
+            items: [{
+              insertText: res.completion,
+              range: {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column,
+              },
+            }],
+          };
+        } catch {
+          return { items: [] };
+        }
+      },
+      freeInlineCompletions: () => {},
+    });
+  }, [path, projectId]);
+
+  useEffect(() => {
+    return () => {
+      completionDisposable.current?.dispose();
+      abortRef.current?.abort();
+    };
+  }, []);
+
   return (
     <MonacoEditor
       height="100%"
@@ -37,9 +110,10 @@ export function CodeEditor({ content, path, onChange }: {
       value={content}
       theme={isDark ? 'vs-dark' : 'light'}
       onChange={v => onChange?.(v ?? '')}
+      onMount={handleEditorMount}
       options={{
         fontSize: 13, lineHeight: 20,
-        fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace', // ok — Monaco editor font
+        fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace',
         fontLigatures: true, minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
         scrollBeyondLastLine: false, renderLineHighlight: 'line', cursorBlinking: 'smooth',
         cursorSmoothCaretAnimation: 'on', smoothScrolling: true, padding: { top: 6, bottom: 6 },
@@ -48,6 +122,8 @@ export function CodeEditor({ content, path, onChange }: {
         readOnly: !onChange, automaticLayout: true,
         scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
         stickyScroll: { enabled: true },
+        inlineSuggest: { enabled: true, mode: 'subwordSmart' },
+        suggest: { preview: true, showInlineDetails: true },
       }}
     />
   );

@@ -979,6 +979,7 @@ export default function CodePage() {
               <PreviewPanel url={previewUrl} className="h-full" />
             ) : currentTab ? (
               <CodeEditor content={currentTab.content} path={currentTab.path}
+                projectId={activeProject?.id}
                 onChange={value => setTabs(prev => prev.map(t =>
                   t.path === currentTab.path ? { ...t, content: value, dirty: true } : t
                 ))}
