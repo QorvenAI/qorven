@@ -97,6 +97,26 @@ func (s *DesignationStore) Get(ctx context.Context, tenantID, id string) (*Desig
 	return &d, nil
 }
 
+func (s *DesignationStore) GetByAgentKey(ctx context.Context, tenantID, agentKey string) (*Designation, error) {
+	var d Designation
+	err := s.db.QueryRow(ctx, `
+		SELECT id, tenant_id, position_name, department, org_layer, COALESCE(nature_of_work,''),
+		       COALESCE(reports_to_designation::text,''), COALESCE(skill_family,''), COALESCE(model_tier,'balanced'),
+		       COALESCE(tools_allowed,'{}'), COALESCE(tools_denied,'{}'), COALESCE(max_budget_usd,0),
+		       can_create_subagents, can_approve_actions, requires_approval, user_creatable,
+		       COALESCE(knowledge_packs,'{}'), COALESCE(approval_scope,'{}'), created_at
+		FROM designations WHERE tenant_id = $1 AND LOWER(REPLACE(position_name,' ','_')) LIKE '%' || $2 || '%'
+		LIMIT 1
+	`, tenantID, agentKey).Scan(&d.ID, &d.TenantID, &d.PositionName, &d.Department, &d.OrgLayer, &d.NatureOfWork,
+		&d.ReportsTo, &d.SkillFamily, &d.ModelTier, &d.ToolsAllowed, &d.ToolsDenied, &d.MaxBudgetUSD,
+		&d.CanCreateSubagents, &d.CanApproveActions, &d.RequiresApproval, &d.UserCreatable,
+		&d.KnowledgePacks, &d.ApprovalScope, &d.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 func (s *DesignationStore) Upsert(ctx context.Context, d Designation) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO designations (tenant_id, position_name, department, org_layer, nature_of_work,

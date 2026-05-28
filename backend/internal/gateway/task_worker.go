@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/tasks"
 	"github.com/qorvenai/qorven/internal/tools"
@@ -69,6 +70,16 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			slog.Warn("task_worker: budget exceeded", "task", taskID,
 				"cost_cents", task.CostCents, "budget_cents", task.BudgetCents)
 			_ = gw.taskStore.Transition(ctx, taskID, tasks.StatusBlocked)
+			if gw.exceptionStore != nil {
+				gw.exceptionStore.Record(ctx, governance.Exception{
+					TenantID:    defaultTenant,
+					AgentID:     agentID,
+					Category:    "budget_overrun",
+					Severity:    "warning",
+					Description: fmt.Sprintf("Task %s budget exceeded: spent %d of %d cents", taskID, task.CostCents, task.BudgetCents),
+					Context:     map[string]any{"task_id": taskID, "cost_cents": task.CostCents, "budget_cents": task.BudgetCents},
+				})
+			}
 			broadcastTaskEvent(gw, taskID, agentID, realtime.EventTaskBlocked, map[string]any{
 				"reason": "budget_exceeded",
 			})
@@ -114,6 +125,9 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 		switch signal {
 		case SignalDone:
 			slog.Info("task_worker: task completed", "task", taskID)
+			if gw.taskStateMachine != nil {
+				gw.taskStateMachine.Transition(ctx, defaultTenant, taskID, "in_progress", "completed", agentID, "task done")
+			}
 			if gw.taskCoordinator != nil {
 				// Re-fetch to get final state with result populated.
 				if finalTask, err := gw.taskStore.Get(ctx, taskID); err == nil {
@@ -123,6 +137,9 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			return
 		case SignalBlocked:
 			slog.Info("task_worker: task blocked by agent", "task", taskID)
+			if gw.taskStateMachine != nil {
+				gw.taskStateMachine.Transition(ctx, defaultTenant, taskID, "in_progress", "blocked", agentID, "agent reported blocked")
+			}
 			return
 		case SignalContinue:
 			// Loop immediately — next iteration.

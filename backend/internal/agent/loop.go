@@ -95,6 +95,7 @@ type Loop struct {
 	subagentRunStore *SubagentRunStore
 	intentRouter     *IntentRouter
 	orgChartStore    *OrgChartStore
+	governanceHooks  *GovernanceHooks
 }
 
 // PIIRedactor decides what to do with inbound/outbound text. Kept as
@@ -1183,6 +1184,15 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					}
 				}
 				for _, fbModel := range fallbackModels {
+					// Governance: check policy on model_switch
+					if gh := l.governanceHooks; gh != nil && gh.EvaluatePolicy != nil {
+						action, _ := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "model_switch", map[string]any{
+							"from_model": model, "to_model": fbModel, "agent_key": ag.AgentKey,
+						})
+						if action == "deny" {
+							continue
+						}
+					}
 					slog.Info("agent.loop.auto_fallback", "agent", ag.ID, "from", model, "to", fbModel, "reason", reason)
 					chatReq.Model = fbModel
 					llmResp, err = provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
@@ -1536,6 +1546,35 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 			} else if loopGuard.IsToolCircuitBroken(tc.Name) {
 				toolResult = tools.ErrorResult(fmt.Sprintf("⛔ %s circuit broken — failed 2x consecutively. Try a different approach.", tc.Name))
 			} else {
+				// Governance: policy + SoD enforcement before tool execution
+				if gh := l.governanceHooks; gh != nil {
+					if gh.EvaluatePolicy != nil {
+						action, reason := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "tool_call", map[string]any{
+							"tool_name": tc.Name, "tool_category": toolCategory(tc.Name), "agent_key": ag.AgentKey,
+						})
+						if action == "deny" {
+							toolResult = tools.ErrorResult("⛔ Policy blocked: " + reason)
+							if gh.RecordException != nil {
+								gh.RecordException(ctx, l.tenantID, ag.ID, "policy_deny", "warning", "Policy denied tool call: "+tc.Name+" — "+reason, map[string]any{"tool": tc.Name})
+							}
+							goto toolDone
+						}
+						if action == "require_approval" {
+							toolResult = tools.ErrorResult("⏸ Requires approval: " + reason + ". Action paused.")
+							goto toolDone
+						}
+					}
+					if gh.CheckSoD != nil {
+						if violated, rule := gh.CheckSoD(ctx, l.tenantID, ag.ID, tc.Name); violated {
+							toolResult = tools.ErrorResult("⛔ Segregation of duties violation: " + rule + ". A different agent must perform this action.")
+							if gh.RecordException != nil {
+								gh.RecordException(ctx, l.tenantID, ag.ID, "sod_violation", "critical", "SoD rule violated: "+rule, map[string]any{"tool": tc.Name, "rule": rule})
+							}
+							goto toolDone
+						}
+					}
+				}
+
 				// Fire pre-tool hook
 				if l.pluginMgr != nil {
 					l.pluginMgr.FireHook(ctx, plugin.HookPreToolCall, map[string]any{
@@ -1575,6 +1614,12 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 					}
 					l.auditFn(ag.AgentKey, tc.Name, req.SessionID, argsStr, toolResult.IsError)
 				}
+			}
+			toolDone:
+
+			// Governance: record exception on tool errors
+			if toolResult.IsError && l.governanceHooks != nil && l.governanceHooks.RecordException != nil {
+				l.governanceHooks.RecordException(ctx, l.tenantID, ag.ID, "tool_error", "info", "Tool "+tc.Name+" failed", map[string]any{"tool": tc.Name, "error": toolResult.ForLLM[:min(len(toolResult.ForLLM), 200)]})
 			}
 
 			// LoopGuard: record result and check for same-result loops
@@ -1765,6 +1810,20 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 
 	// 9. Save messages to session
 	l.saveToSession(ctx, req, result)
+
+	// 9. Governance: policy check on output delivery
+	if gh := l.governanceHooks; gh != nil && gh.EvaluatePolicy != nil && result.Content != "" {
+		action, reason := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "output_deliver", map[string]any{
+			"agent_key": ag.AgentKey, "content_length": len(result.Content),
+		})
+		if action == "deny" {
+			slog.Warn("agent.output.policy_blocked", "agent", ag.AgentKey, "reason", reason)
+			result.Content = "⚠️ Output blocked by policy: " + reason
+			if gh.RecordException != nil {
+				gh.RecordException(ctx, l.tenantID, ag.ID, "output_blocked", "warning", "Output delivery denied by policy: "+reason, nil)
+			}
+		}
+	}
 
 	// 9a. Output quality gate — validate, record, self-correct if score < 4.0
 	if l.outputValidator != nil && result.Content != "" {

@@ -41,6 +41,8 @@ type SubagentManager struct {
 	AgentKey string
 	// OnSpawn is called when a subagent is spawned (for realtime events). nil = skip.
 	OnSpawn func(id, parentID, task string, depth int)
+	// GovernanceHooks provides policy/approval checks. nil = no governance.
+	GovernanceHooks *GovernanceHooks
 }
 
 // SubagentTask tracks a spawned subagent.
@@ -97,6 +99,13 @@ func (sm *SubagentManager) Spawn(ctx context.Context, parentID string, depth int
 		return "", fmt.Errorf("subagent runner not configured")
 	}
 
+	// Governance: check approval matrix for spawn_agent action
+	if gh := sm.GovernanceHooks; gh != nil && gh.CheckApproval != nil {
+		if requires, rule, _ := gh.CheckApproval(ctx, sm.TenantID, "spawn_agent", 0); requires {
+			return "", fmt.Errorf("spawn blocked by approval matrix: %s — requires approval before creating subagents", rule)
+		}
+	}
+
 	id := uuid.New().String()[:8]
 	st := &SubagentTask{
 		ID:        id,
@@ -151,6 +160,11 @@ func (sm *SubagentManager) Spawn(ctx context.Context, parentID string, depth int
 				Depth:     st.Depth,
 				CreatedAt: st.CreatedAt,
 			})
+		}
+		// Governance: record exception on subagent failure
+		if gh := sm.GovernanceHooks; gh != nil && gh.RecordException != nil {
+			gh.RecordException(context.Background(), sm.TenantID, parentID, "subagent_failure", "warning",
+				"Subagent "+id+" failed: "+err.Error(), map[string]any{"task": truncateSA(task, 200), "depth": st.Depth})
 		}
 		return "", fmt.Errorf("subagent failed: %w", err)
 	}

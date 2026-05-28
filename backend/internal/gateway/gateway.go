@@ -733,6 +733,9 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.agentLoop.SetOrgChartStore(gw.orgChartStore)
 		}
 
+		// Wire governance hooks into the agent loop.
+		gw.agentLoop.SetGovernanceHooks(gw.buildGovernanceHooks())
+
 		// Wire AI Gateway pipeline into the agent loop.
 		if gw.llmPipeline != nil {
 			gw.agentLoop.LLMPipeline = gw.llmPipeline
@@ -1229,6 +1232,7 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 				})
 			}
 		}
+		gw.brain.Subagents.GovernanceHooks = gw.buildGovernanceHooks()
 		gw.brain.Start() // start cron + heartbeat
 		slog.Info("brain engine initialized and started")
 
