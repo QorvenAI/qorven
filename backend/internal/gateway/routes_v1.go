@@ -898,6 +898,32 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/feedback", gw.handleMessageFeedback)
 		r.Get("/audit", gw.handleAuditLog)
 		r.Get("/billing/costs", gw.handleBillingCosts)
+		r.Get("/billing/breakdown", gw.handleBillingBreakdown)
+		r.Get("/billing/anomalies", gw.handleBillingAnomalies)
+
+		// ERP Orchestration — Org Hierarchy
+		r.Get("/org/hierarchy", gw.handleGetOrgHierarchy)
+		r.Put("/org/hierarchy/{agent_id}", gw.handleUpdateOrgNode)
+
+		// ERP Orchestration — Routing Rules
+		r.Get("/routing/rules", gw.handleListRoutingRules)
+		r.Post("/routing/rules", gw.handleCreateRoutingRule)
+		r.Put("/routing/rules/{id}", gw.handleUpdateRoutingRule)
+		r.Delete("/routing/rules/{id}", gw.handleDeleteRoutingRule)
+		r.Post("/routing/test", gw.handleTestRouting)
+
+		// ERP Orchestration — Output Quality
+		r.Get("/quality/stats", gw.handleQualityStats)
+
+		// ERP Orchestration — Subagent Runs
+		r.Get("/audit/subagent-runs", gw.handleListSubagentRuns)
+		r.Get("/audit/subagent-runs/{parent_id}", gw.handleListSubagentRuns)
+		r.Get("/audit/trace-tree/{root_id}", gw.handleGetTraceTree)
+
+		// ERP Orchestration — Workflow Runs
+		r.Get("/orchestration/runs", gw.handleListOrchestrationRuns)
+		r.Get("/orchestration/runs/{run_id}", gw.handleGetOrchestrationRun)
+		r.Post("/orchestration/runs/{run_id}/cancel", gw.handleCancelOrchestrationRun)
 
 		// Mail
 		r.Get("/mail/identities", gw.handleListMailIdentities)

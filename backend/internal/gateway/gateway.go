@@ -197,6 +197,13 @@ type Gateway struct {
 	authSvc          *auth.AuthService
 	dreamer          *memory.Dreamer // background memory consolidation
 
+	// ERP orchestration stores (Pillar 1-6)
+	orgChartStore    *agent.OrgChartStore
+	intentRouter     *agent.IntentRouter
+	subagentRunStore *agent.SubagentRunStore
+	outputValidator  *agent.OutputValidator
+	workflowEngine   *workflow.Engine
+
 	briefingSched *briefing.Scheduler   // daily briefing cron (nil until DB available)
 	dsScheduler   *datasource.Scheduler // connector data source cron (nil until DB available)
 
@@ -498,6 +505,11 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.kgStore = knowledgegraph.NewStore(db.Pool)
 			gw.taskStore = tasks.NewStore(db.Pool)
 			gw.wfStore = workflow.NewStore(db.Pool)
+			gw.orgChartStore = agent.NewOrgChartStore(db.Pool)
+			gw.subagentRunStore = agent.NewSubagentRunStore(db.Pool)
+			gw.outputValidator = agent.NewOutputValidator(db.Pool)
+			gw.intentRouter = agent.NewIntentRouter(db.Pool, agent.AgentSeeds)
+			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)
 			gw.msgStore = agent.NewMessageStore(db.Pool)
 			gw.hbStore = heartbeat.NewStore(db.Pool)
 			gw.mailStore = mail.NewStore(db.Pool)

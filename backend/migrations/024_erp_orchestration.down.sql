@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS workflow_step_runs;
+DROP TABLE IF EXISTS workflow_runs;
+DROP TABLE IF EXISTS routing_rules;
+DROP TABLE IF EXISTS output_audit;
+DROP TABLE IF EXISTS subagent_runs;
+DROP TABLE IF EXISTS org_hierarchy;
+ALTER TABLE gateway_budgets DROP COLUMN IF EXISTS project_id;
+ALTER TABLE gateway_budgets DROP COLUMN IF EXISTS lifetime_usd;
+ALTER TABLE gateway_budgets DROP COLUMN IF EXISTS warn_percent;
+ALTER TABLE traces DROP COLUMN IF EXISTS parent_trace_id;
+ALTER TABLE traces DROP COLUMN IF EXISTS delegation_id;

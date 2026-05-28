@@ -6,9 +6,10 @@ import { useAgentsStream } from '@/hooks/use-agents-stream';
 import { AgentDashboard } from '@/components/agents/AgentDashboard';
 import { TaskFeed } from '@/components/agents/TaskFeed';
 import { PlanApproval } from '@/components/agents/PlanApproval';
+import { OrgChart } from '@/components/agents/OrgChart';
 import { useStore } from '@/store';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/qor/tabs';
-import { Bot, ListChecks, ClipboardCheck } from 'lucide-react';
+import { Bot, ListChecks, ClipboardCheck, Network } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 
 export default function AgentsPage() {
@@ -42,6 +43,10 @@ export default function AgentsPage() {
                 </span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="org-chart" className="gap-1.5">
+              <Network className="h-3.5 w-3.5" />
+              Org Chart
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -50,6 +55,7 @@ export default function AgentsPage() {
           <TabsContent value="agents" className="mt-0"><AgentDashboard /></TabsContent>
           <TabsContent value="tasks" className="mt-0"><TaskFeed /></TabsContent>
           <TabsContent value="approvals" className="mt-0"><PlanApproval /></TabsContent>
+          <TabsContent value="org-chart" className="mt-0"><OrgChart /></TabsContent>
         </div>
       </Tabs>
     </div>
