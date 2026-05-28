@@ -13,28 +13,21 @@ CREATE TABLE IF NOT EXISTS org_hierarchy (
     PRIMARY KEY (tenant_id, agent_id)
 );
 
--- Pillar 1: L4 Subagent run persistence
-CREATE TABLE IF NOT EXISTS subagent_runs (
-    id              TEXT PRIMARY KEY,
-    tenant_id       UUID NOT NULL,
-    parent_id       TEXT NOT NULL,
-    agent_key       TEXT,
-    task            TEXT NOT NULL,
-    status          TEXT NOT NULL,
-    result          TEXT,
-    depth           INT NOT NULL,
-    iterations      INT DEFAULT 0,
-    tools_used      TEXT[],
-    tokens_in       BIGINT DEFAULT 0,
-    tokens_out      BIGINT DEFAULT 0,
-    cost_uusd       BIGINT DEFAULT 0,
-    session_id      TEXT,
-    trace_id        UUID,
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    completed_at    TIMESTAMPTZ
-);
-CREATE INDEX IF NOT EXISTS idx_subagent_runs_parent ON subagent_runs (parent_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_subagent_runs_tenant ON subagent_runs (tenant_id, created_at DESC);
+-- Pillar 1: L4 Subagent run persistence (extend existing table from 001)
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS tenant_id UUID;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS parent_id TEXT;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS agent_key TEXT;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS depth INT;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS iterations INT DEFAULT 0;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS tools_used TEXT[];
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS tokens_in BIGINT DEFAULT 0;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS tokens_out BIGINT DEFAULT 0;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS cost_uusd BIGINT DEFAULT 0;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS trace_id UUID;
+ALTER TABLE subagent_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_subagent_runs_parent ON subagent_runs (parent_id, created_at DESC) WHERE parent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_subagent_runs_tenant ON subagent_runs (tenant_id, created_at DESC) WHERE tenant_id IS NOT NULL;
 
 -- Pillar 2: Budget enhancements
 ALTER TABLE gateway_budgets ADD COLUMN IF NOT EXISTS project_id UUID;
