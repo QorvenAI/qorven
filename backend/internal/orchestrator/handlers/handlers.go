@@ -114,7 +114,7 @@ func Planner(cfg Config) graph.Handler {
 			ExtraTools:  extras,
 			TenantID:    h.Plan.TenantID,
 		}
-		_, err := cfg.Agent.Run(ctx, req, func(ev agent.StreamEvent) {
+		planResult, err := cfg.Agent.Run(ctx, req, func(ev agent.StreamEvent) {
 			switch ev.Type {
 			case "text_delta":
 				if ev.Delta != "" {
@@ -125,6 +125,7 @@ func Planner(cfg Config) graph.Handler {
 		if err != nil {
 			return graph.OutcomeError, nil, fmt.Errorf("planner: agent run: %w", err)
 		}
+		_ = planResult // cost tracked at loop level; planner cost is part of total build
 		if len(plannerText) == 0 {
 			return graph.OutcomeError, nil, errors.New("planner: empty agent output")
 		}
@@ -233,7 +234,7 @@ func AgentTask(cfg Config) graph.Handler {
 		extras := resolveExtraTools(ctx, cfg.Tools, h.Plan.TenantID)
 
 		var output []byte
-		_, err := cfg.Agent.Run(ctx, agent.RunRequest{
+		result, err := cfg.Agent.Run(ctx, agent.RunRequest{
 			AgentID:     in.AgentID,
 			SessionID:   sessionID,
 			UserMessage: in.Instruction,
@@ -242,6 +243,7 @@ func AgentTask(cfg Config) graph.Handler {
 			NoPersist:   true,
 			ExtraTools:  extras,
 			TenantID:    h.Plan.TenantID,
+			Autonomous:  true, // builds are long-running; self-continue past iteration cap
 		}, func(ev agent.StreamEvent) {
 			switch ev.Type {
 			case "text_delta":
@@ -257,10 +259,18 @@ func AgentTask(cfg Config) graph.Handler {
 		if err != nil {
 			return graph.OutcomeError, nil, fmt.Errorf("agent_task: run: %w", err)
 		}
-		return graph.OutcomeSuccess, map[string]any{
+		artifacts := map[string]any{
 			"output":   string(output),
 			"agent_id": in.AgentID,
-		}, nil
+		}
+		if result != nil {
+			artifacts["input_tokens"] = result.InputTokens
+			artifacts["output_tokens"] = result.OutputTokens
+			artifacts["cost_cents"] = result.CostCents
+			artifacts["iterations"] = result.Iterations
+			artifacts["tools_used"] = len(result.ToolsUsed)
+		}
+		return graph.OutcomeSuccess, artifacts, nil
 	}
 }
 

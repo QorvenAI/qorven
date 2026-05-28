@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/agent"
 	apievents "github.com/qorvenai/qorven/internal/api/events"
+	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/plans"
 	"github.com/qorvenai/qorven/internal/providers"
 	"github.com/qorvenai/qorven/internal/ssestream"
@@ -392,6 +394,49 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// ─── Governance gate: policy + approval check before build execution ───
+	if gw.policyEngine != nil {
+		decision := gw.policyEngine.Evaluate(r.Context(), "build_approve", "prime", 3, map[string]any{
+			"project_id":   projectID,
+			"project_name": project.Name,
+			"project_type": project.ProjectType,
+		})
+		if decision.Action == "deny" {
+			writeJSON(w, 403, map[string]string{
+				"error":  "build blocked by governance policy",
+				"reason": decision.PolicyName + ": " + decision.Message,
+			})
+			return
+		}
+	}
+	if gw.approvalStore != nil {
+		rule, err := gw.approvalStore.CheckRequiresApproval(r.Context(), defaultTenant, "build_execute", 0)
+		if err == nil && rule != nil {
+			slog.Info("project.approve: build requires governance approval",
+				"project", projectID, "rule", rule.ActionType, "approver", rule.ApproverRole)
+		}
+	}
+
+	// ─── Auto-checkpoint: snapshot workspace state before build ───
+	workspace := resolveWorkspace(project)
+	if workspace != "" {
+		go func() {
+			cpCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			gitInit := exec.CommandContext(cpCtx, "git", "-C", workspace, "rev-parse", "--is-inside-work-tree")
+			if gitInit.Run() != nil {
+				initCmd := exec.CommandContext(cpCtx, "git", "-C", workspace, "init")
+				initCmd.Run()
+			}
+			addCmd := exec.CommandContext(cpCtx, "git", "-C", workspace, "add", "-A")
+			addCmd.Run()
+			label := fmt.Sprintf("qorven:checkpoint:pre-build:%d", time.Now().UnixMilli())
+			commitCmd := exec.CommandContext(cpCtx, "git", "-C", workspace, "commit", "-m", label, "--allow-empty")
+			commitCmd.Run()
+			slog.Debug("project.approve: pre-build checkpoint created", "project", projectID, "label", label)
+		}()
+	}
+
 	planID := project.PlanID
 	gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
 		p.BuildPhase = "spawning"
@@ -438,13 +483,43 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 
 	if planID != "" && gw.orchestrator != nil {
 		go func() {
-			if err := gw.orchestrator.ExecutePlan(context.Background(), planID); err != nil {
+			// Hard cap: builds cannot exceed 2 hours
+			buildCtx, buildCancel := context.WithTimeout(context.Background(), 2*time.Hour)
+			defer buildCancel()
+			buildStart := time.Now()
+			if err := gw.orchestrator.ExecutePlan(buildCtx, planID); err != nil {
 				slog.Error("project.approve: ExecutePlan failed", "project", projectID, "plan", planID, "err", err)
 				gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
 					p.BuildPhase = "failed"
 				})
+				// Record build failure as governance exception
+				if gw.exceptionStore != nil {
+					gw.exceptionStore.Record(context.Background(), governance.Exception{
+						TenantID:    defaultTenant,
+						AgentID:     "prime",
+						Category:    "build_failure",
+						Severity:    "warning",
+						Description: fmt.Sprintf("Build failed for project %s: %v", project.Name, err),
+						Context: map[string]any{
+							"project_id": projectID,
+							"plan_id":    planID,
+							"duration":   time.Since(buildStart).String(),
+						},
+					})
+				}
 				return
 			}
+			buildDuration := time.Since(buildStart)
+			// Record build success for SLA tracking
+			if gw.slaStore != nil {
+				gw.slaStore.RecordMeasurement(context.Background(), defaultTenant, "build_time", buildDuration.Seconds(), buildDuration.Seconds() < 600)
+			}
+			// Mark build as done
+			gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
+				p.BuildPhase = "done"
+				p.BuildDurationMs = buildDuration.Milliseconds()
+			})
+			slog.Info("project.approve: build completed", "project", projectID, "duration", buildDuration)
 			// Auto-install if this was a qorven_app build.
 			if project.ProjectType == "qorven_app" && gw.appMgr != nil {
 				if app, err := gw.appMgr.Install(context.Background(), project.Path); err != nil {

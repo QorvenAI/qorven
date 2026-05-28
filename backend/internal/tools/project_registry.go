@@ -47,6 +47,12 @@ type CodeProject struct {
 
 	InceptionBriefID string `json:"inception_brief_id,omitempty"`
 	ProjectType      string `json:"project_type,omitempty"` // "qorven_app" triggers auto-install after build
+
+	// Build metrics
+	BuildCostCents  float64 `json:"build_cost_cents,omitempty"`
+	BuildTokensIn   int     `json:"build_tokens_in,omitempty"`
+	BuildTokensOut  int     `json:"build_tokens_out,omitempty"`
+	BuildDurationMs int64   `json:"build_duration_ms,omitempty"`
 }
 
 // CodeTask is a todo item within a project.

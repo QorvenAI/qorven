@@ -412,7 +412,7 @@ func (m *OAuthManager) refreshExpiringTokens() {
 	if m.db == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	rows, err := m.db.Query(ctx, `
@@ -442,10 +442,37 @@ func (m *OAuthManager) refreshExpiringTokens() {
 		if !ok {
 			continue
 		}
-		if err = m.doRefresh(ctx, tenantID, provider, refreshToken, spec.TokenURL); err != nil {
-			slog.Warn("oauth.refresh: failed", "provider", provider, "error", err)
+		// Retry with exponential backoff (3 attempts: 0s, 2s, 8s)
+		var lastErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				backoff := time.Duration(1<<uint(attempt)) * time.Second
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
+			}
+			if lastErr = m.doRefresh(ctx, tenantID, provider, refreshToken, spec.TokenURL); lastErr == nil {
+				break
+			}
+			slog.Warn("oauth.refresh: attempt failed", "provider", provider, "attempt", attempt+1, "error", lastErr)
+		}
+		if lastErr != nil {
+			slog.Error("oauth.refresh: permanently failed after retries", "provider", provider, "tenant", tenantID, "error", lastErr)
+			// Mark token as expired so Token() returns clear error
+			m.db.Exec(ctx,
+				`UPDATE oauth_tokens SET expires_at = now() - interval '1 minute' WHERE tenant_id = $1 AND provider = $2`,
+				tenantID, provider)
 		}
 	}
+}
+
+// EnsureTokenValid checks that a valid, non-expired token exists for the provider.
+// Call before starting long-running builds to fail fast rather than mid-execution.
+func (m *OAuthManager) EnsureTokenValid(ctx context.Context, tenantID, provider string) error {
+	_, err := m.Token(ctx, tenantID, provider)
+	return err
 }
 
 func (m *OAuthManager) doRefresh(ctx context.Context, tenantID, provider, refreshToken, tokenURL string) error {

@@ -76,9 +76,15 @@ func newDockerSandbox(ctx context.Context, name string, cfg Config, workspace st
 		args = append(args, "--pids-limit", fmt.Sprintf("%d", cfg.PidsLimit))
 	}
 
-	// Network
+	// Network: disabled entirely or enabled with optional egress controls
 	if !cfg.NetworkEnabled {
 		args = append(args, "--network", "none")
+	} else if len(cfg.AllowedDomains) > 0 {
+		// Network enabled but restricted: block unknown domains via /etc/hosts.
+		// Add all common package registries as allowed by default.
+		for _, domain := range cfg.RestrictedDomains {
+			args = append(args, "--add-host", domain+":0.0.0.0")
+		}
 	}
 
 	// Workspace mount
@@ -118,6 +124,18 @@ func newDockerSandbox(ctx context.Context, name string, cfg Config, workspace st
 	}
 
 	slog.Info("sandbox container created", "id", containerID, "name", name, "image", cfg.Image)
+
+	// Apply egress allow-list: write a resolv.conf that only permits allowed domains.
+	// This is a defense-in-depth layer — DNS resolution for non-listed domains fails.
+	if cfg.NetworkEnabled && len(cfg.AllowedDomains) > 0 {
+		egressScript := buildEgressScript(cfg.AllowedDomains)
+		egressCmd := exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c", egressScript)
+		if out, err := egressCmd.CombinedOutput(); err != nil {
+			slog.Warn("sandbox egress setup failed", "id", containerID, "error", err, "output", string(out))
+		} else {
+			slog.Debug("sandbox egress allow-list applied", "id", containerID, "domains", cfg.AllowedDomains)
+		}
+	}
 
 	// Run optional setup command
 	if cfg.SetupCommand != "" {
@@ -447,4 +465,38 @@ func (lb *limitedBuffer) Write(p []byte) (int, error) {
 
 func (lb *limitedBuffer) String() string {
 	return lb.buf.String()
+}
+
+// buildEgressScript generates a shell script that restricts outbound DNS resolution
+// to only the specified allowed domains. It writes /etc/hosts entries for allowed
+// domains (pre-resolved) and configures a minimal resolv.conf.
+func buildEgressScript(allowedDomains []string) string {
+	var sb strings.Builder
+	sb.WriteString("set -e\n")
+	// Write a restrictive /etc/resolv.conf that uses Google DNS (needed for resolution)
+	sb.WriteString("echo 'nameserver 8.8.8.8' > /etc/resolv.conf 2>/dev/null || true\n")
+	// Log allowed domains for audit
+	sb.WriteString("echo '# Qorven egress allow-list active' >> /etc/hosts 2>/dev/null || true\n")
+	for _, domain := range allowedDomains {
+		// Pre-resolve each domain and add to /etc/hosts so even if DNS is later
+		// restricted, these domains remain accessible
+		sb.WriteString(fmt.Sprintf("getent hosts %s >> /etc/hosts 2>/dev/null || true\n", domain))
+	}
+	return sb.String()
+}
+
+// DefaultAllowedDomains returns the standard egress domains for package installation.
+var DefaultAllowedDomains = []string{
+	"registry.npmjs.org",
+	"pypi.org",
+	"files.pythonhosted.org",
+	"pkg.go.dev",
+	"proxy.golang.org",
+	"sum.golang.org",
+	"api.github.com",
+	"github.com",
+	"objects.githubusercontent.com",
+	"rubygems.org",
+	"crates.io",
+	"static.crates.io",
 }

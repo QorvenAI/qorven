@@ -146,6 +146,18 @@ func buildGraphEmitter(pl *plans.Store, events *apievents.Emitter) func(ctx cont
 					Outcome:          outcome,
 					ArtifactsExcerpt: trimArtifacts(detail),
 				})
+			// Emit build cost event if cost data is present in artifacts
+			if costCents, ok := detail["cost_cents"].(float64); ok && costCents > 0 {
+				_ = events.Emit(ctx, apievents.SinkAll,
+					apievents.Type("build.node_cost"),
+					map[string]any{
+						"plan_id":      planID,
+						"node_id":      nodeID,
+						"cost_cents":   costCents,
+						"input_tokens": detail["input_tokens"],
+						"output_tokens": detail["output_tokens"],
+					})
+			}
 		case "node.paused":
 			_ = events.Emit(ctx, apievents.SinkAll,
 				apievents.TypeGraphNodePaused,

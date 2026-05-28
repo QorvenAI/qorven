@@ -70,9 +70,26 @@ func (w *TokenRefreshWorker) runOnce(ctx context.Context) {
 	}
 	slog.Info("social.token_refresh.running", "count", len(integrations))
 	for _, integ := range integrations {
-		if err := w.refresh(ctx, integ); err != nil {
-			slog.Warn("social.token_refresh.failed",
-				"integration_id", integ.ID, "platform", integ.Platform, "err", err)
+		var lastErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				backoff := time.Duration(1<<uint(attempt)) * 2 * time.Second
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
+			}
+			if lastErr = w.refresh(ctx, integ); lastErr == nil {
+				break
+			}
+			slog.Warn("social.token_refresh.retry",
+				"integration_id", integ.ID, "platform", integ.Platform,
+				"attempt", attempt+1, "err", lastErr)
+		}
+		if lastErr != nil {
+			slog.Error("social.token_refresh.permanently_failed",
+				"integration_id", integ.ID, "platform", integ.Platform, "err", lastErr)
 			w.store.MarkNeedsReconnect(ctx, integ.ID)
 		}
 	}

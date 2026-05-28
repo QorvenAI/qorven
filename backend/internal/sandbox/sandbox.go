@@ -65,6 +65,7 @@ type Config struct {
 	TimeoutSec        int               `json:"timeout_sec"`
 	NetworkEnabled    bool              `json:"network_enabled"`
 	RestrictedDomains []string          `json:"restricted_domains,omitempty"`
+	AllowedDomains    []string          `json:"allowed_domains,omitempty"`
 	Env               map[string]string `json:"env,omitempty"`
 
 	// Security hardening
