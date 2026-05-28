@@ -925,6 +925,46 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/orchestration/runs/{run_id}", gw.handleGetOrchestrationRun)
 		r.Post("/orchestration/runs/{run_id}/cancel", gw.handleCancelOrchestrationRun)
 
+		// ERP Governance — Designations
+		r.Get("/governance/designations", gw.handleListDesignations)
+		r.Get("/governance/designations/{id}", gw.handleGetDesignation)
+		r.Post("/governance/designations", gw.handleUpsertDesignation)
+		r.Delete("/governance/designations/{id}", gw.handleDeleteDesignation)
+		r.Get("/governance/skill-families", gw.handleListSkillFamilies)
+
+		// ERP Governance — Approval Matrix
+		r.Get("/governance/approvals/rules", gw.handleListApprovalRules)
+		r.Get("/governance/approvals/pending", gw.handleListApprovalRequests)
+		r.Post("/governance/approvals/{id}/decide", gw.handleDecideMatrixApproval)
+
+		// ERP Governance — Policy Engine
+		r.Get("/governance/policies/events", gw.handleListPolicyEvents)
+
+		// ERP Governance — Exceptions
+		r.Get("/governance/exceptions", gw.handleListExceptions)
+		r.Post("/governance/exceptions/{id}/resolve", gw.handleResolveException)
+
+		// ERP Governance — Task State Machine
+		r.Post("/governance/tasks/{taskId}/transition", gw.handleTaskTransition)
+		r.Get("/governance/tasks/{taskId}/history", gw.handleTaskHistory)
+
+		// ERP Governance — Segregation of Duties
+		r.Get("/governance/sod/rules", gw.handleListSoDRules)
+		r.Post("/governance/sod/check", gw.handleCheckSoD)
+
+		// ERP Governance — SLA Tracking
+		r.Get("/governance/sla", gw.handleListSLAs)
+		r.Get("/governance/sla/measurements", gw.handleListSLAMeasurements)
+
+		// ERP Governance — Asset Library
+		r.Get("/governance/assets", gw.handleListAssets)
+		r.Get("/governance/assets/{id}", gw.handleGetAsset)
+		r.Post("/governance/assets", gw.handleUpsertAsset)
+		r.Delete("/governance/assets/{id}", gw.handleDeleteAsset)
+
+		// ERP Governance — Capacity Forecasting
+		r.Get("/governance/forecasts", gw.handleListForecasts)
+
 		// Mail
 		r.Get("/mail/identities", gw.handleListMailIdentities)
 		r.Post("/mail/identities", gw.handleCreateMailIdentity)

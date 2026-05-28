@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, GitBranch, Shield } from 'lucide-react';
+import { Users, GitBranch, Shield, Scale } from 'lucide-react';
 import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
@@ -32,6 +32,7 @@ export function TeamsSidebar() {
             <SidebarMenuItem icon={Users} label="Rooms" onClick={() => router.push('/rooms')} />
             <SidebarMenuItem icon={GitBranch} label="Org Chart" onClick={() => router.push('/org-chart')} />
             <SidebarMenuItem icon={Shield} label="Supervisor" onClick={() => router.push('/supervisor')} />
+            <SidebarMenuItem icon={Scale} label="Governance" onClick={() => router.push('/governance')} />
           </ul>
         </>
       }

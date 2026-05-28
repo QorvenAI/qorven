@@ -13,3 +13,4 @@ export * from './api-inbound';
 export * from './api-apps';
 export * from './api-dashboard';
 export * from './api-permissions';
+export * from './api-governance';

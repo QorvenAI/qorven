@@ -78,6 +78,7 @@ import (
 	"github.com/qorvenai/qorven/internal/tools"
 	"github.com/qorvenai/qorven/internal/voice"
 	"github.com/qorvenai/qorven/internal/webintel"
+	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/workflow"
 
 	"github.com/qorvenai/qorven/internal/autonomy"
@@ -203,6 +204,17 @@ type Gateway struct {
 	subagentRunStore *agent.SubagentRunStore
 	outputValidator  *agent.OutputValidator
 	workflowEngine   *workflow.Engine
+
+	// ERP governance subsystem
+	designationStore *governance.DesignationStore
+	approvalStore    *governance.ApprovalStore
+	policyEngine     *governance.PolicyEngine
+	exceptionStore   *governance.ExceptionStore
+	taskStateMachine *governance.TaskStateMachine
+	sodStore         *governance.SoDStore
+	slaStore         *governance.SLAStore
+	assetStore       *governance.AssetStore
+	forecastStore    *governance.ForecastStore
 
 	briefingSched *briefing.Scheduler   // daily briefing cron (nil until DB available)
 	dsScheduler   *datasource.Scheduler // connector data source cron (nil until DB available)
@@ -514,6 +526,17 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.subagentRunStore = agent.NewSubagentRunStore(db.Pool)
 			gw.outputValidator = agent.NewOutputValidator(db.Pool)
 			gw.intentRouter = agent.NewIntentRouter(db.Pool, agent.AgentSeeds)
+			gw.designationStore = governance.NewDesignationStore(db.Pool)
+			gw.approvalStore = governance.NewApprovalStore(db.Pool)
+			gw.policyEngine = governance.NewPolicyEngine(db.Pool)
+			gw.exceptionStore = governance.NewExceptionStore(db.Pool)
+			gw.taskStateMachine = governance.NewTaskStateMachine(db.Pool)
+			gw.sodStore = governance.NewSoDStore(db.Pool)
+			gw.slaStore = governance.NewSLAStore(db.Pool)
+			gw.assetStore = governance.NewAssetStore(db.Pool)
+			gw.forecastStore = governance.NewForecastStore(db.Pool)
+			governance.SeedDefaults(context.Background(), db.Pool, defaultTenant)
+			gw.policyEngine.LoadPolicies(context.Background(), defaultTenant)
 			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)
 			gw.workflowEngine.SetEventHandler(func(evt workflow.StepEvent) {
 				if gw.rtHub != nil {
