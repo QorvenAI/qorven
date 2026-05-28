@@ -310,9 +310,13 @@ function ContentCard({ item, onApprove, onReject, onSave }: {
 // ─── Channel Section (Okara-style grouped view) ────────────────────────────
 
 const channelMeta: Record<string, { label: string; icon: typeof MessageCircle; color: string }> = {
+  social_post: { label: 'Social Posts', icon: AtSign, color: 'text-sky-400' },
   social: { label: 'Social Posts', icon: AtSign, color: 'text-sky-400' },
+  reddit_reply: { label: 'Reddit Opportunities', icon: MessageCircle, color: 'text-orange-400' },
   reddit: { label: 'Reddit Opportunities', icon: MessageCircle, color: 'text-orange-400' },
-  article: { label: 'Articles & SEO', icon: Newspaper, color: 'text-emerald-400' },
+  article_draft: { label: 'Articles & Blog Posts', icon: Newspaper, color: 'text-emerald-400' },
+  article: { label: 'Articles & Blog Posts', icon: Newspaper, color: 'text-emerald-400' },
+  seo_fix: { label: 'SEO Recommendations', icon: Terminal, color: 'text-violet-400' },
   hackernews: { label: 'Hacker News', icon: Terminal, color: 'text-amber-400' },
 };
 
@@ -413,8 +417,16 @@ export default function ContentFeedPage() {
     const item = items.find((i) => i.id === id);
     setItems((prev) => prev.filter((i) => i.id !== id));
     try {
-      await request<{ status: string; post_id?: string }>(`/content-feed/${id}/approve`, { method: 'POST' });
-      toast.success(`Published to ${item?.platforms.join(', ') || 'platforms'}`);
+      const result = await request<{ status: string; post_id?: string; type?: string; cms?: Record<string, unknown>; reddit?: Record<string, unknown> }>(`/content-feed/${id}/approve`, { method: 'POST' });
+      if (result?.type === 'seo_fix') {
+        toast.success('SEO recommendation approved');
+      } else if (result?.cms) {
+        toast.success(`Published to ${(result.cms.platform as string) || 'CMS'}`);
+      } else if (result?.reddit) {
+        toast.success('Reddit reply posted');
+      } else {
+        toast.success(`Published to ${item?.platforms.join(', ') || 'platforms'}`);
+      }
       setStats((s) => ({ ...s, pending: Math.max(0, s.pending - 1), approved_today: s.approved_today + 1 }));
     } catch (err) {
       // Revert optimistic removal
@@ -497,9 +509,10 @@ export default function ContentFeedPage() {
             className="h-9 rounded-lg border border-border bg-input px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="">All channels</option>
-            <option value="social">Social</option>
-            <option value="article">Article</option>
-            <option value="reddit">Reddit</option>
+            <option value="social_post">Social Posts</option>
+            <option value="article_draft">Articles</option>
+            <option value="reddit_reply">Reddit</option>
+            <option value="seo_fix">SEO Fixes</option>
           </select>
 
           <select
@@ -551,7 +564,7 @@ export default function ContentFeedPage() {
           <div className="space-y-3">
             {Object.entries(
               items.reduce<Record<string, ContentItem[]>>((acc, item) => {
-                const ch = item.channel || 'social';
+                const ch = item.channel || item.action_type || 'social';
                 (acc[ch] ||= []).push(item);
                 return acc;
               }, {})

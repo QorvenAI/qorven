@@ -5,12 +5,15 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/qorvenai/qorven/internal/connectors"
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 )
 
@@ -164,6 +167,34 @@ func (gw *Gateway) handleApproveContent(w http.ResponseWriter, r *http.Request) 
 	json.Unmarshal(payload, &payloadMap)
 
 	content, _ := payloadMap["content"].(string)
+
+	// Route by action type: social posts vs articles/SEO recommendations
+	switch actionType {
+	case "article_draft":
+		// CMS publishing: try WordPress or Webflow via connector executor
+		title, _ := payloadMap["title"].(string)
+		if title == "" {
+			title = "Untitled Article"
+		}
+		cmsResult := gw.publishToCMS(ctx, title, content, payloadMap)
+		writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "cms": cmsResult})
+		return
+
+	case "seo_fix":
+		// SEO recommendations are just approved — no auto-publish
+		writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "type": "seo_fix"})
+		return
+
+	case "reddit_reply":
+		// Reddit replies: attempt to post via connector
+		subreddit, _ := payloadMap["subreddit"].(string)
+		threadTitle, _ := payloadMap["thread_title"].(string)
+		replyResult := gw.publishRedditReply(ctx, subreddit, threadTitle, content, payloadMap)
+		writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "reddit": replyResult})
+		return
+	}
+
+	// Default: social post flow
 	var platforms []socialqor.Platform
 	if p, ok := payloadMap["platforms"].([]any); ok {
 		for _, v := range p {
@@ -319,6 +350,85 @@ func (gw *Gateway) handleEditContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "id": id, "content": body.Content})
+}
+
+func (gw *Gateway) connectorExecutor() *connectors.Executor {
+	return gw.connExec
+}
+
+// publishToCMS attempts to publish an article to the connected CMS (WordPress or Webflow).
+func (gw *Gateway) publishToCMS(ctx context.Context, title, content string, payload map[string]any) map[string]any {
+	executor := gw.connectorExecutor()
+	if executor == nil {
+		return map[string]any{"published": false, "reason": "connector executor not available"}
+	}
+
+	// Try WordPress first
+	wpResult, err := executor.Execute(ctx, "wordpress", "create_post", map[string]any{
+		"title":   title,
+		"content": content,
+		"status":  "draft",
+	})
+	if err == nil && wpResult != "" {
+		return map[string]any{"published": true, "platform": "wordpress", "result": wpResult}
+	}
+
+	// Try Webflow
+	collectionID, _ := payload["collection_id"].(string)
+	if collectionID != "" {
+		wfResult, err := executor.Execute(ctx, "webflow", "create_item", map[string]any{
+			"collection_id": collectionID,
+			"fields": map[string]any{
+				"name": title,
+				"slug": strings.ToLower(strings.ReplaceAll(title, " ", "-")),
+				"body": content,
+			},
+		})
+		if err == nil && wfResult != "" {
+			return map[string]any{"published": true, "platform": "webflow", "result": wfResult}
+		}
+	}
+
+	// Try Contentful
+	spaceID, _ := payload["space_id"].(string)
+	if spaceID != "" {
+		cfResult, err := executor.Execute(ctx, "contentful", "create_entry", map[string]any{
+			"space_id":     spaceID,
+			"content_type": "blogPost",
+			"fields": map[string]any{
+				"title": map[string]any{"en-US": title},
+				"body":  map[string]any{"en-US": content},
+			},
+		})
+		if err == nil && cfResult != "" {
+			return map[string]any{"published": true, "platform": "contentful", "result": cfResult}
+		}
+	}
+
+	return map[string]any{"published": false, "reason": "no CMS connector available or configured"}
+}
+
+// publishRedditReply attempts to post a reply to Reddit via the connector.
+func (gw *Gateway) publishRedditReply(ctx context.Context, subreddit, threadTitle, content string, payload map[string]any) map[string]any {
+	executor := gw.connectorExecutor()
+	if executor == nil {
+		return map[string]any{"posted": false, "reason": "connector executor not available"}
+	}
+
+	params := map[string]any{
+		"sr":    subreddit,
+		"title": threadTitle,
+		"text":  content,
+	}
+	if url, ok := payload["url"].(string); ok && url != "" {
+		params["url"] = url
+	}
+
+	result, err := executor.Execute(ctx, "reddit", "submit_post", params)
+	if err != nil {
+		return map[string]any{"posted": false, "reason": err.Error()}
+	}
+	return map[string]any{"posted": true, "result": result}
 }
 
 // handleContentFeedStats returns aggregate stats for the content feed.
