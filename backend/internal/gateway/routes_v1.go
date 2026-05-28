@@ -706,6 +706,13 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/outbound/{id}/approve", gw.handleOutboundApprove)
 		r.Post("/outbound/{id}/reject", gw.handleOutboundReject)
 
+		// Content Approval Feed
+		r.Get("/content-feed", gw.handleListContentFeed)
+		r.Get("/content-feed/stats", gw.handleContentFeedStats)
+		r.Post("/content-feed/{id}/approve", gw.handleApproveContent)
+		r.Post("/content-feed/{id}/reject", gw.handleRejectContent)
+		r.Put("/content-feed/{id}", gw.handleEditContent)
+
 		// Metrics (Pattern 19)
 		r.Get("/metrics/{id}", gw.handleGetMetrics)
 
@@ -820,6 +827,12 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/analytics", gw.handleSocialAnalyticsSummary)
 		r.Get("/social/posts/{id}/metrics", gw.handleGetSocialPostMetrics)
 
+		// Marketing Analytics Dashboard
+		r.Get("/analytics/overview", gw.handleAnalyticsOverview)
+		r.Get("/analytics/seo", gw.handleAnalyticsSEO)
+		r.Get("/analytics/traffic", gw.handleAnalyticsTraffic)
+		r.Get("/analytics/timeline", gw.handleAnalyticsTimeline)
+
 		// Social Post Comments
 		r.Get("/social/posts/{id}/comments", gw.handleListSocialComments)
 		r.Post("/social/posts/{id}/comments", gw.handleCreateSocialComment)
@@ -859,6 +872,11 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/social/integrations/{id}/rules", gw.handleGetAccountRules)
 		r.Put("/social/integrations/{id}/rules", gw.handleSetAccountRules)
 		r.Get("/social/platforms", gw.handlePlatformMatrix)
+
+		// Onboarding — website analysis + product profile
+		r.Post("/onboarding/analyze", gw.handleAnalyzeWebsite)
+		r.Get("/onboarding/profile", gw.handleGetProfile)
+		r.Put("/onboarding/profile", gw.handleUpdateProfile)
 
 		// Dead-letter queue (FU-021)
 		r.Get("/admin/dead-letters", gw.handleListDeadLetters)
