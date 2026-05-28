@@ -391,6 +391,9 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) *Result {
 		return ErrorResult(fmt.Sprintf("cannot write: %v", err))
 	}
 
+	// Update read timestamp so subsequent edits don't trigger stale check
+	RecordFileRead(safe)
+
 	msg := fmt.Sprintf("edited %s — replaced 1 occurrence", rawPath)
 	if diff := generateDiff(rawPath, content, newContent); diff != "" {
 		msg += "\n\n" + diff
