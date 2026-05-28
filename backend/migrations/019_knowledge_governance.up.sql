@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS public.pii_vault (
 CREATE INDEX IF NOT EXISTS idx_pii_vault_agent
     ON public.pii_vault (tenant_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_pii_vault_expiry
-    ON public.pii_vault (expires_at) WHERE expires_at < now() + interval '7 days';
+    ON public.pii_vault (expires_at);
 
 -- ─── PII access log (audit trail for vault retrievals) ───────────────────────
 
