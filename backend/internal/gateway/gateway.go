@@ -515,6 +515,15 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.outputValidator = agent.NewOutputValidator(db.Pool)
 			gw.intentRouter = agent.NewIntentRouter(db.Pool, agent.AgentSeeds)
 			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)
+			gw.workflowEngine.SetEventHandler(func(evt workflow.StepEvent) {
+				if gw.rtHub != nil {
+					gw.rtHub.Broadcast(realtime.Event{
+						Type:      realtime.EventWorkflowStepProgress,
+						Timestamp: time.Now().UnixMilli(),
+						Data:      map[string]any{"run_id": evt.RunID, "step_id": evt.StepID, "event": evt.Event, "payload": evt.Payload},
+					})
+				}
+			})
 			gw.msgStore = agent.NewMessageStore(db.Pool)
 			gw.hbStore = heartbeat.NewStore(db.Pool)
 			gw.mailStore = mail.NewStore(db.Pool)
@@ -1187,6 +1196,15 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		if gw.subagentRunStore != nil {
 			gw.brain.Subagents.RunStore = gw.subagentRunStore
 			gw.brain.Subagents.TenantID = defaultTenant
+		}
+		gw.brain.Subagents.OnSpawn = func(id, parentID, task string, depth int) {
+			if gw.rtHub != nil {
+				gw.rtHub.Broadcast(realtime.Event{
+					Type:      realtime.EventSubagentSpawned,
+					Timestamp: time.Now().UnixMilli(),
+					Data:      map[string]any{"id": id, "parent_id": parentID, "task": task, "depth": depth},
+				})
+			}
 		}
 		gw.brain.Start() // start cron + heartbeat
 		slog.Info("brain engine initialized and started")

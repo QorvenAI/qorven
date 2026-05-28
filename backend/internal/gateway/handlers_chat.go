@@ -17,6 +17,7 @@ import (
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/council"
 	"github.com/qorvenai/qorven/internal/providers"
+	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/session"
 	"github.com/qorvenai/qorven/internal/tools"
 )
@@ -403,6 +404,12 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 			if resolved, rErr := gw.agents.GetByKey(r.Context(), decision.AgentKey); rErr == nil && resolved != nil {
 				agentID = resolved.ID
 				slog.Info("intent.routed", "agent_key", decision.AgentKey, "rule", decision.RuleName, "method", decision.Method)
+				if gw.rtHub != nil {
+					gw.rtHub.Broadcast(realtime.Event{
+						Type: realtime.EventRoutingDecision,
+						Data: map[string]any{"agent_key": decision.AgentKey, "rule": decision.RuleName, "method": decision.Method},
+					})
+				}
 			}
 		}
 	}

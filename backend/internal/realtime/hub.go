@@ -56,6 +56,12 @@ const (
 	// EventDashboardRefresh signals the CEO dashboard to refresh data.
 	// Emitted after cost-ledger flush, agent status change, or session completion.
 	EventDashboardRefresh = "dashboard_refresh"
+
+	// ERP orchestration events
+	EventWorkflowStepProgress = "workflow_step_progress"
+	EventSubagentSpawned      = "subagent_spawned"
+	EventRoutingDecision      = "routing_decision"
+	EventQualityAlert         = "quality_alert"
 )
 
 // Event is a real-time event pushed to all connected clients.

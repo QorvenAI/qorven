@@ -39,6 +39,8 @@ type SubagentManager struct {
 	RunStore *SubagentRunStore
 	TenantID string
 	AgentKey string
+	// OnSpawn is called when a subagent is spawned (for realtime events). nil = skip.
+	OnSpawn func(id, parentID, task string, depth int)
 }
 
 // SubagentTask tracks a spawned subagent.
@@ -111,6 +113,9 @@ func (sm *SubagentManager) Spawn(ctx context.Context, parentID string, depth int
 	sm.activeCount.Add(1)
 
 	slog.Info("subagent.spawn", "id", id, "parent", parentID, "depth", st.Depth, "task", truncateSA(task, 80))
+	if sm.OnSpawn != nil {
+		sm.OnSpawn(id, parentID, truncateSA(task, 120), st.Depth)
+	}
 
 	result, err := sm.RunFunc(ctx, SubagentRunRequest{
 		Task:      task,
