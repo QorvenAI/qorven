@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import {
   Check, X, Pencil, RefreshCw, Clock, FileText,
-  CheckCircle2, XCircle, Inbox,
+  CheckCircle2, XCircle, Inbox, ChevronDown, LayoutList, LayoutGrid,
+  MessageCircle, AtSign, Newspaper, Terminal,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -306,6 +307,55 @@ function ContentCard({ item, onApprove, onReject, onSave }: {
   );
 }
 
+// ─── Channel Section (Okara-style grouped view) ────────────────────────────
+
+const channelMeta: Record<string, { label: string; icon: typeof MessageCircle; color: string }> = {
+  social: { label: 'Social Posts', icon: AtSign, color: 'text-sky-400' },
+  reddit: { label: 'Reddit Opportunities', icon: MessageCircle, color: 'text-orange-400' },
+  article: { label: 'Articles & SEO', icon: Newspaper, color: 'text-emerald-400' },
+  hackernews: { label: 'Hacker News', icon: Terminal, color: 'text-amber-400' },
+};
+
+function ChannelSection({ channel, items, onApprove, onReject, onSave }: {
+  channel: string;
+  items: ContentItem[];
+  onApprove: (id: string) => void;
+  onReject: (id: string, reason?: string) => void;
+  onSave: (id: string, content: string, platforms: string[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = channelMeta[channel] || { label: channel, icon: FileText, color: 'text-muted-foreground' };
+  const Icon = meta.icon;
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <Icon className={cn('h-5 w-5', meta.color)} />
+          <span className="text-sm font-semibold text-foreground">{meta.label}</span>
+          <span className="flex items-center justify-center h-5 min-w-[20px] rounded-full bg-primary/20 text-primary text-xs font-medium px-1.5">
+            {items.length}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {items.length === 1 ? 'item ready' : 'items ready'}
+          </span>
+        </div>
+        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+      </button>
+      {expanded && (
+        <div className="border-t border-border px-3 py-3 space-y-2">
+          {items.map((item) => (
+            <ContentCard key={item.id} item={item} onApprove={onApprove} onReject={onReject} onSave={onSave} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
 export default function ContentFeedPage() {
@@ -314,10 +364,11 @@ export default function ContentFeedPage() {
   const [agentList, setAgentList] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters
+  // Filters + view mode
   const [statusFilter, setStatusFilter] = useState('pending');
   const [channelFilter, setChannelFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
+  const [viewMode, setViewMode] = useState<'list' | 'grouped'>('list');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -463,6 +514,23 @@ export default function ContentFeedPage() {
               </option>
             ))}
           </select>
+
+          <div className="ml-auto flex items-center gap-1 rounded-lg border border-border p-0.5">
+            <button
+              onClick={() => setViewMode('list')}
+              className={cn('flex h-7 w-7 items-center justify-center rounded-md transition-colors', viewMode === 'list' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
+              title="List view"
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('grouped')}
+              className={cn('flex h-7 w-7 items-center justify-center rounded-md transition-colors', viewMode === 'grouped' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
+              title="Grouped by channel"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Feed */}
@@ -478,6 +546,25 @@ export default function ContentFeedPage() {
             <p className="text-sm text-muted-foreground">
               No content awaiting approval. Your agents will produce drafts on their next run.
             </p>
+          </div>
+        ) : viewMode === 'grouped' ? (
+          <div className="space-y-3">
+            {Object.entries(
+              items.reduce<Record<string, ContentItem[]>>((acc, item) => {
+                const ch = item.channel || 'social';
+                (acc[ch] ||= []).push(item);
+                return acc;
+              }, {})
+            ).map(([channel, channelItems]) => (
+              <ChannelSection
+                key={channel}
+                channel={channel}
+                items={channelItems}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                onSave={handleSave}
+              />
+            ))}
           </div>
         ) : (
           <div className="space-y-3">
