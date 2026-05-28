@@ -663,6 +663,108 @@ export const unifiedTimeline = {
     ),
 };
 
+// Content Feed
+export interface ContentFeedItem {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  action_type: string;
+  content: string;
+  platforms: string[];
+  channel: string;
+  status: string;
+  requested_at: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ContentFeedStats {
+  pending: number;
+  approved_today: number;
+  rejected_today: number;
+  total_30d: number;
+}
+
+export interface WebsiteProfile {
+  id?: string;
+  url: string;
+  product_name: string;
+  tagline: string;
+  audience: string;
+  competitors: string[];
+  brand_voice: string;
+  value_props: string[];
+  keywords: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AnalyticsOverview {
+  content_produced_7d: number;
+  content_produced_30d: number;
+  approved_7d: number;
+  rejected_7d: number;
+  published_7d: number;
+  approval_rate: number;
+  posts_by_platform: Record<string, number>;
+  posts_by_agent: { agent_id: string; agent_name: string; count: number }[];
+}
+
+export interface AnalyticsSEO {
+  connected: boolean;
+  clicks?: number;
+  impressions?: number;
+  ctr?: number;
+  position?: number;
+  connect_url?: string;
+}
+
+export interface AnalyticsTraffic {
+  connected: boolean;
+  sessions_7d?: number;
+  users_7d?: number;
+  pageviews_7d?: number;
+  top_pages?: { path: string; views: number }[];
+  connect_url?: string;
+}
+
+export interface TimelineEntry {
+  date: string;
+  produced: number;
+  approved: number;
+  published: number;
+  rejected: number;
+}
+
+export const contentFeed = {
+  list: (params?: { status?: string; channel?: string; agent_id?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.channel) qs.set('channel', params.channel);
+    if (params?.agent_id) qs.set('agent_id', params.agent_id);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    return request<ContentFeedItem[]>(`/content-feed?${qs}`);
+  },
+  stats: () => request<ContentFeedStats>('/content-feed/stats'),
+  approve: (id: string) => request<{ status: string; post_id?: string }>(`/content-feed/${id}/approve`, { method: 'POST' }),
+  reject: (id: string, reason?: string) => request<{ status: string }>(`/content-feed/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  edit: (id: string, body: { content: string; platforms?: string[] }) => request<ContentFeedItem>(`/content-feed/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+};
+
+// Onboarding
+export const onboarding = {
+  analyze: (url: string) => request<WebsiteProfile>('/onboarding/analyze', { method: 'POST', body: JSON.stringify({ url }) }),
+  getProfile: () => request<WebsiteProfile>('/onboarding/profile'),
+  updateProfile: (body: Partial<WebsiteProfile>) => request<WebsiteProfile>('/onboarding/profile', { method: 'PUT', body: JSON.stringify(body) }),
+};
+
+// Analytics
+export const analytics = {
+  overview: () => request<AnalyticsOverview>('/analytics/overview'),
+  seo: () => request<AnalyticsSEO>('/analytics/seo'),
+  traffic: () => request<AnalyticsTraffic>('/analytics/traffic'),
+  timeline: (days?: number) => request<TimelineEntry[]>(`/analytics/timeline${days ? `?days=${days}` : ''}`),
+};
+
 // Admin resets + update
 export const admin = {
   reset: (target: string) =>

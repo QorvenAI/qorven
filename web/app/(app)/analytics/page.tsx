@@ -2,225 +2,549 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState } from 'react';
-import { agents } from '@/lib/api';
-import { traces as tracesApi, type TraceRow, type TraceSummary } from '@/lib/api-providers';
-import { useStore } from '@/store';
-import { ErrorBoundary } from '@/components/error-boundary';
+import { useEffect, useState, useCallback } from 'react';
+import { request } from '@/lib/api-core';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import {
-  BarChart3, Cpu, DollarSign, Activity, AlertTriangle,
-  Clock, Zap, TrendingUp, RefreshCw,
+  BarChart3, TrendingUp, CheckCircle2, Users, Lock,
+  RefreshCw, Search, Globe, FileText,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 
-export default function AnalyticsPage() {
-  const souls = useStore((s) => s.souls);
-  const setSouls = useStore((s) => s.setSouls);
-  const [recentTraces, setRecentTraces] = useState<TraceRow[]>([]);
-  const [summary, setSummary] = useState<TraceSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+// --- Types ---
 
-  const load = () => {
+interface OverviewData {
+  content_produced_7d: number;
+  content_produced_30d: number;
+  approved_7d: number;
+  rejected_7d: number;
+  published_7d: number;
+  approval_rate: number;
+  posts_by_platform: Record<string, number>;
+  posts_by_agent: { agent_id: string; agent_name: string; count: number }[];
+}
+
+interface SeoData {
+  connected: boolean;
+  clicks?: number;
+  impressions?: number;
+  ctr?: number;
+  position?: number;
+  connect_url?: string;
+}
+
+interface TrafficData {
+  connected: boolean;
+  sessions_7d?: number;
+  users_7d?: number;
+  pageviews_7d?: number;
+  top_pages?: { path: string; views: number }[];
+  connect_url?: string;
+}
+
+interface TimelineDay {
+  date: string;
+  produced: number;
+  approved: number;
+  published: number;
+  rejected: number;
+}
+
+type Period = '7d' | '30d';
+
+// --- Page ---
+
+export default function AnalyticsPage() {
+  const [period, setPeriod] = useState<Period>('30d');
+  const [loading, setLoading] = useState(true);
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [seo, setSeo] = useState<SeoData | null>(null);
+  const [traffic, setTraffic] = useState<TrafficData | null>(null);
+  const [timeline, setTimeline] = useState<TimelineDay[]>([]);
+
+  const load = useCallback(() => {
     setLoading(true);
+    const days = period === '7d' ? 7 : 30;
     Promise.all([
-      souls.length === 0 ? agents.list().then(setSouls).catch(() => []) : Promise.resolve(),
-      tracesApi.list({ limit: 30 }).catch(() => [] as TraceRow[]),
-      tracesApi.summary().catch(() => [] as TraceSummary[]),
-    ]).then(([, t, s]) => {
-      setRecentTraces(t as TraceRow[]);
-      setSummary(s as TraceSummary[]);
+      request<OverviewData>('/analytics/overview').catch(() => null),
+      request<SeoData>('/analytics/seo').catch(() => null),
+      request<TrafficData>('/analytics/traffic').catch(() => null),
+      request<TimelineDay[]>(`/analytics/timeline?days=${days}`).catch(() => []),
+    ]).then(([o, s, t, tl]) => {
+      setOverview(o);
+      setSeo(s);
+      setTraffic(t);
+      setTimeline(tl ?? []);
+    }).catch(() => {
+      toast.error('Failed to load analytics data');
+    }).finally(() => {
       setLoading(false);
     });
-  };
+  }, [period]);
 
-  useEffect(load, []);
+  useEffect(() => { load(); }, [load]);
 
-  // Budget overview from soul data (still the source of truth for budget caps)
-  const totalBudget = souls.reduce((a, s) => a + s.credit_budget_cents, 0) / 100;
-  const totalUsed = souls.reduce((a, s) => a + s.credit_used_cents, 0) / 100;
-  const totalPct = totalBudget > 0 ? (totalUsed / totalBudget) * 100 : 0;
-
-  // Aggregate from traces for this month
-  const totalInputTok  = summary.reduce((a, s) => a + s.input_tokens,  0);
-  const totalOutputTok = summary.reduce((a, s) => a + s.output_tokens, 0);
-  const totalCostCents = summary.reduce((a, s) => a + s.cost_cents,    0);
-  const totalTracesCount = summary.reduce((a, s) => a + s.traces, 0);
-
-  // Build agent name lookup
-  const soulById = Object.fromEntries(souls.map((s) => [s.id, s.display_name]));
+  const contentProduced = period === '7d' ? (overview?.content_produced_7d ?? 0) : (overview?.content_produced_30d ?? 0);
+  const published = overview?.published_7d ?? 0;
+  const approvalRate = overview?.approval_rate ?? 0;
+  const activeAgents = overview?.posts_by_agent?.length ?? 0;
 
   return (
-    <ErrorBoundary fallbackTitle="Failed to load analytics">
-      <div className="space-y-6">
-        <CanvasHeader
-          title="Analytics & Usage"
-          description="Token usage, traces, and per-agent spend — current month"
-          actions={
-            <button onClick={load} disabled={loading}
-              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
+    <div className="flex flex-col h-full overflow-y-auto">
+      <CanvasHeader
+        title="Analytics"
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-border overflow-hidden text-sm">
+              <button
+                onClick={() => setPeriod('7d')}
+                className={cn(
+                  'px-3 py-1.5 transition-colors',
+                  period === '7d' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
+                )}
+              >
+                7d
+              </button>
+              <button
+                onClick={() => setPeriod('30d')}
+                className={cn(
+                  'px-3 py-1.5 transition-colors',
+                  period === '30d' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
+                )}
+              >
+                30d
+              </button>
+            </div>
+            <button
+              onClick={load}
+              disabled={loading}
+              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
               <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
               Refresh
             </button>
-          }
-        />
+          </div>
+        }
+      />
 
-        {/* ── Top stat cards ── */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={DollarSign}  label="Cost (budget)" value={`$${totalUsed.toFixed(2)}`}  sub={`of $${totalBudget.toFixed(2)} budget`} alert={totalPct > 80} loading={loading} />
-          <StatCard icon={TrendingUp}  label="Cost (traces)"  value={`$${(totalCostCents / 100).toFixed(4)}`} sub="this month" loading={loading} />
-          <StatCard icon={Cpu}         label="Tokens in"      value={fmtNum(totalInputTok)}  sub="input this month"  loading={loading} />
-          <StatCard icon={Activity}    label="Tokens out"     value={fmtNum(totalOutputTok)} sub="output this month" loading={loading} />
+      <div className="space-y-6 px-6 pb-8">
+        {/* Row 1: Stat cards */}
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            icon={FileText}
+            label="Content Produced"
+            value={contentProduced}
+            accent="blue"
+            loading={loading}
+          />
+          <StatCard
+            icon={CheckCircle2}
+            label="Published"
+            value={published}
+            accent="green"
+            loading={loading}
+          />
+          <StatCard
+            icon={TrendingUp}
+            label="Approval Rate"
+            value={`${approvalRate.toFixed(0)}%`}
+            accent="amber"
+            loading={loading}
+          />
+          <StatCard
+            icon={Users}
+            label="Active Agents"
+            value={activeAgents}
+            accent="purple"
+            loading={loading}
+          />
         </div>
 
-        {totalPct > 80 && (
-          <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            Workspace is at {totalPct.toFixed(0)}% of total budget
-          </div>
-        )}
-
-        {/* ── Per-agent summary (from traces) ── */}
-        {summary.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-sm font-semibold text-foreground">Per-Agent Usage (this month)</h2>
-            <div className="space-y-2">
-              {summary.map((s) => {
-                const name = soulById[s.agent_id] || s.agent_id?.slice(0, 8) || 'Unknown';
-                const pct = totalCostCents > 0 ? (s.cost_cents / totalCostCents) * 100 : 0;
-                return (
-                  <div key={s.agent_id} className="rounded-xl border border-border bg-card px-4 py-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-medium">{name}</span>
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><Zap className="h-3 w-3" />{fmtNum(s.input_tokens + s.output_tokens)} tok</span>
-                        <span className="flex items-center gap-1"><BarChart3 className="h-3 w-3" />{s.traces} traces</span>
-                        <span className="font-medium text-foreground">${(s.cost_cents / 100).toFixed(4)}</span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* ── Per-soul credit spend (from agents table) ── */}
-        {souls.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-sm font-semibold text-foreground">Credit Budget per Agent</h2>
-            <div className="space-y-2">
-              {souls.map((soul) => {
-                const budget = soul.credit_budget_cents / 100;
-                const used   = soul.credit_used_cents   / 100;
-                const pct    = budget > 0 ? Math.min((used / budget) * 100, 100) : 0;
-                return (
-                  <div key={soul.id} className="rounded-xl border border-border bg-card px-4 py-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">{soul.display_name}</span>
-                      <span className="text-xs text-muted-foreground">${used.toFixed(2)} / ${budget.toFixed(2)}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div className={cn('h-full rounded-full', pct > 80 ? 'bg-destructive' : 'bg-primary')} style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* ── Recent traces ── */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-foreground">Recent Traces</h2>
-            {totalTracesCount > 0 && (
-              <span className="text-xs text-muted-foreground">{totalTracesCount.toLocaleString()} this month</span>
-            )}
-          </div>
-
+        {/* Row 2: Timeline chart */}
+        <div className="rounded-xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold text-foreground mb-4">Content Timeline</h2>
           {loading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-12 rounded-xl animate-pulse bg-muted" />
-              ))}
-            </div>
-          ) : recentTraces.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-10 flex flex-col items-center text-center">
-              <Clock className="h-6 w-6 text-muted-foreground/60 mb-2" />
-              <p className="text-sm text-muted-foreground">No traces yet — traces are recorded as agents process requests.</p>
+            <div className="h-48 animate-pulse rounded bg-muted" />
+          ) : timeline.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
+              No timeline data available
             </div>
           ) : (
-            <div className="rounded-xl border border-border overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-muted/40">
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Agent</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Tokens in</th>
-                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Tokens out</th>
-                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Duration</th>
-                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {recentTraces.map((t) => (
-                    <tr key={t.id} className="hover:bg-accent/40 transition-colors">
-                      <td className="px-4 py-2.5 font-medium text-foreground">
-                        {t.agent_id ? (soulById[t.agent_id] || t.agent_id.slice(0, 8)) : '—'}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium',
-                          t.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600' :
-                          t.status === 'running'   ? 'bg-blue-500/10 text-blue-600' :
-                          t.status === 'error'     ? 'bg-destructive/10 text-destructive' :
-                          'bg-muted text-muted-foreground')}>
-                          {t.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{t.input_tokens.toLocaleString()}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{t.output_tokens.toLocaleString()}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">
-                        {t.duration_ms != null ? `${t.duration_ms.toLocaleString()}ms` : '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-muted-foreground">
-                        {new Date(t.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <TimelineChart data={timeline} />
           )}
-        </section>
+        </div>
+
+        {/* Row 3: SEO + Traffic */}
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+          <SeoCard data={seo} loading={loading} />
+          <TrafficCard data={traffic} loading={loading} />
+        </div>
+
+        {/* Row 4: By Platform + By Agent */}
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+          <PlatformCard data={overview?.posts_by_platform ?? {}} loading={loading} />
+          <AgentCard data={overview?.posts_by_agent ?? []} loading={loading} />
+        </div>
       </div>
-    </ErrorBoundary>
+    </div>
   );
 }
+
+// --- Stat Card ---
+
+function StatCard({ icon: Icon, label, value, accent, loading }: {
+  icon: typeof FileText;
+  label: string;
+  value: number | string;
+  accent: 'blue' | 'green' | 'amber' | 'purple';
+  loading?: boolean;
+}) {
+  const iconColor = {
+    blue: 'text-blue-400',
+    green: 'text-emerald-400',
+    amber: 'text-amber-400',
+    purple: 'text-purple-400',
+  }[accent];
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 relative">
+      <Icon className={cn('h-5 w-5 absolute top-4 right-4', iconColor)} />
+      {loading ? (
+        <div className="h-10 w-24 animate-pulse rounded bg-muted mt-1" />
+      ) : (
+        <p className="text-3xl font-semibold tabular-nums">{value}</p>
+      )}
+      <p className="text-xs text-muted-foreground mt-1">{label}</p>
+    </div>
+  );
+}
+
+// --- Timeline Chart (pure SVG) ---
+
+function TimelineChart({ data }: { data: TimelineDay[] }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  const maxTotal = Math.max(...data.map(d => d.produced + d.published + d.rejected), 1);
+  const chartWidth = 800;
+  const chartHeight = 180;
+  const barGap = 2;
+  const barWidth = Math.max((chartWidth - barGap * data.length) / data.length, 4);
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${chartWidth} ${chartHeight + 28}`}
+        className="w-full h-auto"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {data.map((d, i) => {
+          const x = i * (barWidth + barGap);
+          const producedH = (d.produced / maxTotal) * chartHeight;
+          const publishedH = (d.published / maxTotal) * chartHeight;
+          const rejectedH = (d.rejected / maxTotal) * chartHeight;
+          const totalH = producedH + publishedH + rejectedH;
+          const baseY = chartHeight - totalH;
+
+          return (
+            <g
+              key={d.date}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              className="cursor-pointer"
+            >
+              {/* Invisible hit area */}
+              <rect x={x} y={0} width={barWidth} height={chartHeight} fill="transparent" />
+              {/* Blue: produced */}
+              <rect
+                x={x}
+                y={baseY}
+                width={barWidth}
+                height={producedH}
+                className="fill-blue-500"
+                rx={1}
+              />
+              {/* Green: published */}
+              <rect
+                x={x}
+                y={baseY + producedH}
+                width={barWidth}
+                height={publishedH}
+                className="fill-emerald-500"
+                rx={1}
+              />
+              {/* Red: rejected */}
+              <rect
+                x={x}
+                y={baseY + producedH + publishedH}
+                width={barWidth}
+                height={rejectedH}
+                className="fill-red-500"
+                rx={1}
+              />
+              {/* X-axis label (every 5th) */}
+              {i % 5 === 0 && (
+                <text
+                  x={x + barWidth / 2}
+                  y={chartHeight + 16}
+                  textAnchor="middle"
+                  className="fill-muted-foreground text-[9px]"
+                >
+                  {formatDateLabel(d.date)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Tooltip */}
+      {hovered !== null && data[hovered] && (
+        <div
+          className="absolute top-0 pointer-events-none bg-popover border border-border rounded-lg px-3 py-2 text-xs shadow-lg z-10"
+          style={{
+            left: `${(hovered / data.length) * 100}%`,
+            transform: 'translateX(-50%)',
+          }}
+        >
+          <p className="font-medium text-foreground mb-1">{formatDateLabel(data[hovered].date)}</p>
+          <div className="space-y-0.5">
+            <p><span className="inline-block w-2 h-2 rounded-sm bg-blue-500 mr-1.5" />Produced: {data[hovered].produced}</p>
+            <p><span className="inline-block w-2 h-2 rounded-sm bg-emerald-500 mr-1.5" />Published: {data[hovered].published}</p>
+            <p><span className="inline-block w-2 h-2 rounded-sm bg-red-500 mr-1.5" />Rejected: {data[hovered].rejected}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" />Produced</span>
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />Published</span>
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500" />Rejected</span>
+      </div>
+    </div>
+  );
+}
+
+// --- SEO Card ---
+
+function SeoCard({ data, loading }: { data: SeoData | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h2 className="text-sm font-semibold text-foreground mb-4">SEO Health</h2>
+        <div className="h-32 animate-pulse rounded bg-muted" />
+      </div>
+    );
+  }
+
+  if (!data || !data.connected) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h2 className="text-sm font-semibold text-foreground mb-4">SEO Health</h2>
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <Lock className="h-8 w-8 text-muted-foreground/40 mb-3" />
+          <p className="text-sm text-muted-foreground mb-3">
+            Connect Google Search Console to see SEO metrics
+          </p>
+          <a
+            href="/settings"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <Search className="h-4 w-4" />
+            Connect Search Console
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="text-sm font-semibold text-foreground mb-4">SEO Health</h2>
+      <div className="grid grid-cols-2 gap-4">
+        <MetricItem label="Clicks" value={fmtNum(data.clicks ?? 0)} />
+        <MetricItem label="Impressions" value={fmtNum(data.impressions ?? 0)} />
+        <MetricItem label="CTR" value={`${((data.ctr ?? 0) * 100).toFixed(1)}%`} />
+        <MetricItem label="Avg Position" value={(data.position ?? 0).toFixed(1)} />
+      </div>
+    </div>
+  );
+}
+
+// --- Traffic Card ---
+
+function TrafficCard({ data, loading }: { data: TrafficData | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h2 className="text-sm font-semibold text-foreground mb-4">Traffic</h2>
+        <div className="h-32 animate-pulse rounded bg-muted" />
+      </div>
+    );
+  }
+
+  if (!data || !data.connected) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h2 className="text-sm font-semibold text-foreground mb-4">Traffic</h2>
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <Lock className="h-8 w-8 text-muted-foreground/40 mb-3" />
+          <p className="text-sm text-muted-foreground mb-3">
+            Connect Google Analytics to see traffic metrics
+          </p>
+          <a
+            href="/settings"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <Globe className="h-4 w-4" />
+            Connect Google Analytics
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="text-sm font-semibold text-foreground mb-4">Traffic</h2>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <MetricItem label="Sessions" value={fmtNum(data.sessions_7d ?? 0)} />
+        <MetricItem label="Users" value={fmtNum(data.users_7d ?? 0)} />
+        <MetricItem label="Pageviews" value={fmtNum(data.pageviews_7d ?? 0)} />
+      </div>
+      {data.top_pages && data.top_pages.length > 0 && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground mb-2">Top Pages</p>
+          <div className="space-y-1.5">
+            {data.top_pages.slice(0, 5).map((page) => (
+              <div key={page.path} className="flex items-center justify-between text-xs">
+                <span className="text-foreground truncate max-w-[70%]">{page.path}</span>
+                <span className="text-muted-foreground tabular-nums">{page.views.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Platform Card ---
+
+const PLATFORM_COLORS: Record<string, string> = {
+  twitter: 'bg-blue-500',
+  linkedin: 'bg-blue-700',
+  facebook: 'bg-indigo-500',
+  instagram: 'bg-pink-500',
+  youtube: 'bg-red-500',
+  tiktok: 'bg-slate-700',
+  blog: 'bg-emerald-500',
+  email: 'bg-amber-500',
+};
+
+function PlatformCard({ data, loading }: { data: Record<string, number>; loading: boolean }) {
+  const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+  const maxCount = Math.max(...entries.map(([, v]) => v), 1);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="text-sm font-semibold text-foreground mb-4">By Platform</h2>
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+          No platform data yet
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {entries.map(([platform, count]) => {
+            const barColor = PLATFORM_COLORS[platform.toLowerCase()] ?? 'bg-primary';
+            const pct = (count / maxCount) * 100;
+            return (
+              <div key={platform}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-foreground capitalize font-medium">{platform}</span>
+                  <span className="text-muted-foreground tabular-nums">{count}</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all', barColor)}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Agent Card ---
+
+function AgentCard({ data, loading }: { data: { agent_id: string; agent_name: string; count: number }[]; loading: boolean }) {
+  const sorted = [...data].sort((a, b) => b.count - a.count);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="text-sm font-semibold text-foreground mb-4">By Agent</h2>
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-8 animate-pulse rounded bg-muted" />
+          ))}
+        </div>
+      ) : sorted.length === 0 ? (
+        <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+          No agent data yet
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {sorted.map((agent) => (
+            <div key={agent.agent_id} className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <span className="text-xs font-medium text-primary">
+                  {agent.agent_name.slice(0, 2).toUpperCase()}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{agent.agent_name}</p>
+              </div>
+              <span className="text-sm tabular-nums text-muted-foreground font-medium">{agent.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Metric Item ---
+
+function MetricItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-2xl font-semibold tabular-nums text-foreground">{value}</p>
+      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+// --- Helpers ---
 
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000)     return (n / 1_000).toFixed(1) + 'K';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return String(n);
 }
 
-function StatCard({ icon: Icon, label, value, sub, alert, loading }: {
-  icon: typeof DollarSign; label: string; value: string; sub?: string; alert?: boolean; loading?: boolean;
-}) {
-  return (
-    <div className={cn('rounded-xl border bg-card p-5', alert ? 'border-destructive/30' : 'border-border')}>
-      <div className="flex items-center gap-2">
-        <Icon className={cn('h-4 w-4', alert ? 'text-destructive' : 'text-muted-foreground')} />
-        <p className="text-xs text-muted-foreground">{label}</p>
-      </div>
-      {loading
-        ? <div className="mt-2 h-8 w-20 animate-pulse rounded bg-muted" />
-        : <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-      }
-      {sub && <p className="text-2xs text-muted-foreground mt-0.5">{sub}</p>}
-    </div>
-  );
+function formatDateLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
