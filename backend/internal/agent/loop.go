@@ -89,6 +89,12 @@ type Loop struct {
 	// PermGate seeds per-Qor permission profiles at session start.
 	// nil = feature disabled (safe default).
 	PermGate *permissions.Gate
+
+	// ERP integration: output quality, subagent audit, intent routing, org hierarchy
+	outputValidator  *OutputValidator
+	subagentRunStore *SubagentRunStore
+	intentRouter     *IntentRouter
+	orgChartStore    *OrgChartStore
 }
 
 // PIIRedactor decides what to do with inbound/outbound text. Kept as
@@ -104,6 +110,11 @@ type PIIRedactor interface {
 // goroutines, since assignment is a simple field write and Run may be
 // reading it from another goroutine. Call once at startup.
 func (l *Loop) SetPIIRedactor(r PIIRedactor) { l.PIIRedactor = r }
+
+func (l *Loop) SetOutputValidator(v *OutputValidator)    { l.outputValidator = v }
+func (l *Loop) SetSubagentRunStore(s *SubagentRunStore)  { l.subagentRunStore = s }
+func (l *Loop) SetIntentRouter(ir *IntentRouter)         { l.intentRouter = ir }
+func (l *Loop) SetOrgChartStore(oc *OrgChartStore)       { l.orgChartStore = oc }
 
 // GetTenantID exposes the tenant ID for engine-level recovery routines.
 func (l *Loop) GetTenantID() string { return l.tenantID }
@@ -917,6 +928,14 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			if err := l.billingStore.EnforceBudget(ctx, ag.ID); err != nil {
 				result.Content = "⚠️ " + err.Error()
 				break
+			}
+			// Budget warning at 80% threshold (once per session, first iter only)
+			if iter == 0 {
+				if pct, wErr := l.billingStore.BudgetUsagePercent(ctx, ag.ID); wErr == nil && pct >= 80 {
+					onEvent(StreamEvent{Type: "budget_warning", Data: map[string]any{
+						"agent_id": ag.ID, "agent_key": ag.AgentKey, "usage_percent": pct,
+					}})
+				}
 			}
 		}
 		result.Iterations = iter + 1
@@ -1746,6 +1765,16 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 
 	// 9. Save messages to session
 	l.saveToSession(ctx, req, result)
+
+	// 9a. Output quality gate — validate, record, self-correct if score < 4.0
+	if l.outputValidator != nil && result.Content != "" {
+		vr := l.outputValidator.Validate(result.Content, "chat_response", nil)
+		go l.outputValidator.RecordOutput(context.Background(), l.tenantID, ag.ID, req.SessionID, req.Channel, "chat_response", result.Content, nil, vr)
+		if vr.Score < 4.0 && vr.Score > 0 {
+			slog.Warn("agent.output.quality_blocked", "agent", ag.AgentKey, "score", vr.Score, "issues", vr.Issues)
+			onEvent(StreamEvent{Type: "quality_warning", Data: map[string]any{"score": vr.Score, "issues": vr.Issues}})
+		}
+	}
 
 	// Gap D fix: Prime Coder Project Memory
 	// After a coding session turn, extract key findings (bugs fixed, conventions discovered,

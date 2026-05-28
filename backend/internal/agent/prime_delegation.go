@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // PrimeDelegation manages the Prime Soul → specialist agent delegation flow.
@@ -17,11 +19,14 @@ import (
 type PrimeDelegation struct {
 	mu          sync.RWMutex
 	primeID     string
+	tenantID    string
 	agentStore  AgentLookup
 	pending     map[string]*DelegatedTask
 	onComplete  func(task *DelegatedTask)
 	// runAgent executes a specialist agent and returns the response
 	runAgent    func(ctx context.Context, agentID, message string) (string, error)
+	// OrgChart enforces hierarchy delegation rules. nil = skip validation.
+	OrgChart    *OrgChartStore
 }
 
 // AgentLookup finds agents by ID or key.
@@ -63,6 +68,9 @@ func NewPrimeDelegation(primeID string, store AgentLookup) *PrimeDelegation {
 	}
 }
 
+// SetTenantID sets the tenant for org-chart validation.
+func (pd *PrimeDelegation) SetTenantID(id string) { pd.tenantID = id }
+
 // SetOnComplete sets the callback for when a delegated task finishes.
 func (pd *PrimeDelegation) SetOnComplete(fn func(task *DelegatedTask)) {
 	pd.onComplete = fn
@@ -79,6 +87,19 @@ func (pd *PrimeDelegation) Delegate(ctx context.Context, specialistKey, instruct
 	specialist, err := pd.agentStore.GetByKey(ctx, specialistKey)
 	if err != nil || specialist == nil {
 		return nil, fmt.Errorf("specialist %q not found", specialistKey)
+	}
+
+	// Org hierarchy enforcement: delegator must be higher level than delegatee
+	if pd.OrgChart != nil && pd.tenantID != "" {
+		tID, _ := uuid.Parse(pd.tenantID)
+		dFrom, _ := uuid.Parse(pd.primeID)
+		dTo, _ := uuid.Parse(specialist.ID)
+		if tID != uuid.Nil && dFrom != uuid.Nil && dTo != uuid.Nil {
+			if vErr := pd.OrgChart.ValidateDelegation(ctx, tID, dFrom, dTo); vErr != nil {
+				slog.Warn("prime.delegation.hierarchy_denied", "from", pd.primeID, "to", specialistKey, "error", vErr)
+				return nil, fmt.Errorf("delegation denied: %w", vErr)
+			}
+		}
 	}
 
 	task := &DelegatedTask{

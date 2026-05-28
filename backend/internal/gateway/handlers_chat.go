@@ -392,6 +392,21 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		return
 	}
 
+	// Intent routing: check deterministic rules before default agent dispatch.
+	// Only reroute if the request targets a general/chief agent (not explicit specialist).
+	if gw.intentRouter != nil && (agentID == "" || agentID == "chief" || agentID == gw.agentLoop.PrimeID) {
+		decision := gw.intentRouter.Route(r.Context(), agent.RoutingContext{
+			Content: userMsg,
+			Channel: channel,
+		})
+		if decision.AgentKey != "" {
+			if resolved, rErr := gw.agents.GetByKey(r.Context(), decision.AgentKey); rErr == nil && resolved != nil {
+				agentID = resolved.ID
+				slog.Info("intent.routed", "agent_key", decision.AgentKey, "rule", decision.RuleName, "method", decision.Method)
+			}
+		}
+	}
+
 	// Ensure session exists for this key — create if missing
 	// AppendMessage handles both UUID and session_key lookups
 	if gw.sessions != nil && sessionID != "" {

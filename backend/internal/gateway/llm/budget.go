@@ -22,9 +22,10 @@ type agentBudget struct {
 // BudgetEngine enforces per-agent spend caps against the gateway_budgets
 // and gateway_spend tables written by the CostLedger.
 type BudgetEngine struct {
-	db    *pgxpool.Pool
-	mu    sync.Mutex
-	cache map[string]*agentBudget // agentID → cached budget (60s TTL)
+	db       *pgxpool.Pool
+	mu       sync.Mutex
+	cache    map[string]*agentBudget // agentID → cached budget (60s TTL)
+	OnSpend  func(agentID string, cents int64) // optional: feeds in-memory enforcer
 }
 
 // NewBudgetEngine creates a BudgetEngine backed by the given pool.
@@ -84,6 +85,12 @@ func (e *BudgetEngine) AddSpend(ctx context.Context, tenantID, agentID string, c
 	e.mu.Lock()
 	delete(e.cache, agentID)
 	e.mu.Unlock()
+
+	// Feed in-memory enforcer for real-time budget checks in agent loop.
+	if e.OnSpend != nil {
+		cents := int64(costUSD * 100)
+		e.OnSpend(agentID, cents)
+	}
 }
 
 // load returns the cached budget or fetches from DB. Returns nil, nil when

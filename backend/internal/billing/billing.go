@@ -147,6 +147,19 @@ func (s *Store) EnforceBudget(ctx context.Context, agentID string) error {
 	return nil
 }
 
+// BudgetUsagePercent returns current budget utilization as 0-100.
+// Returns 0 if no budget is set.
+func (s *Store) BudgetUsagePercent(ctx context.Context, agentID string) (int, error) {
+	var budget, used int64
+	err := s.pool.QueryRow(ctx,
+		"SELECT COALESCE(credit_budget_cents,0), COALESCE(credit_used_cents,0) FROM agents WHERE id=$1",
+		agentID).Scan(&budget, &used)
+	if err != nil || budget <= 0 {
+		return 0, err
+	}
+	return int(used * 100 / budget), nil
+}
+
 // RecentEvents returns recent cost events for a tenant.
 func (s *Store) RecentEvents(ctx context.Context, tenantID string, limit int) ([]CostEvent, error) {
 	if limit <= 0 { limit = 50 }

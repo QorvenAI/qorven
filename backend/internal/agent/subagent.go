@@ -34,6 +34,11 @@ type SubagentManager struct {
 
 	// RunFunc executes a subagent. Injected by the parent loop.
 	RunFunc func(ctx context.Context, req SubagentRunRequest) (*SubagentResult, error)
+
+	// RunStore persists subagent runs to the audit trail. nil = skip.
+	RunStore *SubagentRunStore
+	TenantID string
+	AgentKey string
 }
 
 // SubagentTask tracks a spawned subagent.
@@ -129,10 +134,37 @@ func (sm *SubagentManager) Spawn(ctx context.Context, parentID string, depth int
 
 	if err != nil {
 		slog.Warn("subagent.failed", "id", id, "error", err)
+		// Persist failure to audit trail
+		if sm.RunStore != nil {
+			go sm.RunStore.Record(context.Background(), SubagentRunRecord{
+				TenantID:  sm.TenantID,
+				ParentID:  parentID,
+				AgentKey:  sm.AgentKey,
+				Task:      task,
+				Status:    "failed",
+				Result:    err.Error(),
+				Depth:     st.Depth,
+				CreatedAt: st.CreatedAt,
+			})
+		}
 		return "", fmt.Errorf("subagent failed: %w", err)
 	}
 
 	slog.Info("subagent.completed", "id", id, "iterations", result.Iterations, "result_len", len(result.Content))
+	// Persist success to audit trail
+	if sm.RunStore != nil {
+		go sm.RunStore.Record(context.Background(), SubagentRunRecord{
+			TenantID:    sm.TenantID,
+			ParentID:    parentID,
+			AgentKey:    sm.AgentKey,
+			Task:        task,
+			Status:      "completed",
+			Depth:       st.Depth,
+			CostUUSD:    0, // cost tracked via gateway pipeline separately
+			CreatedAt:   st.CreatedAt,
+			CompletedAt: st.CompletedAt,
+		})
+	}
 	return result.Content, nil
 }
 

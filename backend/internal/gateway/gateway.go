@@ -449,6 +449,11 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			// cost ledger.
 			{
 				budgetEngine    := gatewayllm.NewBudgetEngine(db.Pool)
+				budgetEngine.OnSpend = func(agentID string, cents int64) {
+					if gw.brain != nil && gw.brain.Budget != nil {
+						gw.brain.Budget.RecordSpend("agent", agentID, cents)
+					}
+				}
 				costLedger      := gatewayllm.NewCostLedger(db.Pool, budgetEngine)
 				gw.llmCostLedger = costLedger
 				gw.llmPipeline   = gatewayllm.NewPipeline(
@@ -680,6 +685,20 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 					"session_id": sessionID, "args": args, "is_error": isError,
 				}, "")
 			})
+		}
+
+		// Wire ERP integration stores into the agent loop.
+		if gw.outputValidator != nil {
+			gw.agentLoop.SetOutputValidator(gw.outputValidator)
+		}
+		if gw.subagentRunStore != nil {
+			gw.agentLoop.SetSubagentRunStore(gw.subagentRunStore)
+		}
+		if gw.intentRouter != nil {
+			gw.agentLoop.SetIntentRouter(gw.intentRouter)
+		}
+		if gw.orgChartStore != nil {
+			gw.agentLoop.SetOrgChartStore(gw.orgChartStore)
 		}
 
 		// Wire AI Gateway pipeline into the agent loop.
@@ -930,6 +949,10 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 
 			// Wire Prime delegation — allows Prime to execute specialist agents
 			pd := agent.NewPrimeDelegation(primeID, gw.agents)
+			pd.SetTenantID(defaultTenant)
+			if gw.orgChartStore != nil {
+				pd.OrgChart = gw.orgChartStore
+			}
 			pd.SetRunAgent(func(ctx context.Context, agentID, message string) (string, error) {
 				return gw.agentLoop.Chat(ctx, agentID, message)
 			})
@@ -1161,7 +1184,11 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			MemStore:     gw.memStore,
 		})
 		gw.brain.Loop = gw.agentLoop // share the same loop instance
-		gw.brain.Start()             // start cron + heartbeat
+		if gw.subagentRunStore != nil {
+			gw.brain.Subagents.RunStore = gw.subagentRunStore
+			gw.brain.Subagents.TenantID = defaultTenant
+		}
+		gw.brain.Start() // start cron + heartbeat
 		slog.Info("brain engine initialized and started")
 
 		// Ensure persisted cron jobs have next_run_at set so gw.cronRunner will pick them up.
