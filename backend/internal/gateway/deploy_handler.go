@@ -5,6 +5,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DeployStatus tracks the state of a deployment.
@@ -47,11 +49,12 @@ type Deployment struct {
 	BuildLog    []string     `json:"build_log,omitempty"`
 }
 
-// DeployManager manages project deployments.
+// DeployManager manages project deployments with DB persistence.
 type DeployManager struct {
 	mu          sync.RWMutex
 	deployments map[string]*Deployment // deployID → deployment
 	byProject   map[string]string      // projectID → latest deployID
+	db          *pgxpool.Pool
 }
 
 func NewDeployManager() *DeployManager {
@@ -59,6 +62,11 @@ func NewDeployManager() *DeployManager {
 		deployments: make(map[string]*Deployment),
 		byProject:   make(map[string]string),
 	}
+}
+
+func (dm *DeployManager) SetDB(pool *pgxpool.Pool) {
+	dm.db = pool
+	dm.loadFromDB()
 }
 
 func (dm *DeployManager) Get(id string) *Deployment {
@@ -81,15 +89,92 @@ func (dm *DeployManager) Create(d *Deployment) {
 	dm.deployments[d.ID] = d
 	dm.byProject[d.ProjectID] = d.ID
 	dm.mu.Unlock()
+	dm.persistCreate(d)
 }
 
 func (dm *DeployManager) Update(id string, fn func(*Deployment)) {
 	dm.mu.Lock()
-	if d, ok := dm.deployments[id]; ok {
+	d, ok := dm.deployments[id]
+	if ok {
 		fn(d)
 		d.UpdatedAt = time.Now()
 	}
 	dm.mu.Unlock()
+	if ok {
+		dm.persistUpdate(d)
+	}
+}
+
+func (dm *DeployManager) persistCreate(d *Deployment) {
+	if dm.db == nil {
+		return
+	}
+	go func() {
+		_, err := dm.db.Exec(context.Background(), `
+			INSERT INTO deployments (id, project_id, project_name, status, framework, url, dockerfile, error, build_log, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+		`, d.ID, d.ProjectID, d.ProjectName, string(d.Status), d.Framework, d.URL, d.Dockerfile, d.Error, d.BuildLog, d.CreatedAt, d.UpdatedAt)
+		if err != nil {
+			slog.Debug("deploy.persist_create", "err", err)
+		}
+	}()
+}
+
+func (dm *DeployManager) persistUpdate(d *Deployment) {
+	if dm.db == nil {
+		return
+	}
+	go func() {
+		dm.mu.RLock()
+		status := string(d.Status)
+		url := d.URL
+		errStr := d.Error
+		buildLog := d.BuildLog
+		updatedAt := d.UpdatedAt
+		dm.mu.RUnlock()
+
+		_, err := dm.db.Exec(context.Background(), `
+			UPDATE deployments SET status = $2, url = $3, error = $4, build_log = $5, updated_at = $6
+			WHERE id = $1::uuid
+		`, d.ID, status, url, errStr, buildLog, updatedAt)
+		if err != nil {
+			slog.Debug("deploy.persist_update", "err", err)
+		}
+	}()
+}
+
+func (dm *DeployManager) loadFromDB() {
+	if dm.db == nil {
+		return
+	}
+	rows, err := dm.db.Query(context.Background(), `
+		SELECT DISTINCT ON (project_id)
+			id, project_id, project_name, status, framework, url, dockerfile, error, build_log, created_at, updated_at
+		FROM deployments
+		ORDER BY project_id, created_at DESC
+	`)
+	if err != nil {
+		slog.Debug("deploy.load_from_db", "err", err)
+		return
+	}
+	defer rows.Close()
+
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	for rows.Next() {
+		var d Deployment
+		var status string
+		if err := rows.Scan(&d.ID, &d.ProjectID, &d.ProjectName, &status, &d.Framework, &d.URL, &d.Dockerfile, &d.Error, &d.BuildLog, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			continue
+		}
+		d.Status = DeployStatus(status)
+		dm.deployments[d.ID] = &d
+		dm.byProject[d.ProjectID] = d.ID
+	}
+	if len(dm.deployments) > 0 {
+		slog.Info("deploy.loaded_from_db", "count", len(dm.deployments))
+	}
 }
 
 // handleDeploy starts a deployment for a project.

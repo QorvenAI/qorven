@@ -46,6 +46,13 @@ export function CodeEditor({ content, path, onChange, projectId }: {
 
         token.onCancellationRequested(() => abort.abort());
 
+        // 300ms debounce — don't fire on every keystroke
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, 300);
+          abort.signal.addEventListener('abort', () => { clearTimeout(t); reject(); });
+        }).catch(() => null);
+        if (abort.signal.aborted) return { items: [] };
+
         const textUntilPosition = model.getValueInRange({
           startLineNumber: Math.max(1, position.lineNumber - 50),
           startColumn: 1,

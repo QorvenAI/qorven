@@ -468,6 +468,9 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			// Attach DB to daemon registry — restores pending plans/tasks on boot.
 			gw.daemonReg.SetPool(db.Pool, defaultTenant)
 
+			// Attach DB to deploy manager — restores deploy history on boot.
+			gw.deployMgr.SetDB(db.Pool)
+
 			gw.agents = agent.NewStore(db.Pool)
 			gw.sessions = session.NewStore(db.Pool)
 			gw.providerStore = providers.NewStore(db.Pool, cfg.Auth.EncryptionKey)

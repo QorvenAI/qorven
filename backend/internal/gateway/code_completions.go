@@ -170,11 +170,35 @@ func cleanCompletion(completion, prefix string) string {
 		completion = strings.TrimRight(completion, "\n")
 	}
 
-	// Cap at 3 lines
-	lines := strings.SplitN(completion, "\n", 5)
-	if len(lines) > 3 {
-		completion = strings.Join(lines[:3], "\n")
+	// Stop at logical boundaries instead of a hard line cap.
+	// Walk lines and cut at the first natural stopping point beyond line 1.
+	lines := strings.Split(completion, "\n")
+	maxLines := 8
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	for i := 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		// Blank line = paragraph break — stop before it.
+		if trimmed == "" {
+			lines = lines[:i]
+			break
+		}
+		// Closing brace/bracket alone = end of block — include it and stop.
+		if trimmed == "}" || trimmed == "};" || trimmed == ")" || trimmed == "]" {
+			lines = lines[:i+1]
+			break
+		}
+		// New top-level definition = we've gone too far.
+		if !strings.HasPrefix(lines[i], " ") && !strings.HasPrefix(lines[i], "\t") {
+			if strings.HasPrefix(trimmed, "func ") || strings.HasPrefix(trimmed, "def ") ||
+				strings.HasPrefix(trimmed, "class ") || strings.HasPrefix(trimmed, "export ") ||
+				strings.HasPrefix(trimmed, "import ") || strings.HasPrefix(trimmed, "type ") {
+				lines = lines[:i]
+				break
+			}
+		}
 	}
 
-	return completion
+	return strings.Join(lines, "\n")
 }
