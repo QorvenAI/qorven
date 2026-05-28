@@ -482,6 +482,21 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if planID != "" && gw.orchestrator != nil {
+		// Register in Command Center
+		if gw.commandCenter != nil {
+			now := time.Now()
+			gw.commandCenter.AddJob(&AgentJob{
+				ID:          planID,
+				ProjectID:   projectID,
+				ProjectName: project.Name,
+				AgentID:     "prime",
+				AgentName:   "Prime Coder",
+				Title:       "Build: " + project.Name,
+				Status:      JobStatusRunning,
+				StartedAt:   &now,
+			})
+		}
+
 		go func() {
 			// Hard cap: builds cannot exceed 2 hours
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 2*time.Hour)
@@ -492,6 +507,16 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 				gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
 					p.BuildPhase = "failed"
 				})
+				// Update Command Center job
+				if gw.commandCenter != nil {
+					gw.commandCenter.UpdateJob(planID, func(j *AgentJob) {
+						now := time.Now()
+						j.Status = JobStatusFailed
+						j.CompletedAt = &now
+						j.DurationMs = time.Since(buildStart).Milliseconds()
+						j.Error = err.Error()
+					})
+				}
 				// Record build failure as governance exception
 				if gw.exceptionStore != nil {
 					gw.exceptionStore.Record(context.Background(), governance.Exception{
@@ -519,6 +544,16 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 				p.BuildPhase = "done"
 				p.BuildDurationMs = buildDuration.Milliseconds()
 			})
+			// Update Command Center job
+			if gw.commandCenter != nil {
+				gw.commandCenter.UpdateJob(planID, func(j *AgentJob) {
+					now := time.Now()
+					j.Status = JobStatusCompleted
+					j.CompletedAt = &now
+					j.DurationMs = buildDuration.Milliseconds()
+					j.Progress = 100
+				})
+			}
 			slog.Info("project.approve: build completed", "project", projectID, "duration", buildDuration)
 			// Auto-install if this was a qorven_app build.
 			if project.ProjectType == "qorven_app" && gw.appMgr != nil {
@@ -855,6 +890,81 @@ func (gw *Gateway) handleArchiveProject(w http.ResponseWriter, r *http.Request) 
 		_, _ = io.Copy(fw, f)
 		return nil
 	})
+}
+
+// --- Live Preview Handlers ---
+
+func (gw *Gateway) handlePreviewStart(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+	if gw.projectReg == nil || gw.previewMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "preview not available"})
+		return
+	}
+
+	project := gw.projectReg.Get(projectID)
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+
+	port, err := gw.previewMgr.StartDevServer(projectID, project.Path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	previewURL := fmt.Sprintf("/api/v1/preview/%s/", projectID)
+	gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
+		p.PreviewURL = previewURL
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"port":        port,
+		"preview_url": previewURL,
+		"status":      "running",
+	})
+}
+
+func (gw *Gateway) handlePreviewStop(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+	if gw.previewMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "preview not available"})
+		return
+	}
+
+	gw.previewMgr.StopDevServer(projectID)
+	if gw.projectReg != nil {
+		gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
+			p.PreviewURL = ""
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func (gw *Gateway) handlePreviewStatus(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+	if gw.previewMgr == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"running": false})
+		return
+	}
+
+	port := gw.previewMgr.GetPort(projectID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"running":     port > 0,
+		"port":        port,
+		"preview_url": fmt.Sprintf("/api/v1/preview/%s/", projectID),
+	})
+}
+
+// handlePreviewProxy reverse-proxies requests to the project's dev server.
+func (gw *Gateway) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+	if gw.previewMgr == nil {
+		http.Error(w, "preview not available", http.StatusServiceUnavailable)
+		return
+	}
+	gw.previewMgr.ProxyHandler(projectID).ServeHTTP(w, r)
 }
 
 // Ensure unused imports don't break compilation

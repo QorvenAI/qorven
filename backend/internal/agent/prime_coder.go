@@ -171,10 +171,14 @@ func (t *PrimeCoderTool) readFile(projectPath, filename string) *tools.Result {
 func (t *PrimeCoderTool) initProject(projectPath string) *tools.Result {
 	dir := filepath.Join(projectPath, qorvenDir)
 	os.MkdirAll(dir, 0755)
+	os.MkdirAll(filepath.Join(dir, "context"), 0755)
 
-	// Default RULES.md
+	// Detect stack from project contents for stack-aware rules
+	stack := detectProjectStack(projectPath)
+
+	// Default RULES.md (stack-aware)
 	if _, err := os.Stat(filepath.Join(dir, "RULES.md")); os.IsNotExist(err) {
-		SaveProjectFile(projectPath, "RULES.md", defaultRules)
+		SaveProjectFile(projectPath, "RULES.md", DefaultRulesTemplate(stack))
 	}
 	// Default MEMORY.md
 	if _, err := os.Stat(filepath.Join(dir, "MEMORY.md")); os.IsNotExist(err) {
@@ -185,32 +189,27 @@ func (t *PrimeCoderTool) initProject(projectPath string) *tools.Result {
 		SaveProjectFile(projectPath, "TASKS.md", "# Tasks\n\n- [ ] Initial setup\n")
 	}
 
-	return tools.TextResult(fmt.Sprintf("Initialized .qorven/ in %s with RULES.md, MEMORY.md, TASKS.md", projectPath))
+	return tools.TextResult(fmt.Sprintf("Initialized .qorven/ in %s with RULES.md, MEMORY.md, TASKS.md, context/", projectPath))
 }
 
-const defaultRules = `# Project Rules
+func detectProjectStack(projectPath string) string {
+	checks := map[string]string{
+		"package.json":  "react",
+		"next.config.js": "next",
+		"next.config.ts": "next",
+		"go.mod":        "go",
+		"Cargo.toml":    "rust",
+		"pyproject.toml": "python",
+		"requirements.txt": "python",
+	}
+	for file, stack := range checks {
+		if _, err := os.Stat(filepath.Join(projectPath, file)); err == nil {
+			return stack
+		}
+	}
+	return ""
+}
 
-## Code Style
-- Follow existing code conventions in the project
-- Keep changes minimal and focused
-- Fix root causes, not symptoms
-
-## Process
-- Read relevant files before making changes
-- Run diagnostics after every edit
-- Write tests for new functionality
-- Commit messages: type(scope): description
-
-## Safety
-- Never delete files without confirmation
-- Always check git status before committing
-- Run the test suite before marking a task done
-
-## Architecture
-- Keep functions small and focused
-- Prefer composition over inheritance
-- Document public APIs
-`
 
 // PrimeCoderSystemPrompt returns the system prompt addition for Prime Coder mode.
 // appsDir is the resolved data directory for apps (e.g. /var/lib/qorven/apps or ~/.qorven/apps).

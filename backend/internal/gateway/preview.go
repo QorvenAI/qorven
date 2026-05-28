@@ -1,0 +1,323 @@
+// Copyright 2026 Qorven AI. All rights reserved.
+// Use of this source code is governed by the Elastic License 2.0 (ELv2)
+// that can be found in the LICENSE file.
+
+package gateway
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// DevServer manages a development server process for a project.
+type DevServer struct {
+	ProjectID string
+	Port      int
+	Cmd       *exec.Cmd
+	Cancel    context.CancelFunc
+	StartedAt time.Time
+	Framework string
+}
+
+// PreviewManager manages dev server processes for live preview.
+// Each project can have one active dev server. The manager handles:
+// - Auto-detecting the framework and start command
+// - Allocating a free port
+// - Starting/stopping the dev server
+// - Reverse proxying requests to the dev server
+type PreviewManager struct {
+	mu      sync.RWMutex
+	servers map[string]*DevServer // projectID → server
+	basePort int
+}
+
+func NewPreviewManager() *PreviewManager {
+	return &PreviewManager{
+		servers:  make(map[string]*DevServer),
+		basePort: 9100,
+	}
+}
+
+// StartDevServer starts a dev server for the given project path.
+// It auto-detects the framework and appropriate start command.
+func (pm *PreviewManager) StartDevServer(projectID, projectPath string) (int, error) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	// Already running?
+	if srv, ok := pm.servers[projectID]; ok {
+		return srv.Port, nil
+	}
+
+	framework, cmd := detectFramework(projectPath)
+	if cmd == "" {
+		return 0, fmt.Errorf("no dev server detected for project")
+	}
+
+	port, err := pm.allocatePort()
+	if err != nil {
+		return 0, fmt.Errorf("no free port: %w", err)
+	}
+
+	// Inject port into command
+	startCmd := injectPort(cmd, port, framework)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	proc := exec.CommandContext(ctx, "sh", "-c", startCmd)
+	proc.Dir = projectPath
+	proc.Env = append(os.Environ(),
+		fmt.Sprintf("PORT=%d", port),
+		fmt.Sprintf("DEV_PORT=%d", port),
+		"NODE_ENV=development",
+		"BROWSER=none",
+	)
+	proc.Stdout = nil // suppress output
+	proc.Stderr = nil
+
+	if err := proc.Start(); err != nil {
+		cancel()
+		return 0, fmt.Errorf("start dev server: %w", err)
+	}
+
+	srv := &DevServer{
+		ProjectID: projectID,
+		Port:      port,
+		Cmd:       proc,
+		Cancel:    cancel,
+		StartedAt: time.Now(),
+		Framework: framework,
+	}
+	pm.servers[projectID] = srv
+
+	// Wait for server to be ready (up to 30s)
+	go pm.waitForReady(srv)
+
+	slog.Info("preview.dev_server.started",
+		"project", projectID, "port", port, "framework", framework, "cmd", startCmd)
+
+	return port, nil
+}
+
+// StopDevServer stops the dev server for a project.
+func (pm *PreviewManager) StopDevServer(projectID string) {
+	pm.mu.Lock()
+	srv, ok := pm.servers[projectID]
+	if ok {
+		delete(pm.servers, projectID)
+	}
+	pm.mu.Unlock()
+
+	if ok && srv.Cancel != nil {
+		srv.Cancel()
+		if srv.Cmd.Process != nil {
+			srv.Cmd.Process.Kill()
+		}
+		slog.Info("preview.dev_server.stopped", "project", projectID)
+	}
+}
+
+// GetPort returns the dev server port for a project, or 0 if not running.
+func (pm *PreviewManager) GetPort(projectID string) int {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	if srv, ok := pm.servers[projectID]; ok {
+		return srv.Port
+	}
+	return 0
+}
+
+// IsRunning returns true if the project has an active dev server.
+func (pm *PreviewManager) IsRunning(projectID string) bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	_, ok := pm.servers[projectID]
+	return ok
+}
+
+// ProxyHandler returns an http.Handler that reverse-proxies to the project's dev server.
+func (pm *PreviewManager) ProxyHandler(projectID string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		port := pm.GetPort(projectID)
+		if port == 0 {
+			http.Error(w, "dev server not running", http.StatusServiceUnavailable)
+			return
+		}
+
+		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "dev server unavailable", http.StatusBadGateway)
+		}
+
+		// Strip the /preview/{projectID} prefix before proxying
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/v1/preview/"+projectID)
+		if r.URL.Path == "" {
+			r.URL.Path = "/"
+		}
+
+		proxy.ServeHTTP(w, r)
+	})
+}
+
+// ListServers returns info about all running dev servers.
+func (pm *PreviewManager) ListServers() []map[string]any {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	var result []map[string]any
+	for _, srv := range pm.servers {
+		result = append(result, map[string]any{
+			"project_id": srv.ProjectID,
+			"port":       srv.Port,
+			"framework":  srv.Framework,
+			"uptime_sec": int(time.Since(srv.StartedAt).Seconds()),
+		})
+	}
+	return result
+}
+
+func (pm *PreviewManager) allocatePort() (int, error) {
+	// Try ports starting from basePort
+	for port := pm.basePort; port < pm.basePort+100; port++ {
+		// Check if port is already in use by our servers
+		inUse := false
+		for _, srv := range pm.servers {
+			if srv.Port == port {
+				inUse = true
+				break
+			}
+		}
+		if inUse {
+			continue
+		}
+		// Check if port is actually free
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err == nil {
+			ln.Close()
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("all ports %d-%d in use", pm.basePort, pm.basePort+100)
+}
+
+func (pm *PreviewManager) waitForReady(srv *DevServer) {
+	deadline := time.After(30 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			slog.Warn("preview.dev_server.timeout", "project", srv.ProjectID, "port", srv.Port)
+			return
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", srv.Port), 200*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				slog.Info("preview.dev_server.ready",
+					"project", srv.ProjectID, "port", srv.Port,
+					"startup_ms", time.Since(srv.StartedAt).Milliseconds())
+				return
+			}
+		}
+	}
+}
+
+// detectFramework identifies the project framework and returns (framework, startCmd).
+func detectFramework(projectPath string) (string, string) {
+	// Check package.json for scripts
+	pkgJSON := filepath.Join(projectPath, "package.json")
+	if data, err := os.ReadFile(pkgJSON); err == nil {
+		content := string(data)
+
+		// Next.js
+		if fileExists(filepath.Join(projectPath, "next.config.js")) ||
+			fileExists(filepath.Join(projectPath, "next.config.ts")) ||
+			fileExists(filepath.Join(projectPath, "next.config.mjs")) ||
+			strings.Contains(content, "\"next\"") {
+			if strings.Contains(content, "\"dev\"") {
+				return "nextjs", "npx next dev --port $PORT"
+			}
+			return "nextjs", "npx next dev --port $PORT"
+		}
+
+		// Vite (React/Vue/Svelte)
+		if fileExists(filepath.Join(projectPath, "vite.config.ts")) ||
+			fileExists(filepath.Join(projectPath, "vite.config.js")) ||
+			strings.Contains(content, "\"vite\"") {
+			return "vite", "npx vite --port $PORT --host 127.0.0.1"
+		}
+
+		// Create React App
+		if strings.Contains(content, "react-scripts") {
+			return "cra", "npx react-scripts start"
+		}
+
+		// Generic npm dev script
+		if strings.Contains(content, "\"dev\"") {
+			return "npm", "npm run dev"
+		}
+		if strings.Contains(content, "\"start\"") {
+			return "npm", "npm start"
+		}
+	}
+
+	// Go projects
+	if fileExists(filepath.Join(projectPath, "go.mod")) {
+		if fileExists(filepath.Join(projectPath, "main.go")) ||
+			fileExists(filepath.Join(projectPath, "cmd")) {
+			return "go", "go run . -port $PORT"
+		}
+	}
+
+	// Python projects
+	if fileExists(filepath.Join(projectPath, "manage.py")) {
+		return "django", "python manage.py runserver 127.0.0.1:$PORT"
+	}
+	if fileExists(filepath.Join(projectPath, "app.py")) ||
+		fileExists(filepath.Join(projectPath, "main.py")) {
+		return "python", "python app.py"
+	}
+
+	// Ruby
+	if fileExists(filepath.Join(projectPath, "Gemfile")) {
+		if fileExists(filepath.Join(projectPath, "config.ru")) {
+			return "rails", "bundle exec rails server -p $PORT"
+		}
+	}
+
+	// Static site (has index.html)
+	if fileExists(filepath.Join(projectPath, "index.html")) ||
+		fileExists(filepath.Join(projectPath, "public", "index.html")) {
+		return "static", "npx serve -l $PORT ."
+	}
+
+	return "", ""
+}
+
+func injectPort(cmd string, port int, framework string) string {
+	portStr := fmt.Sprintf("%d", port)
+	cmd = strings.ReplaceAll(cmd, "$PORT", portStr)
+
+	// CRA uses PORT env var
+	if framework == "cra" {
+		return fmt.Sprintf("PORT=%s %s", portStr, cmd)
+	}
+
+	return cmd
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}

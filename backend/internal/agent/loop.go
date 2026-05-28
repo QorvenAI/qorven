@@ -457,6 +457,11 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			}
 			if projectPath != "" {
 				systemPrompt += "\n\n" + PrimeCoderSystemPrompt(projectPath, config.Sub("apps"))
+
+				// Inject steering rules (.qorven/RULES.md + .qorven/context/*.md)
+				if steeringRules := LoadSteeringRules(projectPath); steeringRules != "" {
+					systemPrompt += "\n\n" + steeringRules
+				}
 			}
 
 			// Load project-scoped memories (task scope)

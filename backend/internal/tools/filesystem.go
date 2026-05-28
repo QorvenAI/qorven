@@ -202,6 +202,11 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *Resul
 	safe, err := SafePathWithRestrict(ws, rawPath, t.restrict, t.allowedPrefixes)
 	if err != nil { return ErrorResult(err.Error()) }
 
+	// Read-before-edit safety check
+	if warn := ReadBeforeEditWarning(safe); warn != "" {
+		return &Result{ForLLM: warn, IsError: false}
+	}
+
 	// Stale file check
 	if staleWarn := CheckStaleFile(safe); staleWarn != "" {
 		return ErrorResult(staleWarn)
@@ -365,6 +370,11 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) *Result {
 	safe, err := SafePathWithRestrict(ws, rawPath, t.restrict, t.allowedPrefixes)
 	if err != nil { return ErrorResult(err.Error()) }
 
+	// Read-before-edit safety check
+	if warn := ReadBeforeEditWarning(safe); warn != "" {
+		return &Result{ForLLM: warn, IsError: false}
+	}
+
 	// Stale file check
 	if staleWarn := CheckStaleFile(safe); staleWarn != "" {
 		return ErrorResult(staleWarn)
@@ -487,6 +497,28 @@ func CheckStaleFile(path string) string {
 			filepath.Base(path), time.Since(readTime).Round(time.Second))
 	}
 	return ""
+}
+
+// WasFileRead returns true if the file was read at any point in this session.
+// Used to enforce the "read before edit" safety invariant.
+func WasFileRead(path string) bool {
+	fileReadTimestamps.RLock()
+	_, ok := fileReadTimestamps.m[path]
+	fileReadTimestamps.RUnlock()
+	return ok
+}
+
+// ReadBeforeEditWarning returns a warning string if the agent hasn't read
+// the file before attempting to edit it. Returns "" if the file was read
+// or if the file doesn't exist yet (new file creation is always allowed).
+func ReadBeforeEditWarning(path string) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "" // new file — no read required
+	}
+	if WasFileRead(path) {
+		return ""
+	}
+	return fmt.Sprintf("⚠️ SAFETY: You haven't read %s yet. Read it first with read_file before editing to avoid overwriting content you haven't seen.", filepath.Base(path))
 }
 
 // isBinaryFileExt returns true if the file extension indicates a binary file.

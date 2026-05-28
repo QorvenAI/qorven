@@ -20,6 +20,7 @@ import { ActivityFeed } from './tabs/activity';
 import { BottomDrawerTab } from '@/components/layouts/qorven/bottom-drawer';
 import { AgentDashboard } from '@/components/agents/AgentDashboard';
 import { TaskFeed } from '@/components/agents/TaskFeed';
+import { CommandCenter } from '@/components/code/command-center';
 import { useAgentsStream } from '@/hooks/use-agents-stream';
 import { ensureCanonicalSessionId } from '@/lib/session';
 import {
@@ -1242,6 +1243,10 @@ export default function CodePage() {
               <TaskFeed compact />
             </div>
           </div>
+        </BottomDrawerTab>
+
+        <BottomDrawerTab id="command-center" label="Jobs" iconName="BarChart3" order={32}>
+          <CommandCenter className="h-full" />
         </BottomDrawerTab>
 
         <BottomDrawerTab id="activity" label="Activity" iconName="Activity" order={35}>

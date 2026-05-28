@@ -276,6 +276,18 @@ type Gateway struct {
 	// In-process PTY terminal sessions (browser ↔ shell over WebSocket).
 	termStore *TerminalStore
 
+	// Live preview dev server manager (per-project HMR preview)
+	previewMgr *PreviewManager
+
+	// Project-level event hooks (.qorven/hooks.yaml)
+	projectHooks *agent.ProjectHookRegistry
+
+	// Background agent job tracking (Command Center)
+	commandCenter *CommandCenter
+
+	// One-click deploy manager
+	deployMgr *DeployManager
+
 	// Pending manual-mode delegations: sessionID → pendingDelegation.
 	// Populated when a user triggers @soul task in manual delegation mode;
 	// cleared when the user confirms ("yes") or cancels ("no"/"cancel").
@@ -384,7 +396,10 @@ func New(cfg *config.Config) (*Gateway, error) {
 		msgBus:      bus.New(),
 		screenShare: NewScreenShareStore(),
 		termStore:   newTerminalStore(),
-		daemonReg:   daemon.New(), // fallback; daemonSvc overrides if repo root known
+		previewMgr:    NewPreviewManager(),
+		commandCenter: NewCommandCenter(),
+		deployMgr:     NewDeployManager(),
+		daemonReg:     daemon.New(), // fallback; daemonSvc overrides if repo root known
 		// API server — historically the only listener. Now bound to
 		// APIListen when the config uses the split schema. If the
 		// config still uses the legacy Listen field, config.Load
@@ -669,6 +684,8 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			agent.NewAutoCompactHook(gw.agentLoop),
 			agent.NewPermissionHook(permissions.ModeDefault),
 		)
+		gw.projectHooks = agent.NewProjectHookRegistry(gw.agentLoop)
+
 		gw.agentLoop.OnMessage = func(sessionID, agentID, role, content, channel string) {
 			gw.rtHub.BroadcastNewMessage(sessionID, agentID, role, content, channel)
 			// Live activity: broadcast agent activity

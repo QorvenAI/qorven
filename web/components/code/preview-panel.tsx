@@ -1,10 +1,11 @@
 'use client';
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useRef, useState } from 'react';
-import { Monitor, Tablet, Smartphone, RotateCw, ExternalLink, AlertTriangle } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Monitor, Tablet, Smartphone, RotateCw, ExternalLink, AlertTriangle, Play, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { request } from '@/lib/api-core';
 
 type DeviceSize = 'desktop' | 'tablet' | 'mobile';
 
@@ -16,30 +17,80 @@ const DEVICE_CONFIG: Record<DeviceSize, { label: string; icon: React.ComponentTy
 
 interface PreviewPanelProps {
   url: string;
+  projectId?: string;
   className?: string;
 }
 
-export function PreviewPanel({ url, className }: PreviewPanelProps) {
+export function PreviewPanel({ url, projectId, className }: PreviewPanelProps) {
   const [device, setDevice] = useState<DeviceSize>('desktop');
   const [frameKey, setFrameKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [starting, setStarting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(url);
+  const [serverRunning, setServerRunning] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const cfg = DEVICE_CONFIG[device];
 
   useEffect(() => {
+    setPreviewUrl(url);
+  }, [url]);
+
+  useEffect(() => {
     setLoading(true);
     setError(null);
-  }, [url, frameKey]);
+  }, [previewUrl, frameKey]);
 
-  if (!url) {
+  const startDevServer = useCallback(async () => {
+    if (!projectId) return;
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await request(`/projects/${projectId}/preview/start`, { method: 'POST' }) as { preview_url?: string };
+      if (res?.preview_url) {
+        setPreviewUrl(res.preview_url);
+        setServerRunning(true);
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to start dev server');
+    } finally {
+      setStarting(false);
+    }
+  }, [projectId]);
+
+  const stopDevServer = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      await request(`/projects/${projectId}/preview/stop`, { method: 'POST' });
+      setServerRunning(false);
+      setPreviewUrl('');
+    } catch (e: any) {
+      setError(e.message || 'Failed to stop dev server');
+    }
+  }, [projectId]);
+
+  if (!previewUrl) {
     return (
       <div className={cn('flex h-full items-center justify-center', className)}>
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
           <Monitor className="mx-auto h-10 w-10 text-muted-foreground/30" />
           <p className="text-xs text-muted-foreground">No preview available yet</p>
-          <p className="text-2xs text-muted-foreground/50">Build something first</p>
+          {projectId && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={startDevServer}
+              disabled={starting}
+              className="gap-1.5"
+            >
+              <Play className="h-3 w-3" />
+              {starting ? 'Starting...' : 'Start Dev Server'}
+            </Button>
+          )}
+          {!projectId && (
+            <p className="text-2xs text-muted-foreground/50">Build something first</p>
+          )}
         </div>
       </div>
     );
@@ -91,11 +142,22 @@ export function PreviewPanel({ url, className }: PreviewPanelProps) {
           variant="ghost"
           size="icon"
           title="Open in new tab"
-          onClick={() => window.open(url, '_blank')}
+          onClick={() => window.open(previewUrl, '_blank')}
           className="h-7 w-7"
         >
           <ExternalLink className="h-3.5 w-3.5" />
         </Button>
+        {serverRunning && (
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Stop dev server"
+            onClick={stopDevServer}
+            className="h-7 w-7 text-destructive hover:text-destructive"
+          >
+            <Square className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
 
       {/* Preview frame */}
@@ -112,7 +174,7 @@ export function PreviewPanel({ url, className }: PreviewPanelProps) {
           <iframe
             ref={iframeRef}
             key={frameKey}
-            src={url}
+            src={previewUrl}
             sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
             className="h-full w-full border-0"
             onLoad={() => setLoading(false)}

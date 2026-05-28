@@ -161,6 +161,24 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/projects/{id}/restore", gw.handleProjectRestore)
 		r.Get("/projects/{id}/archive", gw.handleArchiveProject)
 
+		// Live preview
+		r.Post("/projects/{id}/preview/start", gw.handlePreviewStart)
+		r.Post("/projects/{id}/preview/stop", gw.handlePreviewStop)
+		r.Get("/projects/{id}/preview/status", gw.handlePreviewStatus)
+		r.Get("/preview/{id}/*", gw.handlePreviewProxy)
+
+		// Command Center (background agents)
+		r.Get("/command-center", gw.handleCommandCenter)
+		r.Get("/command-center/stats", gw.handleCommandCenterStats)
+
+		// One-click deploy
+		r.Post("/projects/{id}/deploy", gw.handleDeploy)
+		r.Get("/projects/{id}/deploy/status", gw.handleDeployStatus)
+		r.Post("/projects/{id}/deploy/stop", gw.handleDeployStop)
+		r.Get("/projects/{id}/deploy/dockerfile", gw.handleDeployDockerfile)
+		r.Get("/projects/{id}/deploy/logs", gw.handleDeployLogs)
+		r.Get("/deployments", gw.handleDeployList)
+
 		// Providers
 		r.Get("/providers/auth-profiles", gw.handleProviderAuthProfiles)
 

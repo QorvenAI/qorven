@@ -338,7 +338,7 @@ func (gw *Gateway) registerTools() {
 		}
 	}
 
-	// Wire file → drive sync
+	// Wire file → drive sync + project hooks
 	if gw.driveStore != nil {
 		tools.OnFileWritten = func(ctx context.Context, agentID, name, path string, size int64) {
 			mime := agent.MimeFromExt(filepath.Ext(path))
@@ -346,6 +346,13 @@ func (gw *Gateway) registerTools() {
 			// Track file in session
 			if sid := tools.SessionIDFromCtx(ctx); sid != "" && gw.sessions != nil {
 				gw.sessions.TrackFile(ctx, sid, path, "modified")
+			}
+			// Fire project hooks for file change
+			if gw.projectHooks != nil && gw.projectReg != nil {
+				ws := tools.WorkspaceFromCtx(ctx)
+				if ws != "" {
+					gw.projectHooks.FireFileEvent(ctx, ws, agent.PHookFileChanged, path)
+				}
 			}
 		}
 	}
