@@ -4,6 +4,22 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.5-alpha — 2026-05-28
+
+### Added
+- **Deploy persistence** — deployments survive server restarts and are queryable via API history ([f9c6afe](https://github.com/QorvenAI/qorven/commit/f9c6afe))
+
+### Improved
+- **Inline completions** — 300ms debounce prevents excessive API calls during rapid typing ([f9c6afe](https://github.com/QorvenAI/qorven/commit/f9c6afe))
+- **Completion quality** — suggestions stop at logical boundaries (blank lines, closing braces, new definitions) instead of a hard line cap ([f9c6afe](https://github.com/QorvenAI/qorven/commit/f9c6afe))
+
+### Fixed
+- Subsequent file edits no longer trigger false stale-file warnings ([ce7e967](https://github.com/QorvenAI/qorven/commit/ce7e967))
+- Read-before-edit guard no longer blocks write operations ([07797c8](https://github.com/QorvenAI/qorven/commit/07797c8))
+- Migration compatibility with existing database schemas ([5cca81c](https://github.com/QorvenAI/qorven/commit/5cca81c), [69ab8b8](https://github.com/QorvenAI/qorven/commit/69ab8b8))
+
+---
+
 ## v0.3.4-alpha — 2026-05-28
 
 ### Added
