@@ -202,12 +202,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *Resul
 	safe, err := SafePathWithRestrict(ws, rawPath, t.restrict, t.allowedPrefixes)
 	if err != nil { return ErrorResult(err.Error()) }
 
-	// Read-before-edit safety check
-	if warn := ReadBeforeEditWarning(safe); warn != "" {
-		return &Result{ForLLM: warn, IsError: false}
-	}
-
-	// Stale file check
+	// Stale file check (skip read-before-edit for write_file — full content replacement is safe)
 	if staleWarn := CheckStaleFile(safe); staleWarn != "" {
 		return ErrorResult(staleWarn)
 	}
@@ -221,6 +216,9 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *Resul
 	if err := os.WriteFile(safe, []byte(content), 0644); err != nil {
 		return ErrorResult(fmt.Sprintf("cannot write file: %v", err))
 	}
+
+	// Mark as read — agent knows the content after writing it
+	RecordFileRead(safe)
 
 	msg := fmt.Sprintf("wrote %d bytes to %s", len(content), rawPath)
 
