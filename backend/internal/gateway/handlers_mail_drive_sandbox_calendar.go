@@ -714,3 +714,320 @@ func (gw *Gateway) handleDeleteCalendarEvent(w http.ResponseWriter, r *http.Requ
 	gw.calendarStore.Delete(r.Context(), chi.URLParam(r, "id"))
 	w.WriteHeader(204)
 }
+
+// ─── Remote Drive Browsing ───────────────────────────────────────────────────
+
+// handleListDriveRemotes returns storage platforms and their connection status.
+func (gw *Gateway) handleListDriveRemotes(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Query storage platforms directly from DB.
+	rows, err := gw.db.Pool.Query(ctx,
+		`SELECT id, name, icon FROM connector_platforms WHERE category = 'storage' AND enabled = true ORDER BY name`)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	defer rows.Close()
+
+	type remoteEntry struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Icon      string `json:"icon"`
+		Connected bool   `json:"connected"`
+	}
+
+	result := []remoteEntry{}
+	for rows.Next() {
+		var e remoteEntry
+		if err := rows.Scan(&e.ID, &e.Name, &e.Icon); err != nil {
+			continue
+		}
+
+		// Check vault for direct credentials.
+		if gw.vault != nil {
+			if _, err := gw.vault.GetToken(ctx, defaultTenant, e.ID, nil); err == nil {
+				e.Connected = true
+			}
+		}
+
+		// If not connected via vault, check relay accounts.
+		if !e.Connected && gw.relayStore != nil {
+			acc, _ := gw.relayStore.GetAccountForPlatform(ctx, defaultTenant, e.ID)
+			if acc != nil {
+				e.Connected = true
+			}
+		}
+
+		result = append(result, e)
+	}
+
+	writeJSON(w, 200, result)
+}
+
+// handleListRemoteFiles browses files from a connected cloud storage provider.
+func (gw *Gateway) handleListRemoteFiles(w http.ResponseWriter, r *http.Request) {
+	if gw.connExec == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connectors not configured"})
+		return
+	}
+
+	provider := chi.URLParam(r, "provider")
+	path := r.URL.Query().Get("path")
+
+	// Build provider-specific params for the list_files action.
+	params := map[string]any{}
+	switch provider {
+	case "google-drive":
+		if path != "" {
+			params["q"] = fmt.Sprintf("'%s' in parents", path)
+		}
+		params["pageSize"] = "50"
+	case "dropbox":
+		if path != "" {
+			params["path"] = path
+		} else {
+			params["path"] = ""
+		}
+	case "microsoft-onedrive":
+		if path != "" {
+			params["path"] = path
+		}
+	case "box":
+		if path != "" {
+			params["folder_id"] = path
+		} else {
+			params["folder_id"] = "0"
+		}
+	default:
+		writeJSON(w, 400, map[string]string{"error": "unsupported provider: " + provider})
+		return
+	}
+
+	result, err := gw.connExec.Execute(r.Context(), provider, "list_files", params)
+	if err != nil {
+		writeJSON(w, 502, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+
+	// Parse the raw JSON result into a normalized file list.
+	type remoteFile struct {
+		Name     string `json:"name"`
+		Path     string `json:"path"`
+		IsFolder bool   `json:"is_folder"`
+		Size     int64  `json:"size"`
+		Modified string `json:"modified"`
+		RemoteID string `json:"remote_id"`
+	}
+
+	// Try to parse as a JSON array or object and normalize.
+	normalized := gw.normalizeRemoteFiles(provider, result)
+	writeJSON(w, 200, normalized)
+	_ = remoteFile{} // type used in normalizeRemoteFiles
+}
+
+// normalizeRemoteFiles parses provider-specific JSON responses into a common format.
+func (gw *Gateway) normalizeRemoteFiles(provider, raw string) []map[string]any {
+	var result []map[string]any
+
+	switch provider {
+	case "google-drive":
+		// Google Drive returns {"files": [{id, name, mimeType, size, modifiedTime, parents}]}
+		var resp struct {
+			Files []struct {
+				ID           string `json:"id"`
+				Name         string `json:"name"`
+				MimeType     string `json:"mimeType"`
+				Size         string `json:"size"`
+				ModifiedTime string `json:"modifiedTime"`
+			} `json:"files"`
+		}
+		if err := json.Unmarshal([]byte(raw), &resp); err == nil {
+			for _, f := range resp.Files {
+				isFolder := f.MimeType == "application/vnd.google-apps.folder"
+				var size int64
+				fmt.Sscanf(f.Size, "%d", &size)
+				result = append(result, map[string]any{
+					"name":      f.Name,
+					"path":      f.ID,
+					"is_folder": isFolder,
+					"size":      size,
+					"modified":  f.ModifiedTime,
+					"remote_id": f.ID,
+				})
+			}
+		}
+
+	case "dropbox":
+		// Dropbox returns {"entries": [{".tag": "file"|"folder", "name", "path_lower", "size", "server_modified", "id"}]}
+		var resp struct {
+			Entries []struct {
+				Tag            string `json:".tag"`
+				Name           string `json:"name"`
+				PathLower      string `json:"path_lower"`
+				Size           int64  `json:"size"`
+				ServerModified string `json:"server_modified"`
+				ID             string `json:"id"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal([]byte(raw), &resp); err == nil {
+			for _, f := range resp.Entries {
+				result = append(result, map[string]any{
+					"name":      f.Name,
+					"path":      f.PathLower,
+					"is_folder": f.Tag == "folder",
+					"size":      f.Size,
+					"modified":  f.ServerModified,
+					"remote_id": f.ID,
+				})
+			}
+		}
+
+	case "microsoft-onedrive":
+		// OneDrive returns {"value": [{id, name, size, lastModifiedDateTime, folder?, file?}]}
+		var resp struct {
+			Value []struct {
+				ID                   string `json:"id"`
+				Name                 string `json:"name"`
+				Size                 int64  `json:"size"`
+				LastModifiedDateTime string `json:"lastModifiedDateTime"`
+				Folder               *struct {
+					ChildCount int `json:"childCount"`
+				} `json:"folder"`
+			} `json:"value"`
+		}
+		if err := json.Unmarshal([]byte(raw), &resp); err == nil {
+			for _, f := range resp.Value {
+				result = append(result, map[string]any{
+					"name":      f.Name,
+					"path":      f.ID,
+					"is_folder": f.Folder != nil,
+					"size":      f.Size,
+					"modified":  f.LastModifiedDateTime,
+					"remote_id": f.ID,
+				})
+			}
+		}
+
+	case "box":
+		// Box returns {"entries": [{type: "file"|"folder", id, name, size, modified_at}]}
+		var resp struct {
+			Entries []struct {
+				Type       string `json:"type"`
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				Size       int64  `json:"size"`
+				ModifiedAt string `json:"modified_at"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal([]byte(raw), &resp); err == nil {
+			for _, f := range resp.Entries {
+				result = append(result, map[string]any{
+					"name":      f.Name,
+					"path":      f.ID,
+					"is_folder": f.Type == "folder",
+					"size":      f.Size,
+					"modified":  f.ModifiedAt,
+					"remote_id": f.ID,
+				})
+			}
+		}
+
+	default:
+		// Fallback: try to return raw JSON as-is.
+		var arr []map[string]any
+		if json.Unmarshal([]byte(raw), &arr) == nil {
+			return arr
+		}
+	}
+
+	if result == nil {
+		result = []map[string]any{}
+	}
+	return result
+}
+
+// handleDownloadRemoteFile downloads a file from a remote provider into the local workspace.
+func (gw *Gateway) handleDownloadRemoteFile(w http.ResponseWriter, r *http.Request) {
+	if gw.connExec == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connectors not configured"})
+		return
+	}
+	if gw.driveStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "drive not configured"})
+		return
+	}
+
+	provider := chi.URLParam(r, "provider")
+
+	var body struct {
+		RemoteID string `json:"remote_id"`
+		Name     string `json:"name"`
+		ParentID string `json:"parent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if body.RemoteID == "" || body.Name == "" {
+		writeJSON(w, 400, map[string]string{"error": "remote_id and name are required"})
+		return
+	}
+
+	params := map[string]any{"file_id": body.RemoteID}
+
+	result, err := gw.connExec.Execute(r.Context(), provider, "download_file", params)
+	if err != nil {
+		writeJSON(w, 502, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+
+	// Save the downloaded content to local storage.
+	storagePath := fmt.Sprintf("/tmp/qorven-drive/%s/remote/%s", defaultTenant, body.Name)
+	os.MkdirAll(filepath.Dir(storagePath), 0755)
+
+	if err := os.WriteFile(storagePath, []byte(result), 0644); err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to save file locally"})
+		return
+	}
+
+	// Detect mime type from file extension.
+	mimeType := "application/octet-stream"
+	ext := strings.ToLower(filepath.Ext(body.Name))
+	switch ext {
+	case ".pdf":
+		mimeType = "application/pdf"
+	case ".txt", ".md", ".csv":
+		mimeType = "text/plain"
+	case ".json":
+		mimeType = "application/json"
+	case ".doc", ".docx":
+		mimeType = "application/msword"
+	case ".xls", ".xlsx":
+		mimeType = "application/vnd.ms-excel"
+	case ".png":
+		mimeType = "image/png"
+	case ".jpg", ".jpeg":
+		mimeType = "image/jpeg"
+	}
+
+	size := int64(len(result))
+	var parentID *string
+	if body.ParentID != "" {
+		parentID = &body.ParentID
+	}
+
+	// Create a local drive record for the downloaded file.
+	f, err := gw.driveStore.CreateFile(r.Context(), defaultTenant, "", body.Name, storagePath, mimeType, size, false, parentID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+
+	writeJSON(w, 201, f)
+}

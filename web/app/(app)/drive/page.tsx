@@ -10,7 +10,7 @@ import {
   FolderOpen, File, Image, FileCode, FileSpreadsheet,
   Upload, MoreHorizontal, AlertTriangle,
   Loader2, CheckCircle2, AlertCircle, Clock,
-  Sparkles, X, Search,
+  Sparkles, X, Search, Cloud, CloudDownload, ArrowLeft, HardDrive,
 } from 'lucide-react';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE, getToken } from '@/lib/api-core';
@@ -27,6 +27,32 @@ const formatSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
+};
+
+interface RemoteFile {
+  name: string;
+  path: string;
+  is_folder: boolean;
+  size: number;
+  modified: string;
+  remote_id: string;
+}
+
+interface RemoteInfo {
+  id: string;
+  name: string;
+  icon: string;
+  connected: boolean;
+}
+
+const remoteProviderIcon = (icon: string) => {
+  switch (icon) {
+    case 'google-drive': return HardDrive;
+    case 'dropbox': return Cloud;
+    case 'onedrive': return Cloud;
+    case 'box': return Cloud;
+    default: return Cloud;
+  }
 };
 
 type EnrichmentStatus = 'pending' | 'processing' | 'done' | 'failed';
@@ -191,6 +217,16 @@ export default function DrivePage() {
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Remote sources state
+  const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [remoteProvider, setRemoteProvider] = useState<string | null>(null);
+  const [remoteFiles, setRemoteFiles] = useState<RemoteFile[]>([]);
+  const [remotePath, setRemotePath] = useState('');
+  const [remotePathStack, setRemotePathStack] = useState<{ path: string; name: string }[]>([{ path: '', name: 'Root' }]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<string | null>(null);
+
   const fetchFiles = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -210,6 +246,82 @@ export default function DrivePage() {
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
+
+  // Fetch available remote providers on mount
+  useEffect(() => {
+    request<RemoteInfo[]>('/drive/remotes')
+      .then((data) => setRemotes(Array.isArray(data) ? data.filter((r) => r.connected) : []))
+      .catch(() => setRemotes([]));
+  }, []);
+
+  // Fetch remote files when provider or path changes
+  const fetchRemoteFiles = useCallback(async (provider: string, filePath: string) => {
+    setRemoteLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filePath) params.set('path', filePath);
+      const data = await request<RemoteFile[]>(`/drive/remotes/${provider}/files?${params}`);
+      setRemoteFiles(Array.isArray(data) ? data : []);
+    } catch {
+      setRemoteFiles([]);
+      setError('Failed to load remote files');
+    } finally {
+      setRemoteLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (remoteProvider) {
+      fetchRemoteFiles(remoteProvider, remotePath);
+    }
+  }, [remoteProvider, remotePath, fetchRemoteFiles]);
+
+  const enterRemoteProvider = (providerId: string) => {
+    setRemoteProvider(providerId);
+    setRemotePath('');
+    setRemotePathStack([{ path: '', name: 'Root' }]);
+    setSearch('');
+  };
+
+  const exitRemoteMode = () => {
+    setRemoteProvider(null);
+    setRemoteFiles([]);
+    setRemotePath('');
+    setRemotePathStack([{ path: '', name: 'Root' }]);
+  };
+
+  const openRemoteFolder = (file: RemoteFile) => {
+    setRemotePath(file.path);
+    setRemotePathStack((prev) => [...prev, { path: file.path, name: file.name }]);
+  };
+
+  const navigateRemoteTo = (idx: number) => {
+    setRemotePath(remotePathStack[idx]!.path);
+    setRemotePathStack((prev) => prev.slice(0, idx + 1));
+  };
+
+  const handleDownload = async (file: RemoteFile) => {
+    if (!remoteProvider) return;
+    setDownloadingIds((prev) => new Set(prev).add(file.remote_id));
+    try {
+      await request<DriveFile>(`/drive/remotes/${remoteProvider}/download`, {
+        method: 'POST',
+        body: JSON.stringify({ remote_id: file.remote_id, name: file.name, parent_id: parentId }),
+      });
+      setToast(`Downloaded ${file.name} to workspace`);
+      setTimeout(() => setToast(null), 3000);
+    } catch {
+      setError(`Failed to download ${file.name}`);
+    } finally {
+      setDownloadingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(file.remote_id);
+        return next;
+      });
+    }
+  };
+
+  const activeRemote = remotes.find((r) => r.id === remoteProvider);
 
   const openFolder = (id: string, name: string) => {
     setParentId(id);
@@ -276,38 +388,121 @@ export default function DrivePage() {
         <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0 gap-3">
           {/* Breadcrumb */}
           <nav className="flex items-center gap-1 text-sm shrink-0">
-            {path.map((p, i) => (
-              <span key={i} className="flex items-center gap-1">
-                {i > 0 && <span className="text-muted-foreground">/</span>}
-                <button onClick={() => navigateTo(i)}
-                  className={cn('hover:text-foreground transition-colors', i === path.length - 1 ? 'text-foreground font-medium' : 'text-muted-foreground')}>
-                  {p.name}
+            {remoteProvider && activeRemote ? (
+              <>
+                <button
+                  onClick={exitRemoteMode}
+                  className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Local
                 </button>
-              </span>
-            ))}
+                <span className="text-muted-foreground">/</span>
+                <span className="flex items-center gap-1">
+                  <Cloud className="h-3.5 w-3.5 text-blue-400" />
+                  <button
+                    onClick={() => navigateRemoteTo(0)}
+                    className={cn('hover:text-foreground transition-colors', remotePathStack.length === 1 ? 'text-foreground font-medium' : 'text-muted-foreground')}
+                  >
+                    {activeRemote.name}
+                  </button>
+                </span>
+                {remotePathStack.slice(1).map((p, i) => (
+                  <span key={i + 1} className="flex items-center gap-1">
+                    <span className="text-muted-foreground">/</span>
+                    <button
+                      onClick={() => navigateRemoteTo(i + 1)}
+                      className={cn('hover:text-foreground transition-colors', i + 1 === remotePathStack.length - 1 ? 'text-foreground font-medium' : 'text-muted-foreground')}
+                    >
+                      {p.name}
+                    </button>
+                  </span>
+                ))}
+              </>
+            ) : (
+              path.map((p, i) => (
+                <span key={i} className="flex items-center gap-1">
+                  {i > 0 && <span className="text-muted-foreground">/</span>}
+                  <button onClick={() => navigateTo(i)}
+                    className={cn('hover:text-foreground transition-colors', i === path.length - 1 ? 'text-foreground font-medium' : 'text-muted-foreground')}>
+                    {p.name}
+                  </button>
+                </span>
+              ))
+            )}
           </nav>
+
+          {/* Remote browsing indicator */}
+          {remoteProvider && activeRemote && (
+            <div className="flex items-center gap-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 text-xs text-blue-400">
+              <Cloud className="h-3 w-3" />
+              Browsing: {activeRemote.name}
+            </div>
+          )}
 
           {/* Search */}
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <input
               type="text"
-              placeholder="Search by name, summary, keywords…"
+              placeholder={remoteProvider ? 'Search remote files…' : 'Search by name, summary, keywords…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full h-8 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
-          <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="shrink-0 flex items-center gap-1.5 h-9 rounded-md bg-primary text-primary-foreground px-4 text-sm font-medium hover:bg-primary/90 disabled:opacity-60"
-          >
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            {uploading ? 'Uploading…' : 'Upload'}
-          </button>
+          {/* Cloud sources dropdown */}
+          {!remoteProvider && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              {remotes.length > 0 ? (
+                remotes.map((remote) => {
+                  const ProviderIcon = remoteProviderIcon(remote.icon);
+                  return (
+                    <button
+                      key={remote.id}
+                      onClick={() => enterRemoteProvider(remote.id)}
+                      className="flex items-center gap-1.5 h-8 rounded-full border border-border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors"
+                      title={`Browse ${remote.name}`}
+                    >
+                      <ProviderIcon className="h-3.5 w-3.5" />
+                      {remote.name}
+                    </button>
+                  );
+                })
+              ) : (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Cloud className="h-3.5 w-3.5" />
+                  Connect in Settings
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Back to local button in remote mode */}
+          {remoteProvider && (
+            <button
+              onClick={exitRemoteMode}
+              className="shrink-0 flex items-center gap-1.5 h-8 rounded-md border border-border bg-background px-3 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to Local
+            </button>
+          )}
+
+          {!remoteProvider && (
+            <>
+              <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="shrink-0 flex items-center gap-1.5 h-9 rounded-md bg-primary text-primary-foreground px-4 text-sm font-medium hover:bg-primary/90 disabled:opacity-60"
+              >
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploading ? 'Uploading…' : 'Upload'}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Error banner */}
@@ -323,92 +518,179 @@ export default function DrivePage() {
 
         {/* File list */}
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : filteredFiles.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <EmptyState
-                {...emptyStates.drive}
-                title={search ? 'No files match your search' : 'No files yet'}
-                description={search ? 'Try a different query or clear the search.' : 'Upload files or create folders to get started.'}
-              />
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border text-sm text-muted-foreground">
-                  <th className="text-left font-medium px-5 py-2.5">Name</th>
-                  <th className="text-left font-medium px-3 py-2.5 w-28">Enrichment</th>
-                  <th className="text-left font-medium px-3 py-2.5 w-32">Qor</th>
-                  <th className="text-left font-medium px-3 py-2.5 w-24">Size</th>
-                  <th className="text-left font-medium px-3 py-2.5 w-36">Modified</th>
-                  <th className="w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFiles.map((f) => {
-                  const Icon = f.is_folder ? FolderOpen : mimeIcon(f.mime_type ?? '');
-                  const soul = f.agent_id ? soulMap[f.agent_id] : null;
-                  return (
-                    <tr
-                      key={f.id}
-                      className="border-b border-border hover:bg-accent/30 transition-colors cursor-pointer"
-                      onClick={() => f.is_folder ? openFolder(f.id, f.name) : setSelectedFile(f)}
-                    >
-                      <td className="px-5 py-2.5">
-                        <div className="flex items-center gap-3">
-                          <Icon className={cn('h-5 w-5 shrink-0', f.is_folder ? 'text-amber-400' : 'text-muted-foreground')} />
-                          <div className="min-w-0">
-                            <span className="text-sm font-medium truncate block">{f.name}</span>
-                            {f.summary && (
-                              <span className="text-xs text-muted-foreground truncate block max-w-xs">{f.summary}</span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {!f.is_folder && (
-                          <div className="flex items-center gap-1.5">
-                            <EnrichmentBadge status={f.enrichment_status} />
-                            {(f.enrichment_status === 'pending' || f.enrichment_status === 'failed' || !f.enrichment_status) && (
+          {remoteProvider ? (
+            /* Remote file browsing mode */
+            remoteLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : remoteFiles.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <EmptyState
+                  {...emptyStates.drive}
+                  title={search ? 'No remote files match your search' : 'No files in this folder'}
+                  description={search ? 'Try a different query or clear the search.' : 'This folder is empty or inaccessible.'}
+                />
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border text-sm text-muted-foreground">
+                    <th className="text-left font-medium px-5 py-2.5">Name</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-24">Source</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-24">Size</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-36">Modified</th>
+                    <th className="w-24"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {remoteFiles
+                    .filter((f) => {
+                      if (!search.trim()) return true;
+                      return f.name.toLowerCase().includes(search.toLowerCase());
+                    })
+                    .map((f) => {
+                      const Icon = f.is_folder ? FolderOpen : mimeIcon('');
+                      const isDownloading = downloadingIds.has(f.remote_id);
+                      return (
+                        <tr
+                          key={f.remote_id}
+                          className="border-b border-border hover:bg-accent/30 transition-colors cursor-pointer"
+                          onClick={() => f.is_folder ? openRemoteFolder(f) : undefined}
+                        >
+                          <td className="px-5 py-2.5">
+                            <div className="flex items-center gap-3">
+                              <div className="relative shrink-0">
+                                <Icon className={cn('h-5 w-5', f.is_folder ? 'text-amber-400' : 'text-muted-foreground')} />
+                                <Cloud className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 text-blue-400" />
+                              </div>
+                              <span className="text-sm font-medium truncate">{f.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                              <Cloud className="h-3 w-3 text-blue-400" />
+                              Remote
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-sm text-muted-foreground">
+                            {f.is_folder ? '—' : formatSize(f.size)}
+                          </td>
+                          <td className="px-3 py-2.5 text-sm text-muted-foreground">
+                            {f.modified ? new Date(f.modified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                          </td>
+                          <td className="px-2 py-2.5">
+                            {!f.is_folder && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleEnrich(f.id); }}
-                                title="Enrich document"
-                                className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-indigo-400 transition-colors"
+                                onClick={(e) => { e.stopPropagation(); handleDownload(f); }}
+                                disabled={isDownloading}
+                                className="flex items-center gap-1.5 h-7 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors disabled:opacity-50"
+                                title="Download to workspace"
                               >
-                                <Sparkles className="h-3.5 w-3.5" />
+                                {isDownloading ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <CloudDownload className="h-3.5 w-3.5" />
+                                )}
+                                {isDownloading ? 'Saving…' : 'Save'}
                               </button>
                             )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {soul && (
-                          <div className="flex items-center gap-1.5">
-                            <div className={cn('flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-2xs font-semibold text-white', soulGradient(soul.display_name))}>
-                              {soul.display_name.charAt(0)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            )
+          ) : (
+            /* Local file browsing mode */
+            loading ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : filteredFiles.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <EmptyState
+                  {...emptyStates.drive}
+                  title={search ? 'No files match your search' : 'No files yet'}
+                  description={search ? 'Try a different query or clear the search.' : 'Upload files or create folders to get started.'}
+                />
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border text-sm text-muted-foreground">
+                    <th className="text-left font-medium px-5 py-2.5">Name</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-28">Enrichment</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-32">Qor</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-24">Size</th>
+                    <th className="text-left font-medium px-3 py-2.5 w-36">Modified</th>
+                    <th className="w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFiles.map((f) => {
+                    const Icon = f.is_folder ? FolderOpen : mimeIcon(f.mime_type ?? '');
+                    const soul = f.agent_id ? soulMap[f.agent_id] : null;
+                    return (
+                      <tr
+                        key={f.id}
+                        className="border-b border-border hover:bg-accent/30 transition-colors cursor-pointer"
+                        onClick={() => f.is_folder ? openFolder(f.id, f.name) : setSelectedFile(f)}
+                      >
+                        <td className="px-5 py-2.5">
+                          <div className="flex items-center gap-3">
+                            <Icon className={cn('h-5 w-5 shrink-0', f.is_folder ? 'text-amber-400' : 'text-muted-foreground')} />
+                            <div className="min-w-0">
+                              <span className="text-sm font-medium truncate block">{f.name}</span>
+                              {f.summary && (
+                                <span className="text-xs text-muted-foreground truncate block max-w-xs">{f.summary}</span>
+                              )}
                             </div>
-                            <span className="text-xs text-muted-foreground truncate">{soul.display_name}</span>
                           </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 text-sm text-muted-foreground">{f.is_folder ? '—' : formatSize(f.size_bytes ?? 0)}</td>
-                      <td className="px-3 py-2.5 text-sm text-muted-foreground">
-                        {f.updated_at ? new Date(f.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
-                      </td>
-                      <td className="px-2">
-                        <button className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
-                          onClick={(e) => e.stopPropagation()}>
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {!f.is_folder && (
+                            <div className="flex items-center gap-1.5">
+                              <EnrichmentBadge status={f.enrichment_status} />
+                              {(f.enrichment_status === 'pending' || f.enrichment_status === 'failed' || !f.enrichment_status) && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleEnrich(f.id); }}
+                                  title="Enrich document"
+                                  className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-indigo-400 transition-colors"
+                                >
+                                  <Sparkles className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {soul && (
+                            <div className="flex items-center gap-1.5">
+                              <div className={cn('flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-2xs font-semibold text-white', soulGradient(soul.display_name))}>
+                                {soul.display_name.charAt(0)}
+                              </div>
+                              <span className="text-xs text-muted-foreground truncate">{soul.display_name}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-sm text-muted-foreground">{f.is_folder ? '—' : formatSize(f.size_bytes ?? 0)}</td>
+                        <td className="px-3 py-2.5 text-sm text-muted-foreground">
+                          {f.updated_at ? new Date(f.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                        </td>
+                        <td className="px-2">
+                          <button className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
+                            onClick={(e) => e.stopPropagation()}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )
           )}
         </div>
       </div>
@@ -420,6 +702,17 @@ export default function DrivePage() {
           onClose={() => setSelectedFile(null)}
           onEnrich={handleEnrich}
         />
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-emerald-950 border border-emerald-800 px-4 py-2.5 text-sm text-emerald-300 shadow-lg animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {toast}
+          <button onClick={() => setToast(null)} className="ml-2 text-emerald-500 hover:text-emerald-300">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

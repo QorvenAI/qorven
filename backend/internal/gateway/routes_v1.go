@@ -908,6 +908,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Delete("/drive/files/{id}", gw.handleDeleteDriveFile)
 		r.Get("/drive/quota", gw.handleDriveQuota)
 		r.Post("/drive/files/{id}/enrich", gw.handleEnrichFile)
+		r.Get("/drive/remotes", gw.handleListDriveRemotes)
+		r.Get("/drive/remotes/{provider}/files", gw.handleListRemoteFiles)
+		r.Post("/drive/remotes/{provider}/download", gw.handleDownloadRemoteFile)
 
 		// Sandbox
 		r.Route("/sandbox", func(r chi.Router) {
