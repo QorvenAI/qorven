@@ -234,23 +234,15 @@ export function StatusBar() {
         className="qorven-status-bar fixed bottom-0 z-30 h-6 flex items-center gap-2 border-t border-border bg-muted px-2 text-2xs text-muted-foreground select-none"
         style={{ left: 'var(--rail-width)', right: 0 }}
       >
-        {/* Brand — links to qorven.ai */}
-        <Link
-          href="https://qorven.ai"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Visit qorven.ai"
-          className="flex items-center px-1.5 h-full font-medium text-muted-foreground hover:text-foreground transition-colors rounded-sm hover:bg-accent"
-        >
-          Qorven
-        </Link>
+        {/* Sidebar spacer — keeps version chip aligned to main canvas start */}
+        <div style={{ width: 'calc(var(--sidebar-default-width, 280px) - var(--rail-width, 60px) - 8px)', flexShrink: 0 }} />
 
-        {/* Version chip — opens changelog + update check */}
+        {/* Version chip — opens changelog + update check, anchored to main canvas */}
         {version ? (
           <button
             onClick={openChangelog}
             title={updateState === 'available' ? `Update available: v${updateInfo?.latest}` : 'View changelog & check for updates'}
-            className="relative flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground hover:text-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer"
+            className="relative flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground hover:text-foreground transition-colors tabular-nums rounded-sm hover:bg-accent cursor-pointer shrink-0"
           >
             v{version}
           </button>
