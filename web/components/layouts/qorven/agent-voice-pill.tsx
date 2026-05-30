@@ -98,10 +98,8 @@ function PillCard({ chief, activity, subtitle, isVoiceActive, children }: PillCa
   return (
     <div
       className={cn(
-        'flex flex-1 items-center gap-2.5 rounded-lg border px-3 py-2 min-w-0 transition-colors',
-        isVoiceActive
-          ? 'border-primary/30 bg-primary/5 ring-1 ring-primary/20'
-          : 'border-border bg-card/50',
+        'flex flex-1 items-center gap-2.5 px-1 min-w-0 transition-colors',
+        isVoiceActive && 'bg-primary/5',
       )}
     >
       {/* Avatar + pulse */}
