@@ -4,6 +4,22 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.8-alpha — 2026-05-30
+
+### Added
+- **Distill-inspired sidebar** — agents now show color-coded avatars with live pulse rings, activity subtitles ("Thinking…", last action), and per-agent voice buttons on hover ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+- **Per-agent voice sessions** — click the headphone icon next to any agent to start a voice session; switching agents automatically stops the previous session; no conflict possible ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+- **Hub rows in sidebar** — hubs appear below the agent list with stacked member avatar piles showing which agents are inside ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+- **Agent detail profile** — navigating to an agent's chat now shows a mini-profile sidebar: avatar, status ring, tokens today, recent conversations ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+- **RoomsSidebar** — the Hubs section has its own sidebar with hub list and live member panel showing agent pulse rings ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+- **Hub chat avatars** — messages in hub chats now show the sending agent's avatar and name ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+- **Chat canvas agent identity** — the empty chat state now shows the agent's avatar and a personal greeting ([bcaf999](https://github.com/QorvenAI/qorven/commit/bcaf999))
+
+### Improved
+- Voice sessions now managed globally — one active session at a time, conflict-free across all sidebar rows and the chat toolbar voice button
+
+---
+
 ## v0.3.7-alpha — 2026-05-30
 
 ### Added
