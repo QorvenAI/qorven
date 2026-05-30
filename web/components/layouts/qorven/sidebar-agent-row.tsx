@@ -2,7 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -98,15 +98,17 @@ export function SidebarAgentRow({
   const stopRef = useRef<(() => Promise<void>) | null>(null);
   const voice = useVoice({
     agentId: soul.id,
-    onResponse: () => {},
   });
 
-  // Keep stopRef current so the global stop-other-agent logic can reach it.
-  stopRef.current = voice.stop;
-
-  // Store a ref map so we can stop OTHER agents. We use a module-level Map
-  // keyed by soul.id → stop function, updated each render.
-  agentStopRegistry.set(soul.id, voice.stop);
+  // Keep stopRef current and sync the module-level registry.
+  // Cleanup removes the entry when this row unmounts.
+  useEffect(() => {
+    stopRef.current = voice.stop;
+    agentStopRegistry.set(soul.id, voice.stop);
+    return () => {
+      agentStopRegistry.delete(soul.id);
+    };
+  }, [soul.id, voice.stop]);
 
   const handleVoiceClick = useCallback(
     async (e: React.MouseEvent) => {
@@ -144,10 +146,13 @@ export function SidebarAgentRow({
   const gradient = gradientFor(soul.id);
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       className={cn(
-        'group/row relative flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
+        'group/row relative flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
         isActive
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -213,7 +218,7 @@ export function SidebarAgentRow({
           <Headphones className="h-3.5 w-3.5" />
         </button>
       )}
-    </button>
+    </div>
   );
 }
 
