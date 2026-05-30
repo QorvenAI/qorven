@@ -15,6 +15,7 @@ import { ContextPanel } from './context-panel';
 import { RightPanel } from './right-panel';
 import { BottomDrawer } from './bottom-drawer';
 import { StatusBar } from './status-bar';
+import { AgentVoicePill } from './agent-voice-pill';
 import { ReconnectBanner } from '@/components/reconnect-banner';
 import { Home, MessageSquare, Bot, CheckSquare, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -119,7 +120,7 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   }, [bottomDrawerOpen, bottomDrawerHeightPx, bottomDrawerTabs.length]);
 
   return (
-    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px' } as React.CSSProperties}>
+    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '48px', '--bottom-dock-height': '72px' } as React.CSSProperties}>
       <ReconnectBanner />
       <Rail />
       <Sidebar />
@@ -133,6 +134,7 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
       <ContextPanel />
       <RightPanel />
       <BottomDrawer />
+      <AgentVoicePill />
       <StatusBar />
       <nav className="mobile-bottom-bar">
         {mobileNav.map(({ href, icon: Icon, label }) => {

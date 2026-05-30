@@ -203,33 +203,34 @@
     transition: none !important;
   }
 
-  /* Status bar — 24px pinned to the bottom. Main canvas always reserves
-     that space; bottom drawer stacks directly above it. */
+  /* Status bar (24px) + agent voice pill (48px) — both pinned to the bottom.
+     Main canvas reserves space for both; bottom drawer stacks above both. */
   .qorven {
     --status-bar-height: 0px;
+    --agent-pill-height: 0px;
+    --bottom-dock-height: calc(var(--status-bar-height) + var(--agent-pill-height));
     --bottom-drawer-height: 0px;
   }
 
-  /* Main-canvas always leaves room for the status bar. When the drawer
-     is open, it also leaves room for the drawer. */
+  /* Main-canvas always leaves room for status bar + agent pill. */
   .qorven .main-canvas {
-    padding-bottom: calc(1.25rem + var(--status-bar-height));
+    padding-bottom: calc(1.25rem + var(--bottom-dock-height));
   }
   .qorven.bottom-drawer-open .main-canvas {
-    padding-bottom: calc(1.25rem + var(--status-bar-height) + var(--bottom-drawer-height));
+    padding-bottom: calc(1.25rem + var(--bottom-dock-height) + var(--bottom-drawer-height));
   }
   @media (min-width: theme(--breakpoint-lg)) {
     .qorven .main-canvas {
-      padding-bottom: calc(1.5rem + var(--status-bar-height));
+      padding-bottom: calc(1.5rem + var(--bottom-dock-height));
     }
     .qorven.bottom-drawer-open .main-canvas {
-      padding-bottom: calc(1.5rem + var(--status-bar-height) + var(--bottom-drawer-height));
+      padding-bottom: calc(1.5rem + var(--bottom-dock-height) + var(--bottom-drawer-height));
     }
   }
 
-  /* Bottom drawer sits above the status bar. */
+  /* Bottom drawer sits above the full dock (pill + status bar). */
   .qorven-bottom-drawer {
-    bottom: var(--status-bar-height) !important;
+    bottom: var(--bottom-dock-height) !important;
   }
 
   /* Main canvas — default centered content */
