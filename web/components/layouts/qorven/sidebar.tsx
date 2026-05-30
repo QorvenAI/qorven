@@ -79,7 +79,7 @@ export function Sidebar() {
       <div className="w-(--sidebar-default-width) flex flex-col h-full overflow-hidden">
         <SidebarHeader />
         {/* pb accounts for the agent pill height */}
-        <div className="flex-1 overflow-y-auto pb-[72px]">
+        <div className="flex-1 overflow-y-auto pb-[84px]">
           {activeRail === 'dashboard' && <HomeSidebar events={liveEvents} />}
           {activeRail === 'souls' && (
             detailSoul
