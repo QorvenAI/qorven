@@ -383,82 +383,78 @@ function PillLayout({
         height: 'var(--agent-pill-height, 84px)',
       }}
     >
-      {/* ── Row 1: avatar + name + activity dot + chat icon ── */}
+      {/* ── Row 1: COO avatar + name + mic + chat ── */}
       <div className="flex items-center gap-2 min-w-0">
+        {/* Avatar */}
         <div className="shrink-0">
           {chief.avatar ? (
-            <img src={chief.avatar} alt={chief.display_name} className="h-6 w-6 rounded-full object-cover" />
+            <img src={chief.avatar} alt={chief.display_name} className="h-7 w-7 rounded-full object-cover" />
           ) : (
-            <div className={cn('flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white', gradient)}>
+            <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white', gradient)}>
               {(chief.display_name?.[0] ?? '?').toUpperCase()}
             </div>
           )}
         </div>
+
+        {/* Name + state */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <span className="truncate text-[12px] font-semibold leading-tight text-foreground">
-            {chief.display_name}
-          </span>
+          <span className="truncate text-[12px] font-semibold text-foreground">{chief.display_name}</span>
           {voiceState && voiceState !== 'idle'
             ? <VoiceIndicator voiceState={voiceState} />
-            : <span className={cn('inline-block h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
+            : <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
           }
         </div>
-        <button
-          onClick={onChat}
-          title={`Open ${chief.display_name}'s chat`}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent transition-colors"
-        >
-          <MessageSquare className="h-3 w-3" />
-        </button>
-      </div>
 
-      {/* ── Row 2: voice button (left col) + agent stack (right col) ── */}
-      <div className="flex items-center gap-2">
-        {/* Voice button — takes available space */}
+        {/* Mic button */}
         {onVoiceTrigger ? (
           <button
             onClick={onVoiceTrigger}
+            title={isVoiceActive ? 'End voice' : `Talk to ${chief.display_name}`}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 h-7 rounded-md text-[11px] font-medium transition-all',
+              'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all',
               isVoiceActive
-                ? 'bg-destructive/15 text-destructive border border-destructive/25 hover:bg-destructive/25'
-                : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20',
+                ? 'bg-destructive text-white shadow-sm shadow-destructive/40'
+                : 'bg-primary/15 text-primary hover:bg-primary/25',
             )}
           >
-            {isVoiceActive
-              ? <><MicOff className="h-3 w-3" />{voiceLabel}</>
-              : <><Mic className="h-3 w-3" />{voiceLabel}</>
-            }
+            {isVoiceActive ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
           </button>
         ) : (
-          <div className="flex flex-1 items-center justify-center gap-1.5 h-7 rounded-md text-[11px] text-muted-foreground/40 border border-border/40">
-            <Mic className="h-3 w-3" />{chief.display_name.split(' ')[0]}
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted border border-border/40 text-muted-foreground/30">
+            <Mic className="h-3.5 w-3.5" />
           </div>
         )}
 
-        {/* Vertical separator */}
-        {others.length > 0 && <span className="h-5 w-px bg-border/50 shrink-0" />}
+        {/* Chat button */}
+        <button
+          onClick={onChat}
+          title={`Open ${chief.display_name}'s chat`}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted/80 text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </button>
+      </div>
 
-        {/* Agent stack — right column */}
-        {others.length > 0 && (
-          <div className="flex items-center shrink-0">
-            {others.map((s, i) => (
-              <StackedAgent
-                key={s.id} soul={s} index={i}
-                voiceEnabled={voiceEnabled}
-                isVoiceActive={activeVoiceAgentId === s.id}
-                onVoiceToggle={onOtherVoice}
-              />
-            ))}
-            {overflow > 0 && (
-              <div
-                className="flex h-6 w-6 items-center justify-center rounded-full bg-muted border border-border text-[8px] font-medium text-muted-foreground shrink-0"
-                style={{ marginLeft: -10, zIndex: 0 }}
-              >
-                +{overflow}
-              </div>
-            )}
+      {/* ── Row 2: full-width avatar stack ── */}
+      <div className="flex items-center gap-1">
+        {others.map((s, i) => (
+          <StackedAgent
+            key={s.id} soul={s} index={i}
+            voiceEnabled={voiceEnabled}
+            isVoiceActive={activeVoiceAgentId === s.id}
+            onVoiceToggle={onOtherVoice}
+          />
+        ))}
+        {overflow > 0 && (
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
+            style={{ marginLeft: -10, zIndex: 0 }}
+          >
+            +{overflow}
           </div>
+        )}
+        {others.length === 0 && (
+          <span className="text-[10px] text-muted-foreground/30">No other agents</span>
         )}
       </div>
     </div>
