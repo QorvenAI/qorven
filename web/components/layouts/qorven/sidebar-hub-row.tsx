@@ -72,7 +72,7 @@ export function SidebarHubRow({
                 'absolute flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-muted bg-gradient-to-br text-[9px] font-bold text-white overflow-hidden',
                 gradientFor(m.id),
               )}
-              style={{ left: i * 14, zIndex: shown.length - i }}
+              style={{ left: i * 14, zIndex: i + 1 }}
             >
               {m.avatar ? (
                 <img src={m.avatar} alt={m.display_name} className="h-full w-full object-cover" />
@@ -84,7 +84,7 @@ export function SidebarHubRow({
           {overflow > 0 && (
             <div
               className="absolute flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-muted bg-muted text-[9px] font-medium text-muted-foreground"
-              style={{ left: 3 * 14, zIndex: 0 }}
+              style={{ left: 3 * 14, zIndex: shown.length + 1 }}
             >
               +{overflow}
             </div>
