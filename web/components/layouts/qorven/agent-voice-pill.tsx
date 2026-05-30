@@ -10,7 +10,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
-import { Headphones, MessageSquare, PhoneOff } from 'lucide-react';
+import { Headphones, MessageSquare, PhoneOff, Mic, MicOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
@@ -254,7 +254,7 @@ function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle 
   return (
     <div
       className="relative shrink-0"
-      style={{ zIndex: 20 - index, marginLeft: index === 0 ? 0 : -6 }}
+      style={{ zIndex: 20 - index, marginLeft: index === 0 ? 0 : -10 }}
     >
       <button
         onClick={() => setOpen((v) => !v)}
@@ -292,7 +292,7 @@ function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle 
 function PillContainer({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="fixed z-29 flex items-center gap-2 border-t border-r border-border bg-muted px-2 hidden lg:flex"
+      className="fixed z-29 flex items-center gap-1.5 border-t border-r border-border bg-muted px-2 hidden lg:flex"
       style={{
         left: 'var(--rail-width)',
         width: 'var(--sidebar-default-width, 280px)',
@@ -312,12 +312,15 @@ interface HeroZoneProps {
   subtitle: string;
   isVoiceActive: boolean;
   voiceState?: string;
+  onChat: () => void;
+  onVoice?: () => void;
+  onMic?: () => void;
 }
 
-function HeroZone({ chief, activity, subtitle, isVoiceActive, voiceState }: HeroZoneProps) {
+function HeroZone({ chief, activity, subtitle, isVoiceActive, voiceState, onChat, onVoice, onMic }: HeroZoneProps) {
   const gradient = gradientFor(chief.id);
   return (
-    <div className={cn('flex items-center gap-2 min-w-0 flex-1', isVoiceActive && 'text-primary/90')}>
+    <div className={cn('flex items-center gap-1.5 min-w-0 shrink-0', isVoiceActive && 'text-primary/90')}>
       {/* Avatar */}
       <div className="shrink-0">
         {chief.avatar ? (
@@ -330,9 +333,9 @@ function HeroZone({ chief, activity, subtitle, isVoiceActive, voiceState }: Hero
       </div>
 
       {/* Name + state */}
-      <div className="flex min-w-0 flex-col flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="truncate text-[12px] font-semibold leading-tight">{chief.display_name}</span>
+      <div className="flex min-w-0 flex-col" style={{ maxWidth: 72 }}>
+        <div className="flex items-center gap-1 min-w-0">
+          <span className="truncate text-[11px] font-semibold leading-tight">{chief.display_name}</span>
           {voiceState && voiceState !== 'idle' && <VoiceIndicator voiceState={voiceState} />}
         </div>
         <span className={cn(
@@ -343,6 +346,45 @@ function HeroZone({ chief, activity, subtitle, isVoiceActive, voiceState }: Hero
         )}>
           {subtitle}
         </span>
+      </div>
+
+      {/* Inline action buttons — right next to COO */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          onClick={onChat}
+          title={`Open ${chief.display_name}'s chat`}
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <MessageSquare className="h-3 w-3" />
+        </button>
+        {onMic && (
+          <button
+            onClick={onMic}
+            title={isVoiceActive ? 'End voice' : `Talk to ${chief.display_name}`}
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+              isVoiceActive
+                ? 'text-destructive bg-destructive/10 hover:bg-destructive/20'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/80',
+            )}
+          >
+            {isVoiceActive ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
+          </button>
+        )}
+        {onVoice && !onMic && (
+          <button
+            onClick={onVoice}
+            title={isVoiceActive ? 'End voice session' : `Talk to ${chief.display_name}`}
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-md transition-colors',
+              isVoiceActive
+                ? 'text-destructive bg-destructive/10 hover:bg-destructive/20'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/80',
+            )}
+          >
+            {isVoiceActive ? <PhoneOff className="h-3 w-3" /> : <Headphones className="h-3 w-3" />}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -382,10 +424,14 @@ function PillBasic() {
 
   return (
     <PillContainer>
-      <HeroZone chief={chief} activity={activity} subtitle={subtitle} isVoiceActive={false} />
+      <HeroZone
+        chief={chief} activity={activity} subtitle={subtitle} isVoiceActive={false}
+        onChat={() => router.push(`/qors/${chief.id}`)}
+        onMic={() => router.push('/settings?section=voice')}
+      />
 
       {/* Divider */}
-      {others.length > 0 && <span className="h-5 w-px bg-border/60 shrink-0" />}
+      {others.length > 0 && <span className="h-5 w-px bg-border/60 shrink-0 ml-1" />}
 
       {/* Other agents stack */}
       <div className="flex items-center shrink-0">
@@ -394,20 +440,11 @@ function PillBasic() {
         ))}
         {overflow > 0 && (
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
-            style={{ marginLeft: -6, zIndex: 0 }}>
+            style={{ marginLeft: -10, zIndex: 0 }}>
             +{overflow}
           </div>
         )}
       </div>
-
-      {/* Chat button */}
-      <button
-        onClick={() => router.push(`/qors/${chief.id}`)}
-        title={`Open ${chief.display_name}'s chat`}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-      >
-        <MessageSquare className="h-3.5 w-3.5" />
-      </button>
     </PillContainer>
   );
 }
@@ -498,17 +535,19 @@ function PillWithVoice() {
 
   return (
     <PillContainer>
-      {/* COO hero zone */}
+      {/* COO hero zone — avatar + name + inline chat/mic buttons */}
       <HeroZone
         chief={chief}
         activity={activity}
         subtitle={subtitle}
         isVoiceActive={isVoiceActive}
         voiceState={isVoiceActive ? voice.state : undefined}
+        onChat={() => router.push(`/qors/${chief.id}`)}
+        onMic={handleVoice}
       />
 
       {/* Divider */}
-      {others.length > 0 && <span className="h-5 w-px bg-border/60 shrink-0" />}
+      {others.length > 0 && <span className="h-5 w-px bg-border/60 shrink-0 ml-1" />}
 
       {/* Other agents stacked */}
       <div className="flex items-center shrink-0">
@@ -525,35 +564,11 @@ function PillWithVoice() {
         {overflow > 0 && (
           <div
             className="flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
-            style={{ marginLeft: -6, zIndex: 0 }}
+            style={{ marginLeft: -10, zIndex: 0 }}
           >
             +{overflow}
           </div>
         )}
-      </div>
-
-      {/* COO action buttons */}
-      <div className="flex items-center gap-0.5 shrink-0">
-        <button
-          onClick={handleVoice}
-          title={isVoiceActive ? 'End voice session' : `Talk to ${chief.display_name}`}
-          className={cn(
-            'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
-            isVoiceActive
-              ? 'text-destructive bg-destructive/10 hover:bg-destructive/20'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/80',
-          )}
-        >
-          {isVoiceActive ? <PhoneOff className="h-3.5 w-3.5" /> : <Headphones className="h-3.5 w-3.5" />}
-        </button>
-
-        <button
-          onClick={() => router.push(`/qors/${chief.id}`)}
-          title={`Open ${chief.display_name}'s chat`}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-        </button>
       </div>
     </PillContainer>
   );
