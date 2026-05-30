@@ -365,72 +365,56 @@ interface HeroZoneProps {
 function HeroZone({ chief, activity, subtitle, isVoiceActive, voiceState, onChat, onVoice, onMic }: HeroZoneProps) {
   const gradient = gradientFor(chief.id);
   return (
-    <div className={cn('flex items-center gap-2 min-w-0 shrink-0', isVoiceActive && 'text-primary/90')}>
-      {/* Avatar */}
-      <div className="shrink-0">
-        {chief.avatar ? (
-          <img src={chief.avatar} alt={chief.display_name} className="h-8 w-8 rounded-full object-cover" />
-        ) : (
-          <div className={cn('flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[12px] font-bold text-white', gradient)}>
-            {(chief.display_name?.[0] ?? '?').toUpperCase()}
-          </div>
-        )}
-      </div>
-
-      {/* Name + subtitle + action buttons below */}
-      <div className="flex min-w-0 flex-col gap-0.5">
-        {/* Row 1: name + voice indicator */}
-        <div className="flex items-center gap-1 min-w-0">
+    <div className="flex flex-col gap-2 min-w-0 shrink-0 py-1">
+      {/* Row 1: avatar + name */}
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="shrink-0">
+          {chief.avatar ? (
+            <img src={chief.avatar} alt={chief.display_name} className="h-7 w-7 rounded-full object-cover" />
+          ) : (
+            <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white', gradient)}>
+              {(chief.display_name?.[0] ?? '?').toUpperCase()}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 min-w-0">
           <span className="truncate text-[12px] font-semibold leading-tight">{chief.display_name}</span>
           {voiceState && voiceState !== 'idle' && <VoiceIndicator voiceState={voiceState} />}
+          {!voiceState && (activity === 'thinking' || activity === 'running') && (
+            <span className="text-[9px] text-amber-400/80 font-medium">{activity === 'thinking' ? 'thinking' : 'working'}</span>
+          )}
         </div>
-        {/* Row 2: subtitle */}
-        <span className={cn(
-          'truncate text-[10px] leading-tight',
-          isVoiceActive ? 'text-primary/80'
-            : activity === 'thinking' || activity === 'running' ? 'text-amber-400/80'
-            : 'text-muted-foreground/60',
-        )}>
-          {subtitle}
-        </span>
-        {/* Row 3: chat + mic buttons */}
-        <div className="flex items-center gap-1 mt-0.5">
+      </div>
+
+      {/* Row 2: action buttons — icon-only circles, modern voice app style */}
+      <div className="flex items-center gap-1.5">
+        {/* Chat — small ghost circle */}
+        <button
+          onClick={onChat}
+          title={`Open ${chief.display_name}'s chat`}
+          className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/80 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </button>
+
+        {/* Mic — primary action, larger, accent when active */}
+        {(onMic || onVoice) && (
           <button
-            onClick={onChat}
-            title={`Open ${chief.display_name}'s chat`}
-            className="flex items-center gap-1 px-1.5 h-5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+            onClick={onMic ?? onVoice}
+            title={isVoiceActive ? 'End voice session' : `Talk to ${chief.display_name}`}
+            className={cn(
+              'flex h-8 w-8 items-center justify-center rounded-full transition-all',
+              isVoiceActive
+                ? 'bg-destructive text-white shadow-lg shadow-destructive/30 scale-105'
+                : 'bg-primary/15 text-primary hover:bg-primary/25 hover:scale-105',
+            )}
           >
-            <MessageSquare className="h-2.5 w-2.5" />Chat
+            {isVoiceActive
+              ? <MicOff className="h-4 w-4" />
+              : <Mic className="h-4 w-4" />
+            }
           </button>
-          {onMic && (
-            <button
-              onClick={onMic}
-              title={isVoiceActive ? 'End voice' : `Talk to ${chief.display_name}`}
-              className={cn(
-                'flex items-center gap-1 px-1.5 h-5 rounded text-[10px] transition-colors',
-                isVoiceActive
-                  ? 'text-destructive bg-destructive/10 hover:bg-destructive/20'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/80',
-              )}
-            >
-              {isVoiceActive ? <><MicOff className="h-2.5 w-2.5" />End</> : <><Mic className="h-2.5 w-2.5" />Voice</>}
-            </button>
-          )}
-          {onVoice && !onMic && (
-            <button
-              onClick={onVoice}
-              title={isVoiceActive ? 'End voice session' : `Talk to ${chief.display_name}`}
-              className={cn(
-                'flex items-center gap-1 px-1.5 h-5 rounded text-[10px] transition-colors',
-                isVoiceActive
-                  ? 'text-destructive bg-destructive/10 hover:bg-destructive/20'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/80',
-              )}
-            >
-              {isVoiceActive ? <><PhoneOff className="h-2.5 w-2.5" />End</> : <><Headphones className="h-2.5 w-2.5" />Talk</>}
-            </button>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
