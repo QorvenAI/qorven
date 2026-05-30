@@ -11,7 +11,6 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Headphones, MessageSquare, PhoneOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SoulPulseRing } from '@/components/soul-pulse-ring';
 import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
 import { useStore } from '@/store';
@@ -71,7 +70,7 @@ function useChief() {
 function PillContainer({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="fixed z-29 flex items-center border-t border-border bg-muted px-2 hidden lg:flex"
+      className="fixed z-29 flex items-center border-t border-r border-border bg-muted px-2 hidden lg:flex"
       style={{
         left: 'var(--rail-width)',
         width: 'var(--sidebar-default-width, 280px)',
@@ -102,8 +101,8 @@ function PillCard({ chief, activity, subtitle, isVoiceActive, children }: PillCa
         isVoiceActive && 'bg-primary/5',
       )}
     >
-      {/* Avatar + pulse */}
-      <div className="relative shrink-0">
+      {/* Avatar — no status dot, keep it clean */}
+      <div className="shrink-0">
         {chief.avatar ? (
           <img src={chief.avatar} alt={chief.display_name} className="h-7 w-7 rounded-full object-cover" />
         ) : (
@@ -111,9 +110,6 @@ function PillCard({ chief, activity, subtitle, isVoiceActive, children }: PillCa
             {(chief.display_name?.[0] ?? '?').toUpperCase()}
           </div>
         )}
-        <span className="absolute -bottom-0.5 -right-0.5">
-          <SoulPulseRing activity={isVoiceActive ? 'running' : activity} size="sm" />
-        </span>
       </div>
 
       {/* Name + subtitle */}
