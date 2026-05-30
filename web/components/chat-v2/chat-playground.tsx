@@ -14,6 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { ChevronDown, ShieldAlert, Check, X, Loader2, Infinity, Clock, Timer } from 'lucide-react';
+import { toast } from 'sonner';
 import { sessions as sessionsApi, permissions as permissionsApi, agents } from '@/lib/api';
 import { request } from '@/lib/api-core';
 import { useStore } from '@/store';
@@ -315,6 +316,14 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
             }];
           });
         }
+      }
+    },
+    onError(err) {
+      const msg = err?.message ?? String(err);
+      if (msg.includes('no provider') || msg.includes('no LLM') || msg.includes('503')) {
+        toast.error('No AI provider connected. Go to Models Hub to add one.');
+      } else {
+        toast.error(msg || 'Something went wrong. Please try again.');
       }
     },
     onFinish(result) {

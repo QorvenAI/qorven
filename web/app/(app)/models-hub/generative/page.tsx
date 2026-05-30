@@ -1120,7 +1120,7 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
             ) : existingKeys.length === 0 ? (
               <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-4">
                 <Key className="h-4 w-4 text-muted-foreground/30 shrink-0" />
-                <p className="text-xs text-muted-foreground">No keys yet — add a key above to enable this provider.</p>
+                <p className="text-xs text-muted-foreground">No API key added yet — add one above to activate this provider.</p>
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -1349,7 +1349,7 @@ function AliasLookupCard() {
   const resolved = aliases.find(a => a.alias === selected)?.model_id;
 
   return (
-    <SCard title="Model Alias Lookup" description="See which concrete model each alias resolves to. Override aliases in the Gateway tab.">
+    <SCard title="Model shortcuts" description="See which AI model each shortcut uses. Change these in the Gateway tab.">
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-1 flex-wrap">
           {BUILTIN_ALIASES.map(a => (
@@ -1439,7 +1439,7 @@ function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onTog
         </span>
       ) : (
         <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-destructive/10 text-destructive shrink-0">
-          <Key className="h-3 w-3" />No keys
+          <Key className="h-3 w-3" />Add API key
         </span>
       )}
       <button onClick={onManageModels} className={cn(
@@ -1568,7 +1568,7 @@ export default function GenerativePage() {
           title="Providers"
           description={loading ? undefined : providerList.length === 0
             ? 'No providers configured yet. Add your first provider to start routing AI requests.'
-            : `${providerList.length} provider${providerList.length !== 1 ? 's' : ''} · ${activeCount} active · ${selectedModels.length} models selected`
+            : `${providerList.length} provider${providerList.length !== 1 ? 's' : ''} connected · ${activeCount} active${selectedModels.length === 0 ? ' · no models chosen yet' : ` · ${selectedModels.length} model${selectedModels.length !== 1 ? 's' : ''} selected`}`
           }
           headerRight={
             <div className="flex items-center gap-2">

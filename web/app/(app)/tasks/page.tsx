@@ -331,7 +331,7 @@ export default function TasksPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <CanvasHeader title="Tasks" description="Track work across all your Qors" />
+      <CanvasHeader title="Tasks" description="Track work across all your agents" />
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
         <Filter className="h-4 w-4 text-muted-foreground shrink-0" />

@@ -120,8 +120,8 @@ export const emptyStates = {
 export const descriptions = {
   agents: `${brand.agentNamePlural} in your workspace`,
   channels: `All channel instances across all ${brand.agentNamePlural}`,
-  workflows: `Multi-step ${brand.agentName} Flows`,
-  rooms: `Multi-${brand.agentName} hub collaboration — agents collaborate in real-time`,
+  workflows: 'Automate multi-step agent sequences',
+  rooms: 'Group workspaces where agents and humans collaborate in real-time',
   audit: 'Every action tracked — who did what, when',
   supervisor: `${brand.supervisorName}'s view of the agent team`,
   council: 'Multi-model consensus — 3 models respond, rank each other, chairman synthesizes',

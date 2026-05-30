@@ -26,13 +26,28 @@ type Entry = {
 };
 
 // Action icon + color per action type
-const ACTION_META: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
-  create:    { icon: Plus,         color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-  update:    { icon: Edit3,        color: 'text-blue-400',    bg: 'bg-blue-500/10' },
-  delete:    { icon: Trash2,       color: 'text-red-400',     bg: 'bg-red-500/10' },
-  tool_exec: { icon: Zap,          color: 'text-amber-400',   bg: 'bg-amber-500/10' },
-  tool_error:{ icon: AlertTriangle,color: 'text-red-400',     bg: 'bg-red-500/10' },
-  execute:   { icon: Zap,          color: 'text-amber-400',   bg: 'bg-amber-500/10' },
+const ACTION_META: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
+  create:    { icon: Plus,          color: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Created' },
+  update:    { icon: Edit3,         color: 'text-blue-400',    bg: 'bg-blue-500/10',    label: 'Updated' },
+  delete:    { icon: Trash2,        color: 'text-red-400',     bg: 'bg-red-500/10',     label: 'Deleted' },
+  tool_exec: { icon: Zap,           color: 'text-amber-400',   bg: 'bg-amber-500/10',   label: 'Ran tool' },
+  tool_error:{ icon: AlertTriangle, color: 'text-red-400',     bg: 'bg-red-500/10',     label: 'Tool error' },
+  execute:   { icon: Zap,           color: 'text-amber-400',   bg: 'bg-amber-500/10',   label: 'Ran tool' },
+};
+
+// Human-readable resource names
+const RESOURCE_LABELS: Record<string, string> = {
+  agents:      'Agents',
+  sessions:    'Chats',
+  tasks:       'Tasks',
+  connections: 'Channels',
+  connectors:  'Connectors',
+  workflows:   'Workflows',
+  credentials: 'Credentials',
+  providers:   'Model providers',
+  tool:        'Tool',
+  chat:        'Chat',
+  admin:       'System',
 };
 
 const ACTOR_META: Record<string, { icon: React.ElementType; label: string; color: string }> = {
@@ -129,8 +144,8 @@ export default function AuditPage() {
           onChange={e => { setActorType(e.target.value); setPage(0); }}
           className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
         >
-          <option value="">All Actors</option>
-          <option value="user">User</option>
+          <option value="">Anyone</option>
+          <option value="user">You</option>
           <option value="agent">Agent</option>
           <option value="system">System</option>
         </select>
@@ -141,9 +156,9 @@ export default function AuditPage() {
           onChange={e => { setResource(e.target.value); setPage(0); }}
           className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
         >
-          <option value="">All Resources</option>
+          <option value="">All areas</option>
           {['agents','sessions','tasks','connections','connectors','workflows','credentials','providers','tool'].map(r =>
-            <option key={r} value={r}>{r}</option>
+            <option key={r} value={r}>{RESOURCE_LABELS[r] ?? r}</option>
           )}
         </select>
 
@@ -153,9 +168,9 @@ export default function AuditPage() {
           onChange={e => { setAction(e.target.value); setPage(0); }}
           className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
         >
-          <option value="">All Actions</option>
+          <option value="">All activity</option>
           {['create','update','delete','tool_exec','tool_error'].map(a =>
-            <option key={a} value={a}>{a}</option>
+            <option key={a} value={a}>{ACTION_META[a]?.label ?? a}</option>
           )}
         </select>
 
@@ -165,7 +180,7 @@ export default function AuditPage() {
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applySearch()}
-            placeholder="Filter by actor ID…"
+            placeholder="Filter by agent or user…"
             className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm w-48"
           />
           <button
@@ -223,11 +238,11 @@ export default function AuditPage() {
 
                         {/* Action */}
                         <span className={cn('text-xs font-semibold', ACTION_META[e.action]?.color ?? 'text-muted-foreground')}>
-                          {e.action}
+                          {ACTION_META[e.action]?.label ?? e.action}
                         </span>
 
                         {/* Resource */}
-                        <span className="text-xs text-foreground">{e.resource}</span>
+                        <span className="text-xs text-foreground">{RESOURCE_LABELS[e.resource] ?? e.resource}</span>
                         {e.resource_id && (
                           <span className="text-2xs text-muted-foreground font-mono">
                             #{e.resource_id.slice(0, 8)}

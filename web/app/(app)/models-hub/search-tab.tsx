@@ -80,7 +80,7 @@ export function SearchProvidersTab() {
       <div className={cn('rounded-xl border border-border bg-card overflow-hidden', !searchEnabled && !searchLoading && 'opacity-60')}>
         <div className="px-5 py-4 border-b border-border/70 bg-muted/20">
           <h3 className="text-sm font-semibold">Search Providers</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Configure API keys for web search grounding. Qors will auto-select the best available provider.</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Add API keys for web search. Your agents will automatically use the best available provider.</p>
         </div>
         <div className="px-5 py-4">
           {loading ? (

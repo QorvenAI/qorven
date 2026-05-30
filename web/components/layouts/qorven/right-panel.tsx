@@ -141,7 +141,7 @@ function ChatTab() {
 
   if (!prime) return (
     <div className="flex h-full items-center justify-center p-4 text-center">
-      <p className="text-sm text-muted-foreground">No Prime agent found. Create one in Qors.</p>
+      <p className="text-sm text-muted-foreground">No Prime agent found. Create one in the Agents section.</p>
     </div>
   );
 

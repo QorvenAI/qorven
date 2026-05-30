@@ -11,7 +11,7 @@ import {
   LayoutDashboard, MessageSquare, Code, Mail,
   Megaphone, HardDrive, Link2,
   Share2, GitFork, Beaker,
-  Settings, Brain, Package,
+  Settings, Brain, Package, Hash,
 } from 'lucide-react';
 import { useActiveRail } from '@/hooks/use-active-rail';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/qor/tooltip';
@@ -28,6 +28,7 @@ const primary: NavItem[] = [
   { id: 'social',     icon: Megaphone,       label: 'Social',      href: '/social' },
   { id: 'drive',      icon: HardDrive,       label: 'Drive',       href: '/drive' },
   { id: 'connectors', icon: Link2,           label: 'Channels',    href: '/channels' },
+  { id: 'rooms',      icon: Hash,            label: 'Hubs',        href: '/rooms' },
   { id: 'org-chart',  icon: GitFork,         label: 'Org Chart',   href: '/org-chart' },
   { id: 'kg',         icon: Share2,          label: 'Knowledge',   href: '/knowledge-graph' },
   { id: 'apps',       icon: Package,         label: 'Apps',        href: '/apps' },
@@ -41,7 +42,7 @@ const bottom: NavItem[] = [
 
 export const SIDEBAR_SECTIONS = new Set<RailSection>([
   'home', 'dashboard', 'souls', 'sessions', 'live', 'social',
-  'connectors', 'org-chart', 'kg',
+  'connectors', 'rooms', 'org-chart', 'kg',
   'labs', 'models', 'settings',
 ]);
 

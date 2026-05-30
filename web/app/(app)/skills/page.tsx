@@ -197,7 +197,7 @@ export default function SkillsPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load skills">
       <div className="space-y-5">
-        <CanvasHeader title="Skills" description="Extend your Qors with installable capabilities." />
+        <CanvasHeader title="Skills" description="Add new capabilities to your agents." />
 
         {/* Tab bar */}
         <div className="flex gap-1 border-b border-border">

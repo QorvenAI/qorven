@@ -172,7 +172,7 @@ function OutboundRow({ item, onDone }: { item: InboxItem; onDone: () => void }) 
         </button>
         <button onClick={() => act('reject')} disabled={!!busy}
           className="flex items-center gap-1 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium px-2.5 py-1 hover:bg-destructive/20 disabled:opacity-50 transition-colors">
-          {busy === 'reject' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}Block
+          {busy === 'reject' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}Reject
         </button>
       </div>
     </div>
@@ -206,7 +206,7 @@ function MailRow({ item, onDone }: { item: InboxItem; onDone: () => void }) {
         </button>
         <button onClick={() => act('reject')} disabled={!!busy}
           className="flex items-center gap-1 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium px-2.5 py-1 hover:bg-destructive/20 disabled:opacity-50 transition-colors">
-          {busy === 'reject' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}Block
+          {busy === 'reject' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}Reject
         </button>
       </div>
     </div>

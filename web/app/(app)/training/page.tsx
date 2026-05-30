@@ -59,7 +59,7 @@ export default function TrainingPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load training page">
       <div className="space-y-6">
-        <CanvasHeader title="Training Data" description="Export conversation histories and feedback to fine-tune or evaluate your Qors." />
+        <CanvasHeader title="Training Data" description="Export conversations to improve your AI models." />
 
         {/* Format picker */}
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
@@ -96,7 +96,7 @@ export default function TrainingPage() {
             {Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={3} />)}
           </div>
         ) : list.length === 0 ? (
-          <EmptyState {...emptyStates.souls} description="No Qors found. Create one first before exporting training data." />
+          <EmptyState {...emptyStates.souls} description="No agents found. Create one first before exporting data." />
         ) : (
           <div className="rounded-xl border border-border overflow-hidden">
             <table className="w-full text-sm">

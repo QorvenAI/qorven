@@ -438,7 +438,7 @@ function ProviderCard({ provider, selectedModels, onVerify, onDelete, onSelectio
                 <Loader2 className="h-3 w-3 animate-spin" /> Loading keys…
               </div>
             ) : keys.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-1">No keys — add one above to enable this provider.</p>
+              <p className="text-xs text-muted-foreground py-1">No API key added yet — add one above to activate this provider.</p>
             ) : (
               <div className="space-y-1.5">
                 {keys.map(k => (

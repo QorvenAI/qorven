@@ -211,7 +211,7 @@ export type RailSection =
   | 'home' | 'dashboard'
   | 'souls' | 'code' | 'sessions' | 'live'
   | 'tasks' | 'drive' | 'connectors' | 'workflows'
-  | 'teams' | 'org-chart'
+  | 'teams' | 'org-chart' | 'rooms'
   | 'mcp' | 'kg' | 'heartbeat'
   | 'a2a' | 'agents' | 'scenarios' | 'plans' | 'labs'
   | 'models' | 'settings' | 'terminal' | 'social'
