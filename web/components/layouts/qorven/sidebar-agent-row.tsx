@@ -11,6 +11,7 @@ import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
 import { useStore } from '@/store';
 import type { Soul, SoulActivity } from '@/types';
+import { agentVoiceRegistry } from '@/lib/voice-registry';
 
 // ── Gradient map matches soul-card.tsx ──────────────────────────────────────
 const GRADIENTS = [
@@ -104,9 +105,9 @@ export function SidebarAgentRow({
   // Cleanup removes the entry when this row unmounts.
   useEffect(() => {
     stopRef.current = voice.stop;
-    agentStopRegistry.set(soul.id, voice.stop);
+    agentVoiceRegistry.set(soul.id, voice.stop);
     return () => {
-      agentStopRegistry.delete(soul.id);
+      agentVoiceRegistry.delete(soul.id);
     };
   }, [soul.id, voice.stop]);
 
@@ -124,7 +125,7 @@ export function SidebarAgentRow({
 
       // Stop previously active agent if any
       if (activeVoiceAgentId) {
-        const prevStop = agentStopRegistry.get(activeVoiceAgentId);
+        const prevStop = agentVoiceRegistry.get(activeVoiceAgentId);
         if (prevStop) await prevStop();
         setActiveVoiceAgent(null);
         // Small delay so VAD teardown completes before new session starts
@@ -222,6 +223,3 @@ export function SidebarAgentRow({
   );
 }
 
-// Module-level stop registry — lets any row stop any other agent's voice
-// session without prop-drilling. Populated by each mounted row on every render.
-const agentStopRegistry = new Map<string, () => Promise<void>>();

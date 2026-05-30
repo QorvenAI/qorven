@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
 import { useVoice } from '@/hooks/use-voice';
 import { useStore } from '@/store';
+import { agentVoiceRegistry } from '@/lib/voice-registry';
 
 interface Attachment {
   name: string;
@@ -54,6 +55,8 @@ function VoiceButtonInline({ agentId }: { agentId: string }) {
       setActiveVoiceAgent(null);
     } else {
       if (activeVoiceAgentId) {
+        const prevStop = agentVoiceRegistry.get(activeVoiceAgentId);
+        if (prevStop) await prevStop();
         setActiveVoiceAgent(null);
         await new Promise((r) => setTimeout(r, 80));
       }
