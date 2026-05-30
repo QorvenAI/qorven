@@ -4,6 +4,20 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.7-alpha — 2026-05-30
+
+### Added
+- **Hubs** — group workspaces (real-time multi-agent collaboration rooms) now appear in the main navigation rail between Channels and Org Chart ([7a0f7d1](https://github.com/QorvenAI/qorven/commit/7a0f7d1))
+
+### Improved
+- **Work Log** — filter dropdowns show plain English ("Anyone", "All areas", "All activity"); actions display as "Created", "Updated", "Ran tool" instead of raw API verbs; resource names translated to user-facing labels ([7a0f7d1](https://github.com/QorvenAI/qorven/commit/7a0f7d1))
+- **Approvals** — "Block" button renamed to "Reject" on email approval cards ([7a0f7d1](https://github.com/QorvenAI/qorven/commit/7a0f7d1))
+- **Models Hub** — "No keys" badge renamed to "Add API key"; "Model Alias Lookup" renamed to "Model shortcuts"; provider summary and inline descriptions use plain language ([7a0f7d1](https://github.com/QorvenAI/qorven/commit/7a0f7d1))
+- **Chat** — silent failure when no AI provider is configured now shows a clear toast: "No AI provider connected. Go to Models Hub to add one." ([7a0f7d1](https://github.com/QorvenAI/qorven/commit/7a0f7d1))
+- Internal term "Qors" replaced with "agents" across Tasks, Skills, Workflows, Training, and the right panel ([7a0f7d1](https://github.com/QorvenAI/qorven/commit/7a0f7d1))
+
+---
+
 ## v0.3.6-alpha — 2026-05-30
 
 ### Added
