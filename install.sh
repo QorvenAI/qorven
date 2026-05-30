@@ -4,7 +4,11 @@
 # Qorven bootstrapper — downloads the binary, then hands off to the
 # full-screen installation wizard built into the binary itself.
 #
-#   curl -fsSL https://get.qorven.ai | sudo bash
+#   Linux / macOS:
+#     curl -fsSL https://get.qorven.ai | sudo bash
+#
+#   Windows (PowerShell as Administrator):
+#     iwr https://get.qorven.ai/win | iex
 #
 # All flags after -- are forwarded to `qorven install`.
 # Override QORVEN_BINARY=/path/to/bin to skip the download step.
@@ -47,12 +51,24 @@ fi
 
 # ── platform ──────────────────────────────────────────────────────────────────
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-[ "$OS" != "linux" ] && die "Linux only. macOS: download from https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases"
+case "$OS" in
+  linux|darwin) ;;
+  *) die "unsupported OS: $OS — Windows users: iwr https://get.qorven.ai/win | iex" ;;
+esac
 case "$(uname -m)" in
   x86_64|amd64)  ARCH=amd64 ;;
   aarch64|arm64) ARCH=arm64 ;;
   *) die "unsupported architecture: $(uname -m)" ;;
 esac
+
+# macOS: check for Homebrew before anything else
+if [ "$OS" = "darwin" ] && ! command -v brew >/dev/null 2>&1; then
+  printf "\n  ${BOLD}Homebrew is required on macOS.${NC}\n"
+  printf "  Install it first:\n\n"
+  printf "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n\n"
+  printf "  Then re-run this installer.\n\n"
+  exit 1
+fi
 
 # ── uninstall (no binary needed) ──────────────────────────────────────────────
 if [ "$UNINSTALL" = "1" ]; then
