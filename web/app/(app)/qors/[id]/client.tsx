@@ -421,6 +421,8 @@ export default function QorDetailPage() {
                       sessionId={activeSession.id}
                       agentId={soul.id}
                       agentName={soul.display_name}
+                      agentAvatar={soul.avatar}
+                      voiceAgentId={soul.id}
                       initialThinkingLevel={(soul.thinking_level as 'off' | 'medium' | 'high') || 'off'}
                       className="flex-1 min-h-0"
                     />

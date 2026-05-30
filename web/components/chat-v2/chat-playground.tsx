@@ -55,6 +55,8 @@ interface ChatPlaygroundProps {
   className?: string;
   systemContext?: string;
   agentName?: string;
+  agentAvatar?: string;
+  voiceAgentId?: string;
   initialThinkingLevel?: 'off' | 'medium' | 'high';
 }
 
@@ -92,7 +94,7 @@ function sessionMessageToUIMessage(msg: SessionMessage, idx: number): UIMessage 
   return { id, role: 'assistant', parts, metadata } as unknown as UIMessage;
 }
 
-export function ChatPlayground({ agentId, sessionId, className, systemContext, agentName, initialThinkingLevel = 'off' }: ChatPlaygroundProps) {
+export function ChatPlayground({ agentId, sessionId, className, systemContext, agentName, agentAvatar, voiceAgentId, initialThinkingLevel = 'off' }: ChatPlaygroundProps) {
   const [streamSources, setStreamSources] = useState<Source[]>([]);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [streamWidgets, setStreamWidgets] = useState<WidgetData[]>([]);
@@ -478,7 +480,7 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
             </div>
           )}
 
-          {messages.length === 0 && !isStreaming && <EmptyState />}
+          {messages.length === 0 && !isStreaming && <EmptyState agentId={agentId} agentName={agentName} agentAvatar={agentAvatar} />}
 
           {/* Historical discussion context */}
           {historyLoaded2 && historyMsgs.length > 0 && (
@@ -701,6 +703,7 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
         onSubmit={handleComposerSubmit}
         onStop={stop}
         agentId={agentId}
+        voiceAgentId={voiceAgentId}
         placeholder="Message…"
         thinkingLevel={thinkingLevel}
         onThinkingLevelChange={setThinkingLevel}
@@ -809,13 +812,48 @@ function StreamWidget({ widget }: { widget: WidgetData }) {
   return null;
 }
 
-function EmptyState() {
+function EmptyState({
+  agentId,
+  agentName,
+  agentAvatar,
+}: {
+  agentId?: string;
+  agentName?: string;
+  agentAvatar?: string;
+}) {
+  const GRADIENTS = [
+    'from-primary to-primary/80', 'from-emerald-500 to-teal-600',
+    'from-orange-500 to-red-600', 'from-pink-500 to-rose-600',
+    'from-cyan-500 to-blue-600', 'from-amber-500 to-yellow-600',
+    'from-fuchsia-500 to-purple-600', 'from-lime-500 to-green-600',
+  ];
+  const gradientFor = (id: string) => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+    return GRADIENTS[Math.abs(hash) % GRADIENTS.length]!;
+  };
+  const gradient = agentId ? gradientFor(agentId) : 'from-primary to-primary/80';
+
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary text-2xl mb-4">
-        Q
+      <div className="relative mb-4">
+        {agentAvatar ? (
+          <img
+            src={agentAvatar}
+            alt={agentName}
+            className="h-14 w-14 rounded-full object-cover ring-2 ring-border"
+          />
+        ) : (
+          <div
+            className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-xl font-bold text-white ${gradient}`}
+          >
+            {agentId ? (agentName?.[0] ?? 'Q').toUpperCase() : 'Q'}
+          </div>
+        )}
       </div>
-      <h2 className="text-lg font-semibold">How can I help you?</h2>
+      <h2 className="text-lg font-semibold">
+        {agentName ? `Hi, I'm ${agentName}` : 'How can I help you?'}
+      </h2>
       <p className="mt-1 text-sm text-muted-foreground max-w-xs">
         Ask me anything — I can search the web, write code, run tasks, and more.
       </p>

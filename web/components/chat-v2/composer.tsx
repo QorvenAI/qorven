@@ -3,10 +3,12 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useRef, useState, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
-import { Paperclip, MonitorUp, Globe, Mic, Send, Square, Loader2, X, MicOff, Brain } from 'lucide-react';
+import { Paperclip, MonitorUp, Globe, Mic, Send, Square, Loader2, X, MicOff, Brain, Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
+import { useVoice } from '@/hooks/use-voice';
+import { useStore } from '@/store';
 
 interface Attachment {
   name: string;
@@ -25,6 +27,7 @@ interface ComposerProps {
   onStop: () => void;
   placeholder?: string;
   agentId?: string;
+  voiceAgentId?: string;
   onTranscript?: (text: string) => void;
   thinkingLevel?: ThinkingLevel;
   onThinkingLevelChange?: (level: ThinkingLevel) => void;
@@ -36,6 +39,45 @@ const THINKING_LEVELS: { value: ThinkingLevel; label: string; title: string }[] 
   { value: 'high',   label: 'Think: High',   title: 'Maximum reasoning budget' },
 ];
 
+function VoiceButtonInline({ agentId }: { agentId: string }) {
+  const { enabled: voiceEnabled } = useVoiceEnabled();
+  const activeVoiceAgentId = useStore((s) => s.activeVoiceAgentId);
+  const setActiveVoiceAgent = useStore((s) => s.setActiveVoiceAgent);
+  const isActive = activeVoiceAgentId === agentId;
+  const voice = useVoice({ agentId });
+
+  if (!voiceEnabled) return null;
+
+  const handleClick = async () => {
+    if (isActive) {
+      await voice.stop();
+      setActiveVoiceAgent(null);
+    } else {
+      if (activeVoiceAgentId) {
+        setActiveVoiceAgent(null);
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      await voice.start();
+      setActiveVoiceAgent(agentId);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title={isActive ? 'Stop voice' : 'Talk to agent'}
+      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+        isActive
+          ? 'text-primary bg-primary/10'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+      }`}
+    >
+      <Headphones className="h-4 w-4" />
+    </button>
+  );
+}
+
 export function Composer({
   input,
   isLoading,
@@ -44,6 +86,7 @@ export function Composer({
   onStop,
   placeholder = 'Message…',
   agentId,
+  voiceAgentId,
   onTranscript,
   thinkingLevel = 'off',
   onThinkingLevelChange,
@@ -251,6 +294,7 @@ export function Composer({
             className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none py-1 min-h-[36px] max-h-[200px]"
           />
           <div className="flex items-center gap-1 pb-0.5">
+            {voiceAgentId && <VoiceButtonInline agentId={voiceAgentId} />}
             {isLoading ? (
               <button
                 onClick={onStop}
