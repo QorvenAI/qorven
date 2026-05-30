@@ -18,14 +18,10 @@ function stripMd(s: string): string {
 
 const BYE_WORDS = ['bye', 'goodbye', 'good bye', 'see you', 'that\'s all', 'thank you bye', 'thanks bye'];
 
-// PrimeVoiceWidget gates on voiceEnabled so that PrimeVoiceInner
-// (which calls useVoice → useMicVAD → loads ONNX) is never mounted
-// when voice is disabled. Unconditionally mounting useMicVAD on every
-// page causes React error #185 when the ONNX assets are missing.
+// PrimeVoiceWidget deprecated — voice is now per-agent via SidebarAgentRow.
+// Kept as null export to avoid breaking any remaining import references.
 export function PrimeVoiceWidget() {
-  const { enabled: voiceEnabled, loading: voiceLoading } = useVoiceEnabled();
-  if (voiceLoading || !voiceEnabled) return null;
-  return <PrimeVoiceInner />;
+  return null;
 }
 
 function PrimeVoiceInner() {
