@@ -285,22 +285,22 @@ function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle 
   return (
     <div
       className="relative shrink-0"
-      style={{ zIndex: open || hovered ? 50 : 20 - index, marginLeft: index === 0 ? 0 : -10 }}
+      style={{ zIndex: open || hovered ? 50 : 20 - index, marginLeft: index === 0 ? 0 : -8 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <button
         onClick={() => { setOpen((v) => !v); setHovered(false); }}
         className={cn(
-          'relative h-7 w-7 rounded-full focus:outline-none transition-transform',
+          'relative h-5 w-5 rounded-full focus:outline-none transition-transform',
           hovered && 'scale-110',
         )}
       >
         {soul.avatar ? (
-          <img src={soul.avatar} alt={soul.display_name} className="h-7 w-7 rounded-full object-cover" />
+          <img src={soul.avatar} alt={soul.display_name} className="h-5 w-5 rounded-full object-cover" />
         ) : (
           <div className={cn(
-            'flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white transition-all',
+            'flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-[8px] font-bold text-white transition-all',
             gradient,
             hovered && 'brightness-125',
           )}>
@@ -375,7 +375,7 @@ function PillLayout({
 
   return (
     <div
-      className="fixed z-29 flex flex-col justify-evenly border-t border-r border-border bg-muted px-3 hidden lg:flex"
+      className="fixed z-29 flex flex-col border-t border-r border-border bg-muted px-3 hidden lg:flex"
       style={{
         left: 'var(--rail-width)',
         width: 'var(--sidebar-default-width, 280px)',
@@ -383,8 +383,8 @@ function PillLayout({
         height: 'var(--agent-pill-height, 84px)',
       }}
     >
-      {/* ── Row 1: COO avatar + name + mic + chat ── */}
-      <div className="flex items-center gap-2 min-w-0">
+      {/* ── Row 1: COO — takes ~60% of height ── */}
+      <div className="flex flex-1 items-center gap-2 min-w-0">
         {/* Avatar */}
         <div className="shrink-0">
           {chief.avatar ? (
@@ -435,8 +435,11 @@ function PillLayout({
         </button>
       </div>
 
-      {/* ── Row 2: full-width avatar stack ── */}
-      <div className="flex items-center gap-1">
+      {/* Divider */}
+      <div className="h-px bg-border/50 -mx-3" />
+
+      {/* ── Row 2: compact avatar stack ── */}
+      <div className="flex items-center gap-0 py-1.5">
         {others.map((s, i) => (
           <StackedAgent
             key={s.id} soul={s} index={i}
@@ -447,14 +450,11 @@ function PillLayout({
         ))}
         {overflow > 0 && (
           <div
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
-            style={{ marginLeft: -10, zIndex: 0 }}
+            className="flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border text-[8px] font-medium text-muted-foreground shrink-0"
+            style={{ marginLeft: -8, zIndex: 0 }}
           >
             +{overflow}
           </div>
-        )}
-        {others.length === 0 && (
-          <span className="text-[10px] text-muted-foreground/30">No other agents</span>
         )}
       </div>
     </div>
