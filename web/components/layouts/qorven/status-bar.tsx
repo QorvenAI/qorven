@@ -232,12 +232,9 @@ export function StatusBar() {
     <>
       <div
         className="qorven-status-bar fixed bottom-0 z-30 h-6 flex items-center gap-2 border-t border-border bg-muted px-2 text-2xs text-muted-foreground select-none"
-        style={{ left: 'var(--rail-width)', right: 0 }}
+        style={{ left: 'var(--nav-width)', right: 0 }}
       >
-        {/* Sidebar spacer — keeps version chip aligned to main canvas start */}
-        <div style={{ width: 'calc(var(--sidebar-default-width, 280px) - var(--rail-width, 60px) - 8px)', flexShrink: 0 }} />
-
-        {/* Version chip — opens changelog + update check, anchored to main canvas */}
+        {/* Version chip — opens changelog + update check */}
         {version ? (
           <button
             onClick={openChangelog}
