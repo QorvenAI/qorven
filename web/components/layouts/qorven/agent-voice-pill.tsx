@@ -375,7 +375,7 @@ function PillLayout({
 
   return (
     <div
-      className="fixed z-29 flex flex-col justify-center gap-1.5 border-t border-r border-border bg-muted px-3 hidden lg:flex"
+      className="fixed z-29 flex flex-col justify-evenly border-t border-r border-border bg-muted px-3 hidden lg:flex"
       style={{
         left: 'var(--rail-width)',
         width: 'var(--sidebar-default-width, 280px)',
