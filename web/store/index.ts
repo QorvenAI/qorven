@@ -108,6 +108,12 @@ interface Store {
   serviceHealth: { database: 'ok' | 'unavailable' | 'unknown'; status: 'healthy' | 'degraded' | 'unknown' };
   setServiceHealth: (h: { database: 'ok' | 'unavailable' | 'unknown'; status: 'healthy' | 'degraded' | 'unknown' }) => void;
 
+  // Voice session — only one agent can have an active voice session at a time.
+  // null = no active voice. Set via setActiveVoiceAgent(id) — callers must
+  // stop the previous session themselves before calling this.
+  activeVoiceAgentId: string | null;
+  setActiveVoiceAgent: (agentId: string | null) => void;
+
   // Disconnect reason: set by active probing in websocket.ts when WS drops.
   // null = not yet probed / connected. 'backend_down' = process unreachable.
   // 'db_down' = process alive, DB offline. 'network' = local connectivity.
@@ -447,6 +453,9 @@ export const useStore = create<Store>((set) => ({
 
   serviceHealth: { database: 'unknown', status: 'unknown' },
   setServiceHealth: (h) => set({ serviceHealth: h }),
+
+  activeVoiceAgentId: null,
+  setActiveVoiceAgent: (agentId) => set({ activeVoiceAgentId: agentId }),
 
   wsDisconnectReason: null,
   setWsDisconnectReason: (r) => set({ wsDisconnectReason: r }),
