@@ -69,15 +69,26 @@ interface Minutes {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function ChatBubble({ msg, getMemberName, getMemberInitial }: {
+const BUBBLE_GRADIENTS = [
+  'from-primary to-primary/80', 'from-emerald-500 to-teal-600',
+  'from-orange-500 to-red-600', 'from-pink-500 to-rose-600',
+  'from-cyan-500 to-blue-600', 'from-amber-500 to-yellow-600',
+  'from-fuchsia-500 to-purple-600', 'from-lime-500 to-green-600',
+];
+
+function gradientForId(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return BUBBLE_GRADIENTS[Math.abs(hash) % BUBBLE_GRADIENTS.length]!;
+}
+
+function ChatBubble({ msg, members, getMemberName }: {
   msg: RoomMsg;
+  members: Member[];
   getMemberName: (id: string) => string;
-  getMemberInitial: (id: string) => string;
 }) {
   const isUser = msg.sender_type === 'user';
   const isSystem = msg.sender_id === 'system';
-  const name = isUser ? 'You' : getMemberName(msg.sender_id);
-  const initial = isUser ? 'U' : getMemberInitial(msg.sender_id);
 
   const msgTypeStyle = {
     decision: 'border-l-4 border-amber-500 bg-amber-500/10',
@@ -96,26 +107,52 @@ function ChatBubble({ msg, getMemberName, getMemberInitial }: {
     );
   }
 
-  return (
-    <div className={cn('flex gap-2', isUser && 'flex-row-reverse')}>
-      <div className={cn(
-        'h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-semibold',
-        isUser ? 'bg-primary text-primary-foreground' : 'bg-gradient-to-br from-primary to-primary/60 text-white'
-      )}>
-        {initial}
-      </div>
-      <div className="max-w-[75%]">
-        {!isUser && <p className="text-xs font-medium text-muted-foreground mb-0.5">{name}</p>}
+  if (isUser) {
+    return (
+      <div className="flex justify-end py-1">
         <div className={cn(
-          'rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
-          isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'rounded-tl-sm bg-muted',
-          msgTypeStyle && !isUser && msgTypeStyle
+          'max-w-[75%] rounded-2xl rounded-tr-sm bg-primary/10 px-3.5 py-2.5 text-[13px] leading-relaxed',
+          msgTypeStyle
         )}>
           {msg.content}
         </div>
-        <p className="text-xs text-muted-foreground/50 mt-0.5">
-          {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}
-        </p>
+      </div>
+    );
+  }
+
+  // Agent message — find the member for avatar + name
+  const member = members.find((m) => m.id === msg.sender_id || m.agent_key === msg.sender_id);
+  const name = member?.display_name ?? getMemberName(msg.sender_id);
+  const gradient = gradientForId(msg.sender_id ?? '');
+
+  return (
+    <div className="flex items-start gap-2.5 py-1.5">
+      {member?.avatar ? (
+        <img
+          src={member.avatar}
+          alt={name}
+          className="h-7 w-7 rounded-full object-cover shrink-0 mt-0.5"
+        />
+      ) : (
+        <div
+          className={`flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white shrink-0 mt-0.5 ${gradient}`}
+        >
+          {(name[0] ?? '?').toUpperCase()}
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-1.5 mb-0.5">
+          <span className="text-[12px] font-semibold">{name}</span>
+          <span className="text-[10px] text-muted-foreground/50">
+            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+          </span>
+        </div>
+        <div className={cn(
+          'text-[13px] leading-relaxed text-foreground whitespace-pre-wrap break-words',
+          msgTypeStyle
+        )}>
+          {msg.content}
+        </div>
       </div>
     </div>
   );
@@ -160,7 +197,6 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
     // Try by agent_key first, then by id (store messages use both)
     return memberMap.get(s)?.display_name || souls.find(a => a.id === s)?.display_name || s;
   };
-  const getMemberInitial = (s: string) => getMemberName(s).charAt(0).toUpperCase();
 
   // Merge HTTP-loaded history with live WS messages deduplicated by id
   const allMessages: RoomMsg[] = (() => {
@@ -369,7 +405,7 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
                 </div>
               )}
               {allMessages.map(msg => (
-                <ChatBubble key={msg.id} msg={msg} getMemberName={getMemberName} getMemberInitial={getMemberInitial} />
+                <ChatBubble key={msg.id} msg={msg} members={room?.members ?? []} getMemberName={getMemberName} />
               ))}
               {typingAgentIds.size > 0 && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
