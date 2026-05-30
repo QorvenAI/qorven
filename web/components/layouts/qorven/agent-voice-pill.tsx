@@ -234,7 +234,37 @@ function AgentPopover({ soul, activity, onChat, onVoice, onClose, voiceEnabled, 
   );
 }
 
-// ── Single stacked avatar with ring + popover ─────────────────────────────────
+// ── Hover tooltip — floats above avatar ──────────────────────────────────────
+function AgentTooltip({ soul, activity }: { soul: Soul; activity: SoulActivity }) {
+  const activityLabel = {
+    running: 'Working', thinking: 'Thinking', idle: 'Idle', offline: 'Offline', error: 'Error',
+  }[activity] ?? 'Offline';
+  const activityColor = {
+    running: 'text-emerald-400', thinking: 'text-amber-400',
+    idle: 'text-muted-foreground/70', offline: 'text-muted-foreground/40', error: 'text-destructive',
+  }[activity] ?? 'text-muted-foreground/70';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 2 }}
+      transition={{ duration: 0.1 }}
+      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 pointer-events-none z-50"
+    >
+      <div className="rounded-lg border border-border bg-popover shadow-lg px-2.5 py-1.5 text-center whitespace-nowrap">
+        <p className="text-[11px] font-semibold text-foreground">{soul.display_name}</p>
+        <p className={cn('text-[10px]', activityColor)}>{activityLabel}</p>
+        {soul.title && <p className="text-[9px] text-muted-foreground/50 mt-0.5">{soul.title}</p>}
+      </div>
+      {/* Arrow */}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border" style={{ marginTop: -1 }} />
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-popover" />
+    </motion.div>
+  );
+}
+
+// ── Single stacked avatar: hover tooltip + click popover ──────────────────────
 interface StackedAgentProps {
   soul: Soul;
   index: number;
@@ -246,6 +276,7 @@ interface StackedAgentProps {
 function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle }: StackedAgentProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const soulStates = useStore((s) => s.soulStates);
   const gradient = gradientFor(soul.id);
   const state = soulStates[soul.id];
@@ -254,23 +285,37 @@ function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle 
   return (
     <div
       className="relative shrink-0"
-      style={{ zIndex: 20 - index, marginLeft: index === 0 ? 0 : -10 }}
+      style={{ zIndex: open || hovered ? 50 : 20 - index, marginLeft: index === 0 ? 0 : -10 }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="relative h-7 w-7 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/40"
-        title={soul.display_name}
+        onClick={() => { setOpen((v) => !v); setHovered(false); }}
+        className={cn(
+          'relative h-7 w-7 rounded-full focus:outline-none transition-transform',
+          hovered && 'scale-110',
+        )}
       >
         {soul.avatar ? (
           <img src={soul.avatar} alt={soul.display_name} className="h-7 w-7 rounded-full object-cover" />
         ) : (
-          <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white', gradient)}>
+          <div className={cn(
+            'flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white transition-all',
+            gradient,
+            hovered && 'brightness-125',
+          )}>
             {(soul.display_name?.[0] ?? '?').toUpperCase()}
           </div>
         )}
         <ActivityRing activity={activity} isVoiceActive={isVoiceActive} />
       </button>
 
+      {/* Hover tooltip — only when not showing click popover */}
+      <AnimatePresence>
+        {hovered && !open && <AgentTooltip soul={soul} activity={activity} />}
+      </AnimatePresence>
+
+      {/* Click popover — full actions */}
       <AnimatePresence>
         {open && (
           <AgentPopover
@@ -418,9 +463,9 @@ function PillBasic() {
       const bA = (soulStates[b.id]?.activity as SoulActivity) ?? 'offline';
       return activityPriority(aA) - activityPriority(bA);
     })
-    .slice(0, 6);
+    .slice(0, 4); // max 4 avatars fit within 280px sidebar
 
-  const overflow = souls.length - 1 - others.length;
+  const overflow = Math.max(0, souls.length - 1 - others.length);
 
   return (
     <PillContainer>
@@ -529,9 +574,9 @@ function PillWithVoice() {
       const bA = (soulStates[b.id]?.activity as SoulActivity) ?? 'offline';
       return activityPriority(aA) - activityPriority(bA);
     })
-    .slice(0, 6);
+    .slice(0, 4); // max 4 avatars fit within 280px sidebar
 
-  const overflow = souls.length - 1 - others.length;
+  const overflow = Math.max(0, souls.length - 1 - others.length);
 
   return (
     <PillContainer>
