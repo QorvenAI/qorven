@@ -197,12 +197,43 @@ if ($answer -notmatch '^[Yy]') { Write-Host "  Installation cancelled."; exit 0 
 # ── Step 1: Prerequisites ─────────────────────────────────────────────────────
 Write-Step 1 7 "Checking prerequisites"
 
+# 32-bit check — we only ship amd64
+if ([System.Environment]::Is64BitOperatingSystem -eq $false -or [System.Environment]::Is64BitProcess -eq $false) {
+    Invoke-Rollback "Qorven requires a 64-bit Windows installation. 32-bit is not supported."
+}
+
 $WingetAvail = Command-Exists 'winget'
 if ($WingetAvail) {
     Write-Ok "winget found: $(winget --version)"
 } else {
     Write-Warn "winget not found — will rely on pre-installed software"
 }
+
+# Detect any existing PostgreSQL service (any version) and auto-detect $PgVersion
+$existingPgService = Get-Service -Name "postgresql-x64-*" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($existingPgService) {
+    $detectedVersion = ($existingPgService.Name -replace 'postgresql-x64-', '')
+    if ($detectedVersion -ne $PgVersion) {
+        Write-Warn "Detected PostgreSQL $detectedVersion (expected $PgVersion) — using detected version"
+        $PgVersion = $detectedVersion
+    }
+}
+
+# Pre-check: port 5432 availability (only relevant if we need to install PG fresh)
+if (-not $existingPgService) {
+    $portInUse = $false
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $tcp.Connect('127.0.0.1', 5432)
+        $tcp.Close()
+        $portInUse = $true
+    } catch {}
+    if ($portInUse) {
+        Invoke-Rollback "Port 5432 is already in use by another process. Identify and stop it before installing PostgreSQL:`n  netstat -ano | findstr :5432"
+    }
+}
+
+Write-Ok "Prerequisites OK"
 
 # ── Step 2: PostgreSQL ────────────────────────────────────────────────────────
 Write-Step 2 7 "PostgreSQL"
@@ -216,21 +247,48 @@ $pgService = Get-Service -Name "postgresql-x64-$PgVersion" -ErrorAction Silently
 if ($pgService) {
     Write-Ok "PostgreSQL $PgVersion service already present"
 
-    # If we did NOT install it, we don't know the superuser password.
-    # Ask once; store in $PgSuperPass for subsequent psql calls.
-    if ($env:PG_SUPERUSER_PASSWORD) {
+    # Resolve psql.exe path FIRST before any password attempt
+    $PgBinDir = "C:\Program Files\PostgreSQL\$PgVersion\bin"
+    if (-not (Test-Path "$PgBinDir\psql.exe")) {
+        $found = Get-ChildItem 'C:\Program Files\PostgreSQL' -Filter 'psql.exe' -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*$PgVersion*" } | Select-Object -First 1
+        if (-not $found) {
+            $found = Get-ChildItem 'C:\Program Files\PostgreSQL' -Filter 'psql.exe' -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+        }
+        if ($found) { $PgBinDir = $found.DirectoryName }
+        else { Invoke-Rollback "psql.exe not found for PostgreSQL $PgVersion — is it installed correctly?" }
+    }
+    $script:PgBinDir = $PgBinDir
+    $env:PATH += ";$PgBinDir"
+
+    # Try passwordless first (peer/trust auth or Windows authentication)
+    $env:PGPASSWORD = ''
+    $canTest = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
+    if ($canTest) {
+        Write-Ok "Connected to existing PostgreSQL (no password needed)"
+    } elseif ($env:PG_SUPERUSER_PASSWORD) {
         $env:PGPASSWORD = $env:PG_SUPERUSER_PASSWORD
-    } else {
-        $env:PGPASSWORD = ''
         $canTest = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
-        if (-not $canTest) {
+        if (-not $canTest) { Invoke-Rollback "PG_SUPERUSER_PASSWORD env var set but connection failed" }
+    } else {
+        # Ask up to 3 times
+        $attempts = 0
+        $canTest = $false
+        while (-not $canTest -and $attempts -lt 3) {
             Write-Host ""
-            Write-Host "  PostgreSQL was already installed on this machine." -ForegroundColor Cyan
+            Write-Host "  PostgreSQL is already installed on this machine." -ForegroundColor Cyan
             Write-Host "  Enter the 'postgres' superuser password to continue." -ForegroundColor Cyan
+            Write-Host "  (Or set PG_SUPERUSER_PASSWORD env var to skip this prompt.)" -ForegroundColor DarkGray
             $secPw = Read-Host "  postgres password" -AsSecureString
             $bstr  = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
             $env:PGPASSWORD = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            $canTest = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
+            $attempts++
+        }
+        if (-not $canTest) {
+            Invoke-Rollback "Cannot connect to PostgreSQL after 3 attempts. Run: qorven install --skip-postgres to skip DB setup."
         }
     }
 } else {
@@ -436,13 +494,27 @@ if ($sysPath -notlike "*$InstallDir*") {
 Write-Step 6 7 "Configuration"
 
 $ConfigPath = "$ConfigDir\config.toml"
+
+# Preserve existing encryption_key and token on re-run — regenerating these
+# would make all stored API keys and secrets permanently unreadable.
+$ExistingEncKey = ''
+$ExistingToken  = ''
 if (Test-Path $ConfigPath) {
-    Write-Warn "$ConfigPath already exists — leaving unchanged. Delete it to regenerate."
+    $existingLines = Get-Content $ConfigPath -ErrorAction SilentlyContinue
+    foreach ($line in $existingLines) {
+        if ($line -match '^encryption_key\s*=\s*"(.+)"') { $ExistingEncKey = $Matches[1] }
+        if ($line -match '^token\s*=\s*"(.+)"')          { $ExistingToken  = $Matches[1] }
+    }
+}
+
+$EncKey    = if ($ExistingEncKey) { $ExistingEncKey } else { Random-Hex 32 }
+$AuthToken = if ($ExistingToken)  { $ExistingToken  } else { Random-Hex 16 }
+
+if ($ExistingEncKey) {
+    Write-Ok "Config preserved (existing encryption_key retained)"
 } else {
-    $EncKey    = Random-Hex 32
-    $AuthToken = Random-Hex 16
     $configContent = @"
-# Qorven configuration — generated by install.ps1 on $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+# Qorven configuration — generated by install.ps1
 # The encryption_key is the ONLY copy. Lose it = lose all stored secrets.
 
 [server]
@@ -477,39 +549,76 @@ if ($SkipService) {
 } else {
 
 $NssmPath = "$InstallDir\nssm.exe"
+$UseNssm = $false
 if (-not (Test-Path $NssmPath)) {
     Write-Info "Downloading NSSM service wrapper..."
     $NssmUrl = "https://nssm.cc/release/nssm-$NssmVersion.zip"
     $NssmZip = "$env:TEMP\nssm.zip"
-    Invoke-WebRequest -Uri $NssmUrl -OutFile $NssmZip -UseBasicParsing
-    Expand-Archive -Path $NssmZip -DestinationPath "$env:TEMP\nssm" -Force
-    $nssmBin = Get-ChildItem "$env:TEMP\nssm" -Filter 'nssm.exe' -Recurse | Where-Object { $_.FullName -match 'win64' } | Select-Object -First 1
-    if (-not $nssmBin) { $nssmBin = Get-ChildItem "$env:TEMP\nssm" -Filter 'nssm.exe' -Recurse | Select-Object -First 1 }
-    if (-not $nssmBin) { Invoke-Rollback "Could not find nssm.exe in downloaded archive" }
-    Copy-Item $nssmBin.FullName $NssmPath -Force
-    Remove-Item $NssmZip -Force -ErrorAction SilentlyContinue
-    Write-Ok "NSSM downloaded"
+    try {
+        Invoke-WebRequest -Uri $NssmUrl -OutFile $NssmZip -UseBasicParsing -ErrorAction Stop
+        Expand-Archive -Path $NssmZip -DestinationPath "$env:TEMP\nssm" -Force
+        $nssmBin = Get-ChildItem "$env:TEMP\nssm" -Filter 'nssm.exe' -Recurse |
+            Where-Object { $_.FullName -match 'win64' } | Select-Object -First 1
+        if (-not $nssmBin) {
+            $nssmBin = Get-ChildItem "$env:TEMP\nssm" -Filter 'nssm.exe' -Recurse | Select-Object -First 1
+        }
+        if ($nssmBin) {
+            Copy-Item $nssmBin.FullName $NssmPath -Force
+            $UseNssm = $true
+            Write-Ok "NSSM downloaded"
+        } else {
+            Write-Warn "NSSM archive did not contain nssm.exe — falling back to sc.exe"
+        }
+    } catch {
+        Write-Warn "NSSM download failed ($_) — falling back to sc.exe for service registration"
+    } finally {
+        Remove-Item $NssmZip -Force -ErrorAction SilentlyContinue
+        Remove-Item "$env:TEMP\nssm" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+} else {
+    $UseNssm = $true
 }
 
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($svc) {
     Write-Info "Removing previous service registration..."
-    & $NssmPath stop $ServiceName 2>&1 | Out-Null
-    & $NssmPath remove $ServiceName confirm 2>&1 | Out-Null
+    if ($UseNssm) {
+        & $NssmPath stop $ServiceName 2>&1 | Out-Null
+        & $NssmPath remove $ServiceName confirm 2>&1 | Out-Null
+    } else {
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        sc.exe delete $ServiceName 2>&1 | Out-Null
+        Start-Sleep -Seconds 2
+    }
 }
 
-& $NssmPath install $ServiceName $BinaryPath start 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppParameters "start" 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppDirectory $DataDir 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppEnvironmentExtra "QORVEN_CONFIG=$ConfigPath" 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppStdout "$LogDir\qorven.log" 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppStderr "$LogDir\qorven.log" 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
-& $NssmPath set $ServiceName AppRotateBytes 10485760 2>&1 | Out-Null
-& $NssmPath set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
-& $NssmPath set $ServiceName Description "Qorven AI Agent Platform" 2>&1 | Out-Null
+if ($UseNssm) {
+    & $NssmPath install $ServiceName $BinaryPath start 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppParameters "start" 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppDirectory $DataDir 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppEnvironmentExtra "QORVEN_CONFIG=$ConfigPath" 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppStdout "$LogDir\qorven.log" 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppStderr "$LogDir\qorven.log" 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
+    & $NssmPath set $ServiceName AppRotateBytes 10485760 2>&1 | Out-Null
+    & $NssmPath set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
+    & $NssmPath set $ServiceName Description "Qorven AI Agent Platform" 2>&1 | Out-Null
+} else {
+    # Fallback: register using sc.exe with a wrapper batch that sets env vars
+    $batchPath = "$InstallDir\qorven-start.bat"
+    $batchContent = "@echo off`r`nset QORVEN_CONFIG=$ConfigPath`r`n`"$BinaryPath`" start >> `"$LogDir\qorven.log`" 2>&1"
+    Set-Content -Path $batchPath -Value $batchContent -Encoding ASCII
+    sc.exe create $ServiceName binPath= "`"$batchPath`"" start= auto DisplayName= "Qorven AI Platform" 2>&1 | Out-Null
+    sc.exe description $ServiceName "Qorven AI Agent Platform" 2>&1 | Out-Null
+    sc.exe failure $ServiceName reset= 60 actions= restart/5000/restart/10000/restart/30000 2>&1 | Out-Null
+}
 $script:RollbackCreatedService = $true
-Start-Service -Name $ServiceName
+Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+$svcState = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue).Status
+if ($svcState -ne 'Running') {
+    Invoke-Rollback "Service '$ServiceName' failed to start. Check logs: $LogDir\qorven.log"
+}
 Write-Ok "Service '$ServiceName' registered and started (auto-start on boot)"
 
 } # end if (-not $SkipService)

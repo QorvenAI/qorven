@@ -50,13 +50,28 @@ func platformMigrate(configPath, dsn string) error {
 	return cmd.Run()
 }
 
+// probeSocketDSN tries Unix socket first (fastest, no password), falls back to TCP.
 func probeSocketDSN() string {
 	port := probePGPort()
-	base := "postgres:///qorven?host=/var/run/postgresql&user=qorven&sslmode=disable"
+	socketDSN := "postgres:///qorven?host=/var/run/postgresql&user=qorven&sslmode=disable"
 	if port != "" && port != "5432" {
-		base += "&port=" + port
+		socketDSN += "&port=" + port
 	}
-	return base
+	// Verify the socket actually exists before committing to it.
+	entries, err := os.ReadDir("/var/run/postgresql")
+	if err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".s.PGSQL.") {
+				return socketDSN
+			}
+		}
+	}
+	// Fall back to TCP loopback (works when socket is missing or on custom path).
+	tcpPort := port
+	if tcpPort == "" {
+		tcpPort = "5432"
+	}
+	return "postgres://qorven@127.0.0.1:" + tcpPort + "/qorven?sslmode=disable"
 }
 
 func probePGPort() string {
@@ -76,34 +91,132 @@ func probePGPort() string {
 	return "5432"
 }
 
+// startPostgresService handles the Debian/Ubuntu multi-name service problem.
+// The generic "postgresql" unit may not exist; the real one is often
+// "postgresql@16-main" or "postgresql@14-main". We try multiple names.
+func startPostgresService() error {
+	// Try generic name first (works on some distros)
+	if runQuiet("systemctl", "start", "postgresql") == nil {
+		return nil
+	}
+	// Try all versioned cluster units (Debian/Ubuntu style)
+	out, err := exec.Command("systemctl", "list-units", "--type=service", "--all",
+		"--no-legend", "--no-pager", "postgresql*").Output()
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			svcName := strings.TrimSuffix(fields[0], ".service")
+			if strings.HasPrefix(svcName, "postgresql@") || strings.HasPrefix(svcName, "postgresql") {
+				if runQuiet("systemctl", "enable", svcName) == nil {
+					if runQuiet("systemctl", "start", svcName) == nil {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	// pg_ctlcluster fallback (Debian-only utility)
+	if commandExists("pg_ctlcluster") {
+		// pg_lsclusters -h: version  cluster  port  status
+		lsOut, lsErr := exec.Command("pg_lsclusters", "-h").Output()
+		if lsErr == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(lsOut)), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					runQuiet("pg_ctlcluster", fields[0], fields[1], "start")
+				}
+			}
+		}
+	}
+	// Final check
+	if _, e := runSilent("pg_isready", "-q"); e == nil {
+		return nil
+	}
+	return fmt.Errorf("could not start PostgreSQL — try: sudo systemctl status postgresql")
+}
+
+// pgDiagnostic returns journal output for postgresql units (for error messages).
+func pgDiagnostic() string {
+	out, err := exec.Command("journalctl", "-u", "postgresql*", "-n", "20", "--no-pager").Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		out2, _ := exec.Command("journalctl", "-xe", "--no-pager", "-n", "15").Output()
+		return strings.TrimSpace(string(out2))
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func installPgvector(pgMaj string) {
 	if pgMaj == "" {
 		return
 	}
-	versioned := "postgresql-" + pgMaj + "-pgvector"
-	if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
-		return
-	}
-	distro, _ := runSilent("bash", "-c",
-		`source /etc/os-release 2>/dev/null && echo "${ID}"`)
-	distro = strings.TrimSpace(distro)
-	codename, _ := runSilent("lsb_release", "-cs")
-	codename = strings.TrimSpace(codename)
-	if (distro == "ubuntu" || distro == "debian") && codename != "" {
-		keyPath := "/usr/share/keyrings/postgresql.asc"
-		runSilent("curl", "-fsSL",
-			"https://www.postgresql.org/media/keys/accc4cf8.asc",
-			"-o", keyPath)
-		repo := fmt.Sprintf(
-			"deb [signed-by=%s] https://apt.postgresql.org/pub/repos/apt %s-pgdg main",
-			keyPath, codename)
-		os.WriteFile("/etc/apt/sources.list.d/pgdg.list", []byte(repo+"\n"), 0644)
-		runQuiet("apt-get", "update", "-qq")
+
+	// Detect package manager
+	hasDnf := commandExists("dnf")
+	hasYum := commandExists("yum")
+
+	if commandExists("apt-get") {
+		// Debian/Ubuntu path
+		versioned := "postgresql-" + pgMaj + "-pgvector"
 		if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
 			return
 		}
+		// Add PGDG repo and retry
+		distro, _ := runSilent("bash", "-c", `source /etc/os-release 2>/dev/null && echo "${ID}"`)
+		distro = strings.TrimSpace(distro)
+		codename, _ := runSilent("lsb_release", "-cs")
+		codename = strings.TrimSpace(codename)
+		if (distro == "ubuntu" || distro == "debian") && codename != "" {
+			keyPath := "/usr/share/keyrings/postgresql.asc"
+			runSilent("curl", "-fsSL",
+				"https://www.postgresql.org/media/keys/accc4cf8.asc",
+				"-o", keyPath)
+			repo := fmt.Sprintf(
+				"deb [signed-by=%s] https://apt.postgresql.org/pub/repos/apt %s-pgdg main",
+				keyPath, codename)
+			os.WriteFile("/etc/apt/sources.list.d/pgdg.list", []byte(repo+"\n"), 0644)
+			runQuiet("apt-get", "update", "-qq")
+			if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
+				return
+			}
+		}
+		// Fallback: unversioned name (Ubuntu universe)
+		runQuiet("apt-get", "install", "-y", "-qq", "postgresql-pgvector")
+		return
 	}
-	runQuiet("apt-get", "install", "-y", "-qq", "postgresql-pgvector")
+
+	if hasDnf || hasYum {
+		// RHEL/Fedora/Amazon Linux path — use PGDG RPM repo
+		pm := "dnf"
+		if !hasDnf {
+			pm = "yum"
+		}
+		// Add PGDG repo if not present
+		if _, e := runSilent("rpm", "-q", "pgdg-redhat-repo"); e != nil {
+			repoUrl := fmt.Sprintf("https://download.postgresql.org/pub/repos/yum/reporpms/EL-$(rpm -E %%rhel)-x86_64/pgdg-redhat-repo-latest.noarch.rpm")
+			runQuiet(pm, "install", "-y", repoUrl)
+		}
+		pkgName := fmt.Sprintf("pgvector_%s", pgMaj)
+		if runQuiet(pm, "install", "-y", pkgName) == nil {
+			return
+		}
+		// Try alternate naming
+		runQuiet(pm, "install", "-y", "pgvector")
+	}
+}
+
+// pgvectorEnabled checks whether the vector extension is actually available in PostgreSQL.
+func pgvectorEnabled() bool {
+	out, err := runSilent("sudo", "-u", "postgres", "psql", "-d", "qorven", "-tAc",
+		"SELECT 1 FROM pg_extension WHERE extname='vector'")
+	if err != nil {
+		// Try TCP fallback
+		out, err = runSilent("psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "qorven", "-tAc",
+			"SELECT 1 FROM pg_extension WHERE extname='vector'")
+	}
+	return err == nil && strings.TrimSpace(out) == "1"
 }
 
 func platformRequirementsText() string {
@@ -111,7 +224,7 @@ func platformRequirementsText() string {
 		return icon + "  " + fgSt.Render(label) + "\n" +
 			"   " + mutedSt.Render(detail)
 	}
-	return req("🐧", "Ubuntu 20.04+ / Debian 11+", "or any systemd-based Linux") + "\n" +
+	return req("🐧", "Ubuntu 20.04+ / Debian 11+ / RHEL 8+", "systemd-based Linux") + "\n" +
 		req("🔑", "root or sudo access", "to install packages & services") + "\n" +
 		req("💾", "2 GB RAM  ·  10 GB disk", "minimum recommended") + "\n" +
 		req("🌐", "Internet access", "to pull packages on first install")
@@ -125,12 +238,12 @@ func platformServiceCommands() string {
 
 func platformErrorHints() (common, logs string) {
 	common = dimSt.Render("  No internet — check curl / DNS") + "\n" +
-		dimSt.Render("  Port 443 already in use") + "\n" +
+		dimSt.Render("  Port already in use") + "\n" +
 		dimSt.Render("  postgresql service not starting") + "\n" +
 		dimSt.Render("  Disk full — needs 10 GB free") + "\n" +
 		dimSt.Render("  Not running as root (use sudo)")
-	logs = mutedSt.Render("  journalctl -xe") + "\n" +
-		mutedSt.Render("  apt-get install -f")
+	logs = mutedSt.Render("  journalctl -u qorven -f") + "\n" +
+		mutedSt.Render("  journalctl -u postgresql* -n 30")
 	return
 }
 
@@ -139,18 +252,40 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 	case 0:
 		out, _ := runSilent("bash", "-c", `source /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"`)
 		arch, _ := runSilent("uname", "-m")
+		// Warn if neither apt nor dnf/yum
+		if !commandExists("apt-get") && !commandExists("dnf") && !commandExists("yum") {
+			return strings.TrimSpace(out) + "  " + strings.TrimSpace(arch) +
+				" — WARNING: unknown package manager, some steps may require manual intervention", true, nil
+		}
 		return strings.TrimSpace(out) + "  " + strings.TrimSpace(arch), false, nil
 
 	case 1:
-		if err = runQuiet("apt-get", "update", "-qq"); err != nil {
-			return "skipped", true, nil
+		if commandExists("apt-get") {
+			if err = runQuiet("apt-get", "update", "-qq"); err != nil {
+				return "skipped (apt-get update failed — continuing)", true, nil
+			}
+		} else if commandExists("dnf") {
+			if err = runQuiet("dnf", "makecache", "--quiet"); err != nil {
+				return "skipped", true, nil
+			}
+		} else if commandExists("yum") {
+			if err = runQuiet("yum", "makecache", "--quiet"); err != nil {
+				return "skipped", true, nil
+			}
 		}
 		return "", false, nil
 
 	case 2:
-		if err = runQuiet("apt-get", "install", "-y", "-qq",
-			"curl", "ca-certificates", "gnupg", "lsb-release", "openssl"); err != nil {
-			return err.Error(), true, nil
+		if commandExists("apt-get") {
+			args := append([]string{"install", "-y", "-qq"}, "curl", "ca-certificates", "openssl", "gnupg", "lsb-release")
+			if err = runQuiet("apt-get", args...); err != nil {
+				return err.Error(), true, nil
+			}
+		} else if commandExists("dnf") {
+			args := append([]string{"install", "-y", "-q"}, "curl", "ca-certificates", "openssl")
+			if err = runQuiet("dnf", args...); err != nil {
+				return err.Error(), true, nil
+			}
 		}
 		return "", false, nil
 
@@ -159,12 +294,26 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			return "skipped (--skip-postgres)", true, nil
 		}
 		if !commandExists("psql") {
-			if err = runQuiet("apt-get", "install", "-y", "-qq", "postgresql", "postgresql-contrib"); err != nil {
-				return "", false, fmt.Errorf("apt install postgresql: %w", err)
+			if commandExists("apt-get") {
+				if err = runQuiet("apt-get", "install", "-y", "-qq", "postgresql", "postgresql-contrib"); err != nil {
+					return "", false, fmt.Errorf("apt install postgresql: %w\n\n%s", err, pgDiagnostic())
+				}
+			} else if commandExists("dnf") {
+				runQuiet("dnf", "install", "-y", "-q", "postgresql-server", "postgresql-contrib")
+				runQuiet("postgresql-setup", "--initdb")
+			} else if commandExists("yum") {
+				runQuiet("yum", "install", "-y", "-q", "postgresql-server")
+				runQuiet("postgresql-setup", "initdb")
+			} else {
+				return "", false, fmt.Errorf("no supported package manager found — install PostgreSQL 15+ manually from https://postgresql.org/download")
 			}
 		}
-		runQuiet("systemctl", "enable", "postgresql")
-		runQuiet("systemctl", "start", "postgresql")
+
+		if err = startPostgresService(); err != nil {
+			return "", false, fmt.Errorf("%w\n\nDiagnostic output:\n%s", err, pgDiagnostic())
+		}
+
+		// Wait for readiness
 		ready := false
 		for i := 0; i < 20; i++ {
 			if _, e := runSilent("pg_isready", "-q"); e == nil {
@@ -174,8 +323,9 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			time.Sleep(time.Second)
 		}
 		if !ready {
-			return "", false, fmt.Errorf("postgresql did not become ready within 20s — check: sudo systemctl status postgresql")
+			return "", false, fmt.Errorf("postgresql did not become ready within 20s\n\nDiagnostic:\n%s", pgDiagnostic())
 		}
+
 		v, _ := runSilent("psql", "--version")
 		pgMaj := ""
 		if parts := strings.Fields(strings.TrimSpace(v)); len(parts) >= 3 {
@@ -233,28 +383,61 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		if cfg.SkipPG {
 			return "skipped (--skip-postgres)", true, nil
 		}
-		out, _ := runSilent("sudo", "-u", "postgres", "psql", "-tAc",
-			"SELECT 1 FROM pg_database WHERE datname='qorven'")
+
+		// Try sudo -u postgres first (standard Debian/Ubuntu).
+		// Fall back to TCP connection as postgres superuser.
+		psqlUser := ""
+		if _, e := runSilent("id", "postgres"); e == nil {
+			psqlUser = "postgres"
+		}
+
+		psql := func(sql string, db string) (string, error) {
+			if psqlUser != "" {
+				out, err := runSilent("sudo", "-u", psqlUser, "psql", "-d", db, "-tAc", sql)
+				return out, err
+			}
+			out, err := runSilent("psql", "-h", "127.0.0.1", "-U", "postgres", "-d", db, "-tAc", sql)
+			return out, err
+		}
+
+		// Create DB
+		out, _ := psql("SELECT 1 FROM pg_database WHERE datname='qorven'", "postgres")
 		if strings.TrimSpace(out) != "1" {
-			if dbOut, dbErr := runSilent("sudo", "-u", "postgres", "createdb", "qorven"); dbErr != nil {
-				return "", false, fmt.Errorf("createdb: %w — %s", dbErr, strings.TrimSpace(dbOut))
+			if psqlUser != "" {
+				if dbOut, dbErr := runSilent("sudo", "-u", psqlUser, "createdb", "qorven"); dbErr != nil {
+					return "", false, fmt.Errorf("createdb: %w — %s", dbErr, strings.TrimSpace(dbOut))
+				}
+			} else {
+				if dbOut, dbErr := runSilent("psql", "-h", "127.0.0.1", "-U", "postgres",
+					"-c", "CREATE DATABASE qorven;"); dbErr != nil {
+					return "", false, fmt.Errorf("createdb: %w — %s", dbErr, strings.TrimSpace(dbOut))
+				}
 			}
 		}
-		out, _ = runSilent("sudo", "-u", "postgres", "psql", "-tAc",
-			"SELECT 1 FROM pg_roles WHERE rolname='qorven'")
+
+		// Create role
+		out, _ = psql("SELECT 1 FROM pg_roles WHERE rolname='qorven'", "postgres")
 		if strings.TrimSpace(out) != "1" {
-			if cuOut, cuErr := runSilent("sudo", "-u", "postgres", "createuser",
-				"--no-superuser", "--no-createdb", "--no-createrole", "qorven"); cuErr != nil {
-				return "", false, fmt.Errorf("createuser: %w — %s", cuErr, strings.TrimSpace(cuOut))
+			if psqlUser != "" {
+				if cuOut, cuErr := runSilent("sudo", "-u", psqlUser, "createuser",
+					"--no-superuser", "--no-createdb", "--no-createrole", "qorven"); cuErr != nil {
+					return "", false, fmt.Errorf("createuser: %w — %s", cuErr, strings.TrimSpace(cuOut))
+				}
+			} else {
+				psql("CREATE ROLE qorven LOGIN;", "postgres")
 			}
 		}
-		runSilent("sudo", "-u", "postgres", "psql", "-c",
-			"GRANT ALL PRIVILEGES ON DATABASE qorven TO qorven;")
-		runSilent("sudo", "-u", "postgres", "psql", "-d", "qorven", "-c",
-			"GRANT ALL ON SCHEMA public TO qorven;")
-		runSilent("sudo", "-u", "postgres", "psql", "-d", "qorven", "-c",
-			"CREATE EXTENSION IF NOT EXISTS vector;")
-		return "ready", false, nil
+
+		// Always grant — idempotent, ensures re-run repairs broken permissions
+		psql("GRANT ALL PRIVILEGES ON DATABASE qorven TO qorven;", "postgres")
+		psql("GRANT ALL ON SCHEMA public TO qorven;", "qorven")
+
+		// pgvector — try to enable, check if it actually loaded
+		psql("CREATE EXTENSION IF NOT EXISTS vector;", "qorven")
+		if pgvectorEnabled() {
+			return "ready — pgvector enabled", false, nil
+		}
+		return "ready — pgvector not available (vector search disabled, Qorven works without it)", true, nil
 
 	case 8: // Binary
 		binDir := "/opt/qorven/bin"
@@ -284,6 +467,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			return "", false, fmt.Errorf("rename binary: %w", err)
 		}
 		runQuiet("chown", "qorven:qorven", target)
+		// Remove any old symlink at the legacy location before creating a new one
 		os.Remove(symlink)
 		if err = os.Symlink(target, symlink); err != nil {
 			slog.Warn("install.symlink_failed", "err", err)
@@ -292,7 +476,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 
 	case 9: // systemd
 		if !commandExists("systemctl") {
-			return "not available — skipped", true, nil
+			return "not available — skipped (Qorven is installed but will not auto-start; run: sudo qorven start)", true, nil
 		}
 		unit := `[Unit]
 Description=Qorven AI Gateway
@@ -374,8 +558,12 @@ server {
 }
 `, port, port, port)
 		if !commandExists("nginx") {
-			if _, err = runSilent("apt-get", "install", "-y", "-qq", "nginx"); err != nil {
-				return "skipped (nginx install failed)", true, nil
+			if commandExists("apt-get") {
+				if _, err = runSilent("apt-get", "install", "-y", "-qq", "nginx"); err != nil {
+					return "skipped (nginx install failed)", true, nil
+				}
+			} else if commandExists("dnf") {
+				runQuiet("dnf", "install", "-y", "-q", "nginx")
 			}
 		}
 		confPath := "/etc/nginx/conf.d/qorven.conf"

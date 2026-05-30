@@ -516,14 +516,37 @@ mode = "disabled"
 	}
 
 	dsn := probeSocketDSN()
+	envPath := filepath.Join(etcDir, ".env")
+
+	// Preserve the existing encryption_key and gateway_token on re-run.
+	// Regenerating these would render all stored API keys and secrets unreadable.
+	existingKey := ""
+	existingToken := ""
+	if existing, readErr := os.ReadFile(envPath); readErr == nil {
+		for _, line := range strings.Split(string(existing), "\n") {
+			if strings.HasPrefix(line, "QORVEN_ENCRYPTION_KEY=") {
+				existingKey = strings.TrimPrefix(line, "QORVEN_ENCRYPTION_KEY=")
+			}
+			if strings.HasPrefix(line, "QORVEN_GATEWAY_TOKEN=") {
+				existingToken = strings.TrimPrefix(line, "QORVEN_GATEWAY_TOKEN=")
+			}
+		}
+	}
+	if existingKey == "" {
+		existingKey = randHex(32)
+	}
+	if existingToken == "" {
+		existingToken = randHex(16)
+	}
+
 	env := strings.Join([]string{
 		"# Qorven secrets — keep private",
 		"QORVEN_POSTGRES_DSN=" + dsn,
-		"QORVEN_GATEWAY_TOKEN=" + randHex(16),
-		"QORVEN_ENCRYPTION_KEY=" + randHex(32),
+		"QORVEN_GATEWAY_TOKEN=" + existingToken,
+		"QORVEN_ENCRYPTION_KEY=" + existingKey,
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(etcDir, ".env"), []byte(env), 0600); err != nil {
+	if err := os.WriteFile(envPath, []byte(env), 0600); err != nil {
 		return fmt.Errorf("write .env: %w", err)
 	}
 
