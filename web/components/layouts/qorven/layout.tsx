@@ -120,14 +120,14 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   }, [bottomDrawerOpen, bottomDrawerHeightPx, bottomDrawerTabs.length]);
 
   return (
-    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '48px' } as React.CSSProperties}>
+    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '72px' } as React.CSSProperties}>
       <ReconnectBanner />
       <Rail />
       <Sidebar />
       <div className="wrapper flex min-h-screen flex-col">
         <Header />
         <Toolbar />
-        <main className="main-canvas flex-1 overflow-y-auto">
+        <main className="main-canvas flex-1 overflow-y-scroll" style={{ scrollbarGutter: 'stable' }}>
           {children}
         </main>
       </div>
