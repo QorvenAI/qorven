@@ -333,11 +333,49 @@ function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle 
   );
 }
 
-// ── Fixed position container ──────────────────────────────────────────────────
-function PillContainer({ children }: { children: React.ReactNode }) {
+// ── Two-row pill layout ───────────────────────────────────────────────────────
+// Row 1: avatar + name + activity + agent stack
+// Row 2: full-width voice button + chat icon
+// Inspired by LiveKit's bottom bar — breathing room, clear hierarchy.
+
+interface PillLayoutProps {
+  chief: Soul;
+  activity: SoulActivity;
+  voiceState?: string;
+  isVoiceActive: boolean;
+  onChat: () => void;
+  onVoiceTrigger?: () => void;
+  others: Soul[];
+  overflow: number;
+  voiceEnabled: boolean;
+  activeVoiceAgentId: string | null;
+  onOtherVoice: (soul: Soul) => void;
+}
+
+function PillLayout({
+  chief, activity, voiceState, isVoiceActive,
+  onChat, onVoiceTrigger, others, overflow,
+  voiceEnabled, activeVoiceAgentId, onOtherVoice,
+}: PillLayoutProps) {
+  const gradient = gradientFor(chief.id);
+
+  // Activity dot colour
+  const dotColor = isVoiceActive ? 'bg-primary' :
+    activity === 'running' ? 'bg-emerald-400' :
+    activity === 'thinking' ? 'bg-amber-400' :
+    'bg-muted-foreground/30';
+
+  // Voice button label
+  const voiceLabel = isVoiceActive
+    ? voiceState === 'listening' ? 'Listening…'
+      : voiceState === 'processing' ? 'Processing…'
+      : voiceState === 'speaking' ? 'Speaking…'
+      : 'End call'
+    : `Talk to ${chief.display_name}`;
+
   return (
     <div
-      className="fixed z-29 flex items-center gap-1.5 border-t border-r border-border bg-muted px-2 hidden lg:flex"
+      className="fixed z-29 flex flex-col justify-center gap-1.5 border-t border-r border-border bg-muted px-3 hidden lg:flex"
       style={{
         left: 'var(--rail-width)',
         width: 'var(--sidebar-default-width, 280px)',
@@ -345,12 +383,95 @@ function PillContainer({ children }: { children: React.ReactNode }) {
         height: 'var(--agent-pill-height, 72px)',
       }}
     >
-      {children}
+      {/* ── Row 1: identity + stack ── */}
+      <div className="flex items-center gap-2 min-w-0">
+        {/* Avatar */}
+        <div className="relative shrink-0">
+          {chief.avatar ? (
+            <img src={chief.avatar} alt={chief.display_name} className="h-6 w-6 rounded-full object-cover" />
+          ) : (
+            <div className={cn('flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white', gradient)}>
+              {(chief.display_name?.[0] ?? '?').toUpperCase()}
+            </div>
+          )}
+        </div>
+
+        {/* Name + state dot */}
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <span className="truncate text-[12px] font-medium leading-tight text-foreground">
+            {chief.display_name}
+          </span>
+          {voiceState && voiceState !== 'idle'
+            ? <VoiceIndicator voiceState={voiceState} />
+            : <span className={cn('inline-block h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
+          }
+        </div>
+
+        {/* Agent stack — right side */}
+        {others.length > 0 && (
+          <div className="flex items-center shrink-0">
+            {others.map((s, i) => (
+              <StackedAgent
+                key={s.id} soul={s} index={i}
+                voiceEnabled={voiceEnabled}
+                isVoiceActive={activeVoiceAgentId === s.id}
+                onVoiceToggle={onOtherVoice}
+              />
+            ))}
+            {overflow > 0 && (
+              <div
+                className="flex h-6 w-6 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
+                style={{ marginLeft: -10, zIndex: 0 }}
+              >
+                +{overflow}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Row 2: voice button + chat ── */}
+      <div className="flex items-center gap-2">
+        {/* Voice button — full width, the primary action */}
+        {onVoiceTrigger ? (
+          <button
+            onClick={onVoiceTrigger}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 h-7 rounded-md text-[11px] font-medium transition-all',
+              isVoiceActive
+                ? 'bg-destructive/15 text-destructive border border-destructive/30 hover:bg-destructive/25'
+                : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20',
+            )}
+          >
+            {isVoiceActive
+              ? <><MicOff className="h-3 w-3" />{voiceLabel}</>
+              : <><Mic className="h-3 w-3" />{voiceLabel}</>
+            }
+          </button>
+        ) : (
+          // Voice disabled — show greyed out hint
+          <button
+            onClick={onChat}
+            className="flex flex-1 items-center justify-center gap-1.5 h-7 rounded-md text-[11px] font-medium bg-muted/60 text-muted-foreground/50 border border-border/50 cursor-default"
+          >
+            <Mic className="h-3 w-3" />Voice disabled
+          </button>
+        )}
+
+        {/* Chat — compact icon button */}
+        <button
+          onClick={onChat}
+          title={`Open ${chief.display_name}'s chat`}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors border border-border/50"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── COO hero zone ─────────────────────────────────────────────────────────────
+// Keep HeroZone interface for type compat — redirects to PillLayout
 interface HeroZoneProps {
   chief: Soul;
   activity: SoulActivity;
@@ -360,64 +481,6 @@ interface HeroZoneProps {
   onChat: () => void;
   onVoice?: () => void;
   onMic?: () => void;
-}
-
-function HeroZone({ chief, activity, subtitle, isVoiceActive, voiceState, onChat, onVoice, onMic }: HeroZoneProps) {
-  const gradient = gradientFor(chief.id);
-  return (
-    <div className="flex flex-col gap-2 min-w-0 shrink-0 py-1">
-      {/* Row 1: avatar + name */}
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="shrink-0">
-          {chief.avatar ? (
-            <img src={chief.avatar} alt={chief.display_name} className="h-7 w-7 rounded-full object-cover" />
-          ) : (
-            <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white', gradient)}>
-              {(chief.display_name?.[0] ?? '?').toUpperCase()}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="truncate text-[12px] font-semibold leading-tight">{chief.display_name}</span>
-          {voiceState && voiceState !== 'idle' && <VoiceIndicator voiceState={voiceState} />}
-          {!voiceState && (activity === 'thinking' || activity === 'running') && (
-            <span className="text-[9px] text-amber-400/80 font-medium">{activity === 'thinking' ? 'thinking' : 'working'}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Row 2: action buttons — icon-only circles, modern voice app style */}
-      <div className="flex items-center gap-1.5">
-        {/* Chat — small ghost circle */}
-        <button
-          onClick={onChat}
-          title={`Open ${chief.display_name}'s chat`}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/80 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-        </button>
-
-        {/* Mic — primary action, larger, accent when active */}
-        {(onMic || onVoice) && (
-          <button
-            onClick={onMic ?? onVoice}
-            title={isVoiceActive ? 'End voice session' : `Talk to ${chief.display_name}`}
-            className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full transition-all',
-              isVoiceActive
-                ? 'bg-destructive text-white shadow-lg shadow-destructive/30 scale-105'
-                : 'bg-primary/15 text-primary hover:bg-primary/25 hover:scale-105',
-            )}
-          >
-            {isVoiceActive
-              ? <MicOff className="h-4 w-4" />
-              : <Mic className="h-4 w-4" />
-            }
-          </button>
-        )}
-      </div>
-    </div>
-  );
 }
 
 // ── Public export ─────────────────────────────────────────────────────────────
@@ -439,43 +502,22 @@ function PillBasic() {
 
   const state = soulStates[chief.id];
   const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
-  const subtitle = chief.title || chief.role || 'Chief of Staff';
 
   const others = souls
     .filter((s) => s.id !== chief.id)
-    .sort((a, b) => {
-      const aA = (soulStates[a.id]?.activity as SoulActivity) ?? 'offline';
-      const bA = (soulStates[b.id]?.activity as SoulActivity) ?? 'offline';
-      return activityPriority(aA) - activityPriority(bA);
-    })
-    .slice(0, 4); // max 4 avatars fit within 280px sidebar
-
-  const overflow = Math.max(0, souls.length - 1 - others.length);
+    .sort((a, b) => activityPriority((soulStates[a.id]?.activity as SoulActivity) ?? 'offline') - activityPriority((soulStates[b.id]?.activity as SoulActivity) ?? 'offline'))
+    .slice(0, 4);
 
   return (
-    <PillContainer>
-      <HeroZone
-        chief={chief} activity={activity} subtitle={subtitle} isVoiceActive={false}
-        onChat={() => router.push(`/qors/${chief.id}`)}
-        onMic={() => router.push('/settings?section=voice')}
-      />
-
-      {/* Divider */}
-      {others.length > 0 && <span className="h-5 w-px bg-border/60 shrink-0 ml-1" />}
-
-      {/* Other agents stack */}
-      <div className="flex items-center shrink-0">
-        {others.map((s, i) => (
-          <StackedAgent key={s.id} soul={s} index={i} voiceEnabled={false} isVoiceActive={false} onVoiceToggle={() => {}} />
-        ))}
-        {overflow > 0 && (
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
-            style={{ marginLeft: -10, zIndex: 0 }}>
-            +{overflow}
-          </div>
-        )}
-      </div>
-    </PillContainer>
+    <PillLayout
+      chief={chief} activity={activity} isVoiceActive={false}
+      onChat={() => router.push(`/qors/${chief.id}`)}
+      others={others}
+      overflow={Math.max(0, souls.length - 1 - others.length)}
+      voiceEnabled={false}
+      activeVoiceAgentId={null}
+      onOtherVoice={() => {}}
+    />
   );
 }
 
@@ -564,42 +606,18 @@ function PillWithVoice() {
   const overflow = Math.max(0, souls.length - 1 - others.length);
 
   return (
-    <PillContainer>
-      {/* COO hero zone — avatar + name + inline chat/mic buttons */}
-      <HeroZone
-        chief={chief}
-        activity={activity}
-        subtitle={subtitle}
-        isVoiceActive={isVoiceActive}
-        voiceState={isVoiceActive ? voice.state : undefined}
-        onChat={() => router.push(`/qors/${chief.id}`)}
-        onMic={handleVoice}
-      />
-
-      {/* Divider */}
-      {others.length > 0 && <span className="h-5 w-px bg-border/60 shrink-0 ml-1" />}
-
-      {/* Other agents stacked */}
-      <div className="flex items-center shrink-0">
-        {others.map((s, i) => (
-          <StackedAgent
-            key={s.id}
-            soul={s}
-            index={i}
-            voiceEnabled={true}
-            isVoiceActive={activeVoiceAgentId === s.id}
-            onVoiceToggle={handleOtherVoice}
-          />
-        ))}
-        {overflow > 0 && (
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-[9px] font-medium text-muted-foreground shrink-0"
-            style={{ marginLeft: -10, zIndex: 0 }}
-          >
-            +{overflow}
-          </div>
-        )}
-      </div>
-    </PillContainer>
+    <PillLayout
+      chief={chief}
+      activity={activity}
+      isVoiceActive={isVoiceActive}
+      voiceState={isVoiceActive ? voice.state : undefined}
+      onChat={() => router.push(`/qors/${chief.id}`)}
+      onVoiceTrigger={handleVoice}
+      others={others}
+      overflow={overflow}
+      voiceEnabled={true}
+      activeVoiceAgentId={activeVoiceAgentId}
+      onOtherVoice={handleOtherVoice}
+    />
   );
 }
