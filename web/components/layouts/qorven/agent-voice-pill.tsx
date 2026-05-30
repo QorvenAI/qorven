@@ -71,10 +71,10 @@ function useChief() {
 function PillContainer({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="fixed z-29 flex items-center border-t border-border bg-muted px-3 sm:block hidden"
+      className="fixed z-29 flex items-center border-t border-border bg-muted px-2 hidden lg:flex"
       style={{
         left: 'var(--rail-width)',
-        right: 0,
+        width: 'var(--sidebar-default-width, 280px)',
         bottom: 'var(--status-bar-height, 24px)',
         height: 'var(--agent-pill-height, 48px)',
       }}
