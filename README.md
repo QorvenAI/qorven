@@ -15,14 +15,23 @@ Purpose-built for developers and teams that require full data control, model fle
 
 ## Quick start
 
-**Linux / macOS (amd64 or arm64):**
+**Linux / macOS**
 ```bash
 curl -fsSL https://get.qorven.ai | sudo bash
 ```
 
-The installer provisions PostgreSQL, installs the binary, runs migrations, and opens the setup wizard. No manual config file editing required. Minimum: 2 GB RAM.
+**Windows** (PowerShell as Administrator)
+```powershell
+iwr https://get.qorven.ai/win | iex
+```
 
-**Windows** — native installer in progress.
+The installer provisions PostgreSQL, installs the binary, runs migrations, and opens the browser setup wizard. No manual configuration required.
+
+| Platform | Requirements |
+|---|---|
+| Linux | Ubuntu 20.04+ / Debian 11+ / RHEL 8+ · 2 GB RAM · systemd |
+| macOS | macOS 12+ · Homebrew · Intel or Apple Silicon |
+| Windows | Windows 10 22H2+ / Server 2019+ · 64-bit · 2 GB RAM |
 
 **Docs:** [docs.qorven.ai](https://docs.qorven.ai) &nbsp;·&nbsp; **Discussions:** [GitHub Discussions](https://github.com/QorvenAI/qorven/discussions)
 

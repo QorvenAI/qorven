@@ -4,6 +4,18 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.6-alpha — 2026-05-30
+
+### Added
+- **macOS installer** — `curl -fsSL https://get.qorven.ai | sudo bash` now works on macOS (Intel and Apple Silicon). Homebrew installs PostgreSQL and pgvector; a launchd service handles auto-start on boot ([b8ed03d](https://github.com/QorvenAI/qorven/commit/b8ed03d))
+- **Windows installer** — EDB silent MSI replaces the previous winget approach; pgvector installed from pre-built binary — no Visual Studio required ([b8ed03d](https://github.com/QorvenAI/qorven/commit/b8ed03d))
+
+### Improved
+- **Installer reliability** — handles 25 real-world edge cases: existing PostgreSQL (any version, any auth), multi-cluster service names, RHEL/Fedora/Amazon Linux, Apple Silicon Homebrew prefix, postgres.app socket paths, Windows 32-bit detection, port 5432 pre-check, NSSM fallback to sc.exe ([20177bb](https://github.com/QorvenAI/qorven/commit/20177bb))
+- **Re-run safety** — re-running the installer on an existing deployment now preserves the encryption key and gateway token; previously this would silently destroy all stored credentials ([20177bb](https://github.com/QorvenAI/qorven/commit/20177bb))
+
+---
+
 ## v0.3.5-alpha — 2026-05-28
 
 ### Added
