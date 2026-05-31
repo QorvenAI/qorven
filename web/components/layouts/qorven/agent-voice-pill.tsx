@@ -10,7 +10,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Mic, MicOff, MessageSquare, Search, PhoneCall } from 'lucide-react';
+import { ChevronsUpDown, Mic, MicOff, MessageSquare, Search, PhoneCall } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
@@ -30,6 +30,16 @@ function gradientFor(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
   return GRADIENTS[Math.abs(hash) % GRADIENTS.length]!;
+}
+
+// Format designation: title > org_role (formatted) > skip internal role ('worker', 'chief') > 'Agent'
+function designation(soul: Soul): string {
+  if (soul.title) return soul.title;
+  if (soul.org_role) return soul.org_role.toUpperCase();
+  // Skip generic internal role names
+  const skip = ['worker', 'chief', 'agent', ''];
+  if (soul.role && !skip.includes(soul.role.toLowerCase())) return soul.role;
+  return 'Agent';
 }
 
 function activityDotColor(a: SoulActivity): string {
@@ -222,7 +232,7 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
             {pinned && <span className="shrink-0 rounded text-[9px] font-bold px-1 py-0.5 bg-primary/15 text-primary uppercase tracking-wide">COO</span>}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <p className="text-[10px] text-muted-foreground/60 truncate">{soul.title || soul.role || 'Agent'}</p>
+            <p className="text-[10px] text-muted-foreground/60 truncate">{designation(soul)}</p>
             {statusText && <><span className="text-muted-foreground/30">·</span><p className={cn('text-[10px] shrink-0', statusColor)}>{statusText}</p></>}
           </div>
         </div>
@@ -318,9 +328,9 @@ function PillNoVoice() {
               <span className="truncate text-[12px] font-semibold text-foreground">{agent.display_name}</span>
               <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
             </div>
-            <p className="text-[10px] text-muted-foreground/60 truncate leading-tight">{agent.title || agent.role || 'Agent'}</p>
+            <p className="text-[10px] text-muted-foreground/60 truncate leading-tight">{designation(agent)}</p>
           </div>
-          <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
+          <ChevronsUpDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
         </button>
 
         {/* Action buttons — disabled with tooltip */}
@@ -419,9 +429,9 @@ function PillWithVoice() {
                   <span className="truncate text-[12px] font-semibold text-foreground">{agent.display_name}</span>
                   <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
                 </div>
-                <p className="text-[10px] text-muted-foreground/60 truncate leading-tight">{agent.title || agent.role || 'Agent'}</p>
+                <p className="text-[10px] text-muted-foreground/60 truncate leading-tight">{designation(agent)}</p>
               </div>
-              <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
+              <ChevronsUpDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
             </motion.button>
           )}
         </AnimatePresence>
