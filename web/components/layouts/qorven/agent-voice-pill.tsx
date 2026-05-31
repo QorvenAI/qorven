@@ -171,10 +171,107 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
     };
   }, [onClose]);
 
-  const filtered = souls.filter((s) =>
-    !query || s.display_name.toLowerCase().includes(query.toLowerCase()) ||
-    (s.title || s.role || '').toLowerCase().includes(query.toLowerCase())
-  );
+  // Separate COO (org_level === 'l1') and pin at top
+  const coo = souls.find((s) => s.org_level === 'l1' || s.org_role === 'coo');
+  const rest = souls.filter((s) => s.id !== coo?.id);
+
+  const matchesQuery = (s: Soul) =>
+    !query ||
+    s.display_name.toLowerCase().includes(query.toLowerCase()) ||
+    (s.title || s.role || '').toLowerCase().includes(query.toLowerCase());
+
+  const filteredCoo = coo && matchesQuery(coo) ? coo : null;
+  const filteredRest = rest.filter(matchesQuery);
+
+  const AgentItem = ({ soul, isPinned }: { soul: Soul; isPinned?: boolean }) => {
+    const state = soulStates[soul.id];
+    const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'idle';
+    const gradient = gradientFor(soul.id);
+    const isSelected = soul.id === selectedId;
+    const isActive = activity === 'running' || activity === 'thinking';
+
+    // Status ring colour on avatar
+    const ringColor = activity === 'running' ? 'ring-emerald-400'
+      : activity === 'thinking' ? 'ring-amber-400'
+      : 'ring-transparent';
+
+    // Status text shown next to name
+    const statusText = activity === 'running' ? 'Working now'
+      : activity === 'thinking' ? 'Thinking…'
+      : 'Available 24/7';
+    const statusColor = activity === 'running' ? 'text-emerald-400'
+      : activity === 'thinking' ? 'text-amber-400'
+      : 'text-muted-foreground/50';
+
+    return (
+      <button
+        onClick={() => { onSelect(soul); onClose(); }}
+        className={cn(
+          'flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors',
+          isSelected ? 'bg-primary/10' : 'hover:bg-accent',
+        )}
+      >
+        {/* Avatar with activity ring */}
+        <div className="relative shrink-0">
+          {soul.avatar ? (
+            <img
+              src={soul.avatar}
+              alt={soul.display_name}
+              className={cn('h-8 w-8 rounded-full object-cover ring-2', isActive ? ringColor : 'ring-transparent')}
+            />
+          ) : (
+            <div className={cn(
+              'flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white ring-2',
+              gradient,
+              isActive ? ringColor : 'ring-transparent',
+            )}>
+              {(soul.display_name?.[0] ?? '?').toUpperCase()}
+            </div>
+          )}
+          {/* Animated pulse dot — bottom right */}
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+            {isActive ? (
+              <>
+                <motion.span
+                  className={cn('absolute inline-flex h-2.5 w-2.5 rounded-full', activity === 'running' ? 'bg-emerald-400' : 'bg-amber-400')}
+                  animate={{ scale: [1, 1.6, 1], opacity: [0.8, 0, 0.8] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                />
+                <span className={cn('relative inline-flex h-2 w-2 rounded-full', activity === 'running' ? 'bg-emerald-400' : 'bg-amber-400')} />
+              </>
+            ) : (
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500/40 ring-1 ring-background" />
+            )}
+          </span>
+        </div>
+
+        {/* Name + designation + status */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className={cn('text-[12px] font-semibold truncate leading-tight', isSelected ? 'text-foreground' : 'text-foreground/90')}>
+              {soul.display_name}
+            </p>
+            {isPinned && (
+              <span className="shrink-0 rounded text-[9px] font-bold px-1 py-0.5 bg-primary/15 text-primary uppercase tracking-wide">
+                COO
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className="text-[10px] text-muted-foreground/60 truncate">
+              {soul.title || soul.role || 'Agent'}
+            </p>
+            <span className="text-muted-foreground/30">·</span>
+            <p className={cn('text-[10px] shrink-0', statusColor)}>
+              {statusText}
+            </p>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const empty = !filteredCoo && filteredRest.length === 0;
 
   return (
     <motion.div
@@ -197,44 +294,23 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
         />
       </div>
 
-      {/* Agent list */}
-      <div className="max-h-52 overflow-y-auto py-1">
-        {filtered.length === 0 ? (
-          <p className="px-3 py-3 text-[11px] text-muted-foreground text-center">No agents found</p>
+      <div className="max-h-64 overflow-y-auto">
+        {empty ? (
+          <p className="px-3 py-4 text-[11px] text-muted-foreground text-center">No agents found</p>
         ) : (
-          filtered.map((soul) => {
-            const state = soulStates[soul.id];
-            const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
-            const gradient = gradientFor(soul.id);
-            const isSelected = soul.id === selectedId;
-
-            return (
-              <button
-                key={soul.id}
-                onClick={() => { onSelect(soul); onClose(); }}
-                className={cn(
-                  'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors',
-                  isSelected ? 'bg-primary/10 text-foreground' : 'hover:bg-accent text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {/* Avatar */}
-                {soul.avatar ? (
-                  <img src={soul.avatar} alt={soul.display_name} className="h-6 w-6 rounded-full object-cover shrink-0" />
-                ) : (
-                  <div className={cn('flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-[9px] font-bold text-white shrink-0', gradient)}>
-                    {(soul.display_name?.[0] ?? '?').toUpperCase()}
-                  </div>
-                )}
-                {/* Name + role */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[12px] font-medium truncate leading-tight">{soul.display_name}</p>
-                  <p className="text-[10px] text-muted-foreground/60 truncate">{soul.title || soul.role || 'Agent'}</p>
-                </div>
-                {/* Activity dot */}
-                <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
-              </button>
-            );
-          })
+          <>
+            {/* Pinned COO */}
+            {filteredCoo && (
+              <>
+                <AgentItem soul={filteredCoo} isPinned />
+                {filteredRest.length > 0 && <div className="mx-3 h-px bg-border/50" />}
+              </>
+            )}
+            {/* Rest of agents */}
+            {filteredRest.map((soul) => (
+              <AgentItem key={soul.id} soul={soul} />
+            ))}
+          </>
         )}
       </div>
     </motion.div>
