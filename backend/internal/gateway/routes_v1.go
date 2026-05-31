@@ -1083,7 +1083,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/terminal/sessions", gw.handleListTerminalSessions)
 		r.Post("/terminal/sessions", gw.handleCreateTerminalSession)
 		r.Delete("/terminal/sessions/{id}", gw.handleDeleteTerminalSession)
-		r.Get("/terminal/sessions/{id}/ws", gw.handleTerminalWS)
+		r.Get("/terminal/sessions/{id}/ws", gw.wsAuth(gw.handleTerminalWS))
 
 		// Work goals
 		r.Get("/work-goals", gw.handleListWorkGoals)
