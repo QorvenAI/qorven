@@ -74,53 +74,79 @@ function ActivityRing({ activity, isVoiceActive }: { activity: SoulActivity; isV
   return <span className="absolute inset-0 rounded-full ring-1 ring-border/20" />;
 }
 
-// ── Waveform bars (voice state driven) ───────────────────────────────────────
-function VoiceIndicator({ voiceState }: { voiceState: string }) {
+// ── Volume-reactive waveform bars (ElevenLabs-inspired) ──────────────────────
+// volume: 0–1 float from useVoice. Bars scale with actual audio level.
+// Falls back to CSS animation when volume is 0 (keeps it alive visually).
+function VoiceIndicator({ voiceState, volume = 0 }: { voiceState: string; volume?: number }) {
+  const MAX_H = 14; // px
+  const MIN_H = 3;  // px
+
   if (voiceState === 'listening') {
-    // Short bars pulsing upward — mic input
+    // User speaking — 4 green bars, heights respond to mic volume
+    const bars = [0.6, 1.0, 0.8, 0.5]; // relative weight per bar
     return (
-      <span className="inline-flex items-end gap-[2px] h-4 shrink-0">
-        {[0, 1, 2].map((i) => (
-          <motion.span
-            key={i}
-            className="w-[3px] rounded-full bg-emerald-400"
-            animate={{ height: ['3px', '10px', '3px'] }}
-            transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }}
-          />
-        ))}
+      <span className="inline-flex items-center gap-[2px] shrink-0" style={{ height: `${MAX_H}px` }}>
+        {bars.map((weight, i) => {
+          const h = volume > 0.01
+            ? Math.max(MIN_H, Math.round(MIN_H + (MAX_H - MIN_H) * volume * weight))
+            : undefined;
+          return (
+            <motion.span
+              key={i}
+              className="w-[3px] rounded-full bg-emerald-400"
+              animate={h ? { height: `${h}px` } : { height: [`${MIN_H}px`, `${Math.round(MAX_H * weight * 0.6)}px`, `${MIN_H}px`] }}
+              transition={h
+                ? { duration: 0.08, ease: 'easeOut' }
+                : { duration: 0.55, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }
+              }
+            />
+          );
+        })}
       </span>
     );
   }
+
   if (voiceState === 'processing') {
-    // 3 dots pulsing — thinking
+    // Thinking — 3 dots bouncing
     return (
-      <span className="inline-flex items-center gap-[3px] h-4 shrink-0">
+      <span className="inline-flex items-center gap-[3px] shrink-0" style={{ height: '14px' }}>
         {[0, 1, 2].map((i) => (
           <motion.span
             key={i}
             className="w-[4px] h-[4px] rounded-full bg-amber-400"
-            animate={{ opacity: [0.2, 1, 0.2], scale: [0.8, 1.2, 0.8] }}
-            transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.2, ease: 'easeInOut' }}
+            animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
+            transition={{ duration: 0.7, repeat: Infinity, delay: i * 0.18, ease: 'easeInOut' }}
           />
         ))}
       </span>
     );
   }
+
   if (voiceState === 'speaking') {
-    // Taller bars — agent speaking
+    // Agent speaking — 5 bars, centre bar tallest, volume-reactive
+    const weights = [0.5, 0.8, 1.0, 0.8, 0.5];
     return (
-      <span className="inline-flex items-end gap-[2px] h-4 shrink-0">
-        {[0, 1, 2, 3].map((i) => (
-          <motion.span
-            key={i}
-            className="w-[3px] rounded-full bg-primary"
-            animate={{ height: ['4px', '14px', '4px'] }}
-            transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }}
-          />
-        ))}
+      <span className="inline-flex items-center gap-[2px] shrink-0" style={{ height: `${MAX_H}px` }}>
+        {weights.map((weight, i) => {
+          const h = volume > 0.01
+            ? Math.max(MIN_H, Math.round(MIN_H + (MAX_H - MIN_H) * volume * weight))
+            : undefined;
+          return (
+            <motion.span
+              key={i}
+              className="w-[3px] rounded-full bg-primary"
+              animate={h ? { height: `${h}px` } : { height: [`${MIN_H}px`, `${Math.round(MAX_H * weight)}px`, `${MIN_H}px`] }}
+              transition={h
+                ? { duration: 0.08, ease: 'easeOut' }
+                : { duration: 0.5, repeat: Infinity, delay: i * 0.08, ease: 'easeInOut' }
+              }
+            />
+          );
+        })}
       </span>
     );
   }
+
   return null;
 }
 
@@ -297,10 +323,10 @@ function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle 
         )}
       >
         {soul.avatar ? (
-          <img src={soul.avatar} alt={soul.display_name} className="h-5 w-5 rounded-full object-cover" />
+          <img src={soul.avatar} alt={soul.display_name} className="h-5 w-5 rounded-full object-cover ring-2 ring-muted" />
         ) : (
           <div className={cn(
-            'flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-[8px] font-bold text-white transition-all',
+            'flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-[8px] font-bold text-white ring-2 ring-muted transition-all',
             gradient,
             hovered && 'brightness-125',
           )}>
@@ -342,6 +368,7 @@ interface PillLayoutProps {
   chief: Soul;
   activity: SoulActivity;
   voiceState?: string;
+  voiceVolume?: number;
   isVoiceActive: boolean;
   onChat: () => void;
   onVoiceTrigger?: () => void;
@@ -353,7 +380,7 @@ interface PillLayoutProps {
 }
 
 function PillLayout({
-  chief, activity, voiceState, isVoiceActive,
+  chief, activity, voiceState, voiceVolume = 0, isVoiceActive,
   onChat, onVoiceTrigger, others, overflow,
   voiceEnabled, activeVoiceAgentId, onOtherVoice,
 }: PillLayoutProps) {
@@ -400,7 +427,7 @@ function PillLayout({
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <span className="truncate text-[12px] font-semibold text-foreground">{chief.display_name}</span>
           {voiceState && voiceState !== 'idle'
-            ? <VoiceIndicator voiceState={voiceState} />
+            ? <VoiceIndicator voiceState={voiceState} volume={voiceVolume} />
             : <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
           }
         </div>
@@ -601,6 +628,7 @@ function PillWithVoice() {
       activity={activity}
       isVoiceActive={isVoiceActive}
       voiceState={isVoiceActive ? voice.state : undefined}
+      voiceVolume={isVoiceActive ? voice.volume : 0}
       onChat={() => router.push(`/qors/${chief.id}`)}
       onVoiceTrigger={handleVoice}
       others={others}
