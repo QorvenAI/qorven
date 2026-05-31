@@ -64,6 +64,15 @@ export function authBase(): string {
  */
 export function wsBase(path: string): string {
   if (typeof window === 'undefined') return '';
+  // In dev, NEXT_PUBLIC_API_URL points at the backend directly (port 4200).
+  // Next.js rewrites can't proxy WebSocket upgrades, so we must connect
+  // to the backend port directly — not through localhost:3000.
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl) {
+    const wsOrigin = envUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+    return `${wsOrigin}${path}`;
+  }
+  // Production: page origin == backend origin, same port.
   const { protocol, host } = window.location;
   const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
   return `${wsProtocol}//${host}${path}`;

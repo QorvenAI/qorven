@@ -12,6 +12,22 @@ import { cn } from '@/lib/utils';
 import { wsBase } from '@/lib/api-url';
 import { request, getToken } from '@/lib/api-core';
 
+// Strip ANSI escape sequences and OSC sequences from terminal output.
+// Without xterm.js, we display plain text — these sequences would show as garbage.
+function stripEscapes(s: string): string {
+  return s
+    // OSC sequences: ESC ] ... ESC \ or ESC ] ... BEL
+    .replace(/\x1b\][^\x1b\x07]*(?:\x1b\\|\x07)/g, '')
+    // CSI sequences: ESC [ ... final byte
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    // Other ESC sequences
+    .replace(/\x1b[^[\]]/g, '')
+    // Carriage returns (keep newlines)
+    .replace(/\r/g, '')
+    // Bracketed paste mode and other DEC sequences
+    .replace(/\x1b\[[?][0-9]+[hl]/g, '');
+}
+
 interface TermSession {
   id: string;
   name: string;
@@ -163,7 +179,8 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
 
     ws.onopen = () => {
       setConnected(true);
-      setLines(prev => [...prev.filter(l => l !== 'Connecting to session…'), '']);
+      // Clear any previous error/disconnect messages on successful connect
+      setLines(['']);
     };
 
     ws.onmessage = (e) => {
@@ -171,10 +188,10 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'output' || msg.type === 'data') {
-          appendOutput(msg.data || msg.output || '');
+          appendOutput(stripEscapes(msg.data || msg.output || ''));
         }
       } catch {
-        appendOutput(e.data);
+        appendOutput(stripEscapes(e.data));
       }
     };
 
@@ -184,9 +201,12 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
     };
 
     ws.onerror = () => {
-      setLines(prev => [...prev, '', '─── WebSocket error. The terminal backend may not be running. ───',
-        '    You can still run commands via the exec tool in your Qors chat.',
-      ]);
+      setLines(prev => {
+        // Only add error if not already showing one
+        if (prev.some(l => l.includes('WebSocket error'))) return prev;
+        return [...prev, '', '─── WebSocket error. The terminal backend may not be running. ───',
+          '    You can still run commands via the exec tool in your Agents chat.'];
+      });
     };
 
     return () => { ws.close(); };

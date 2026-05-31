@@ -51,8 +51,8 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const fullBleedPage = pathname?.startsWith('/terminal');
-  const noSidebarPage = fullBleedPage;
+  const fullBleedPage = false; // terminal no longer hides sidebar
+  const noSidebarPage = false;
   const effectiveCollapsed = sidebarCollapsed || noSidebarPage;
 
   const { left, right } = useToolbar();
