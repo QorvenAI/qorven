@@ -51,6 +51,18 @@ function VoiceOrb({ voiceState, volume = 0 }: { voiceState: string; volume?: num
       ? 'from-amber-400 to-orange-500'
       : 'from-primary to-violet-500';
 
+  // Idle state — dim orb with click-to-speak hint
+  if (!isActive) {
+    return (
+      <div className="flex items-center gap-2.5">
+        <div className="relative flex h-5 w-5 items-center justify-center">
+          <div className="h-4 w-4 rounded-full bg-muted-foreground/15 ring-1 ring-muted-foreground/20" />
+        </div>
+        <span className="text-[10px] text-muted-foreground/40">Tap mic to start voice</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-center gap-3 py-0.5">
       {/* Orb */}
@@ -475,7 +487,21 @@ function PillBasic() {
         onMic={() => {}}
         onChat={() => router.push(`/qors/${agent.id}`)}
       />
-      {/* No voice row when disabled */}
+      {/* Row 2: disabled orb with hover tooltip */}
+      <div
+        className="border-t border-border/50 px-3 flex items-center justify-center group/disabled cursor-default relative"
+        style={{ height: '32px' }}
+        title="Enable voice in Settings → Voice to use this feature"
+      >
+        <div className="flex items-center gap-2.5 opacity-40">
+          <div className="h-4 w-4 rounded-full bg-muted-foreground/20 ring-1 ring-muted-foreground/20" />
+          <span className="text-[10px] text-muted-foreground/60">Voice not configured</span>
+        </div>
+        {/* Hover tooltip */}
+        <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 hidden group-hover/disabled:flex items-center whitespace-nowrap rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[11px] text-foreground shadow-lg z-50">
+          Enable in Settings → Voice
+        </div>
+      </div>
     </PillShell>
   );
 }
@@ -547,20 +573,10 @@ function PillWithVoice() {
         onChat={() => router.push(`/qors/${agent.id}`)}
       />
 
-      {/* Row 2: voice orb — only when active */}
-      <AnimatePresence>
-        {isVoiceActive && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="border-t border-border/50 px-3 overflow-hidden"
-          >
-            <VoiceOrb voiceState={voice.state} volume={voice.volume} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Row 2: voice orb — always visible, animates when active */}
+      <div className="border-t border-border/50 px-3 flex items-center justify-center" style={{ height: '32px' }}>
+        <VoiceOrb voiceState={isVoiceActive ? voice.state : 'idle'} volume={isVoiceActive ? voice.volume : 0} />
+      </div>
     </PillShell>
   );
 }
