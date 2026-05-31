@@ -2,15 +2,15 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 //
-// AgentVoicePill — persistent agent bar above the status bar.
-// Row 1: agent switcher (▼ chevron opens searchable dropdown) + mic + chat
-// Row 2: voice state visual (orb / waveform) — only when voice active
-// No avatar stack — scales to any number of agents.
+// AgentVoicePill — single-row persistent bar.
+// Layout: [avatar/orb-pill] [name + designation + chevron] [mic] [voice-chat] [chat]
+// When voice is active: avatar morphs into an expanding waveform pill (Distill-style).
+// Mic/voice-chat disabled when voice not configured — hover shows tooltip.
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Mic, MicOff, MessageSquare, Search } from 'lucide-react';
+import { ChevronDown, Mic, MicOff, MessageSquare, Search, PhoneCall } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
@@ -32,130 +32,118 @@ function gradientFor(id: string): string {
   return GRADIENTS[Math.abs(hash) % GRADIENTS.length]!;
 }
 
-// ── Activity label ────────────────────────────────────────────────────────────
-function activityLabel(a: SoulActivity): string {
-  return { running: 'Working', thinking: 'Thinking', idle: 'Ready', offline: 'Offline', error: 'Error' }[a] ?? 'Offline';
-}
 function activityDotColor(a: SoulActivity): string {
-  return { running: 'bg-emerald-400', thinking: 'bg-amber-400', idle: 'bg-emerald-500/50', offline: 'bg-muted-foreground/25', error: 'bg-destructive' }[a] ?? 'bg-muted-foreground/25';
+  return { running: 'bg-emerald-400', thinking: 'bg-amber-400', idle: 'bg-emerald-500/40', offline: 'bg-muted-foreground/20', error: 'bg-destructive' }[a] ?? 'bg-muted-foreground/20';
 }
 
-// ── Volume-reactive orb (ElevenLabs-inspired) ─────────────────────────────────
-function VoiceOrb({ voiceState, volume = 0 }: { voiceState: string; volume?: number }) {
-  const isActive = voiceState !== 'idle';
-  const glow = Math.min(1, volume * 2);
+// ── Waveform pill — expands from avatar position when voice active ─────────────
+// Inspired by Distill's sidebar voice indicator
+function WaveformPill({ voiceState, volume = 0 }: { voiceState: string; volume?: number }) {
+  const bars = [0.4, 0.7, 1, 0.8, 0.6, 0.9, 0.5, 0.7, 0.4];
 
-  const orbColor = voiceState === 'listening'
-    ? 'from-emerald-400 to-teal-500'
+  const barColor = voiceState === 'listening'
+    ? 'bg-emerald-400'
     : voiceState === 'processing'
-      ? 'from-amber-400 to-orange-500'
-      : 'from-primary to-violet-500';
-
-  // Idle state — dim orb with click-to-speak hint
-  if (!isActive) {
-    return (
-      <div className="flex items-center gap-2.5">
-        <div className="relative flex h-5 w-5 items-center justify-center">
-          <div className="h-4 w-4 rounded-full bg-muted-foreground/15 ring-1 ring-muted-foreground/20" />
-        </div>
-        <span className="text-[10px] text-muted-foreground/40">Tap mic to start voice</span>
-      </div>
-    );
-  }
+      ? 'bg-amber-400'
+      : 'bg-primary';
 
   return (
-    <div className="flex items-center justify-center gap-3 py-0.5">
-      {/* Orb */}
-      <div className="relative flex items-center justify-center">
-        {/* Glow ring — expands with volume */}
-        {isActive && (
-          <motion.div
-            className={cn('absolute rounded-full bg-gradient-to-br opacity-20', orbColor)}
-            animate={{
-              width: volume > 0.01 ? `${28 + glow * 16}px` : ['28px', '36px', '28px'],
-              height: volume > 0.01 ? `${28 + glow * 16}px` : ['28px', '36px', '28px'],
-              opacity: volume > 0.01 ? 0.15 + glow * 0.2 : [0.1, 0.25, 0.1],
-            }}
-            transition={volume > 0.01
-              ? { duration: 0.08, ease: 'easeOut' }
-              : { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }
-            }
+    <motion.div
+      initial={{ width: '28px', borderRadius: '50%' }}
+      animate={{ width: '72px', borderRadius: '8px' }}
+      exit={{ width: '28px', borderRadius: '50%' }}
+      transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+      className="flex h-7 shrink-0 items-center justify-center gap-[2px] overflow-hidden bg-primary/10 border border-primary/20 px-2"
+    >
+      {voiceState === 'processing' ? (
+        // Dots for thinking
+        [0, 1, 2].map((i) => (
+          <motion.span
+            key={i}
+            className="w-[3px] h-[3px] rounded-full bg-amber-400"
+            animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }}
+            transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
           />
-        )}
-        {/* Core orb */}
-        <motion.div
-          className={cn(
-            'relative w-5 h-5 rounded-full bg-gradient-to-br',
-            isActive ? orbColor : 'from-muted-foreground/20 to-muted-foreground/10',
-          )}
-          animate={isActive
-            ? { scale: volume > 0.01 ? 1 + glow * 0.15 : [1, 1.06, 1] }
-            : { scale: 1 }
-          }
-          transition={volume > 0.01
-            ? { duration: 0.08, ease: 'easeOut' }
-            : { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }
-          }
-        />
-      </div>
+        ))
+      ) : (
+        // Bars for listening/speaking
+        bars.map((weight, i) => {
+          const maxH = 14;
+          const minH = 2;
+          const h = volume > 0.02
+            ? Math.max(minH, Math.round(minH + (maxH - minH) * volume * weight))
+            : undefined;
+          return (
+            <motion.span
+              key={i}
+              className={cn('w-[2px] rounded-full', barColor)}
+              animate={h
+                ? { height: `${h}px` }
+                : { height: [`${minH}px`, `${Math.round(maxH * weight)}px`, `${minH}px`] }
+              }
+              transition={h
+                ? { duration: 0.08, ease: 'easeOut' }
+                : { duration: 0.5 + i * 0.03, repeat: Infinity, delay: i * 0.06, ease: 'easeInOut' }
+              }
+            />
+          );
+        })
+      )}
+    </motion.div>
+  );
+}
 
-      {/* State label + waveform bars */}
-      <div className="flex items-center gap-1.5">
-        <span className={cn(
-          'text-[10px] font-medium',
-          voiceState === 'listening' ? 'text-emerald-400'
-            : voiceState === 'processing' ? 'text-amber-400'
-            : 'text-primary/80',
-        )}>
-          {voiceState === 'listening' ? 'Listening…'
-            : voiceState === 'processing' ? 'Thinking…'
-            : voiceState === 'speaking' ? 'Speaking…'
-            : 'Voice active'}
-        </span>
+// ── Agent avatar (idle) or waveform pill (voice active) ───────────────────────
+function AgentAvatar({
+  soul, isVoiceActive, voiceState, volume,
+}: {
+  soul: Soul;
+  isVoiceActive: boolean;
+  voiceState?: string;
+  volume?: number;
+}) {
+  const gradient = gradientFor(soul.id);
 
-        {/* Mini waveform */}
-        {(voiceState === 'listening' || voiceState === 'speaking') && (
-          <span className="inline-flex items-center gap-[2px]" style={{ height: '10px' }}>
-            {[0.6, 1, 0.8, 1, 0.6].map((w, i) => {
-              const h = volume > 0.01
-                ? Math.max(2, Math.round(2 + 8 * volume * w))
-                : undefined;
-              return (
-                <motion.span
-                  key={i}
-                  className={cn('w-[2px] rounded-full', voiceState === 'listening' ? 'bg-emerald-400' : 'bg-primary')}
-                  animate={h
-                    ? { height: `${h}px` }
-                    : { height: [`2px`, `${Math.round(8 * w)}px`, `2px`] }
-                  }
-                  transition={h
-                    ? { duration: 0.08, ease: 'easeOut' }
-                    : { duration: 0.55, repeat: Infinity, delay: i * 0.08, ease: 'easeInOut' }
-                  }
-                />
-              );
-            })}
-          </span>
+  return (
+    <div className="shrink-0">
+      <AnimatePresence mode="wait">
+        {isVoiceActive && voiceState ? (
+          <WaveformPill key="waveform" voiceState={voiceState} volume={volume} />
+        ) : (
+          <motion.div
+            key="avatar"
+            initial={{ opacity: 0.8 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0.8 }}
+            transition={{ duration: 0.15 }}
+          >
+            {soul.avatar ? (
+              <img src={soul.avatar} alt={soul.display_name} className="h-7 w-7 rounded-full object-cover" />
+            ) : (
+              <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white', gradient)}>
+                {(soul.display_name?.[0] ?? '?').toUpperCase()}
+              </div>
+            )}
+          </motion.div>
         )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
-        {voiceState === 'processing' && (
-          <span className="inline-flex items-center gap-[3px]">
-            {[0, 1, 2].map((i) => (
-              <motion.span
-                key={i}
-                className="w-[3px] h-[3px] rounded-full bg-amber-400"
-                animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }}
-                transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
-              />
-            ))}
-          </span>
-        )}
+// ── Tooltip wrapper for disabled buttons ──────────────────────────────────────
+function DisabledTooltip({ children, message }: { children: React.ReactNode; message: string }) {
+  return (
+    <div className="relative group/tip">
+      {children}
+      <div className="pointer-events-none absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover/tip:flex whitespace-nowrap rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[11px] text-foreground shadow-lg z-50">
+        {message}
       </div>
     </div>
   );
 }
 
-// ── Agent switcher dropdown ───────────────────────────────────────────────────
+// ── Searchable agent switcher dropdown ────────────────────────────────────────
 interface SwitcherDropdownProps {
   souls: Soul[];
   soulStates: Record<string, any>;
@@ -183,36 +171,21 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
     };
   }, [onClose]);
 
-  // Separate COO (org_level === 'l1') and pin at top
   const coo = souls.find((s) => s.org_level === 'l1' || s.org_role === 'coo');
   const rest = souls.filter((s) => s.id !== coo?.id);
+  const match = (s: Soul) => !query
+    || s.display_name.toLowerCase().includes(query.toLowerCase())
+    || (s.title || s.role || '').toLowerCase().includes(query.toLowerCase());
 
-  const matchesQuery = (s: Soul) =>
-    !query ||
-    s.display_name.toLowerCase().includes(query.toLowerCase()) ||
-    (s.title || s.role || '').toLowerCase().includes(query.toLowerCase());
-
-  const filteredCoo = coo && matchesQuery(coo) ? coo : null;
-  const filteredRest = rest.filter(matchesQuery);
-
-  const AgentItem = ({ soul, isPinned }: { soul: Soul; isPinned?: boolean }) => {
+  const AgentRow = ({ soul, pinned }: { soul: Soul; pinned?: boolean }) => {
     const state = soulStates[soul.id];
     const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'idle';
     const gradient = gradientFor(soul.id);
     const isSelected = soul.id === selectedId;
     const isActive = activity === 'running' || activity === 'thinking';
-
-    // Status ring colour on avatar
-    const ringColor = activity === 'running' ? 'ring-emerald-400'
-      : activity === 'thinking' ? 'ring-amber-400'
-      : 'ring-transparent';
-
-    // Status text shown next to name
-    const statusText = activity === 'running' ? 'Working now'
-      : activity === 'thinking' ? 'Thinking…'
-      : null;
-    const statusColor = activity === 'running' ? 'text-emerald-400'
-      : 'text-amber-400';
+    const ringColor = activity === 'running' ? 'ring-emerald-400' : activity === 'thinking' ? 'ring-amber-400' : 'ring-transparent';
+    const statusText = activity === 'running' ? 'Working now' : activity === 'thinking' ? 'Thinking…' : null;
+    const statusColor = activity === 'running' ? 'text-emerald-400' : 'text-amber-400';
 
     return (
       <button
@@ -222,32 +195,20 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
           isSelected ? 'bg-primary/10' : 'hover:bg-accent',
         )}
       >
-        {/* Avatar with activity ring */}
         <div className="relative shrink-0">
           {soul.avatar ? (
-            <img
-              src={soul.avatar}
-              alt={soul.display_name}
-              className={cn('h-8 w-8 rounded-full object-cover ring-2', isActive ? ringColor : 'ring-transparent')}
-            />
+            <img src={soul.avatar} alt={soul.display_name} className={cn('h-8 w-8 rounded-full object-cover ring-2', isActive ? ringColor : 'ring-transparent')} />
           ) : (
-            <div className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white ring-2',
-              gradient,
-              isActive ? ringColor : 'ring-transparent',
-            )}>
+            <div className={cn('flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white ring-2', gradient, isActive ? ringColor : 'ring-transparent')}>
               {(soul.display_name?.[0] ?? '?').toUpperCase()}
             </div>
           )}
-          {/* Animated pulse dot — bottom right */}
           <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
             {isActive ? (
               <>
-                <motion.span
-                  className={cn('absolute inline-flex h-2.5 w-2.5 rounded-full', activity === 'running' ? 'bg-emerald-400' : 'bg-amber-400')}
+                <motion.span className={cn('absolute inline-flex h-2.5 w-2.5 rounded-full', activity === 'running' ? 'bg-emerald-400' : 'bg-amber-400')}
                   animate={{ scale: [1, 1.6, 1], opacity: [0.8, 0, 0.8] }}
-                  transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-                />
+                  transition={{ duration: 1.5, repeat: Infinity }} />
                 <span className={cn('relative inline-flex h-2 w-2 rounded-full', activity === 'running' ? 'bg-emerald-400' : 'bg-amber-400')} />
               </>
             ) : (
@@ -255,74 +216,43 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
             )}
           </span>
         </div>
-
-        {/* Name + designation + status */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
-            <p className={cn('text-[12px] font-semibold truncate leading-tight', isSelected ? 'text-foreground' : 'text-foreground/90')}>
-              {soul.display_name}
-            </p>
-            {isPinned && (
-              <span className="shrink-0 rounded text-[9px] font-bold px-1 py-0.5 bg-primary/15 text-primary uppercase tracking-wide">
-                COO
-              </span>
-            )}
+            <p className="text-[12px] font-semibold truncate text-foreground/90">{soul.display_name}</p>
+            {pinned && <span className="shrink-0 rounded text-[9px] font-bold px-1 py-0.5 bg-primary/15 text-primary uppercase tracking-wide">COO</span>}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <p className="text-[10px] text-muted-foreground/60 truncate">
-              {soul.title || soul.role || 'Agent'}
-            </p>
-            {statusText && (
-              <>
-                <span className="text-muted-foreground/30 shrink-0">·</span>
-                <p className={cn('text-[10px] shrink-0', statusColor)}>{statusText}</p>
-              </>
-            )}
+            <p className="text-[10px] text-muted-foreground/60 truncate">{soul.title || soul.role || 'Agent'}</p>
+            {statusText && <><span className="text-muted-foreground/30">·</span><p className={cn('text-[10px] shrink-0', statusColor)}>{statusText}</p></>}
           </div>
         </div>
       </button>
     );
   };
 
-  const empty = !filteredCoo && filteredRest.length === 0;
+  const empty = !rest.concat(coo ? [coo] : []).some(match);
 
   return (
-    <motion.div
-      ref={ref}
+    <motion.div ref={ref}
       initial={{ opacity: 0, y: 6, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 4, scale: 0.97 }}
       transition={{ duration: 0.12 }}
       className="absolute bottom-full mb-2 left-0 w-full rounded-xl border border-border bg-popover shadow-xl z-50 overflow-hidden"
     >
-      {/* Search */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border/60">
         <Search className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+        <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)}
           placeholder="Search agents…"
-          className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none"
-        />
+          className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none" />
       </div>
-
       <div className="max-h-64 overflow-y-auto">
         {empty ? (
           <p className="px-3 py-4 text-[11px] text-muted-foreground text-center">No agents found</p>
         ) : (
           <>
-            {/* Pinned COO */}
-            {filteredCoo && (
-              <>
-                <AgentItem soul={filteredCoo} isPinned />
-                {filteredRest.length > 0 && <div className="mx-3 h-px bg-border/50" />}
-              </>
-            )}
-            {/* Rest of agents */}
-            {filteredRest.map((soul) => (
-              <AgentItem key={soul.id} soul={soul} />
-            ))}
+            {coo && match(coo) && <><AgentRow soul={coo} pinned />{rest.some(match) && <div className="mx-3 h-px bg-border/50" />}</>}
+            {rest.filter(match).map((s) => <AgentRow key={s.id} soul={s} />)}
           </>
         )}
       </div>
@@ -330,195 +260,107 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
   );
 }
 
-// ── Hook: resolve default agent (COO/L1) ──────────────────────────────────────
+// ── Hook: resolve default agent ───────────────────────────────────────────────
 function useDefaultAgent() {
   const souls = useStore((s) => s.souls);
-  const [defaultAgent, setDefaultAgent] = useState<Soul | null>(null);
+  const [def, setDef] = useState<Soul | null>(null);
+  useEffect(() => { agentsApi.chief().then((c) => { if (c?.id) setDef(c as Soul); }).catch(() => {}); }, []); // eslint-disable-line
+  useEffect(() => { if (!def && souls.length > 0) setDef(souls[0] as Soul); }, [souls, def]);
+  return def;
+}
 
-  useEffect(() => {
-    agentsApi.chief()
-      .then((c) => { if (c?.id) setDefaultAgent(c as Soul); })
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!defaultAgent && souls.length > 0) setDefaultAgent(souls[0] as Soul);
-  }, [souls, defaultAgent]);
-
-  return defaultAgent;
+// ── Shell ─────────────────────────────────────────────────────────────────────
+function PillShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="fixed z-29 flex items-center border-t border-r border-border bg-muted px-3 hidden lg:flex"
+      style={{ left: 'var(--rail-width)', width: 'var(--sidebar-default-width, 280px)', bottom: 0, height: 'var(--agent-pill-height, 56px)' }}>
+      {children}
+    </div>
+  );
 }
 
 // ── Public export ─────────────────────────────────────────────────────────────
 export function AgentVoicePill() {
   const { enabled: voiceEnabled, loading: voiceLoading } = useVoiceEnabled();
   if (voiceLoading) return null;
-  if (!voiceEnabled) return <PillBasic />;
+  if (!voiceEnabled) return <PillNoVoice />;
   return <PillWithVoice />;
 }
 
-// ── Shared pill shell ─────────────────────────────────────────────────────────
-function PillShell({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="fixed z-29 flex flex-col border-t border-r border-border bg-muted hidden lg:flex"
-      style={{
-        left: 'var(--rail-width)',
-        width: 'var(--sidebar-default-width, 280px)',
-        bottom: 0,
-        height: 'var(--agent-pill-height, 84px)',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-// ── Row 1: agent switcher + action buttons ────────────────────────────────────
-interface AgentRowProps {
-  agent: Soul;
-  soulStates: Record<string, any>;
-  allSouls: Soul[];
-  onAgentChange: (soul: Soul) => void;
-  isVoiceActive: boolean;
-  voiceEnabled: boolean;
-  onMic: () => void;
-  onChat: () => void;
-}
-
-function AgentRow({ agent, soulStates, allSouls, onAgentChange, isVoiceActive, voiceEnabled, onMic, onChat }: AgentRowProps) {
-  const [open, setOpen] = useState(false);
-  const gradient = gradientFor(agent.id);
-  const state = soulStates[agent.id];
-  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
-
-  return (
-    <div className="relative flex flex-1 items-center gap-2 px-3">
-      {/* Switcher button — avatar + name + chevron */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex flex-1 items-center gap-2 min-w-0 rounded-md px-1 py-1 hover:bg-accent/60 transition-colors group"
-      >
-        {/* Avatar */}
-        {agent.avatar ? (
-          <img src={agent.avatar} alt={agent.display_name} className="h-6 w-6 rounded-full object-cover shrink-0" />
-        ) : (
-          <div className={cn('flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white shrink-0', gradient)}>
-            {(agent.display_name?.[0] ?? '?').toUpperCase()}
-          </div>
-        )}
-        {/* Name + activity */}
-        <div className="flex-1 min-w-0 text-left">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="truncate text-[12px] font-semibold text-foreground leading-tight">{agent.display_name}</span>
-            <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
-          </div>
-          <p className="text-[10px] text-muted-foreground/60 leading-tight truncate">
-            {activityLabel(activity)}
-          </p>
-        </div>
-        {/* Chevron */}
-        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
-      </button>
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-1 shrink-0">
-        {voiceEnabled && (
-          <button
-            onClick={onMic}
-            title={isVoiceActive ? 'End voice session' : `Talk to ${agent.display_name}`}
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded-full transition-all',
-              isVoiceActive
-                ? 'bg-destructive text-white shadow-sm shadow-destructive/30'
-                : 'bg-primary/12 text-primary hover:bg-primary/20',
-            )}
-          >
-            {isVoiceActive ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-          </button>
-        )}
-        <button
-          onClick={onChat}
-          title={`Open ${agent.display_name}'s chat`}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/80 text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors"
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {/* Dropdown */}
-      <AnimatePresence>
-        {open && (
-          <SwitcherDropdown
-            souls={allSouls}
-            soulStates={soulStates}
-            selectedId={agent.id}
-            onSelect={onAgentChange}
-            onClose={() => setOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ── Voice-disabled variant ────────────────────────────────────────────────────
-function PillBasic() {
+// ── Voice disabled ────────────────────────────────────────────────────────────
+function PillNoVoice() {
   const router = useRouter();
-  const defaultAgent = useDefaultAgent();
+  const def = useDefaultAgent();
   const souls = useStore((s) => s.souls);
   const soulStates = useStore((s) => s.soulStates);
   const [agent, setAgent] = useState<Soul | null>(null);
+  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (defaultAgent && !agent) setAgent(defaultAgent);
-  }, [defaultAgent, agent]);
-
+  useEffect(() => { if (def && !agent) setAgent(def); }, [def, agent]);
   if (!agent) return null;
+
+  const state = soulStates[agent.id];
+  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'idle';
+  const gradient = gradientFor(agent.id);
 
   return (
     <PillShell>
-      <AgentRow
-        agent={agent}
-        soulStates={soulStates}
-        allSouls={souls}
-        onAgentChange={setAgent}
-        isVoiceActive={false}
-        voiceEnabled={false}
-        onMic={() => {}}
-        onChat={() => router.push(`/qors/${agent.id}`)}
-      />
-      {/* Row 2: disabled orb with hover tooltip */}
-      <div
-        className="border-t border-border/50 px-3 flex items-center justify-center group/disabled cursor-default relative"
-        style={{ height: '32px' }}
-        title="Enable voice in Settings → Voice to use this feature"
-      >
-        <div className="flex items-center gap-2.5 opacity-40">
-          <div className="h-4 w-4 rounded-full bg-muted-foreground/20 ring-1 ring-muted-foreground/20" />
-          <span className="text-[10px] text-muted-foreground/60">Voice not configured</span>
+      {/* Switcher */}
+      <div className="relative flex flex-1 items-center gap-2 min-w-0">
+        <button onClick={() => setOpen((v) => !v)}
+          className="flex flex-1 items-center gap-2 min-w-0 rounded-md px-1 py-1 hover:bg-accent/60 transition-colors">
+          {agent.avatar
+            ? <img src={agent.avatar} alt={agent.display_name} className="h-7 w-7 rounded-full object-cover shrink-0" />
+            : <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white shrink-0', gradient)}>{(agent.display_name?.[0] ?? '?').toUpperCase()}</div>
+          }
+          <div className="flex-1 min-w-0 text-left">
+            <div className="flex items-center gap-1.5">
+              <span className="truncate text-[12px] font-semibold text-foreground">{agent.display_name}</span>
+              <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
+            </div>
+            <p className="text-[10px] text-muted-foreground/60 truncate leading-tight">{agent.title || agent.role || 'Agent'}</p>
+          </div>
+          <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
+        </button>
+
+        {/* Action buttons — disabled with tooltip */}
+        <div className="flex items-center gap-1 shrink-0">
+          <DisabledTooltip message="Enable voice in Settings → Voice">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/60 text-muted-foreground/25 cursor-default">
+              <Mic className="h-3.5 w-3.5" />
+            </div>
+          </DisabledTooltip>
+          <DisabledTooltip message="Enable voice in Settings → Voice">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/60 text-muted-foreground/25 cursor-default">
+              <PhoneCall className="h-3.5 w-3.5" />
+            </div>
+          </DisabledTooltip>
+          <button onClick={() => router.push(`/qors/${agent.id}`)}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/80 text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors">
+            <MessageSquare className="h-3.5 w-3.5" />
+          </button>
         </div>
-        {/* Hover tooltip */}
-        <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 hidden group-hover/disabled:flex items-center whitespace-nowrap rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[11px] text-foreground shadow-lg z-50">
-          Enable in Settings → Voice
-        </div>
+
+        <AnimatePresence>
+          {open && <SwitcherDropdown souls={souls} soulStates={soulStates} selectedId={agent.id} onSelect={setAgent} onClose={() => setOpen(false)} />}
+        </AnimatePresence>
       </div>
     </PillShell>
   );
 }
 
-// ── Voice-enabled variant ─────────────────────────────────────────────────────
+// ── Voice enabled ─────────────────────────────────────────────────────────────
 function PillWithVoice() {
   const router = useRouter();
-  const defaultAgent = useDefaultAgent();
+  const def = useDefaultAgent();
   const souls = useStore((s) => s.souls);
   const soulStates = useStore((s) => s.soulStates);
   const activeVoiceAgentId = useStore((s) => s.activeVoiceAgentId);
   const setActiveVoiceAgent = useStore((s) => s.setActiveVoiceAgent);
   const [agent, setAgent] = useState<Soul | null>(null);
+  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (defaultAgent && !agent) setAgent(defaultAgent);
-  }, [defaultAgent, agent]);
+  useEffect(() => { if (def && !agent) setAgent(def); }, [def, agent]);
 
   const agentId = agent?.id ?? '';
   const isVoiceActive = activeVoiceAgentId === agentId && !!agentId;
@@ -532,50 +374,89 @@ function PillWithVoice() {
 
   const handleMic = useCallback(async () => {
     if (!agentId) return;
-    if (isVoiceActive) {
-      await voice.stop();
-      setActiveVoiceAgent(null);
-    } else {
-      if (activeVoiceAgentId) {
-        const prev = agentVoiceRegistry.get(activeVoiceAgentId);
-        if (prev) await prev();
-        setActiveVoiceAgent(null);
-        await new Promise((r) => setTimeout(r, 80));
-      }
-      await voice.start();
-      setActiveVoiceAgent(agentId);
+    if (isVoiceActive) { await voice.stop(); setActiveVoiceAgent(null); }
+    else {
+      if (activeVoiceAgentId) { const p = agentVoiceRegistry.get(activeVoiceAgentId); if (p) await p(); setActiveVoiceAgent(null); await new Promise(r => setTimeout(r, 80)); }
+      await voice.start(); setActiveVoiceAgent(agentId);
     }
   }, [agentId, isVoiceActive, voice, activeVoiceAgentId, setActiveVoiceAgent]);
 
-  // When user switches agent while voice is active — stop first
-  const handleAgentChange = useCallback(async (soul: Soul) => {
-    if (isVoiceActive) {
-      await voice.stop();
-      setActiveVoiceAgent(null);
-      await new Promise((r) => setTimeout(r, 80));
-    }
+  const handleSwitch = useCallback(async (soul: Soul) => {
+    if (isVoiceActive) { await voice.stop(); setActiveVoiceAgent(null); await new Promise(r => setTimeout(r, 80)); }
     setAgent(soul);
   }, [isVoiceActive, voice, setActiveVoiceAgent]);
 
   if (!agent) return null;
 
+  const state = soulStates[agent.id];
+  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'idle';
+  const gradient = gradientFor(agent.id);
+
   return (
     <PillShell>
-      {/* Row 1: switcher + mic + chat */}
-      <AgentRow
-        agent={agent}
-        soulStates={soulStates}
-        allSouls={souls}
-        onAgentChange={handleAgentChange}
-        isVoiceActive={isVoiceActive}
-        voiceEnabled={true}
-        onMic={handleMic}
-        onChat={() => router.push(`/qors/${agent.id}`)}
-      />
+      <div className="relative flex flex-1 items-center gap-2 min-w-0">
+        {/* Avatar → waveform pill morphs on voice active */}
+        <AgentAvatar
+          soul={agent}
+          isVoiceActive={isVoiceActive}
+          voiceState={isVoiceActive ? voice.state : undefined}
+          volume={isVoiceActive ? voice.volume : 0}
+        />
 
-      {/* Row 2: voice orb — always visible, animates when active */}
-      <div className="border-t border-border/50 px-3 flex items-center justify-center" style={{ height: '32px' }}>
-        <VoiceOrb voiceState={isVoiceActive ? voice.state : 'idle'} volume={isVoiceActive ? voice.volume : 0} />
+        {/* Name + designation + chevron — hidden when voice active to give waveform room */}
+        <AnimatePresence>
+          {!isVoiceActive && (
+            <motion.button
+              initial={{ opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: 'auto' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setOpen((v) => !v)}
+              className="flex flex-1 items-center gap-1.5 min-w-0 rounded-md px-1 py-1 hover:bg-accent/60 transition-colors overflow-hidden"
+            >
+              <div className="flex-1 min-w-0 text-left">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-[12px] font-semibold text-foreground">{agent.display_name}</span>
+                  <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
+                </div>
+                <p className="text-[10px] text-muted-foreground/60 truncate leading-tight">{agent.title || agent.role || 'Agent'}</p>
+              </div>
+              <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
+            </motion.button>
+          )}
+        </AnimatePresence>
+
+        {/* Spacer when voice active */}
+        {isVoiceActive && <div className="flex-1" />}
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Mic toggle */}
+          <button onClick={handleMic}
+            title={isVoiceActive ? 'Mute mic' : `Start voice with ${agent.display_name}`}
+            className={cn('flex h-7 w-7 items-center justify-center rounded-full transition-all',
+              isVoiceActive ? 'bg-destructive text-white' : 'bg-primary/12 text-primary hover:bg-primary/20')}>
+            {isVoiceActive ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+          </button>
+          {/* End call — only when active, else phone icon */}
+          <button onClick={isVoiceActive ? handleMic : undefined}
+            title={isVoiceActive ? 'End voice session' : 'Voice chat'}
+            className={cn('flex h-7 w-7 items-center justify-center rounded-full transition-all',
+              isVoiceActive ? 'bg-destructive/15 text-destructive hover:bg-destructive/25' : 'bg-muted/80 text-muted-foreground/40 cursor-default')}>
+            <PhoneCall className="h-3.5 w-3.5" />
+          </button>
+          {/* Chat */}
+          <button onClick={() => router.push(`/qors/${agent.id}`)}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/80 text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors">
+            <MessageSquare className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {open && !isVoiceActive && (
+            <SwitcherDropdown souls={souls} soulStates={soulStates} selectedId={agent.id} onSelect={handleSwitch} onClose={() => setOpen(false)} />
+          )}
+        </AnimatePresence>
       </div>
     </PillShell>
   );

@@ -120,7 +120,7 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   }, [bottomDrawerOpen, bottomDrawerHeightPx, bottomDrawerTabs.length]);
 
   return (
-    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '84px' } as React.CSSProperties}>
+    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '56px' } as React.CSSProperties}>
       <ReconnectBanner />
       <Rail />
       <Sidebar />
