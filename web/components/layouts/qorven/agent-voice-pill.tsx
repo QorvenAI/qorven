@@ -198,10 +198,9 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
     // Status text shown next to name
     const statusText = activity === 'running' ? 'Working now'
       : activity === 'thinking' ? 'Thinking…'
-      : 'Available 24/7';
+      : null;
     const statusColor = activity === 'running' ? 'text-emerald-400'
-      : activity === 'thinking' ? 'text-amber-400'
-      : 'text-muted-foreground/50';
+      : 'text-amber-400';
 
     return (
       <button
@@ -261,10 +260,12 @@ function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: 
             <p className="text-[10px] text-muted-foreground/60 truncate">
               {soul.title || soul.role || 'Agent'}
             </p>
-            <span className="text-muted-foreground/30">·</span>
-            <p className={cn('text-[10px] shrink-0', statusColor)}>
-              {statusText}
-            </p>
+            {statusText && (
+              <>
+                <span className="text-muted-foreground/30 shrink-0">·</span>
+                <p className={cn('text-[10px] shrink-0', statusColor)}>{statusText}</p>
+              </>
+            )}
           </div>
         </div>
       </button>
