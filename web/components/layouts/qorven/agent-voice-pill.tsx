@@ -2,15 +2,15 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 //
-// AgentVoicePill — persistent bar above the status bar on all pages.
-// Left: COO hero with voice controls.
-// Middle: other agents stacked, sorted by activity, click to chat/voice.
-// Right: voice + chat action buttons.
+// AgentVoicePill — persistent agent bar above the status bar.
+// Row 1: agent switcher (▼ chevron opens searchable dropdown) + mic + chat
+// Row 2: voice state visual (orb / waveform) — only when voice active
+// No avatar stack — scales to any number of agents.
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
-import { Headphones, MessageSquare, PhoneOff, Mic, MicOff } from 'lucide-react';
+import { ChevronDown, Mic, MicOff, MessageSquare, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
@@ -19,7 +19,7 @@ import { agents as agentsApi } from '@/lib/api';
 import { agentVoiceRegistry } from '@/lib/voice-registry';
 import type { Soul, SoulActivity } from '@/types';
 
-// ── Gradient (matches sidebar-agent-row) ─────────────────────────────────────
+// ── Gradient helper ───────────────────────────────────────────────────────────
 const GRADIENTS = [
   'from-primary to-primary/80', 'from-emerald-500 to-teal-600',
   'from-orange-500 to-red-600', 'from-pink-500 to-rose-600',
@@ -32,472 +32,231 @@ function gradientFor(id: string): string {
   return GRADIENTS[Math.abs(hash) % GRADIENTS.length]!;
 }
 
-// Activity sort priority — running > thinking > idle > offline > error
-function activityPriority(a: SoulActivity): number {
-  return { running: 0, thinking: 1, idle: 2, offline: 3, error: 4 }[a] ?? 3;
+// ── Activity label ────────────────────────────────────────────────────────────
+function activityLabel(a: SoulActivity): string {
+  return { running: 'Working', thinking: 'Thinking', idle: 'Ready', offline: 'Offline', error: 'Error' }[a] ?? 'Offline';
+}
+function activityDotColor(a: SoulActivity): string {
+  return { running: 'bg-emerald-400', thinking: 'bg-amber-400', idle: 'bg-emerald-500/50', offline: 'bg-muted-foreground/25', error: 'bg-destructive' }[a] ?? 'bg-muted-foreground/25';
 }
 
-// ── Activity ring around each stacked avatar ──────────────────────────────────
-function ActivityRing({ activity, isVoiceActive }: { activity: SoulActivity; isVoiceActive: boolean }) {
-  if (isVoiceActive) {
-    return (
-      <motion.span
-        className="absolute inset-0 rounded-full ring-2 ring-primary"
-        animate={{ opacity: [1, 0.4, 1] }}
-        transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    );
-  }
-  if (activity === 'running') {
-    return (
-      <motion.span
-        className="absolute inset-0 rounded-full ring-2 ring-emerald-400"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-        style={{ clipPath: 'inset(0 0 50% 0)' }}
-      />
-    );
-  }
-  if (activity === 'thinking') {
-    return (
-      <motion.span
-        className="absolute inset-0 rounded-full ring-2 ring-amber-400"
-        animate={{ opacity: [1, 0.3, 1] }}
-        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    );
-  }
-  if (activity === 'idle') {
-    return <span className="absolute inset-0 rounded-full ring-1 ring-border/60" />;
-  }
-  // offline / error — very faint
-  return <span className="absolute inset-0 rounded-full ring-1 ring-border/20" />;
-}
+// ── Volume-reactive orb (ElevenLabs-inspired) ─────────────────────────────────
+function VoiceOrb({ voiceState, volume = 0 }: { voiceState: string; volume?: number }) {
+  const isActive = voiceState !== 'idle';
+  const glow = Math.min(1, volume * 2);
 
-// ── Volume-reactive waveform bars (ElevenLabs-inspired) ──────────────────────
-// volume: 0–1 float from useVoice. Bars scale with actual audio level.
-// Falls back to CSS animation when volume is 0 (keeps it alive visually).
-function VoiceIndicator({ voiceState, volume = 0 }: { voiceState: string; volume?: number }) {
-  const MAX_H = 14; // px
-  const MIN_H = 3;  // px
+  const orbColor = voiceState === 'listening'
+    ? 'from-emerald-400 to-teal-500'
+    : voiceState === 'processing'
+      ? 'from-amber-400 to-orange-500'
+      : 'from-primary to-violet-500';
 
-  if (voiceState === 'listening') {
-    // User speaking — 4 green bars, heights respond to mic volume
-    const bars = [0.6, 1.0, 0.8, 0.5]; // relative weight per bar
-    return (
-      <span className="inline-flex items-center gap-[2px] shrink-0" style={{ height: `${MAX_H}px` }}>
-        {bars.map((weight, i) => {
-          const h = volume > 0.01
-            ? Math.max(MIN_H, Math.round(MIN_H + (MAX_H - MIN_H) * volume * weight))
-            : undefined;
-          return (
-            <motion.span
-              key={i}
-              className="w-[3px] rounded-full bg-emerald-400"
-              animate={h ? { height: `${h}px` } : { height: [`${MIN_H}px`, `${Math.round(MAX_H * weight * 0.6)}px`, `${MIN_H}px`] }}
-              transition={h
-                ? { duration: 0.08, ease: 'easeOut' }
-                : { duration: 0.55, repeat: Infinity, delay: i * 0.1, ease: 'easeInOut' }
-              }
-            />
-          );
-        })}
-      </span>
-    );
-  }
-
-  if (voiceState === 'processing') {
-    // Thinking — 3 dots bouncing
-    return (
-      <span className="inline-flex items-center gap-[3px] shrink-0" style={{ height: '14px' }}>
-        {[0, 1, 2].map((i) => (
-          <motion.span
-            key={i}
-            className="w-[4px] h-[4px] rounded-full bg-amber-400"
-            animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
-            transition={{ duration: 0.7, repeat: Infinity, delay: i * 0.18, ease: 'easeInOut' }}
+  return (
+    <div className="flex items-center justify-center gap-3 py-0.5">
+      {/* Orb */}
+      <div className="relative flex items-center justify-center">
+        {/* Glow ring — expands with volume */}
+        {isActive && (
+          <motion.div
+            className={cn('absolute rounded-full bg-gradient-to-br opacity-20', orbColor)}
+            animate={{
+              width: volume > 0.01 ? `${28 + glow * 16}px` : ['28px', '36px', '28px'],
+              height: volume > 0.01 ? `${28 + glow * 16}px` : ['28px', '36px', '28px'],
+              opacity: volume > 0.01 ? 0.15 + glow * 0.2 : [0.1, 0.25, 0.1],
+            }}
+            transition={volume > 0.01
+              ? { duration: 0.08, ease: 'easeOut' }
+              : { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }
+            }
           />
-        ))}
-      </span>
-    );
-  }
+        )}
+        {/* Core orb */}
+        <motion.div
+          className={cn(
+            'relative w-5 h-5 rounded-full bg-gradient-to-br',
+            isActive ? orbColor : 'from-muted-foreground/20 to-muted-foreground/10',
+          )}
+          animate={isActive
+            ? { scale: volume > 0.01 ? 1 + glow * 0.15 : [1, 1.06, 1] }
+            : { scale: 1 }
+          }
+          transition={volume > 0.01
+            ? { duration: 0.08, ease: 'easeOut' }
+            : { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }
+          }
+        />
+      </div>
 
-  if (voiceState === 'speaking') {
-    // Agent speaking — 5 bars, centre bar tallest, volume-reactive
-    const weights = [0.5, 0.8, 1.0, 0.8, 0.5];
-    return (
-      <span className="inline-flex items-center gap-[2px] shrink-0" style={{ height: `${MAX_H}px` }}>
-        {weights.map((weight, i) => {
-          const h = volume > 0.01
-            ? Math.max(MIN_H, Math.round(MIN_H + (MAX_H - MIN_H) * volume * weight))
-            : undefined;
-          return (
-            <motion.span
-              key={i}
-              className="w-[3px] rounded-full bg-primary"
-              animate={h ? { height: `${h}px` } : { height: [`${MIN_H}px`, `${Math.round(MAX_H * weight)}px`, `${MIN_H}px`] }}
-              transition={h
-                ? { duration: 0.08, ease: 'easeOut' }
-                : { duration: 0.5, repeat: Infinity, delay: i * 0.08, ease: 'easeInOut' }
-              }
-            />
-          );
-        })}
-      </span>
-    );
-  }
+      {/* State label + waveform bars */}
+      <div className="flex items-center gap-1.5">
+        <span className={cn(
+          'text-[10px] font-medium',
+          voiceState === 'listening' ? 'text-emerald-400'
+            : voiceState === 'processing' ? 'text-amber-400'
+            : 'text-primary/80',
+        )}>
+          {voiceState === 'listening' ? 'Listening…'
+            : voiceState === 'processing' ? 'Thinking…'
+            : voiceState === 'speaking' ? 'Speaking…'
+            : 'Voice active'}
+        </span>
 
-  return null;
+        {/* Mini waveform */}
+        {(voiceState === 'listening' || voiceState === 'speaking') && (
+          <span className="inline-flex items-center gap-[2px]" style={{ height: '10px' }}>
+            {[0.6, 1, 0.8, 1, 0.6].map((w, i) => {
+              const h = volume > 0.01
+                ? Math.max(2, Math.round(2 + 8 * volume * w))
+                : undefined;
+              return (
+                <motion.span
+                  key={i}
+                  className={cn('w-[2px] rounded-full', voiceState === 'listening' ? 'bg-emerald-400' : 'bg-primary')}
+                  animate={h
+                    ? { height: `${h}px` }
+                    : { height: [`2px`, `${Math.round(8 * w)}px`, `2px`] }
+                  }
+                  transition={h
+                    ? { duration: 0.08, ease: 'easeOut' }
+                    : { duration: 0.55, repeat: Infinity, delay: i * 0.08, ease: 'easeInOut' }
+                  }
+                />
+              );
+            })}
+          </span>
+        )}
+
+        {voiceState === 'processing' && (
+          <span className="inline-flex items-center gap-[3px]">
+            {[0, 1, 2].map((i) => (
+              <motion.span
+                key={i}
+                className="w-[3px] h-[3px] rounded-full bg-amber-400"
+                animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }}
+                transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
+              />
+            ))}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
-// ── Hook: resolve COO agent ───────────────────────────────────────────────────
-function useChief() {
-  const souls = useStore((s) => s.souls);
-  const [chief, setChief] = useState<Soul | null>(null);
-
-  useEffect(() => {
-    agentsApi.chief()
-      .then((c) => { if (c?.id) setChief(c as Soul); })
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!chief && souls.length > 0) setChief(souls[0] as Soul);
-  }, [souls, chief]);
-
-  return chief;
-}
-
-// ── Agent popover — appears above the clicked avatar ─────────────────────────
-interface AgentPopoverProps {
-  soul: Soul;
-  activity: SoulActivity;
-  onChat: () => void;
-  onVoice?: () => void;
+// ── Agent switcher dropdown ───────────────────────────────────────────────────
+interface SwitcherDropdownProps {
+  souls: Soul[];
+  soulStates: Record<string, any>;
+  selectedId: string;
+  onSelect: (soul: Soul) => void;
   onClose: () => void;
-  voiceEnabled: boolean;
-  isVoiceActive: boolean;
 }
 
-function AgentPopover({ soul, activity, onChat, onVoice, onClose, voiceEnabled, isVoiceActive }: AgentPopoverProps) {
+function SwitcherDropdown({ souls, soulStates, selectedId, onSelect, onClose }: SwitcherDropdownProps) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const gradient = gradientFor(soul.id);
 
-  // Close on click-outside
   useEffect(() => {
+    inputRef.current?.focus();
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', escHandler);
+    document.addEventListener('keydown', esc);
     return () => {
       document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', escHandler);
+      document.removeEventListener('keydown', esc);
     };
   }, [onClose]);
 
-  const activityLabel = {
-    running: 'Working', thinking: 'Thinking', idle: 'Idle', offline: 'Offline', error: 'Error',
-  }[activity] ?? 'Offline';
-
-  const activityColor = {
-    running: 'text-emerald-400', thinking: 'text-amber-400',
-    idle: 'text-muted-foreground', offline: 'text-muted-foreground/50', error: 'text-destructive',
-  }[activity] ?? 'text-muted-foreground';
+  const filtered = souls.filter((s) =>
+    !query || s.display_name.toLowerCase().includes(query.toLowerCase()) ||
+    (s.title || s.role || '').toLowerCase().includes(query.toLowerCase())
+  );
 
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y: 6, scale: 0.95 }}
+      initial={{ opacity: 0, y: 6, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 4, scale: 0.95 }}
+      exit={{ opacity: 0, y: 4, scale: 0.97 }}
       transition={{ duration: 0.12 }}
-      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-44 rounded-xl border border-border bg-popover shadow-xl z-50 overflow-hidden"
+      className="absolute bottom-full mb-2 left-0 w-full rounded-xl border border-border bg-popover shadow-xl z-50 overflow-hidden"
     >
-      {/* Agent header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/60">
-        {soul.avatar ? (
-          <img src={soul.avatar} alt={soul.display_name} className="h-7 w-7 rounded-full object-cover shrink-0" />
-        ) : (
-          <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white shrink-0', gradient)}>
-            {(soul.display_name?.[0] ?? '?').toUpperCase()}
-          </div>
-        )}
-        <div className="min-w-0">
-          <p className="text-[12px] font-semibold truncate">{soul.display_name}</p>
-          <p className={cn('text-[10px]', activityColor)}>{activityLabel}</p>
-        </div>
+      {/* Search */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border/60">
+        <Search className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search agents…"
+          className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none"
+        />
       </div>
 
-      {/* Actions */}
-      <div className="p-1.5 space-y-0.5">
-        <button
-          onClick={() => { onChat(); onClose(); }}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] hover:bg-accent transition-colors"
-        >
-          <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-          Open Chat
-        </button>
-        {voiceEnabled && onVoice && (
-          <button
-            onClick={() => { onVoice(); onClose(); }}
-            className={cn(
-              'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] transition-colors',
-              isVoiceActive
-                ? 'text-destructive hover:bg-destructive/10'
-                : 'hover:bg-accent',
-            )}
-          >
-            {isVoiceActive
-              ? <><PhoneOff className="h-3.5 w-3.5" />End voice</>
-              : <><Headphones className="h-3.5 w-3.5 text-muted-foreground" />Start voice</>
-            }
-          </button>
+      {/* Agent list */}
+      <div className="max-h-52 overflow-y-auto py-1">
+        {filtered.length === 0 ? (
+          <p className="px-3 py-3 text-[11px] text-muted-foreground text-center">No agents found</p>
+        ) : (
+          filtered.map((soul) => {
+            const state = soulStates[soul.id];
+            const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
+            const gradient = gradientFor(soul.id);
+            const isSelected = soul.id === selectedId;
+
+            return (
+              <button
+                key={soul.id}
+                onClick={() => { onSelect(soul); onClose(); }}
+                className={cn(
+                  'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors',
+                  isSelected ? 'bg-primary/10 text-foreground' : 'hover:bg-accent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {/* Avatar */}
+                {soul.avatar ? (
+                  <img src={soul.avatar} alt={soul.display_name} className="h-6 w-6 rounded-full object-cover shrink-0" />
+                ) : (
+                  <div className={cn('flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-[9px] font-bold text-white shrink-0', gradient)}>
+                    {(soul.display_name?.[0] ?? '?').toUpperCase()}
+                  </div>
+                )}
+                {/* Name + role */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium truncate leading-tight">{soul.display_name}</p>
+                  <p className="text-[10px] text-muted-foreground/60 truncate">{soul.title || soul.role || 'Agent'}</p>
+                </div>
+                {/* Activity dot */}
+                <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
+              </button>
+            );
+          })
         )}
       </div>
     </motion.div>
   );
 }
 
-// ── Hover tooltip — floats above avatar ──────────────────────────────────────
-function AgentTooltip({ soul, activity }: { soul: Soul; activity: SoulActivity }) {
-  const activityLabel = {
-    running: 'Working', thinking: 'Thinking', idle: 'Idle', offline: 'Offline', error: 'Error',
-  }[activity] ?? 'Offline';
-  const activityColor = {
-    running: 'text-emerald-400', thinking: 'text-amber-400',
-    idle: 'text-muted-foreground/70', offline: 'text-muted-foreground/40', error: 'text-destructive',
-  }[activity] ?? 'text-muted-foreground/70';
+// ── Hook: resolve default agent (COO/L1) ──────────────────────────────────────
+function useDefaultAgent() {
+  const souls = useStore((s) => s.souls);
+  const [defaultAgent, setDefaultAgent] = useState<Soul | null>(null);
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 2 }}
-      transition={{ duration: 0.1 }}
-      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 pointer-events-none z-50"
-    >
-      <div className="rounded-lg border border-border bg-popover shadow-lg px-2.5 py-1.5 text-center whitespace-nowrap">
-        <p className="text-[11px] font-semibold text-foreground">{soul.display_name}</p>
-        <p className={cn('text-[10px]', activityColor)}>{activityLabel}</p>
-        {soul.title && <p className="text-[9px] text-muted-foreground/50 mt-0.5">{soul.title}</p>}
-      </div>
-      {/* Arrow */}
-      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border" style={{ marginTop: -1 }} />
-      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-popover" />
-    </motion.div>
-  );
-}
+  useEffect(() => {
+    agentsApi.chief()
+      .then((c) => { if (c?.id) setDefaultAgent(c as Soul); })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-// ── Single stacked avatar: hover tooltip + click popover ──────────────────────
-interface StackedAgentProps {
-  soul: Soul;
-  index: number;
-  voiceEnabled: boolean;
-  isVoiceActive: boolean;
-  onVoiceToggle: (soul: Soul) => void;
-}
+  useEffect(() => {
+    if (!defaultAgent && souls.length > 0) setDefaultAgent(souls[0] as Soul);
+  }, [souls, defaultAgent]);
 
-function StackedAgent({ soul, index, voiceEnabled, isVoiceActive, onVoiceToggle }: StackedAgentProps) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const soulStates = useStore((s) => s.soulStates);
-  const gradient = gradientFor(soul.id);
-  const state = soulStates[soul.id];
-  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
-
-  return (
-    <div
-      className="relative shrink-0"
-      style={{ zIndex: open || hovered ? 50 : 20 - index, marginLeft: index === 0 ? 0 : -8 }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <button
-        onClick={() => { setOpen((v) => !v); setHovered(false); }}
-        className={cn(
-          'relative h-5 w-5 rounded-full focus:outline-none transition-transform',
-          hovered && 'scale-110',
-        )}
-      >
-        {soul.avatar ? (
-          <img src={soul.avatar} alt={soul.display_name} className="h-5 w-5 rounded-full object-cover ring-2 ring-muted" />
-        ) : (
-          <div className={cn(
-            'flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-[8px] font-bold text-white ring-2 ring-muted transition-all',
-            gradient,
-            hovered && 'brightness-125',
-          )}>
-            {(soul.display_name?.[0] ?? '?').toUpperCase()}
-          </div>
-        )}
-        <ActivityRing activity={activity} isVoiceActive={isVoiceActive} />
-      </button>
-
-      {/* Hover tooltip — only when not showing click popover */}
-      <AnimatePresence>
-        {hovered && !open && <AgentTooltip soul={soul} activity={activity} />}
-      </AnimatePresence>
-
-      {/* Click popover — full actions */}
-      <AnimatePresence>
-        {open && (
-          <AgentPopover
-            soul={soul}
-            activity={activity}
-            voiceEnabled={voiceEnabled}
-            isVoiceActive={isVoiceActive}
-            onChat={() => router.push(`/qors/${soul.id}`)}
-            onVoice={() => onVoiceToggle(soul)}
-            onClose={() => setOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ── Two-row pill layout ───────────────────────────────────────────────────────
-// Row 1: avatar + name + activity + agent stack
-// Row 2: full-width voice button + chat icon
-// Inspired by LiveKit's bottom bar — breathing room, clear hierarchy.
-
-interface PillLayoutProps {
-  chief: Soul;
-  activity: SoulActivity;
-  voiceState?: string;
-  voiceVolume?: number;
-  isVoiceActive: boolean;
-  onChat: () => void;
-  onVoiceTrigger?: () => void;
-  others: Soul[];
-  overflow: number;
-  voiceEnabled: boolean;
-  activeVoiceAgentId: string | null;
-  onOtherVoice: (soul: Soul) => void;
-}
-
-function PillLayout({
-  chief, activity, voiceState, voiceVolume = 0, isVoiceActive,
-  onChat, onVoiceTrigger, others, overflow,
-  voiceEnabled, activeVoiceAgentId, onOtherVoice,
-}: PillLayoutProps) {
-  const gradient = gradientFor(chief.id);
-
-  // Activity dot colour
-  const dotColor = isVoiceActive ? 'bg-primary' :
-    activity === 'running' ? 'bg-emerald-400' :
-    activity === 'thinking' ? 'bg-amber-400' :
-    'bg-muted-foreground/30';
-
-  // Voice button label
-  const voiceLabel = isVoiceActive
-    ? voiceState === 'listening' ? 'Listening…'
-      : voiceState === 'processing' ? 'Processing…'
-      : voiceState === 'speaking' ? 'Speaking…'
-      : 'End call'
-    : `Talk to ${chief.display_name}`;
-
-  return (
-    <div
-      className="fixed z-29 flex flex-col border-t border-r border-border bg-muted px-3 hidden lg:flex"
-      style={{
-        left: 'var(--rail-width)',
-        width: 'var(--sidebar-default-width, 280px)',
-        bottom: 0,
-        height: 'var(--agent-pill-height, 84px)',
-      }}
-    >
-      {/* ── Row 1: COO — takes ~60% of height ── */}
-      <div className="flex flex-1 items-center gap-2 min-w-0">
-        {/* Avatar */}
-        <div className="shrink-0">
-          {chief.avatar ? (
-            <img src={chief.avatar} alt={chief.display_name} className="h-7 w-7 rounded-full object-cover" />
-          ) : (
-            <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white', gradient)}>
-              {(chief.display_name?.[0] ?? '?').toUpperCase()}
-            </div>
-          )}
-        </div>
-
-        {/* Name + state */}
-        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <span className="truncate text-[12px] font-semibold text-foreground">{chief.display_name}</span>
-          {voiceState && voiceState !== 'idle'
-            ? <VoiceIndicator voiceState={voiceState} volume={voiceVolume} />
-            : <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
-          }
-        </div>
-
-        {/* Mic button */}
-        {onVoiceTrigger ? (
-          <button
-            onClick={onVoiceTrigger}
-            title={isVoiceActive ? 'End voice' : `Talk to ${chief.display_name}`}
-            className={cn(
-              'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all',
-              isVoiceActive
-                ? 'bg-destructive text-white shadow-sm shadow-destructive/40'
-                : 'bg-primary/15 text-primary hover:bg-primary/25',
-            )}
-          >
-            {isVoiceActive ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-          </button>
-        ) : (
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted border border-border/40 text-muted-foreground/30">
-            <Mic className="h-3.5 w-3.5" />
-          </div>
-        )}
-
-        {/* Chat button */}
-        <button
-          onClick={onChat}
-          title={`Open ${chief.display_name}'s chat`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted/80 text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors"
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {/* Divider */}
-      <div className="h-px bg-border/50 -mx-3" />
-
-      {/* ── Row 2: compact avatar stack ── */}
-      <div className="flex items-center gap-0 py-1.5">
-        {others.map((s, i) => (
-          <StackedAgent
-            key={s.id} soul={s} index={i}
-            voiceEnabled={voiceEnabled}
-            isVoiceActive={activeVoiceAgentId === s.id}
-            onVoiceToggle={onOtherVoice}
-          />
-        ))}
-        {overflow > 0 && (
-          <div
-            className="flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border text-[8px] font-medium text-muted-foreground shrink-0"
-            style={{ marginLeft: -8, zIndex: 0 }}
-          >
-            +{overflow}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Keep HeroZone interface for type compat — redirects to PillLayout
-interface HeroZoneProps {
-  chief: Soul;
-  activity: SoulActivity;
-  subtitle: string;
-  isVoiceActive: boolean;
-  voiceState?: string;
-  onChat: () => void;
-  onVoice?: () => void;
-  onMic?: () => void;
+  return defaultAgent;
 }
 
 // ── Public export ─────────────────────────────────────────────────────────────
@@ -508,46 +267,157 @@ export function AgentVoicePill() {
   return <PillWithVoice />;
 }
 
+// ── Shared pill shell ─────────────────────────────────────────────────────────
+function PillShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="fixed z-29 flex flex-col border-t border-r border-border bg-muted hidden lg:flex"
+      style={{
+        left: 'var(--rail-width)',
+        width: 'var(--sidebar-default-width, 280px)',
+        bottom: 0,
+        height: 'var(--agent-pill-height, 84px)',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── Row 1: agent switcher + action buttons ────────────────────────────────────
+interface AgentRowProps {
+  agent: Soul;
+  soulStates: Record<string, any>;
+  allSouls: Soul[];
+  onAgentChange: (soul: Soul) => void;
+  isVoiceActive: boolean;
+  voiceEnabled: boolean;
+  onMic: () => void;
+  onChat: () => void;
+}
+
+function AgentRow({ agent, soulStates, allSouls, onAgentChange, isVoiceActive, voiceEnabled, onMic, onChat }: AgentRowProps) {
+  const [open, setOpen] = useState(false);
+  const gradient = gradientFor(agent.id);
+  const state = soulStates[agent.id];
+  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
+
+  return (
+    <div className="relative flex flex-1 items-center gap-2 px-3">
+      {/* Switcher button — avatar + name + chevron */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex flex-1 items-center gap-2 min-w-0 rounded-md px-1 py-1 hover:bg-accent/60 transition-colors group"
+      >
+        {/* Avatar */}
+        {agent.avatar ? (
+          <img src={agent.avatar} alt={agent.display_name} className="h-6 w-6 rounded-full object-cover shrink-0" />
+        ) : (
+          <div className={cn('flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white shrink-0', gradient)}>
+            {(agent.display_name?.[0] ?? '?').toUpperCase()}
+          </div>
+        )}
+        {/* Name + activity */}
+        <div className="flex-1 min-w-0 text-left">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate text-[12px] font-semibold text-foreground leading-tight">{agent.display_name}</span>
+            <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', activityDotColor(activity))} />
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 leading-tight truncate">
+            {activityLabel(activity)}
+          </p>
+        </div>
+        {/* Chevron */}
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-1 shrink-0">
+        {voiceEnabled && (
+          <button
+            onClick={onMic}
+            title={isVoiceActive ? 'End voice session' : `Talk to ${agent.display_name}`}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-full transition-all',
+              isVoiceActive
+                ? 'bg-destructive text-white shadow-sm shadow-destructive/30'
+                : 'bg-primary/12 text-primary hover:bg-primary/20',
+            )}
+          >
+            {isVoiceActive ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+          </button>
+        )}
+        <button
+          onClick={onChat}
+          title={`Open ${agent.display_name}'s chat`}
+          className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/80 text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Dropdown */}
+      <AnimatePresence>
+        {open && (
+          <SwitcherDropdown
+            souls={allSouls}
+            soulStates={soulStates}
+            selectedId={agent.id}
+            onSelect={onAgentChange}
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── Voice-disabled variant ────────────────────────────────────────────────────
 function PillBasic() {
   const router = useRouter();
-  const chief = useChief();
+  const defaultAgent = useDefaultAgent();
   const souls = useStore((s) => s.souls);
   const soulStates = useStore((s) => s.soulStates);
+  const [agent, setAgent] = useState<Soul | null>(null);
 
-  if (!chief) return null;
+  useEffect(() => {
+    if (defaultAgent && !agent) setAgent(defaultAgent);
+  }, [defaultAgent, agent]);
 
-  const state = soulStates[chief.id];
-  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
-
-  const others = souls
-    .filter((s) => s.id !== chief.id)
-    .sort((a, b) => activityPriority((soulStates[a.id]?.activity as SoulActivity) ?? 'offline') - activityPriority((soulStates[b.id]?.activity as SoulActivity) ?? 'offline'))
-    .slice(0, 4);
+  if (!agent) return null;
 
   return (
-    <PillLayout
-      chief={chief} activity={activity} isVoiceActive={false}
-      onChat={() => router.push(`/qors/${chief.id}`)}
-      others={others}
-      overflow={Math.max(0, souls.length - 1 - others.length)}
-      voiceEnabled={false}
-      activeVoiceAgentId={null}
-      onOtherVoice={() => {}}
-    />
+    <PillShell>
+      <AgentRow
+        agent={agent}
+        soulStates={soulStates}
+        allSouls={souls}
+        onAgentChange={setAgent}
+        isVoiceActive={false}
+        voiceEnabled={false}
+        onMic={() => {}}
+        onChat={() => router.push(`/qors/${agent.id}`)}
+      />
+      {/* No voice row when disabled */}
+    </PillShell>
   );
 }
 
 // ── Voice-enabled variant ─────────────────────────────────────────────────────
 function PillWithVoice() {
   const router = useRouter();
-  const chief = useChief();
+  const defaultAgent = useDefaultAgent();
   const souls = useStore((s) => s.souls);
   const soulStates = useStore((s) => s.soulStates);
   const activeVoiceAgentId = useStore((s) => s.activeVoiceAgentId);
   const setActiveVoiceAgent = useStore((s) => s.setActiveVoiceAgent);
+  const [agent, setAgent] = useState<Soul | null>(null);
 
-  const agentId = chief?.id ?? '';
+  useEffect(() => {
+    if (defaultAgent && !agent) setAgent(defaultAgent);
+  }, [defaultAgent, agent]);
+
+  const agentId = agent?.id ?? '';
   const isVoiceActive = activeVoiceAgentId === agentId && !!agentId;
   const voice = useVoice({ agentId: agentId || '__noop__' });
 
@@ -557,7 +427,7 @@ function PillWithVoice() {
     return () => { agentVoiceRegistry.delete(agentId); };
   }, [agentId, voice.stop]);
 
-  const handleVoice = useCallback(async () => {
+  const handleMic = useCallback(async () => {
     if (!agentId) return;
     if (isVoiceActive) {
       await voice.stop();
@@ -574,68 +444,46 @@ function PillWithVoice() {
     }
   }, [agentId, isVoiceActive, voice, activeVoiceAgentId, setActiveVoiceAgent]);
 
-  // Voice toggle for stacked agents
-  const handleOtherVoice = useCallback(async (soul: Soul) => {
-    const otherId = soul.id;
-    const otherIsActive = activeVoiceAgentId === otherId;
-    if (otherIsActive) {
-      const prev = agentVoiceRegistry.get(otherId);
-      if (prev) await prev();
+  // When user switches agent while voice is active — stop first
+  const handleAgentChange = useCallback(async (soul: Soul) => {
+    if (isVoiceActive) {
+      await voice.stop();
       setActiveVoiceAgent(null);
-    } else {
-      if (activeVoiceAgentId) {
-        const prev = agentVoiceRegistry.get(activeVoiceAgentId);
-        if (prev) await prev();
-        setActiveVoiceAgent(null);
-        await new Promise((r) => setTimeout(r, 80));
-      }
-      // Navigate to the agent's page — voice from there
-      router.push(`/qors/${otherId}`);
+      await new Promise((r) => setTimeout(r, 80));
     }
-  }, [activeVoiceAgentId, setActiveVoiceAgent, router]);
+    setAgent(soul);
+  }, [isVoiceActive, voice, setActiveVoiceAgent]);
 
-  if (!chief) return null;
-
-  const state = soulStates[chief.id];
-  const activity: SoulActivity = (state?.activity as SoulActivity) ?? 'offline';
-
-  let subtitle = chief.title || chief.role || 'Chief of Staff';
-  if (isVoiceActive) {
-    subtitle = voice.state === 'listening' ? 'Listening…'
-      : voice.state === 'processing' ? 'Processing…'
-      : voice.state === 'speaking' ? 'Speaking…'
-      : 'Voice active';
-  } else if (activity === 'thinking') {
-    subtitle = state?.lastEvent?.trim().slice(0, 44) || 'Thinking…';
-  } else if (activity === 'running') {
-    subtitle = state?.lastEvent?.trim().slice(0, 44) || 'Working…';
-  }
-
-  const others = souls
-    .filter((s) => s.id !== chief.id)
-    .sort((a, b) => {
-      const aA = (soulStates[a.id]?.activity as SoulActivity) ?? 'offline';
-      const bA = (soulStates[b.id]?.activity as SoulActivity) ?? 'offline';
-      return activityPriority(aA) - activityPriority(bA);
-    })
-    .slice(0, 4); // max 4 avatars fit within 280px sidebar
-
-  const overflow = Math.max(0, souls.length - 1 - others.length);
+  if (!agent) return null;
 
   return (
-    <PillLayout
-      chief={chief}
-      activity={activity}
-      isVoiceActive={isVoiceActive}
-      voiceState={isVoiceActive ? voice.state : undefined}
-      voiceVolume={isVoiceActive ? voice.volume : 0}
-      onChat={() => router.push(`/qors/${chief.id}`)}
-      onVoiceTrigger={handleVoice}
-      others={others}
-      overflow={overflow}
-      voiceEnabled={true}
-      activeVoiceAgentId={activeVoiceAgentId}
-      onOtherVoice={handleOtherVoice}
-    />
+    <PillShell>
+      {/* Row 1: switcher + mic + chat */}
+      <AgentRow
+        agent={agent}
+        soulStates={soulStates}
+        allSouls={souls}
+        onAgentChange={handleAgentChange}
+        isVoiceActive={isVoiceActive}
+        voiceEnabled={true}
+        onMic={handleMic}
+        onChat={() => router.push(`/qors/${agent.id}`)}
+      />
+
+      {/* Row 2: voice orb — only when active */}
+      <AnimatePresence>
+        {isVoiceActive && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="border-t border-border/50 px-3 overflow-hidden"
+          >
+            <VoiceOrb voiceState={voice.state} volume={voice.volume} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </PillShell>
   );
 }
