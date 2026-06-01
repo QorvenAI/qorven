@@ -151,6 +151,7 @@ type Gateway struct {
 	customTools      *tools.CustomToolStore
 	mcpClient        *mcp.Client
 	agentLoop        *agent.Loop
+	runRouter        *agent.Router
 	brain            *engine.Engine // Universal AI brain
 	memStore         *memory.Store
 	taskStore        *tasks.Store
@@ -674,6 +675,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.agents, gw.sessions, gw.providerReg,
 			gw.toolReg, gw.skillLoader, gw.memStore, defaultTenant,
 		)
+		gw.runRouter = agent.NewRouter()
 		if gw.skillStore != nil {
 			gw.agentLoop.SetSkillStore(gw.skillStore)
 		}
