@@ -130,6 +130,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/sessions/{id}/messages", gw.handleGetSessionMessages)
 		r.Post("/sessions/{id}/messages", gw.handleAddSessionMessage)
 		r.Delete("/sessions/{id}/messages", gw.handleDeleteSessionMessage)
+		r.Post("/sessions/{id}/inject", gw.handleInjectMessage)
+		r.Get("/sessions/{id}/status", gw.handleSessionStatus)
 
 		// Traces & observability
 		r.Get("/traces", gw.handleListTraces)
