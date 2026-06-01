@@ -22,36 +22,28 @@ var (
 		Short: "Self-hosted AI agent platform",
 		Long: `⚡ Qorven — Self-hosted AI Agent Platform
 
-GETTING STARTED:
-  qorven start          Start the Qorven server
-  qorven init           Interactive setup wizard
-  qorven chat           Chat with an agent
-
-SERVER:
-  qorven start          Start server (foreground)
-  qorven stop           Stop the running server
+SERVICE:
+  qorven start          Start the server
+  qorven stop           Stop the server
   qorven restart        Restart the server
-  qorven status         Show server status
-  qorven logs           Stream server logs (journalctl -u qorven -f)
-  qorven monitor        Watch service health in real-time
+  qorven status         Show status and health
+  qorven logs           Stream server logs
 
-AGENTS:
-  qorven chat           Chat with Prime (or specify --agent)
-  qorven agents         List all agents
-  qorven agent create   Create a new agent
+INSTALL / UPDATE:
+  qorven install        Install Qorven (system dependencies, DB, service)
+  qorven update         Update to the latest release
+  qorven uninstall      Remove Qorven completely
+  qorven init           Bootstrap config and first setup
 
-ADMIN:
-  qorven auth login     Login to get a token
-  qorven auth setup     Create admin account
+MAINTENANCE:
   qorven backup         Backup database + config
   qorven restore        Restore from backup
+  qorven migrate        Apply database migrations
   qorven doctor         Run diagnostics
-  qorven update         Check for and install updates
-  qorven uninstall      Remove Qorven completely
-
-CONFIG:
-  qorven config         Show current config
+  qorven config         Show / edit config
   qorven version        Show version
+
+Use the web UI at http://localhost:8486 to manage agents, chat, channels, and workflows.
 
 Run 'qorven <command> --help' for details on any command.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -105,7 +97,7 @@ func loadConfig(cmd *cobra.Command) *Config {
 		}
 	}
 
-	// 2b. Saved profile token (from `qorven auth login`)
+	// 2b. Saved profile token (legacy — now web-UI only)
 	if c.Token == "" {
 		pf, _ := loadProfiles()
 		profile := pf.Active
