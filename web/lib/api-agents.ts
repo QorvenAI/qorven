@@ -148,6 +148,15 @@ export const sessions = {
       total: number;
       channels: string[];
     }>(`/sessions/unified?agent_id=${encodeURIComponent(agentId)}&limit=${limit}`),
+  injectMessage: (sessionId: string, message: string) =>
+    request<{ ok: boolean; queued: boolean }>(`/sessions/${sessionId}/inject`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  getSessionStatus: (sessionId: string) =>
+    request<{ busy: boolean; run_id?: string; phase?: string; tool?: string; iteration?: number }>(
+      `/sessions/${sessionId}/status`,
+    ),
 };
 
 export const chat = {
