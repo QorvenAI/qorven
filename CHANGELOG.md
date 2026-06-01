@@ -4,6 +4,21 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.4.0-alpha — 2026-06-01
+
+### Added
+- **Non-blocking chat input** — you can now send messages while an agent is actively working. Messages sent mid-run are queued and injected into the conversation at the next tool boundary, so the agent incorporates them without losing its current task context ([ca05213](https://github.com/QorvenAI/qorven/commit/ca05213), [330c995](https://github.com/QorvenAI/qorven/commit/330c995), [30203dd](https://github.com/QorvenAI/qorven/commit/30203dd))
+- **Queue indicator on send button** — when a message will be queued (agent is busy), the send button turns amber with a `+` badge; hovering shows a tooltip explaining the message will be added at the next step boundary ([30203dd](https://github.com/QorvenAI/qorven/commit/30203dd))
+- **Session status API** — new `GET /v1/sessions/{id}/status` endpoint returns whether a session has an active run, the current phase (thinking/tool execution), the active tool name, and iteration count ([af11825](https://github.com/QorvenAI/qorven/commit/af11825))
+- **Inject message API** — new `POST /v1/sessions/{id}/inject` endpoint for programmatically injecting messages into a running agent session ([af11825](https://github.com/QorvenAI/qorven/commit/af11825))
+
+### Improved
+- **Status bar** — now shows CPU%, RAM%, and disk usage as percentages; live date+time clock; active task, session, and pending approval counts; clicking opens the System page ([a249405](https://github.com/QorvenAI/qorven/commit/a249405))
+- **Injected messages persisted to session history** — messages queued mid-run are saved to the conversation log and survive page reload ([e796644](https://github.com/QorvenAI/qorven/commit/e796644))
+- **Agent run cancellation wired through** — stopping a run via the API now correctly cancels the underlying execution context ([4e2b2e0](https://github.com/QorvenAI/qorven/commit/4e2b2e0))
+
+---
+
 ## v0.3.9-alpha — 2026-05-31
 
 ### Changed
