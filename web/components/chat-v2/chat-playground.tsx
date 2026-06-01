@@ -346,6 +346,21 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
 
   const isStreaming = status === 'streaming' || status === 'submitted';
 
+  const [isAgentBusy, setIsAgentBusy] = useState(false);
+
+  // Poll session busy state every 2s while streaming.
+  // isAgentBusy tracks backend run state independently from SSE stream state.
+  useEffect(() => {
+    if (!isStreaming) {
+      setIsAgentBusy(false);
+      return;
+    }
+    const id = setInterval(() => {
+      sessionsApi.getSessionStatus(sessionId).then((s) => setIsAgentBusy(s.busy)).catch(() => {});
+    }, 2000);
+    return () => clearInterval(id);
+  }, [isStreaming, sessionId]);
+
   // Get parts from the last assistant message (which is in-progress during streaming)
   const lastMsg = chatMessages[chatMessages.length - 1];
   const lastParts = (isStreaming && lastMsg?.role === 'assistant') ? (lastMsg.parts ?? []) : [];
@@ -417,6 +432,17 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
 
   const handleComposerSubmit = useCallback((attachments?: Array<{ name: string; type: string; url: string; size: number }>) => {
     if (!inputValue.trim() && !attachments?.length) return;
+
+    // If agent is currently running, inject rather than start a new turn
+    if (isAgentBusy) {
+      sessionsApi.injectMessage(sessionId, inputValue.trim()).catch(() => {
+        toast.error('Could not queue message — try again');
+      });
+      setInputValue('');
+      return;
+    }
+
+    setShellApprovals([]);
     setFollowUps([]);
     setStreamSources([]);
     setStreamWidgets([]);
@@ -436,7 +462,7 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
       sendMessage({ text: inputValue.trim() });
     }
     setInputValue('');
-  }, [inputValue, sendMessage]);
+  }, [inputValue, sendMessage, isAgentBusy, sessionId]);
 
   // Stamp the newly added user message with the send time
   useEffect(() => {
@@ -699,6 +725,7 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
       <Composer
         input={inputValue}
         isLoading={showStopButton}
+        isAgentBusy={isAgentBusy}
         onInputChange={setInputValue}
         onSubmit={handleComposerSubmit}
         onStop={stop}

@@ -23,6 +23,7 @@ type ThinkingLevel = 'off' | 'medium' | 'high';
 interface ComposerProps {
   input: string;
   isLoading: boolean;
+  isAgentBusy?: boolean;
   onInputChange: (v: string) => void;
   onSubmit: (attachments?: Attachment[]) => void;
   onStop: () => void;
@@ -84,6 +85,7 @@ function VoiceButtonInline({ agentId }: { agentId: string }) {
 export function Composer({
   input,
   isLoading,
+  isAgentBusy = false,
   onInputChange,
   onSubmit,
   onStop,
@@ -121,7 +123,7 @@ export function Composer({
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isLoading && (input.trim() || attachments.length)) handleSend();
+      if ((isAgentBusy || !isLoading) && (input.trim() || attachments.length)) handleSend();
     }
   };
 
@@ -201,7 +203,7 @@ export function Composer({
 
   const toggleMic = () => { if (micState === 'idle') startMic(); else if (micState === 'recording') stopMic(); };
 
-  const canSend = (input.trim().length > 0 || attachments.length > 0) && !isLoading;
+  const canSend = (input.trim().length > 0 || attachments.length > 0) && (!isLoading || isAgentBusy);
 
   return (
     <div className="border-t border-border bg-background px-6 py-3">
@@ -311,14 +313,21 @@ export function Composer({
                 onClick={handleSend}
                 disabled={!canSend}
                 className={cn(
-                  'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                  'flex h-8 w-8 items-center justify-center rounded-lg transition-colors relative',
                   canSend
-                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    ? isAgentBusy
+                      ? 'bg-amber-500 text-white hover:bg-amber-600'
+                      : 'bg-primary text-primary-foreground hover:bg-primary/90'
                     : 'bg-muted text-muted-foreground cursor-not-allowed',
                 )}
-                title="Send (Enter)"
+                title={isAgentBusy ? 'Agent is working — your message will be added when it finishes its current step' : 'Send (Enter)'}
               >
                 <Send className="h-3.5 w-3.5" />
+                {isAgentBusy && canSend && (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-amber-400 text-[8px] font-bold text-white">
+                    +
+                  </span>
+                )}
               </button>
             )}
           </div>
