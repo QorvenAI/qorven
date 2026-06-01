@@ -435,10 +435,18 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
 
     // If agent is currently running, inject rather than start a new turn
     if (isAgentBusy) {
-      sessionsApi.injectMessage(sessionId, inputValue.trim()).catch(() => {
-        toast.error('Could not queue message — try again');
-      });
+      const msg = inputValue.trim();
       setInputValue('');
+      sessionsApi.injectMessage(sessionId, msg).catch((err: unknown) => {
+        // 409 = agent finished just before we sent — fall back to normal send
+        const status = (err as { status?: number })?.status;
+        if (status === 409 || status === undefined) {
+          setIsAgentBusy(false);
+          sendMessage({ text: msg });
+        } else {
+          toast.error('Could not queue message — try again');
+        }
+      });
       return;
     }
 
@@ -462,7 +470,7 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
       sendMessage({ text: inputValue.trim() });
     }
     setInputValue('');
-  }, [inputValue, sendMessage, isAgentBusy, sessionId]);
+  }, [inputValue, sendMessage, isAgentBusy, sessionId, setIsAgentBusy]);
 
   // Stamp the newly added user message with the send time
   useEffect(() => {
