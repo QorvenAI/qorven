@@ -127,7 +127,7 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
       <div className="wrapper flex min-h-screen flex-col">
         <Header />
         <Toolbar />
-        <main className="main-canvas flex-1 overflow-y-scroll" style={{ scrollbarGutter: 'stable' }}>
+        <main className="main-canvas flex-1 overflow-y-scroll scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
           {children}
         </main>
       </div>

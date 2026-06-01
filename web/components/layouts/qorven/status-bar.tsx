@@ -23,7 +23,25 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2, TrendingUp } from 'lucide-react';
+import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2, TrendingUp, Clock } from 'lucide-react';
+
+// ── Live clock ────────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [time, setTime] = useState('');
+  useEffect(() => {
+    const fmt = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    setTime(fmt());
+    const id = setInterval(() => setTime(fmt()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!time) return null;
+  return (
+    <span className="flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground/70 tabular-nums text-2xs select-none">
+      <Clock className="h-3 w-3 shrink-0 opacity-60" />
+      {time}
+    </span>
+  );
+}
 
 interface UpdateInfo {
   current: string;
@@ -246,6 +264,9 @@ export function StatusBar() {
         ) : null}
 
         <div className="flex-1" />
+        {/* Clock — centered */}
+        <LiveClock />
+        <div className="flex-1" />
 
         {/* Right side — system + cost stats */}
         <div className="flex items-center gap-0.5 ml-auto">
@@ -266,14 +287,14 @@ export function StatusBar() {
 
               {/* Memory */}
               <StatusChip title={`RAM used: ${stats.mem_used_gb.toFixed(2)} GB · Available: ${(stats.mem_total_gb - stats.mem_used_gb).toFixed(2)} GB · Total: ${stats.mem_total_gb.toFixed(1)} GB`}>
-                <MemoryStick className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.5} />{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB
+                <MemoryStick className="h-3 w-3 shrink-0" strokeWidth={2.5} /><span>{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB</span>
               </StatusChip>
 
               <StatusDivider />
 
               {/* Disk */}
               <StatusChip title={`Disk used: ${stats.disk_used_gb.toFixed(2)} GB · Free: ${(stats.disk_total_gb - stats.disk_used_gb).toFixed(2)} GB · Total: ${stats.disk_total_gb.toFixed(1)} GB`}>
-                <HardDrive className="h-3 w-3 mr-0.5 shrink-0" strokeWidth={2.5} />{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB
+                <HardDrive className="h-3 w-3 shrink-0" strokeWidth={2.5} /><span>{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB</span>
               </StatusChip>
 
               <StatusDivider />
@@ -473,7 +494,7 @@ function StatusChip({ children, title }: { children: React.ReactNode; title?: st
   return (
     <span
       title={title}
-      className="px-1.5 h-full flex items-center font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
+      className="px-1.5 h-full flex items-center gap-1 font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors rounded-sm cursor-default tabular-nums"
     >
       {children}
     </span>
