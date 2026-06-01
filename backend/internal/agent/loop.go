@@ -1729,6 +1729,17 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 			})
 		}
 
+		// Drain any messages the user sent while tools were executing.
+		// forLLM: injected user messages appended to context for the next LLM call.
+		// forSession: messages to persist (excludes HideInput ones).
+		if req.InjectCh != nil {
+			injected, _ := drainInjectChannel(req.InjectCh, onEvent)
+			if len(injected) > 0 {
+				messages = append(messages, injected...)
+				onEvent(StreamEvent{Type: "inject.applied", Data: map[string]any{"count": len(injected)}})
+			}
+		}
+
 		// Qorven-style total tool budget: after 15 total tool calls, force summarize
 		if len(result.ToolsUsed) >= 15 {
 			slog.Warn("agent.loop.tool_budget", "agent", ag.ID, "total", len(result.ToolsUsed))
