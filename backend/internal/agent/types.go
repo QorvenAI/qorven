@@ -92,6 +92,11 @@ type RunRequest struct {
 	// self-continues past maxIter by checkpointing and re-waking until the
 	// task is complete, budget is exhausted, or the session is cancelled.
 	Autonomous bool
+
+	// InjectCh receives mid-run user messages. When set, the loop drains
+	// this channel at every tool-call boundary and folds the messages into
+	// the conversation context before the next LLM call.
+	InjectCh InjectChannel
 }
 
 // ImageInput represents an image attached to a request.
