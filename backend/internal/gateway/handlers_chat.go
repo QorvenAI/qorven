@@ -536,9 +536,11 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 
 		// Register this run so mid-run messages can be injected
 		var runID string
+		runCtx := context.Background()
 		if gw.runRouter != nil {
 			runID = uuid.New().String()
-			_, cancel := context.WithCancel(context.Background())
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithCancel(context.Background())
 			injectCh := gw.runRouter.RegisterRun(runID, sessionID, agentID, cancel)
 			req.InjectCh = injectCh
 		}
@@ -551,7 +553,7 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 			if req.Autonomous && gw.agentLoop.Autonomous != nil {
 				runFn = gw.agentLoop.Autonomous.RunAutonomous
 			}
-			runFn(context.Background(), req, func(event agent.StreamEvent) {
+			runFn(runCtx, req, func(event agent.StreamEvent) {
 				var data []byte
 				switch event.Type {
 				case "text_delta":
