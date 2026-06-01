@@ -4,6 +4,21 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.3.9-alpha — 2026-05-31
+
+### Changed
+- **CLI simplified to ops-only** — removed TUI and all commands that mirrored the web UI (agents, chat, sessions, channels, rooms, tasks, workflows, auth, providers, memory, MCP, and 20+ others). The CLI now handles only system operations: `start`, `stop`, `restart`, `status`, `install`, `update`, `uninstall`, `logs`, `backup`, `restore`, `migrate`, `doctor`, `config`, `init`, `setup`, `version` ([4f846b1](https://github.com/QorvenAI/qorven/commit/4f846b1))
+- **Web UI is the single interface for all agent work** — agents, chat, channels, workflows, and everything else is managed at `http://localhost:8486`
+
+### Fixed
+- **Auth redirect before page renders** — added `middleware.ts` so unauthenticated requests redirect to login at the Edge, before any page content loads ([3f14c00](https://github.com/QorvenAI/qorven/commit/3f14c00))
+- **Terminal WebSocket auth** — WS connections now use `wsAuth` middleware which accepts `?token=` query param; browsers cannot send custom headers on WebSocket upgrade ([b0a997c](https://github.com/QorvenAI/qorven/commit/b0a997c))
+- **Terminal connects to backend directly** — `wsBase()` uses `NEXT_PUBLIC_API_URL` in dev so WebSocket connections bypass the Next.js proxy (which cannot proxy WS upgrades) ([c01ff1d](https://github.com/QorvenAI/qorven/commit/c01ff1d))
+- **Terminal escape sequences stripped** — raw ANSI/OSC codes no longer show as garbage in the simple text renderer ([c01ff1d](https://github.com/QorvenAI/qorven/commit/c01ff1d))
+- **Sidebar restored on terminal page** — terminal page no longer hides the sidebar ([c01ff1d](https://github.com/QorvenAI/qorven/commit/c01ff1d))
+
+---
+
 ## v0.3.8-alpha — 2026-05-30
 
 ### Added
