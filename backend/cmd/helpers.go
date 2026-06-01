@@ -5,6 +5,8 @@
 package cmd
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,12 +16,10 @@ import (
 // unmarshalList parses a JSON response that contains a list.
 // Handles both bare arrays and {"key": [...]} envelopes.
 func unmarshalList(data json.RawMessage) []map[string]any {
-	// Try bare array first
 	var list []map[string]any
 	if json.Unmarshal(data, &list) == nil {
 		return list
 	}
-	// Try envelope: {"agents": [...], "sessions": [...], etc.}
 	var envelope map[string]json.RawMessage
 	if json.Unmarshal(data, &envelope) == nil {
 		for _, v := range envelope {
@@ -31,14 +31,12 @@ func unmarshalList(data json.RawMessage) []map[string]any {
 	return nil
 }
 
-// unmarshalMap parses a JSON response as a single object.
 func unmarshalMap(data json.RawMessage) map[string]any {
 	var m map[string]any
 	_ = json.Unmarshal(data, &m)
 	return m
 }
 
-// str safely gets a string from a map.
 func str(m map[string]any, key string) string {
 	if v, ok := m[key]; ok {
 		return fmt.Sprintf("%v", v)
@@ -46,7 +44,6 @@ func str(m map[string]any, key string) string {
 	return ""
 }
 
-// buildBody creates a map from key-value pairs, skipping empty/zero values.
 func buildBody(pairs ...any) map[string]any {
 	body := make(map[string]any)
 	for i := 0; i < len(pairs)-1; i += 2 {
@@ -72,7 +69,6 @@ func buildBody(pairs ...any) map[string]any {
 	return body
 }
 
-// readContent reads from @file or returns literal string.
 func readContent(val string) (string, error) {
 	if strings.HasPrefix(val, "@") {
 		data, err := os.ReadFile(val[1:])
@@ -83,6 +79,7 @@ func readContent(val string) (string, error) {
 	}
 	return val, nil
 }
+
 func mmin(a, b int) int { if a < b { return a }; return b }
 
 func safeID(s string) string {
@@ -90,4 +87,42 @@ func safeID(s string) string {
 		return s[:8]
 	}
 	return s
+}
+
+// ── Auth profile stubs (auth CLI removed — web UI handles login) ──────────────
+
+type profilesFile struct {
+	Active   string    `json:"active"`
+	Profiles []profile `json:"profiles"`
+}
+type profile struct {
+	Name   string `json:"name"`
+	Server string `json:"server"`
+	Token  string `json:"token"`
+}
+
+func loadProfiles() (profilesFile, error) { return profilesFile{}, nil }
+func loadToken(_ string) string           { return "" }
+
+// ── Crypto helpers (used by init command) ─────────────────────────────────────
+
+func generateToken(bytes int) string {
+	b := make([]byte, bytes)
+	if _, err := rand.Read(b); err != nil {
+		panic("generateToken: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+func writeEnvFile(path, dsn, token, encKey string) {
+	content := strings.Join([]string{
+		"# Qorven secrets — keep private",
+		"QORVEN_POSTGRES_DSN=" + dsn,
+		"QORVEN_GATEWAY_TOKEN=" + token,
+		"QORVEN_ENCRYPTION_KEY=" + encKey,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		fmt.Printf("  WARN: could not write %s: %v\n", path, err)
+	}
 }
