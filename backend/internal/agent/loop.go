@@ -1733,9 +1733,18 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 		// forLLM: injected user messages appended to context for the next LLM call.
 		// forSession: messages to persist (excludes HideInput ones).
 		if req.InjectCh != nil {
-			injected, _ := drainInjectChannel(req.InjectCh, onEvent)
+			injected, sessionMsgs := drainInjectChannel(req.InjectCh, onEvent)
 			if len(injected) > 0 {
 				messages = append(messages, injected...)
+				// Persist non-HideInput injected messages to session history so they
+				// survive a page reload and appear in the conversation transcript.
+				if l.sessionStore != nil && req.SessionID != "" {
+					for _, m := range sessionMsgs {
+						l.sessionStore.AppendMessage(ctx, req.SessionID, session.Message{
+							Role: m.Role, Content: m.Content, Timestamp: time.Now().UnixMilli(),
+						}, 0, 0)
+					}
+				}
 				onEvent(StreamEvent{Type: "inject.applied", Data: map[string]any{"count": len(injected)}})
 			}
 		}
