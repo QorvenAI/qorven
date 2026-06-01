@@ -23,22 +23,29 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { X, ExternalLink, MemoryStick, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2, TrendingUp, Clock } from 'lucide-react';
+import { X, ExternalLink, Cpu, Database, HardDrive, Bot, ArrowUpCircle, Loader2, CheckCircle2, TrendingUp, Clock, CheckSquare, MessageSquare, Bell } from 'lucide-react';
 
 // ── Live clock ────────────────────────────────────────────────────────────────
 function LiveClock() {
-  const [time, setTime] = useState('');
+  const [dt, setDt] = useState({ date: '', time: '' });
   useEffect(() => {
-    const fmt = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    setTime(fmt());
-    const id = setInterval(() => setTime(fmt()), 1000);
+    const fmt = () => {
+      const now = new Date();
+      return {
+        date: now.toLocaleDateString([], { day: '2-digit', month: 'short' }),
+        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+      };
+    };
+    setDt(fmt());
+    const id = setInterval(() => setDt(fmt()), 1000);
     return () => clearInterval(id);
   }, []);
-  if (!time) return null;
+  if (!dt.time) return null;
   return (
     <span className="flex items-center gap-1 px-1.5 h-full font-mono text-muted-foreground/70 tabular-nums text-2xs select-none">
-      <Clock className="h-3 w-3 shrink-0 opacity-60" />
-      {time}
+      <Clock className="h-3 w-3 shrink-0 opacity-60" strokeWidth={2} />
+      <span className="text-muted-foreground/50">{dt.date}</span>
+      <span>{dt.time}</span>
     </span>
   );
 }
@@ -65,12 +72,16 @@ interface StatsBar {
   mem_total_gb: number;
   disk_used_gb: number;
   disk_total_gb: number;
+  cpu_percent?: number;
   uptime_sec: number;
   db_ok: boolean;
   cost_month_usd: number;
   tokens_in_today: number;
   tokens_out_today: number;
   active_qors: number;
+  active_tasks?: number;
+  active_sessions?: number;
+  pending_approvals?: number;
   goroutines: number;
   top_agents: AgentSpend[];
 }
@@ -279,40 +290,105 @@ export function StatusBar() {
               />
 
               {/* Uptime */}
-              <StatusChip title={`Uptime: ${fmtUptime(displaySec)} · ${stats.goroutines} goroutines`}>
+              <SystemChip
+                tooltip={`Server uptime: ${fmtUptime(displaySec)} · ${stats.goroutines} goroutines running`}
+              >
                 {fmtUptime(displaySec)}
-              </StatusChip>
+              </SystemChip>
 
               <StatusDivider />
 
+              {/* CPU */}
+              {stats.cpu_percent != null && (
+                <>
+                  <SystemChip
+                    tooltip={`CPU usage: ${stats.cpu_percent.toFixed(1)}%`}
+                  >
+                    <Cpu className="h-3 w-3 shrink-0" strokeWidth={2} />
+                    <span className={stats.cpu_percent > 80 ? 'text-amber-400' : undefined}>
+                      {stats.cpu_percent.toFixed(0)}%
+                    </span>
+                  </SystemChip>
+                  <StatusDivider />
+                </>
+              )}
+
               {/* Memory */}
-              <StatusChip title={`RAM used: ${stats.mem_used_gb.toFixed(2)} GB · Available: ${(stats.mem_total_gb - stats.mem_used_gb).toFixed(2)} GB · Total: ${stats.mem_total_gb.toFixed(1)} GB`}>
-                <MemoryStick className="h-3 w-3 shrink-0" strokeWidth={2.5} /><span>{stats.mem_used_gb.toFixed(1)}/{stats.mem_total_gb.toFixed(0)}GB</span>
-              </StatusChip>
+              <SystemChip
+                tooltip={`Memory: ${stats.mem_used_gb.toFixed(1)} GB used of ${stats.mem_total_gb.toFixed(0)} GB · ${(stats.mem_total_gb - stats.mem_used_gb).toFixed(1)} GB free`}
+              >
+                <Database className="h-3 w-3 shrink-0" strokeWidth={2} />
+                <span className={stats.mem_used_gb / stats.mem_total_gb > 0.85 ? 'text-amber-400' : undefined}>
+                  {Math.round(stats.mem_used_gb / stats.mem_total_gb * 100)}%
+                </span>
+                <span className="text-muted-foreground/50 text-[10px]">{stats.mem_used_gb.toFixed(1)}G</span>
+              </SystemChip>
 
               <StatusDivider />
 
               {/* Disk */}
-              <StatusChip title={`Disk used: ${stats.disk_used_gb.toFixed(2)} GB · Free: ${(stats.disk_total_gb - stats.disk_used_gb).toFixed(2)} GB · Total: ${stats.disk_total_gb.toFixed(1)} GB`}>
-                <HardDrive className="h-3 w-3 shrink-0" strokeWidth={2.5} /><span>{stats.disk_used_gb.toFixed(0)}/{stats.disk_total_gb.toFixed(0)}GB</span>
-              </StatusChip>
+              <SystemChip
+                tooltip={`Disk: ${stats.disk_used_gb.toFixed(0)} GB used of ${stats.disk_total_gb.toFixed(0)} GB · ${(stats.disk_total_gb - stats.disk_used_gb).toFixed(0)} GB free`}
+              >
+                <HardDrive className="h-3 w-3 shrink-0" strokeWidth={2} />
+                <span className={stats.disk_used_gb / stats.disk_total_gb > 0.85 ? 'text-amber-400' : undefined}>
+                  {Math.round(stats.disk_used_gb / stats.disk_total_gb * 100)}%
+                </span>
+                <span className="text-muted-foreground/50 text-[10px]">{stats.disk_used_gb.toFixed(0)}G</span>
+              </SystemChip>
+
+              <StatusDivider />
+
+              {/* Active agents */}
+              <SystemChip tooltip={`${stats.active_qors} agent${stats.active_qors !== 1 ? 's' : ''} active`}>
+                <Bot className="h-3 w-3 shrink-0" strokeWidth={2} />
+                {stats.active_qors}
+              </SystemChip>
+
+              {/* Active tasks */}
+              {stats.active_tasks != null && (
+                <>
+                  <StatusDivider />
+                  <SystemChip tooltip={`${stats.active_tasks} task${stats.active_tasks !== 1 ? 's' : ''} in progress`}>
+                    <CheckSquare className="h-3 w-3 shrink-0" strokeWidth={2} />
+                    {stats.active_tasks}
+                  </SystemChip>
+                </>
+              )}
+
+              {/* Active sessions */}
+              {stats.active_sessions != null && (
+                <>
+                  <StatusDivider />
+                  <SystemChip tooltip={`${stats.active_sessions} active conversation${stats.active_sessions !== 1 ? 's' : ''} (last 30 min)`}>
+                    <MessageSquare className="h-3 w-3 shrink-0" strokeWidth={2} />
+                    {stats.active_sessions}
+                  </SystemChip>
+                </>
+              )}
+
+              {/* Pending approvals */}
+              {stats.pending_approvals != null && stats.pending_approvals > 0 && (
+                <>
+                  <StatusDivider />
+                  <SystemChip tooltip={`${stats.pending_approvals} action${stats.pending_approvals !== 1 ? 's' : ''} waiting for your approval`} highlight>
+                    <Bell className="h-3 w-3 shrink-0" strokeWidth={2} />
+                    {stats.pending_approvals}
+                  </SystemChip>
+                </>
+              )}
 
               <StatusDivider />
 
               {/* Tokens today */}
-              <StatusChip title={`Tokens today — Prompt (↑): ${stats.tokens_in_today.toLocaleString()} · Completion (↓): ${stats.tokens_out_today.toLocaleString()} · Total: ${(stats.tokens_in_today + stats.tokens_out_today).toLocaleString()}`}>
+              <SystemChip tooltip={`Tokens today — sent: ${stats.tokens_in_today.toLocaleString()} · received: ${stats.tokens_out_today.toLocaleString()}`}>
                 <span className="text-blue-400/70">↑</span>{fmtK(stats.tokens_in_today)}&nbsp;<span className="text-emerald-400/70">↓</span>{fmtK(stats.tokens_out_today)}
-              </StatusChip>
+              </SystemChip>
 
               <StatusDivider />
 
-              {/* Cost this month — hoverable with per-agent breakdown */}
+              {/* Cost this month */}
               <CostChip cost={stats.cost_month_usd} topAgents={stats.top_agents ?? []} />
-
-              <StatusDivider />
-
-              {/* Active Qors */}
-              <ActiveQorsChip count={stats.active_qors} />
             </>
           )}
 
@@ -498,6 +574,19 @@ function StatusChip({ children, title }: { children: React.ReactNode; title?: st
     >
       {children}
     </span>
+  );
+}
+
+// SystemChip — links to /system on click, shows tooltip on hover
+function SystemChip({ children, tooltip, highlight }: { children: React.ReactNode; tooltip?: string; highlight?: boolean }) {
+  return (
+    <Link
+      href="/system"
+      title={tooltip}
+      className={`px-1.5 h-full flex items-center gap-1 font-mono hover:bg-accent transition-colors rounded-sm tabular-nums text-2xs ${highlight ? 'text-amber-400 hover:text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}
+    >
+      {children}
+    </Link>
   );
 }
 

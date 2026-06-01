@@ -10,6 +10,43 @@ import (
 	"time"
 )
 
+// readCPUPercent reads a 100ms CPU sample from /proc/stat (Linux).
+func readCPUPercent() float64 {
+	sample := func() (idle, total uint64) {
+		data, err := os.ReadFile("/proc/stat")
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if !strings.HasPrefix(line, "cpu ") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 5 {
+				break
+			}
+			var vals [8]uint64
+			for i := 1; i < len(fields) && i <= 8; i++ {
+				vals[i-1], _ = strconv.ParseUint(fields[i], 10, 64)
+			}
+			// user, nice, system, idle, iowait, irq, softirq, steal
+			idle = vals[3] + vals[4]
+			total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
+			return
+		}
+		return
+	}
+	idle1, total1 := sample()
+	time.Sleep(200 * time.Millisecond)
+	idle2, total2 := sample()
+	totalDiff := total2 - total1
+	idleDiff := idle2 - idle1
+	if totalDiff == 0 {
+		return 0
+	}
+	return (1.0 - float64(idleDiff)/float64(totalDiff)) * 100.0
+}
+
 // readMemInfoGB reads /proc/meminfo for MemTotal and MemAvailable (Linux).
 func readMemInfoGB() (usedGB, totalGB float64) {
 	data, err := os.ReadFile("/proc/meminfo")
@@ -116,18 +153,52 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 		).Scan(&activeQors)
 	}
 
+	// --- active tasks (in_progress) ---
+	var activeTasks int
+	if gw.db != nil {
+		gw.db.Pool.QueryRow(r.Context(),
+			`SELECT COUNT(*) FROM tasks WHERE tenant_id = $1 AND status = 'in_progress'`,
+			defaultTenant,
+		).Scan(&activeTasks)
+	}
+
+	// --- active sessions (updated in last 30 minutes) ---
+	var activeSessions int
+	if gw.db != nil {
+		gw.db.Pool.QueryRow(r.Context(),
+			`SELECT COUNT(*) FROM sessions WHERE tenant_id = $1 AND updated_at >= now() - interval '30 minutes'`,
+			defaultTenant,
+		).Scan(&activeSessions)
+	}
+
+	// --- pending approvals ---
+	var pendingApprovals int
+	if gw.db != nil {
+		gw.db.Pool.QueryRow(r.Context(),
+			`SELECT COUNT(*) FROM outbound_queue WHERE tenant_id = $1 AND status = 'pending'`,
+			defaultTenant,
+		).Scan(&pendingApprovals)
+	}
+
+	// --- CPU percent (non-blocking: sample already taken above) ---
+	cpuPct := readCPUPercent()
+
 	writeJSON(w, 200, map[string]any{
-		"mem_used_gb":      memUsedGB,
-		"mem_total_gb":     memTotalGB,
-		"disk_used_gb":     diskUsedGB,
-		"disk_total_gb":    diskTotalGB,
-		"uptime_sec":       uptimeSec,
-		"db_ok":            dbOK,
-		"cost_month_usd":   costMonthUSD,
-		"tokens_in_today":  tokensInToday,
-		"tokens_out_today": tokensOutToday,
-		"active_qors":      activeQors,
-		"goroutines":       runtime.NumGoroutine(),
-		"top_agents":       topAgents,
+		"mem_used_gb":       memUsedGB,
+		"mem_total_gb":      memTotalGB,
+		"disk_used_gb":      diskUsedGB,
+		"disk_total_gb":     diskTotalGB,
+		"cpu_percent":       cpuPct,
+		"uptime_sec":        uptimeSec,
+		"db_ok":             dbOK,
+		"cost_month_usd":    costMonthUSD,
+		"tokens_in_today":   tokensInToday,
+		"tokens_out_today":  tokensOutToday,
+		"active_qors":       activeQors,
+		"active_tasks":      activeTasks,
+		"active_sessions":   activeSessions,
+		"pending_approvals": pendingApprovals,
+		"goroutines":        runtime.NumGoroutine(),
+		"top_agents":        topAgents,
 	})
 }
