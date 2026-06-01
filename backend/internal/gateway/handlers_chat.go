@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/council"
@@ -532,7 +533,20 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		// The agent loop continues post-processing (persist, metrics, memory)
 		// in a background goroutine so the HTTP response closes immediately.
 		doneCh := make(chan struct{})
+
+		// Register this run so mid-run messages can be injected
+		var runID string
+		if gw.runRouter != nil {
+			runID = uuid.New().String()
+			_, cancel := context.WithCancel(context.Background())
+			injectCh := gw.runRouter.RegisterRun(runID, sessionID, agentID, cancel)
+			req.InjectCh = injectCh
+		}
+
 		go func() {
+			if gw.runRouter != nil && runID != "" {
+				defer gw.runRouter.UnregisterRun(runID)
+			}
 			runFn := gw.agentLoop.Run
 			if req.Autonomous && gw.agentLoop.Autonomous != nil {
 				runFn = gw.agentLoop.Autonomous.RunAutonomous
