@@ -84,14 +84,25 @@ function OrgRoleBadge({ orgRole }: { orgRole?: string }) {
   );
 }
 
+// ─── Model name shortener ──────────────────────────────────────────────────────
+function shortModel(model: string): string {
+  if (!model) return '';
+  if (model.startsWith('claude-')) {
+    const m = model.replace(/^claude-/, '').replace(/-\d{8,}$/, '');
+    const parts = m.split('-');
+    const name = parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) : '';
+    const ver  = parts.slice(1).join('.').replace(/\.$/, '');
+    return ver ? `${name} ${ver}` : name;
+  }
+  if (model.startsWith('gpt-')) return model.replace('gpt-', 'GPT-');
+  if (model.startsWith('gemini-')) return 'Gemini ' + model.replace('gemini-', '').replace(/-/g, ' ');
+  return model.length > 16 ? model.slice(0, 14) + '…' : model;
+}
+
 // ─── QorCard ───────────────────────────────────────────────────────────────────
-function QorCard({ soul, onDeleted, size = 'md' }: {
-  soul: Soul;
-  onDeleted: () => void;
-  size?: 'sm' | 'md' | 'lg';
-}) {
+function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
   const router = useRouter();
-  const { activity, lastEvent } = useSoulRun(soul.id);
+  const { activity, lastEvent, tokensToday } = useSoulRun(soul.id);
   const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -111,12 +122,21 @@ function QorCard({ soul, onDeleted, size = 'md' }: {
   const statusVariant = ACTIVITY_STATUS[activity] ?? 'offline';
   const statusLabel   = ACTIVITY_LABEL[activity]  ?? 'Offline';
   const isActive      = activity === 'thinking' || activity === 'running';
-  const avatarSize    = size === 'lg' ? 'size-12' : size === 'sm' ? 'size-8' : 'size-10';
-  const fallbackSize  = size === 'lg' ? 'text-base' : size === 'sm' ? 'text-xs' : 'text-sm';
 
   const roleDesc = soul.org_role && ORG_ROLE_META[soul.org_role]
     ? `${ORG_ROLE_META[soul.org_role]!.label} — ${soul.org_level === 'l1' ? 'Executive' : soul.org_level === 'l2' ? 'Management' : 'Specialist'}`
     : soul.title || soul.role || 'Assistant';
+
+  const modelLabel = shortModel(soul.model);
+  const spentUSD   = soul.credit_used_cents ? `$${(soul.credit_used_cents / 100).toFixed(2)}` : null;
+  const tokensK    = tokensToday > 0
+    ? (tokensToday >= 1000 ? `${(tokensToday / 1000).toFixed(1)}k tok` : `${tokensToday} tok`)
+    : null;
+
+  const caps: string[] = [];
+  if (soul.web_search_enabled) caps.push('Web');
+  if (soul.memory_enabled) caps.push('Memory');
+  if (soul.can_delegate) caps.push('Delegate');
 
   return (
     <Card
@@ -128,15 +148,13 @@ function QorCard({ soul, onDeleted, size = 'md' }: {
         deleting && 'opacity-50 pointer-events-none',
       )}
     >
-      <CardContent className={cn('p-4', size === 'sm' && 'p-3')}>
-        <div className="flex items-start gap-3">
+      <CardContent className="p-4">
 
-          {/* Avatar with status */}
+        {/* Identity row */}
+        <div className="flex items-start gap-3">
           <div className="relative shrink-0">
-            <Avatar className={avatarSize}>
-              <AvatarFallback
-                className={cn('bg-gradient-to-br font-semibold text-white', soulGradient(soul.display_name), fallbackSize)}
-              >
+            <Avatar className="size-10">
+              <AvatarFallback className={cn('bg-gradient-to-br font-semibold text-white text-sm', soulGradient(soul.display_name))}>
                 {soul.display_name.charAt(0).toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -150,21 +168,14 @@ function QorCard({ soul, onDeleted, size = 'md' }: {
             </Tooltip>
           </div>
 
-          {/* Info */}
-          <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <p className={cn('truncate font-semibold leading-tight', size === 'sm' ? 'text-xs' : 'text-sm')}>
-                {soul.display_name}
-              </p>
+              <p className="truncate text-sm font-semibold leading-tight">{soul.display_name}</p>
               <OrgRoleBadge orgRole={soul.org_role} />
             </div>
-            <p className="truncate text-xs text-muted-foreground">{roleDesc}</p>
-            {size !== 'sm' && lastEvent && (
-              <p className="truncate text-[11px] text-muted-foreground/50 mt-0.5">{lastEvent}</p>
-            )}
+            <p className="truncate text-xs text-muted-foreground mt-0.5">{roleDesc}</p>
           </div>
 
-          {/* Overflow menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -185,43 +196,59 @@ function QorCard({ soul, onDeleted, size = 'md' }: {
                 <Settings className="size-3.5 mr-2" /> Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleDelete}
-                className="text-destructive focus:text-destructive focus:bg-destructive/10"
-              >
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive focus:bg-destructive/10">
                 <Trash2 className="size-3.5 mr-2" /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        {/* Action strip — only on md/lg, shown on hover */}
-        {size !== 'sm' && (
-          <div className="mt-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 h-7 text-xs"
-              onClick={(e) => { e.stopPropagation(); router.push(`/qors/${soul.id}`); }}
-            >
-              <MessageSquare className="size-3 mr-1.5" />
-              Chat
-            </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={(e) => { e.stopPropagation(); router.push(`/qors/${soul.id}?tab=inbox`); }}
-                >
-                  <Settings className="size-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">Open settings</TooltipContent>
-            </Tooltip>
+        {/* Meta row — model · tokens · spend */}
+        {(modelLabel || tokensK || spentUSD) && (
+          <div className="mt-2.5 flex items-center gap-2 text-[11px] text-muted-foreground/70">
+            {modelLabel && <span className="font-medium">{modelLabel}</span>}
+            {tokensK    && <><span className="text-border">·</span><span>{tokensK}</span></>}
+            {spentUSD   && <><span className="text-border">·</span><span>{spentUSD}</span></>}
           </div>
         )}
+
+        {/* Last event or capability pills */}
+        {lastEvent ? (
+          <p className="mt-1 truncate text-[11px] text-muted-foreground/50">{lastEvent}</p>
+        ) : caps.length > 0 ? (
+          <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+            {caps.map((c) => (
+              <span key={c} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground font-medium">{c}</span>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Hover action strip */}
+        <div className="mt-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={(e) => { e.stopPropagation(); router.push(`/qors/${soul.id}`); }}
+          >
+            <MessageSquare className="size-3 mr-1.5" />
+            Chat
+          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={(e) => { e.stopPropagation(); router.push(`/qors/${soul.id}?tab=settings`); }}
+              >
+                <Settings className="size-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">Settings</TooltipContent>
+          </Tooltip>
+        </div>
+
       </CardContent>
     </Card>
   );
@@ -243,13 +270,8 @@ function TierSection({
   const meta = TIER_META[tier];
   const TierIcon = meta.Icon;
 
-  const gridCols =
-    tier === 'l1' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3' :
-    tier === 'l2' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' :
-                   'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
-
-  const cardSize: 'lg' | 'md' | 'sm' =
-    tier === 'l1' ? 'lg' : tier === 'l2' ? 'md' : 'sm';
+  // All tiers use the same 3-col grid — uniform card size, content fills the space
+  const gridCols = 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 
   return (
     <div className="space-y-3">
@@ -262,14 +284,9 @@ function TierSection({
       </div>
 
       {/* Cards */}
-      <div className={cn('grid gap-3', viewMode === 'grid' ? gridCols : gridCols)}>
+      <div className={cn('grid gap-3', gridCols)}>
         {souls.map((soul) => (
-          <QorCard
-            key={soul.id}
-            soul={soul}
-            onDeleted={onDeleted}
-            size={cardSize}
-          />
+          <QorCard key={soul.id} soul={soul} onDeleted={onDeleted} />
         ))}
       </div>
     </div>
@@ -431,7 +448,7 @@ export default function QorsPage() {
           ) : viewMode === 'grid' ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filtered.map((soul) => (
-                <QorCard key={soul.id} soul={soul} onDeleted={load} size="md" />
+                <QorCard key={soul.id} soul={soul} onDeleted={load} />
               ))}
             </div>
           ) : (
