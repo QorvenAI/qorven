@@ -60,7 +60,12 @@ const LLAMAFILE_PRESET: CatalogPreset = {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ProviderItem = { id: string; name: string; display_name?: string; provider_type: string; api_base?: string; enabled?: boolean };
-type ProvKey      = { id: string; label?: string; status: string; usage_count: number; budget_usd_monthly?: number; budget_tokens_monthly?: number };
+type ProvKey = {
+  id: string; label?: string; status: string; usage_count: number;
+  budget_usd_monthly?: number; budget_tokens_monthly?: number;
+  budget_type?: string; balance_usd?: number; token_quota_monthly?: number;
+  spent_usd_month?: number; spent_tokens_month?: number;
+};
 type LiveModel    = { id: string; name?: string };
 type SelModel     = { model_id: string; provider_id: string; is_default?: boolean };
 
@@ -916,7 +921,6 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
   const [savingKeys, setSavingKeys]     = useState(false);
   const [testingKey, setTestingKey]     = useState<string | null>(null);
   const [budgetKey, setBudgetKey]       = useState<string | null>(null);
-  const [budgetForm, setBudgetForm]     = useState({ usd: '', tokens: '' });
   const [poolConfig, setPoolConfig]     = useState({ strategy: 'priority', failover_mode: 'on_error' });
   const [savingPool, setSavingPool]     = useState(false);
 
@@ -973,16 +977,6 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
     if (!confirm('Remove this key?')) return;
     try { await providersApi.retireKey(id); toast.success('Key removed'); setExistingKeys(p => p.filter(k => k.id !== id)); }
     catch { toast.error('Could not remove key. Please try again.'); }
-  };
-
-  const saveBudget = async (id: string) => {
-    try {
-      await providersApi.setKeyBudget(id, {
-        budget_usd_monthly:    budgetForm.usd    ? parseFloat(budgetForm.usd)  : null,
-        budget_tokens_monthly: budgetForm.tokens ? parseInt(budgetForm.tokens) : null,
-      });
-      toast.success('Budget saved'); setBudgetKey(null); loadData();
-    } catch { toast.error('Could not save budget. Please try again.'); }
   };
 
   const savePool = async () => {
@@ -1154,7 +1148,7 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
                           {testingKey === k.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
                         </Button>
                         <Button variant="ghost" mode="icon" size="sm" title="Budget"
-                          onClick={() => { setBudgetKey(budgetKey === k.id ? null : k.id); setBudgetForm({ usd: k.budget_usd_monthly?.toString() ?? '', tokens: k.budget_tokens_monthly?.toString() ?? '' }); }}>
+                          onClick={() => setBudgetKey(budgetKey === k.id ? null : k.id)}>
                           <BarChart3 className="h-3 w-3" />
                         </Button>
                         <Button variant="ghost" mode="icon" size="sm" title="Remove" onClick={() => deleteKey(k.id)} className="hover:text-destructive hover:bg-destructive/10">
@@ -1163,22 +1157,7 @@ function KeyPoolSheet({ provider, open, onOpenChange, authProfiles }: {
                       </div>
                     </div>
                     {budgetKey === k.id && (
-                      <div className="border-t border-border/50 bg-muted/20 px-3.5 py-3 space-y-3">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-muted-foreground mb-1">Monthly USD limit</label>
-                            <input value={budgetForm.usd} onChange={e => setBudgetForm(p => ({ ...p, usd: e.target.value }))} placeholder="Unlimited" type="number" min="0" step="0.01" className={inputCls + ' text-xs py-1.5'} />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-muted-foreground mb-1">Monthly token limit</label>
-                            <input value={budgetForm.tokens} onChange={e => setBudgetForm(p => ({ ...p, tokens: e.target.value }))} placeholder="Unlimited" type="number" min="0" className={inputCls + ' text-xs py-1.5'} />
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="primary" onClick={() => saveBudget(k.id)}>Save Budget</Button>
-                          <Button size="sm" variant="outline" onClick={() => setBudgetKey(null)}>Cancel</Button>
-                        </div>
-                      </div>
+                      <KeyBudgetPanel k={k} onClose={() => setBudgetKey(null)} onSaved={() => { setBudgetKey(null); loadData(); }} />
                     )}
                   </div>
                 ))}
@@ -1401,6 +1380,305 @@ function SCard({ title, description, headerRight, children }: {
   );
 }
 
+// ─── Progress bar ─────────────────────────────────────────────────────────────
+
+function SpendBar({ spent, limit }: { spent: number; limit: number }) {
+  const pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
+  return (
+    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+      <div
+        className={cn('h-full rounded-full transition-all', pct >= 95 ? 'bg-destructive' : pct >= 80 ? 'bg-amber-400' : 'bg-primary')}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+// ─── Per-key budget panel ──────────────────────────────────────────────────────
+
+type BudgetType = 'prepaid' | 'postpaid' | 'quota' | 'free';
+
+function KeyBudgetPanel({ k, onClose, onSaved }: { k: ProvKey; onClose: () => void; onSaved: () => void }) {
+  const budgetType: BudgetType = (k.budget_type as BudgetType) || 'postpaid';
+  const [type, setType] = useState<BudgetType>(budgetType);
+  const [usdCap, setUsdCap] = useState(k.budget_usd_monthly?.toString() ?? '');
+  const [balance, setBalance] = useState(k.balance_usd?.toString() ?? '');
+  const [tokenQuota, setTokenQuota] = useState(k.token_quota_monthly?.toString() ?? '');
+  const [saving, setSaving] = useState(false);
+  const [topUpMode, setTopUpMode] = useState(false);
+  const [topUpVal, setTopUpVal] = useState('');
+  const [toppingUp, setToppingUp] = useState(false);
+
+  const spentUSD = k.spent_usd_month ?? 0;
+  const spentTokens = k.spent_tokens_month ?? 0;
+
+  const BUDGET_TYPES: { value: BudgetType; label: string }[] = [
+    { value: 'prepaid',  label: 'Prepaid' },
+    { value: 'postpaid', label: 'Postpaid (monthly)' },
+    { value: 'quota',    label: 'OAuth / Subscription' },
+    { value: 'free',     label: 'Free (local)' },
+  ];
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await providersApi.setKeyBudget(k.id, {
+        budget_type: type,
+        budget_usd_monthly: type === 'postpaid' && usdCap ? parseFloat(usdCap) : null,
+        balance_usd: type === 'prepaid' && balance ? parseFloat(balance) : null,
+        token_quota_monthly: type === 'quota' && tokenQuota ? parseInt(tokenQuota) : null,
+      });
+      toast.success('Budget saved');
+      onSaved();
+    } catch { toast.error('Could not save budget. Please try again.'); }
+    finally { setSaving(false); }
+  };
+
+  const doTopUp = async () => {
+    const val = parseFloat(topUpVal);
+    if (!val || val <= 0) return;
+    setToppingUp(true);
+    try {
+      await providersApi.markPrepaidTopUp(k.id, val);
+      toast.success(`Balance reset to $${val.toFixed(2)}`);
+      setTopUpMode(false); setTopUpVal('');
+      onSaved();
+    } catch { toast.error('Could not process top-up. Please try again.'); }
+    finally { setToppingUp(false); }
+  };
+
+  return (
+    <div className="border-t border-border/50 bg-muted/20 px-3.5 py-3.5 space-y-3.5">
+      {/* Budget type selector */}
+      <div>
+        <p className="text-xs text-muted-foreground mb-1.5">Budget type</p>
+        <div className="flex flex-wrap gap-1">
+          {BUDGET_TYPES.map(bt => (
+            <button key={bt.value} onClick={() => setType(bt.value)}
+              className={cn('rounded-md border px-2.5 py-1 text-xs transition-colors',
+                type === bt.value ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border hover:bg-accent')}>
+              {bt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Prepaid */}
+      {type === 'prepaid' && (
+        <div className="space-y-2">
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Loaded balance ($)</label>
+            <input value={balance} onChange={e => setBalance(e.target.value)} type="number" min="0" step="0.01"
+              placeholder="e.g. 20.00" className={inputCls + ' text-xs py-1.5'} />
+          </div>
+          {(k.balance_usd ?? 0) > 0 && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Spent this month</span>
+                <span>${spentUSD.toFixed(2)} / ${(k.balance_usd ?? 0).toFixed(2)}</span>
+              </div>
+              <SpendBar spent={spentUSD} limit={k.balance_usd ?? 1} />
+            </div>
+          )}
+          {!topUpMode ? (
+            <button onClick={() => setTopUpMode(true)}
+              className="text-xs text-primary hover:underline flex items-center gap-1">
+              Mark as topped up →
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input value={topUpVal} onChange={e => setTopUpVal(e.target.value)} type="number" min="0" step="0.01"
+                placeholder="New balance ($)" className={inputCls + ' text-xs py-1.5 flex-1'} />
+              <Button size="sm" variant="primary" onClick={doTopUp} disabled={toppingUp || !topUpVal}>
+                {toppingUp ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                Confirm
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setTopUpMode(false); setTopUpVal(''); }}>Cancel</Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Postpaid */}
+      {type === 'postpaid' && (
+        <div className="space-y-2">
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Monthly cap ($) — leave blank for unlimited</label>
+            <input value={usdCap} onChange={e => setUsdCap(e.target.value)} type="number" min="0" step="0.01"
+              placeholder="Unlimited" className={inputCls + ' text-xs py-1.5'} />
+          </div>
+          {usdCap && parseFloat(usdCap) > 0 && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Spent this month</span>
+                <span>${spentUSD.toFixed(2)} / ${parseFloat(usdCap).toFixed(2)}</span>
+              </div>
+              <SpendBar spent={spentUSD} limit={parseFloat(usdCap)} />
+            </div>
+          )}
+          {!usdCap && spentUSD > 0 && (
+            <p className="text-xs text-muted-foreground">Spent this month: ${spentUSD.toFixed(2)} · Resets 1st of each month</p>
+          )}
+        </div>
+      )}
+
+      {/* Quota (OAuth) */}
+      {type === 'quota' && (
+        <div className="space-y-2">
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Token quota / month — leave blank for unlimited</label>
+            <input value={tokenQuota} onChange={e => setTokenQuota(e.target.value)} type="number" min="0"
+              placeholder="Unlimited" className={inputCls + ' text-xs py-1.5'} />
+          </div>
+          {tokenQuota && parseInt(tokenQuota) > 0 && spentTokens > 0 && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Tokens used</span>
+                <span>{spentTokens.toLocaleString()} / {parseInt(tokenQuota).toLocaleString()}</span>
+              </div>
+              <SpendBar spent={spentTokens} limit={parseInt(tokenQuota)} />
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground italic">
+            Billing managed by your subscription — only tokens are tracked.
+          </p>
+        </div>
+      )}
+
+      {/* Free */}
+      {type === 'free' && (
+        <div>
+          <p className="text-xs text-muted-foreground">No cost — tokens tracked for visibility only.</p>
+          {spentTokens > 0 && <p className="text-xs text-muted-foreground mt-1">Tokens processed this month: {spentTokens.toLocaleString()}</p>}
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-0.5">
+        <Button size="sm" variant="primary" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Save budget
+        </Button>
+        <Button size="sm" variant="outline" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── OAuth connections card ───────────────────────────────────────────────────
+
+const OAUTH_CATALOG = [
+  { id: 'claude_code',    name: 'Claude Code',     emoji: '🤖' },
+  { id: 'github_copilot', name: 'GitHub Copilot',  emoji: '🐙' },
+  { id: 'google_vertex',  name: 'Gemini (OAuth)',   emoji: '🔷' },
+] as const;
+
+type OAuthStatus = { connected: boolean; expires_at?: string; updated_at?: string };
+
+function OAuthConnectionsCard() {
+  const [statuses, setStatuses] = useState<Record<string, OAuthStatus>>({});
+  const [loading,  setLoading]  = useState<Record<string, boolean>>({});
+  const popupRefs = useRef<Record<string, Window | null>>({});
+
+  // Load all statuses on mount
+  useEffect(() => {
+    OAUTH_CATALOG.forEach(p => {
+      providersApi.oauthStatus(p.id)
+        .then(s => setStatuses(prev => ({ ...prev, [p.id]: s as OAuthStatus })))
+        .catch(() => {});
+    });
+  }, []);
+
+  const connect = (id: string) => {
+    setLoading(prev => ({ ...prev, [id]: true }));
+    const url = providersApi.oauthStartUrl(id);
+    const popup = window.open(url, `oauth_${id}`, 'width=600,height=700,scrollbars=yes,resizable=yes');
+    if (!popup) {
+      setLoading(prev => ({ ...prev, [id]: false }));
+      toast.error('Popup blocked — please allow popups and try again.');
+      return;
+    }
+    popupRefs.current[id] = popup;
+
+    let poll: ReturnType<typeof setInterval>;
+    const onMsg = (evt: MessageEvent) => {
+      if (evt.data?.type === 'oauth_complete' && evt.data?.provider === id) {
+        clearInterval(poll);
+        window.removeEventListener('message', onMsg);
+        setLoading(prev => ({ ...prev, [id]: false }));
+        popupRefs.current[id] = null;
+        // Re-fetch status
+        providersApi.oauthStatus(id)
+          .then(s => setStatuses(prev => ({ ...prev, [id]: s as OAuthStatus })))
+          .catch(() => {});
+        toast.success(`Connected to ${OAUTH_CATALOG.find(p => p.id === id)?.name}`);
+      }
+    };
+    window.addEventListener('message', onMsg);
+
+    poll = setInterval(() => {
+      if (popupRefs.current[id]?.closed) {
+        clearInterval(poll);
+        window.removeEventListener('message', onMsg);
+        setLoading(prev => ({ ...prev, [id]: false }));
+        popupRefs.current[id] = null;
+      }
+    }, 500);
+  };
+
+  const disconnect = async (id: string) => {
+    if (!confirm(`Disconnect ${OAUTH_CATALOG.find(p => p.id === id)?.name}? The OAuth token will be deleted.`)) return;
+    try {
+      await providersApi.oauthRevoke(id);
+      setStatuses(prev => ({ ...prev, [id]: { connected: false } }));
+      toast.success('OAuth connection revoked');
+    } catch { toast.error('Could not revoke connection. Please try again.'); }
+  };
+
+  return (
+    <SCard title="OAuth Connections" description="Connect via OAuth — no API key required. Token is stored securely.">
+      <div className="space-y-2">
+        {OAUTH_CATALOG.map(p => {
+          const status = statuses[p.id];
+          const isConnected = status?.connected ?? false;
+          const isLoading = loading[p.id] ?? false;
+          return (
+            <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted border border-border/50 shrink-0 text-lg">
+                {p.emoji}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{p.name}</p>
+                {isConnected && status?.expires_at ? (
+                  <p className="text-xs text-muted-foreground">Expires {new Date(status.expires_at).toLocaleDateString()}</p>
+                ) : isConnected ? (
+                  <p className="text-xs text-emerald-400">Connected</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Not connected</p>
+                )}
+              </div>
+              <span className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium shrink-0',
+                isConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-muted text-muted-foreground',
+              )}>
+                <span className={cn('h-1.5 w-1.5 rounded-full', isConnected ? 'bg-emerald-400' : 'bg-muted-foreground/60')} />
+                {isConnected ? 'Connected' : 'Not connected'}
+              </span>
+              {isConnected ? (
+                <Button variant="outline" size="sm" onClick={() => disconnect(p.id)}>
+                  <Link2Off className="h-3.5 w-3.5" /> Disconnect
+                </Button>
+              ) : (
+                <Button variant="primary" size="sm" onClick={() => connect(p.id)} disabled={isLoading}>
+                  {isLoading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting…</> : <><ExternalLink className="h-3.5 w-3.5" /> Connect</>}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </SCard>
+  );
+}
+
 function ProviderRow({ provider, selectedModels, keyCount, oauthConnected, onToggle, onDelete, onVerify, onManageKeys, onManageModels, onRevokeOAuth }: {
   provider: ProviderItem; selectedModels: SelModel[]; keyCount: number;
   oauthConnected?: boolean;
@@ -1618,6 +1896,8 @@ export default function GenerativePage() {
             </div>
           )}
         </SCard>
+
+        <OAuthConnectionsCard />
 
         <AliasLookupCard />
       </div>

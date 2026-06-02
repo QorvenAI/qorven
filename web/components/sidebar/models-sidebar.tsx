@@ -3,7 +3,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useRouter, usePathname } from 'next/navigation';
-import { Brain, Image, Eye, Mic, Globe, GitBranch, BarChart3, Layers } from 'lucide-react';
+import { Brain, Image, Eye, Mic, Globe, GitBranch, BarChart3, Layers, DollarSign } from 'lucide-react';
 import { SidebarMenuItem } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
@@ -17,6 +17,7 @@ const ITEMS = [
   { href: '/models-hub/router',       label: 'Model Router',   icon: GitBranch },
   { href: '/models-hub/integrations', label: 'Integrations',   icon: BarChart3 },
   { href: '/models-hub/gateway',      label: 'Gateway',        icon: Layers },
+  { href: '/models-hub/spend',        label: 'Spend',          icon: DollarSign },
 ] as const;
 
 export function ModelsSidebar() {

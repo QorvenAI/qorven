@@ -68,8 +68,35 @@ export const providers = {
   getPoolConfig: (providerId: string) => request<{ strategy: string; failover_mode: string }>(`/providers/${providerId}/pool`),
   savePoolConfig: (providerId: string, cfg: { strategy: string; failover_mode: string }) =>
     request<void>(`/providers/${providerId}/pool`, { method: 'PUT', body: JSON.stringify(cfg) }),
-  setKeyBudget: (keyId: string, budget: { budget_usd_monthly?: number | null; budget_tokens_monthly?: number | null }) =>
+  setKeyBudget: (keyId: string, budget: {
+    budget_type?: 'prepaid' | 'postpaid' | 'quota' | 'free';
+    budget_usd_monthly?: number | null;
+    balance_usd?: number | null;
+    token_quota_monthly?: number | null;
+    budget_tokens_monthly?: number | null;
+  }) =>
     request<void>(`/providers/keys/${keyId}/budget`, { method: 'PUT', body: JSON.stringify(budget) }),
+  markPrepaidTopUp: (keyId: string, newBalanceUsd: number) =>
+    request<{ ok: boolean }>(`/providers/keys/${keyId}/topup`, { method: 'POST', body: JSON.stringify({ new_balance_usd: newBalanceUsd }) }),
+  getSpendSummary: () =>
+    request<{
+      month: string;
+      providers: Array<{
+        provider_id: string;
+        spent_usd_month: number;
+        spent_tokens_month: number;
+        budget_usd?: number;
+        keys: Array<{
+          key_id: string;
+          label: string;
+          key_hash: string;
+          spent_usd_month: number;
+          spent_tokens_month: number;
+          budget_type: string;
+          limit_usd?: number;
+        }>;
+      }>;
+    }>('/providers/spend/summary'),
   testKey: (keyId: string) => request<{ key_id: string; ok: boolean; verified: boolean; error: string; models: { id: string; name: string }[] }>(`/providers/keys/${keyId}/test`, { method: 'POST' }),
   oauthList: () => request<{ id: string; name: string; pkce: boolean; icon: string }[]>('/providers/oauth'),
   oauthStartUrl: (provider: string) => {
