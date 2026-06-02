@@ -223,32 +223,6 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
           </div>
         ) : null}
 
-        {/* Hover action strip */}
-        <div className="mt-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1 h-7 text-xs"
-            onClick={(e) => { e.stopPropagation(); router.push(`/qors/${soul.id}`); }}
-          >
-            <MessageSquare className="size-3 mr-1.5" />
-            Chat
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={(e) => { e.stopPropagation(); router.push(`/qors/${soul.id}?tab=settings`); }}
-              >
-                <Settings className="size-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">Settings</TooltipContent>
-          </Tooltip>
-        </div>
-
       </CardContent>
     </Card>
   );
