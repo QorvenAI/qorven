@@ -7,6 +7,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -1274,4 +1275,165 @@ func (gw *Gateway) handleExportTrajectory(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+}
+
+// ─── Provider-level budget ─────────────────────────────────────────────────────
+
+// handleGetProviderBudget returns the current budget config and spend for a provider.
+// GET /v1/providers/:provider_id/budget
+func (gw *Gateway) handleGetProviderBudget(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 503, map[string]string{"error": "database not configured"})
+		return
+	}
+	providerID := chi.URLParam(r, "provider_id")
+	var result struct {
+		ProviderID      string   `json:"provider_id"`
+		BudgetType      string   `json:"budget_type"`
+		BudgetUSD       *float64 `json:"budget_usd,omitempty"`
+		TokenQuota      *int64   `json:"token_quota,omitempty"`
+		SpentUSDMonth   float64  `json:"spent_usd_month"`
+		SpentTokens     int64    `json:"spent_tokens_month"`
+		ResetDay        int      `json:"reset_day"`
+		BudgetResetAt   *string  `json:"budget_reset_at,omitempty"`
+	}
+	result.ProviderID = providerID
+	result.BudgetType = "postpaid"
+	result.ResetDay = 1
+
+	gw.db.Pool.QueryRow(r.Context(),
+		`SELECT COALESCE(budget_type,'postpaid'), budget_usd, token_quota,
+		        spent_usd_month, spent_tokens_month, reset_day,
+		        to_char(budget_reset_at, 'YYYY-MM-DD')
+		 FROM provider_budgets
+		 WHERE tenant_id = $1 AND provider_id = $2`,
+		defaultTenant, providerID,
+	).Scan(&result.BudgetType, &result.BudgetUSD, &result.TokenQuota,
+		&result.SpentUSDMonth, &result.SpentTokens, &result.ResetDay, &result.BudgetResetAt)
+
+	writeJSON(w, 200, result)
+}
+
+// handleSetProviderBudget creates or updates a provider-level budget cap.
+// PUT /v1/providers/:provider_id/budget
+func (gw *Gateway) handleSetProviderBudget(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 503, map[string]string{"error": "database not configured"})
+		return
+	}
+	providerID := chi.URLParam(r, "provider_id")
+	var body struct {
+		BudgetType string   `json:"budget_type"`
+		BudgetUSD  *float64 `json:"budget_usd"`
+		TokenQuota *int64   `json:"token_quota"`
+		ResetDay   int      `json:"reset_day"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if body.BudgetType == "" {
+		body.BudgetType = "postpaid"
+	}
+	if body.ResetDay < 1 || body.ResetDay > 28 {
+		body.ResetDay = 1
+	}
+	_, err := gw.db.Pool.Exec(r.Context(),
+		`INSERT INTO provider_budgets
+		     (tenant_id, provider_id, budget_type, budget_usd, token_quota, reset_day, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, now())
+		 ON CONFLICT (tenant_id, provider_id) DO UPDATE SET
+		     budget_type = $3, budget_usd = $4, token_quota = $5, reset_day = $6, updated_at = now()`,
+		defaultTenant, providerID, body.BudgetType, body.BudgetUSD, body.TokenQuota, body.ResetDay)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// handleGetProviderSpendSummary returns monthly spend grouped by provider, with per-key breakdown.
+// GET /v1/providers/spend/summary
+func (gw *Gateway) handleGetProviderSpendSummary(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 503, map[string]string{"error": "database not configured"})
+		return
+	}
+
+	type keySpend struct {
+		KeyID    string  `json:"key_id"`
+		Label    string  `json:"label"`
+		KeyHash  string  `json:"key_hash"`
+		SpentUSD float64 `json:"spent_usd_month"`
+		Tokens   int64   `json:"spent_tokens_month"`
+		BudgetType string `json:"budget_type"`
+		Limit    *float64 `json:"limit_usd,omitempty"`
+	}
+	type providerSummary struct {
+		ProviderID  string     `json:"provider_id"`
+		SpentUSD    float64    `json:"spent_usd_month"`
+		Tokens      int64      `json:"spent_tokens_month"`
+		BudgetUSD   *float64   `json:"budget_usd,omitempty"`
+		Keys        []keySpend `json:"keys"`
+	}
+
+	// Per-provider totals from provider_keys
+	rows, err := gw.db.Pool.Query(r.Context(),
+		`SELECT provider_id,
+		        SUM(spent_usd_month),
+		        SUM(spent_tokens_month)
+		 FROM provider_keys
+		 WHERE tenant_id = $1 AND status != 'retired'
+		 GROUP BY provider_id
+		 ORDER BY SUM(spent_usd_month) DESC`,
+		defaultTenant)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	defer rows.Close()
+
+	summaries := []providerSummary{}
+	for rows.Next() {
+		var s providerSummary
+		rows.Scan(&s.ProviderID, &s.SpentUSD, &s.Tokens)
+		summaries = append(summaries, s)
+	}
+	rows.Close()
+
+	// Per-key breakdown and provider budget caps
+	for i := range summaries {
+		pid := summaries[i].ProviderID
+
+		// Key-level detail
+		krows, _ := gw.db.Pool.Query(r.Context(),
+			`SELECT id, COALESCE(label,''), key_hash, spent_usd_month, spent_tokens_month,
+			        COALESCE(budget_type,'postpaid'),
+			        CASE WHEN budget_type='prepaid' THEN balance_usd ELSE budget_usd_monthly END
+			 FROM provider_keys
+			 WHERE tenant_id = $1 AND provider_id = $2 AND status != 'retired'
+			 ORDER BY spent_usd_month DESC`,
+			defaultTenant, pid)
+		if krows != nil {
+			for krows.Next() {
+				var k keySpend
+				krows.Scan(&k.KeyID, &k.Label, &k.KeyHash, &k.SpentUSD, &k.Tokens, &k.BudgetType, &k.Limit)
+				summaries[i].Keys = append(summaries[i].Keys, k)
+			}
+			krows.Close()
+		}
+		if summaries[i].Keys == nil {
+			summaries[i].Keys = []keySpend{}
+		}
+
+		// Provider-level cap if set
+		gw.db.Pool.QueryRow(r.Context(),
+			`SELECT budget_usd FROM provider_budgets WHERE tenant_id = $1 AND provider_id = $2`,
+			defaultTenant, pid).Scan(&summaries[i].BudgetUSD)
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"month":     fmt.Sprintf("%d-%02d", time.Now().Year(), int(time.Now().Month())),
+		"providers": summaries,
+	})
 }
