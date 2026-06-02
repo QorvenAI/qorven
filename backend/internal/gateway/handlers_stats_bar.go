@@ -88,54 +88,80 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 		dbOK = gw.db.Pool.Ping(r.Context()) == nil
 	}
 
-	// --- cost + tokens today ---
-	// Cost: sum credit_used_cents from agents (where actual spend is tracked).
-	// Tokens: sum from sessions updated today (where token counts are stored).
+	// --- cost + tokens ---
+	// Source: gateway_spend (modern, per-call precision) with fallback to
+	// agents.credit_used_cents (legacy) if gateway_spend is empty.
 	var costMonthUSD float64
 	var tokensInToday, tokensOutToday int64
 	type agentSpend struct {
-		ID          string  `json:"id"`
-		Name        string  `json:"name"`
-		CostUSD     float64 `json:"cost_usd"`
-		TokensIn    int64   `json:"tokens_in"`
-		TokensOut   int64   `json:"tokens_out"`
+		ID       string  `json:"id"`
+		Name     string  `json:"name"`
+		CostUSD  float64 `json:"cost_usd"`
+		TokensIn int64   `json:"tokens_in"`
+		TokensOut int64  `json:"tokens_out"`
 	}
 	var topAgents []agentSpend
 	if gw.db != nil {
-		// Total monthly cost from agents.credit_used_cents (100 cents = $1)
+		// Total cost this calendar month from gateway_spend (accurate µUSD precision)
 		gw.db.Pool.QueryRow(r.Context(),
-			`SELECT COALESCE(SUM(credit_used_cents), 0) FROM agents
-			 WHERE tenant_id = $1 AND deleted_at IS NULL`,
+			`SELECT COALESCE(SUM(cost_usd), 0)
+			 FROM gateway_spend
+			 WHERE tenant_id = $1
+			   AND period >= date_trunc('month', CURRENT_DATE)`,
 			defaultTenant,
 		).Scan(&costMonthUSD)
-		costMonthUSD /= 100.0
 
-		// Tokens from sessions updated today
+		// Fall back to legacy agents.credit_used_cents if gateway_spend has no data yet
+		if costMonthUSD == 0 {
+			var legacyCents int64
+			gw.db.Pool.QueryRow(r.Context(),
+				`SELECT COALESCE(SUM(credit_used_cents), 0) FROM agents
+				 WHERE tenant_id = $1 AND deleted_at IS NULL`,
+				defaultTenant,
+			).Scan(&legacyCents)
+			costMonthUSD = float64(legacyCents) / 100.0
+		}
+
+		// Tokens from gateway_spend_raw today (exact per-call counts)
 		gw.db.Pool.QueryRow(r.Context(),
-			`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
-			 FROM sessions
-			 WHERE tenant_id = $1 AND updated_at >= date_trunc('day', now())`,
+			`SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0)
+			 FROM gateway_spend_raw
+			 WHERE tenant_id = $1
+			   AND created_at >= date_trunc('day', now())`,
 			defaultTenant,
 		).Scan(&tokensInToday, &tokensOutToday)
 
-		// Per-agent spend for hover breakdown (top 5 by spend)
+		// Fallback: tokens from sessions if gateway_spend_raw empty
+		if tokensInToday == 0 && tokensOutToday == 0 {
+			gw.db.Pool.QueryRow(r.Context(),
+				`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
+				 FROM sessions
+				 WHERE tenant_id = $1 AND updated_at >= date_trunc('day', now())`,
+				defaultTenant,
+			).Scan(&tokensInToday, &tokensOutToday)
+		}
+
+		// Top 5 agents by cost this month from gateway_spend
 		rows, err := gw.db.Pool.Query(r.Context(),
-			`SELECT id, COALESCE(display_name, agent_key, 'Unknown'),
-			        credit_used_cents,
-			        COALESCE((SELECT SUM(input_tokens) FROM sessions WHERE agent_id = agents.id), 0),
-			        COALESCE((SELECT SUM(output_tokens) FROM sessions WHERE agent_id = agents.id), 0)
-			 FROM agents
-			 WHERE tenant_id = $1 AND deleted_at IS NULL AND credit_used_cents > 0
-			 ORDER BY credit_used_cents DESC LIMIT 5`,
+			`SELECT gs.agent_id,
+			        COALESCE(a.display_name, a.agent_key, 'Unknown'),
+			        SUM(gs.cost_usd),
+			        SUM(gs.tokens_in),
+			        SUM(gs.tokens_out)
+			 FROM gateway_spend gs
+			 JOIN agents a ON a.id = gs.agent_id::uuid
+			 WHERE gs.tenant_id = $1
+			   AND gs.period >= date_trunc('month', CURRENT_DATE)
+			 GROUP BY gs.agent_id, a.display_name, a.agent_key
+			 ORDER BY SUM(gs.cost_usd) DESC
+			 LIMIT 5`,
 			defaultTenant,
 		)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var a agentSpend
-				var cents int64
-				rows.Scan(&a.ID, &a.Name, &cents, &a.TokensIn, &a.TokensOut)
-				a.CostUSD = float64(cents) / 100.0
+				rows.Scan(&a.ID, &a.Name, &a.CostUSD, &a.TokensIn, &a.TokensOut)
 				topAgents = append(topAgents, a)
 			}
 		}

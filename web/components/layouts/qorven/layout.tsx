@@ -59,10 +59,9 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   const hasToolbar = !!(left || right);
 
   useEffect(() => {
-    if (souls.length === 0) {
-      agents.list().then((data) => setSouls(Array.isArray(data) ? data : [])).catch(() => {});
-    }
-  }, [souls.length, setSouls]);
+    agents.list().then((data) => setSouls(Array.isArray(data) ? data : [])).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Global budget_warning toast — shows on any page when an agent approaches its budget
   useEffect(() => {

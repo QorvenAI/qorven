@@ -195,6 +195,7 @@ type spendEntry struct {
 	sessionID  string
 	providerID string
 	modelID    string
+	keyID      string // UUID of the specific provider_key used; empty if unknown
 	cost       CallCost
 	cacheHit   bool
 	// pricingMissing mirrors cost.PricingMissing — duplicated here so
@@ -277,6 +278,7 @@ func (l *CostLedger) Record(ctx context.Context, req GatewayRequest, resp *Gatew
 		sessionID:      req.SessionID,
 		providerID:     resp.ProviderID,
 		modelID:        resp.ModelResolved,
+		keyID:          resp.KeyID,
 		cost:           cost,
 		cacheHit:       resp.CacheHit,
 		pricingMissing: cost.PricingMissing,
@@ -353,16 +355,22 @@ func (l *CostLedger) flush(e spendEntry) {
 		sessionIDPtr = &e.sessionID
 	}
 
+	// key_id is optional — NULL if the call didn't go through the key pool
+	var keyIDPtr *string
+	if e.keyID != "" {
+		keyIDPtr = &e.keyID
+	}
+
 	// 1. Append to immutable raw log — never update or delete this table.
 	_, err := l.db.Exec(ctx, `
 		INSERT INTO gateway_spend_raw (
-			tenant_id, agent_id, session_id, provider_id, model_id,
+			tenant_id, agent_id, session_id, provider_id, model_id, key_id,
 			tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
 			cost_input_uusd, cost_output_uusd, cost_thinking_uusd, cost_cache_w_uusd, cost_cache_r_uusd,
 			cost_total_uusd, cache_hit, pricing_missing
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`,
-		e.tenantID, agentIDPtr, sessionIDPtr, e.providerID, e.modelID,
+		e.tenantID, agentIDPtr, sessionIDPtr, e.providerID, e.modelID, keyIDPtr,
 		e.cost.TokensIn, e.cost.TokensOut, e.cost.TokensThinking,
 		e.cost.TokensCacheWrite, e.cost.TokensCacheRead,
 		e.cost.CostInputUUSD, e.cost.CostOutputUUSD, e.cost.CostThinkingUUSD,
@@ -387,21 +395,21 @@ func (l *CostLedger) flush(e spendEntry) {
 	// 2. Upsert into daily aggregate (fast budget queries).
 	_, err = l.db.Exec(ctx, `
 		INSERT INTO gateway_spend (
-			tenant_id, agent_id, provider_id, model_id,
+			tenant_id, agent_id, provider_id, model_id, key_id,
 			tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
 			cost_usd, cost_total_uusd, period
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_DATE)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_DATE)
 		ON CONFLICT (tenant_id, agent_id, period)
 		DO UPDATE SET
-			tokens_in          = gateway_spend.tokens_in          + $5,
-			tokens_out         = gateway_spend.tokens_out         + $6,
-			tokens_thinking    = gateway_spend.tokens_thinking    + $7,
-			tokens_cache_write = gateway_spend.tokens_cache_write + $8,
-			tokens_cache_read  = gateway_spend.tokens_cache_read  + $9,
-			cost_usd           = gateway_spend.cost_usd           + $10,
-			cost_total_uusd    = gateway_spend.cost_total_uusd    + $11
+			tokens_in          = gateway_spend.tokens_in          + $6,
+			tokens_out         = gateway_spend.tokens_out         + $7,
+			tokens_thinking    = gateway_spend.tokens_thinking    + $8,
+			tokens_cache_write = gateway_spend.tokens_cache_write + $9,
+			tokens_cache_read  = gateway_spend.tokens_cache_read  + $10,
+			cost_usd           = gateway_spend.cost_usd           + $11,
+			cost_total_uusd    = gateway_spend.cost_total_uusd    + $12
 	`,
-		e.tenantID, e.agentID, e.providerID, e.modelID,
+		e.tenantID, e.agentID, e.providerID, e.modelID, keyIDPtr,
 		e.cost.TokensIn, e.cost.TokensOut, e.cost.TokensThinking,
 		e.cost.TokensCacheWrite, e.cost.TokensCacheRead,
 		e.cost.TotalUSD(), e.cost.TotalUUSD,
@@ -416,7 +424,27 @@ func (l *CostLedger) flush(e spendEntry) {
 		l.budget.AddSpend(ctx, e.tenantID, e.agentID, e.cost.TotalUSD(), e.cost.TokensIn, e.cost.TokensOut)
 	}
 
-	// 3. Upsert a trace row (one per session) and append a span (one per LLM call).
+	// 3a. Update provider_keys spend counters so per-key budget enforcement
+	// always sees fresh data (spent_usd_month, spent_tokens_month).
+	if keyIDPtr != nil && e.cost.TotalUUSD > 0 {
+		totalTokens := int64(e.cost.TokensIn + e.cost.TokensOut + e.cost.TokensThinking)
+		_, kerr := l.db.Exec(ctx, `
+			UPDATE provider_keys
+			SET spent_usd_month    = spent_usd_month    + $1,
+			    spent_tokens_month = spent_tokens_month + $2,
+			    total_requests     = total_requests     + 1,
+			    total_tokens_in    = total_tokens_in    + $3,
+			    total_tokens_out   = total_tokens_out   + $4,
+			    last_used_at       = now()
+			WHERE id = $5
+		`, e.cost.TotalUSD(), totalTokens, e.cost.TokensIn, e.cost.TokensOut, keyIDPtr)
+		if kerr != nil {
+			slog.Warn("gateway.cost_ledger: provider_keys spend update failed",
+				"key_id", e.keyID, "error", kerr)
+		}
+	}
+
+	// 4. Upsert a trace row (one per session) and append a span (one per LLM call).
 	// Traces aggregate token + cost totals; spans are the individual call records.
 	if e.sessionID != "" && e.agentID != "" {
 		costCents := int(e.cost.TotalUSD() * 100)

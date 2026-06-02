@@ -638,19 +638,48 @@ func (gw *Gateway) handleSetKeyBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	keyID := chi.URLParam(r, "key_id")
 	var body struct {
-		BudgetUSD    *float64 `json:"budget_usd_monthly"`
-		BudgetTokens *int64   `json:"budget_tokens_monthly"`
+		BudgetType   string   `json:"budget_type"`            // prepaid|postpaid|quota|free
+		BudgetUSD    *float64 `json:"budget_usd_monthly"`     // postpaid monthly cap
+		BalanceUSD   *float64 `json:"balance_usd"`            // prepaid loaded balance
+		BudgetTokens *int64   `json:"budget_tokens_monthly"`  // legacy token cap
+		TokenQuota   *int64   `json:"token_quota_monthly"`    // quota (OAuth) token limit
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
 		return
 	}
+	if body.BudgetType == "" {
+		body.BudgetType = "postpaid"
+	}
 	store := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
-	if err := store.SetKeyBudget(r.Context(), keyID, body.BudgetUSD, body.BudgetTokens); err != nil {
+	if err := store.SetKeyBudget(r.Context(), keyID, body.BudgetType, body.BudgetUSD, body.BalanceUSD, body.BudgetTokens, body.TokenQuota); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// handleMarkPrepaidTopUp resets spent counters for a prepaid key when user
+// has reloaded credits with the provider.
+func (gw *Gateway) handleMarkPrepaidTopUp(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 503, map[string]string{"error": "database not configured"})
+		return
+	}
+	keyID := chi.URLParam(r, "key_id")
+	var body struct {
+		NewBalanceUSD float64 `json:"new_balance_usd"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NewBalanceUSD <= 0 {
+		writeJSON(w, 400, map[string]string{"error": "new_balance_usd required"})
+		return
+	}
+	store := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
+	if err := store.MarkPrepaidTopUp(r.Context(), keyID, body.NewBalanceUSD); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "new_balance_usd": body.NewBalanceUSD})
 }
 
 func (gw *Gateway) handleTestKeyAndFetchModels(w http.ResponseWriter, r *http.Request) {

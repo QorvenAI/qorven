@@ -299,10 +299,26 @@ func (gw *Gateway) Start() error {
 			keyStore := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
 			ticker := time.NewTicker(24 * time.Hour)
 			for range ticker.C {
-				if err := keyStore.ResetMonthlySpend(context.Background(), defaultTenant); err != nil {
+				ctx := context.Background()
+				// Reset provider_keys spend for postpaid + quota types only (prepaid never auto-resets)
+				if err := keyStore.ResetMonthlySpend(ctx, defaultTenant); err != nil {
 					slog.Warn("keypool.monthly_reset_failed", "error", err)
 				} else {
 					slog.Info("keypool.monthly_reset_ok")
+				}
+				// Reset provider_budgets monthly spend totals (postpaid + quota only)
+				if gw.db != nil {
+					_, err := gw.db.Pool.Exec(ctx,
+						`UPDATE provider_budgets
+						 SET spent_usd_month = 0, spent_tokens_month = 0,
+						     budget_reset_at = budget_reset_at + INTERVAL '1 month'
+						 WHERE tenant_id = $1
+						   AND COALESCE(budget_type,'postpaid') IN ('postpaid','quota')
+						   AND budget_reset_at <= now()`,
+						defaultTenant)
+					if err != nil {
+						slog.Warn("provider_budgets.monthly_reset_failed", "error", err)
+					}
 				}
 			}
 		}()

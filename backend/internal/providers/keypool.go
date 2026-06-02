@@ -30,13 +30,20 @@ type KeyRecord struct {
 	TotalRequests    int64      `json:"total_requests"`
 	TotalTokensIn    int64      `json:"total_tokens_in"`
 	TotalTokensOut   int64      `json:"total_tokens_out"`
-	// Budget fields (loaded from DB col; nil = unlimited)
+	// Budget fields (loaded from DB; nil = unlimited)
 	BudgetUSDMonthly    *float64   `json:"budget_usd_monthly,omitempty"`
 	BudgetTokensMonthly *int64     `json:"budget_tokens_monthly,omitempty"`
 	SpentUSDMonth       float64    `json:"spent_usd_month"`
 	SpentTokensMonth    int64      `json:"spent_tokens_month"`
 	BudgetResetAt       *time.Time `json:"budget_reset_at,omitempty"`
-	encryptedKey        []byte
+
+	// Extended budget type fields (migration 027)
+	// BudgetType: "prepaid" | "postpaid" | "quota" | "free"
+	BudgetType          string     `json:"budget_type"`
+	BalanceUSD          *float64   `json:"balance_usd,omitempty"`       // prepaid: loaded balance
+	TokenQuotaMonthly   *int64     `json:"token_quota_monthly,omitempty"` // quota: monthly token cap
+
+	encryptedKey []byte
 }
 
 // PoolConfig holds provider-level rotation settings.
@@ -112,6 +119,11 @@ func (p *KeyPool) Next() (*KeyRecord, string, error) {
 }
 
 // isAvailable returns true if the key can be used right now.
+// Budget logic depends on BudgetType:
+//   - "free"     → always available (local models — no cost)
+//   - "quota"    → token-based limit only (OAuth/subscriptions — $ invisible)
+//   - "prepaid"  → spend against declared BalanceUSD; never auto-resets
+//   - "postpaid" → monthly cap (BudgetUSDMonthly); resets on BudgetResetAt
 func (p *KeyPool) isAvailable(k *KeyRecord, now time.Time) bool {
 	if k.Status != "verified" {
 		return false
@@ -119,20 +131,53 @@ func (p *KeyPool) isAvailable(k *KeyRecord, now time.Time) bool {
 	if k.RateLimitedUntil != nil && now.Before(*k.RateLimitedUntil) {
 		return false
 	}
-	// Reset monthly counters if past reset time
-	if k.BudgetResetAt != nil && now.After(*k.BudgetResetAt) {
-		k.SpentUSDMonth = 0
-		k.SpentTokensMonth = 0
-		next := k.BudgetResetAt.AddDate(0, 1, 0)
-		k.BudgetResetAt = &next
+
+	switch k.BudgetType {
+	case "free":
+		// Local models — always allowed, track tokens for visibility only.
+		return true
+
+	case "quota":
+		// OAuth/subscription: enforce token quota only; no $ enforcement.
+		// Resets monthly on BudgetResetAt.
+		if k.BudgetResetAt != nil && now.After(*k.BudgetResetAt) {
+			k.SpentTokensMonth = 0
+			next := k.BudgetResetAt.AddDate(0, 1, 0)
+			k.BudgetResetAt = &next
+		}
+		if k.TokenQuotaMonthly != nil && k.SpentTokensMonth >= *k.TokenQuotaMonthly {
+			return false
+		}
+		return true
+
+	case "prepaid":
+		// User topped up a balance; spend depletes it; never auto-resets.
+		// User must manually mark as topped up to reset.
+		if k.BalanceUSD != nil && k.SpentUSDMonth >= *k.BalanceUSD {
+			return false
+		}
+		// Also respect token budget if set alongside prepaid balance.
+		if k.BudgetTokensMonthly != nil && k.SpentTokensMonth >= *k.BudgetTokensMonthly {
+			return false
+		}
+		return true
+
+	default: // "postpaid" and unset/legacy
+		// Monthly cap with auto-reset on BudgetResetAt.
+		if k.BudgetResetAt != nil && now.After(*k.BudgetResetAt) {
+			k.SpentUSDMonth = 0
+			k.SpentTokensMonth = 0
+			next := k.BudgetResetAt.AddDate(0, 1, 0)
+			k.BudgetResetAt = &next
+		}
+		if k.BudgetUSDMonthly != nil && k.SpentUSDMonth >= *k.BudgetUSDMonthly {
+			return false
+		}
+		if k.BudgetTokensMonthly != nil && k.SpentTokensMonth >= *k.BudgetTokensMonthly {
+			return false
+		}
+		return true
 	}
-	if k.BudgetUSDMonthly != nil && k.SpentUSDMonth >= *k.BudgetUSDMonthly {
-		return false
-	}
-	if k.BudgetTokensMonthly != nil && k.SpentTokensMonth >= *k.BudgetTokensMonthly {
-		return false
-	}
-	return true
 }
 
 func (p *KeyPool) randomAvailable(now time.Time) *KeyRecord {
@@ -229,7 +274,8 @@ func (s *KeyPoolStore) ListKeys(ctx context.Context, tenantID, providerID string
 		        verified_at, last_used_at, rate_limited_until, rotation_order,
 		        total_requests, total_tokens_in, total_tokens_out,
 		        budget_usd_monthly, budget_tokens_monthly,
-		        spent_usd_month, spent_tokens_month, budget_reset_at
+		        spent_usd_month, spent_tokens_month, budget_reset_at,
+		        COALESCE(budget_type,'postpaid'), balance_usd, token_quota_monthly
 		 FROM provider_keys
 		 WHERE tenant_id = $1 AND provider_id = $2 AND status != 'retired'
 		 ORDER BY rotation_order, created_at`,
@@ -247,6 +293,7 @@ func (s *KeyPoolStore) ListKeys(ctx context.Context, tenantID, providerID string
 			&k.RotationOrder, &k.TotalRequests, &k.TotalTokensIn, &k.TotalTokensOut,
 			&k.BudgetUSDMonthly, &k.BudgetTokensMonthly,
 			&k.SpentUSDMonth, &k.SpentTokensMonth, &k.BudgetResetAt,
+			&k.BudgetType, &k.BalanceUSD, &k.TokenQuotaMonthly,
 		)
 		keys = append(keys, k)
 	}
@@ -378,11 +425,29 @@ func (s *KeyPoolStore) SavePoolConfig(ctx context.Context, tenantID, providerID 
 
 // ─── Budget management ─────────────────────────────────────────────────────────
 
-// SetKeyBudget updates the monthly budget caps for a key.
-func (s *KeyPoolStore) SetKeyBudget(ctx context.Context, keyID string, budgetUSD *float64, budgetTokens *int64) error {
+// SetKeyBudget updates the budget configuration for a key.
+// budgetType must be one of: "prepaid", "postpaid", "quota", "free"
+func (s *KeyPoolStore) SetKeyBudget(ctx context.Context, keyID, budgetType string, budgetUSD *float64, balanceUSD *float64, budgetTokens *int64, tokenQuota *int64) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE provider_keys SET budget_usd_monthly = $1, budget_tokens_monthly = $2 WHERE id = $3`,
-		budgetUSD, budgetTokens, keyID)
+		`UPDATE provider_keys
+		 SET budget_type          = $1,
+		     budget_usd_monthly   = $2,
+		     balance_usd          = $3,
+		     budget_tokens_monthly = $4,
+		     token_quota_monthly  = $5
+		 WHERE id = $6`,
+		budgetType, budgetUSD, balanceUSD, budgetTokens, tokenQuota, keyID)
+	return err
+}
+
+// MarkPrepaidTopUp resets the spent_usd_month counter for a prepaid key
+// when the user declares they have topped up their balance with the provider.
+func (s *KeyPoolStore) MarkPrepaidTopUp(ctx context.Context, keyID string, newBalanceUSD float64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE provider_keys
+		 SET balance_usd = $1, spent_usd_month = 0, spent_tokens_month = 0
+		 WHERE id = $2`,
+		newBalanceUSD, keyID)
 	return err
 }
 
@@ -397,14 +462,17 @@ func (s *KeyPoolStore) RecordSpend(ctx context.Context, keyID string, usdCost fl
 	return err
 }
 
-// ResetMonthlySpend zeroes spend counters and advances reset_at by one month.
-// Called by a cron job at the start of each billing period.
+// ResetMonthlySpend zeroes spend counters for postpaid and quota keys only.
+// Prepaid keys never auto-reset — user must call MarkPrepaidTopUp explicitly.
+// Called by cron on the 1st of each month (or per key's budget_reset_day).
 func (s *KeyPoolStore) ResetMonthlySpend(ctx context.Context, tenantID string) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE provider_keys
 		 SET spent_usd_month = 0, spent_tokens_month = 0,
 		     budget_reset_at = budget_reset_at + INTERVAL '1 month'
-		 WHERE tenant_id = $1 AND budget_reset_at <= now()`,
+		 WHERE tenant_id = $1
+		   AND COALESCE(budget_type,'postpaid') IN ('postpaid','quota')
+		   AND budget_reset_at <= now()`,
 		tenantID)
 	return err
 }

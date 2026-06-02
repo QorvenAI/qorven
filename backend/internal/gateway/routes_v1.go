@@ -231,6 +231,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/providers/keys/{key_id}/verify", gw.handleVerifyProviderKey)
 		r.Delete("/providers/keys/{key_id}", gw.handleRetireProviderKey)
 		r.Put("/providers/keys/{key_id}/budget", gw.handleSetKeyBudget)
+		r.Post("/providers/keys/{key_id}/topup", gw.handleMarkPrepaidTopUp)
 		r.Post("/providers/keys/{key_id}/test", gw.handleTestKeyAndFetchModels)
 		r.Get("/providers/{provider_id}/pool", gw.handleGetPoolConfig)
 		r.Put("/providers/{provider_id}/pool", gw.handleSavePoolConfig)

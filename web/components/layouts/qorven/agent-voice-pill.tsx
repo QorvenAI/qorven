@@ -281,9 +281,16 @@ function useDefaultAgent() {
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function PillShell({ children }: { children: React.ReactNode }) {
+  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
   return (
     <div className="fixed z-29 flex items-center border-t border-r border-border bg-muted px-3 hidden lg:flex"
-      style={{ left: 'var(--rail-width)', width: 'var(--sidebar-default-width, 280px)', bottom: 0, height: 'var(--agent-pill-height, 56px)' }}>
+      style={{
+        left: 'var(--rail-width)',
+        width: sidebarCollapsed ? 'var(--sidebar-width-collapse, 56px)' : 'var(--sidebar-default-width, 280px)',
+        bottom: 0,
+        height: 'var(--agent-pill-height, 56px)',
+        transition: 'width var(--sidebar-transition-duration, 200ms) var(--sidebar-transition-timing, ease)',
+      }}>
       {children}
     </div>
   );
