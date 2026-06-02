@@ -2,12 +2,11 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import { motion } from 'motion/react';
 import { Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SoulPulseRing } from '@/components/soul-pulse-ring';
-import { useVoice } from '@/hooks/use-voice';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
 import { useStore } from '@/store';
 import type { Soul, SoulActivity } from '@/types';
@@ -94,48 +93,36 @@ export function SidebarAgentRow({
 
   const isVoiceActive = activeVoiceAgentId === soul.id;
 
-  // Each row mounts its own useVoice instance. The hook lazily connects
-  // WebSocket only when start() is called, so idle rows have zero overhead.
-  const stopRef = useRef<(() => Promise<void>) | null>(null);
-  const voice = useVoice({
-    agentId: soul.id,
-  });
-
-  // Keep stopRef current and sync the module-level registry.
-  // Cleanup removes the entry when this row unmounts.
-  useEffect(() => {
-    stopRef.current = voice.stop;
-    agentVoiceRegistry.set(soul.id, voice.stop);
-    return () => {
-      agentVoiceRegistry.delete(soul.id);
-    };
-  }, [soul.id, voice.stop]);
-
+  // Sidebar rows do NOT own a VAD instance — that would mount useMicVAD once
+  // per agent row (12+ simultaneous ONNX model loads → race condition errors).
+  // Instead, the row delegates to the single AgentVoicePill instance via the
+  // agentVoiceRegistry. The Pill holds the one shared useMicVAD instance.
   const handleVoiceClick = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
       if (!voiceEnabled) return;
 
       if (isVoiceActive) {
-        // Toggle off: stop this agent
-        await voice.stop();
+        // Stop current agent — call the Pill's registered stop fn
+        const stop = agentVoiceRegistry.get(soul.id);
+        if (stop) await stop();
         setActiveVoiceAgent(null);
         return;
       }
 
-      // Stop previously active agent if any
+      // Stop previously active agent first
       if (activeVoiceAgentId) {
         const prevStop = agentVoiceRegistry.get(activeVoiceAgentId);
         if (prevStop) await prevStop();
         setActiveVoiceAgent(null);
-        // Small delay so VAD teardown completes before new session starts
         await new Promise((r) => setTimeout(r, 80));
       }
 
-      await voice.start();
+      // Switch the Pill to this agent by updating the store.
+      // The AgentVoicePill watches activeVoiceAgentId and starts the session.
       setActiveVoiceAgent(soul.id);
     },
-    [voice, isVoiceActive, voiceEnabled, activeVoiceAgentId, setActiveVoiceAgent, soul.id],
+    [isVoiceActive, voiceEnabled, activeVoiceAgentId, setActiveVoiceAgent, soul.id],
   );
 
   const subtitle = activitySubtitle(

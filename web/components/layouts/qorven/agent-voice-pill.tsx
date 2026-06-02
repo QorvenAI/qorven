@@ -389,6 +389,34 @@ function PillWithVoice() {
     return () => { agentVoiceRegistry.delete(agentId); };
   }, [agentId, voice.stop]);
 
+  // When a sidebar row sets activeVoiceAgentId to a different agent,
+  // the Pill (sole VAD owner) switches to that agent and starts voice.
+  // This avoids sidebar rows needing their own useVoice/useMicVAD instances.
+  useEffect(() => {
+    if (!activeVoiceAgentId || activeVoiceAgentId === agentId) return;
+    // Find the new target agent in souls
+    const target = souls.find(s => s.id === activeVoiceAgentId);
+    if (!target) return;
+    // Switch pill to the requested agent, then start voice
+    const switchAndStart = async () => {
+      if (voice.state !== 'idle') await voice.stop();
+      setAgent(target);
+      // voice.start will be triggered by the agentId change on next render
+    };
+    switchAndStart();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVoiceAgentId]);
+
+  // Auto-start voice when agentId changes to match activeVoiceAgentId
+  // (happens after sidebar row switches the pill's agent via above effect)
+  useEffect(() => {
+    if (!agentId || activeVoiceAgentId !== agentId) return;
+    if (voice.state === 'idle') {
+      voice.start();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
+
   const handleMic = useCallback(async () => {
     if (!agentId) return;
     if (isVoiceActive) { await voice.stop(); setActiveVoiceAgent(null); }
