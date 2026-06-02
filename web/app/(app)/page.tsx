@@ -2,7 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
@@ -50,10 +50,19 @@ export default function DashboardPage() {
   const [financeDaily, setFinanceDaily] = useState<{ date: string; cost_usd: number; tokens_in: number; tokens_out: number }[]>([]);
   const [financeSummary, setFinanceSummary] = useState<{ agents: OrgAgentSpend[]; total_month_usd: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Track whether we've ever loaded data — after the first load, background
+  // refreshes use setRefreshing(true) instead of setLoading(true) so existing
+  // content stays visible while new data arrives silently.
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(() => {
-    setLoading(true);
+    if (hasLoadedOnce.current) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     Promise.all([
       agents.list(),
@@ -87,9 +96,11 @@ export default function DashboardPage() {
         setFinanceDaily((dailyData as any)?.daily ?? []);
         setFinanceSummary(summaryData as any);
         setLoading(false);
+        setRefreshing(false);
+        hasLoadedOnce.current = true;
         if (pc === 0) router.replace('/setup');
       })
-      .catch((e) => { setError(e.message); setLoading(false); });
+      .catch((e) => { setError(e.message); setLoading(false); setRefreshing(false); });
   }, [router]);
 
   const decideApproval = async (id: string, decision: 'approve' | 'reject') => {
@@ -149,9 +160,9 @@ export default function DashboardPage() {
           description="Fleet operations, spend, and activity at a glance"
           actions={
             <>
-              <button onClick={load} disabled={loading}
+              <button onClick={load} disabled={loading || refreshing}
                 className="qr-btn-outline qr-btn-sm flex items-center gap-2">
-                <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+                <RefreshCw className={cn('h-4 w-4', (loading || refreshing) && 'animate-spin')} />
                 Refresh
               </button>
               <button onClick={() => router.push('/qors')}
