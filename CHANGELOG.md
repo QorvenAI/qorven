@@ -4,6 +4,25 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.0-alpha — 2026-06-03
+
+### Added
+- **Customisable bento dashboard** — the home page is now a fully editable operations centre. Drag, resize, and rearrange widgets freely. Layouts are saved per user. ([d0d3098](https://github.com/QorvenAI/qorven/commit/d0d3098))
+- **AI widget builder** — click "Ask AI" and describe what you want in plain language. The COO agent generates a widget configuration and adds it to your dashboard instantly.
+- **11 built-in widget types** — Metric card, Line/Area chart, Bar chart, Donut chart, Activity feed, Agent status grid, Tasks & approvals, Heatmap, Progress gauge, External data, Mini chat.
+- **Live dashboard data** — all widgets update in real-time via WebSocket. No page refresh needed.
+- **Provider budget types** — API keys now support four budget modes: Prepaid (depletes balance), Postpaid (monthly cap with auto-reset), Quota (OAuth/subscription token limits), Free (local models). ([58b0159](https://github.com/QorvenAI/qorven/commit/58b0159))
+- **Per-key spend tracking** — every LLM call is attributed to the specific API key that made it. Spend counters update in real-time on provider_keys.
+- **Qors page redesign** — agent cards now show model name, current spend, and capability pills (Web, Memory, Delegate). Uniform card sizes, hover-reveal actions, no empty space.
+- **OAuth token store** — Claude Code, GitHub Copilot, and Gemini OAuth flows fully implemented with PKCE support and auto-refresh.
+
+### Fixed
+- Dashboard background refresh no longer clears content to skeleton state — data updates silently without blanking the page.
+- VAD ONNX model load errors fixed — sidebar agent rows no longer each mount their own useMicVAD instance. Single shared instance in AgentVoicePill.
+- Agent bar now collapses correctly when sidebar is collapsed.
+
+---
+
 ## v0.4.0-alpha — 2026-06-01
 
 ### Added
