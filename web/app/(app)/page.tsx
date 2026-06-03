@@ -5,13 +5,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import {
   agents, sessions, providers, approvals as approvalsApi,
   outbound, supervisor,
   type ApprovalItem, type OutboundAction, type SupervisorMessage,
 } from '@/lib/api';
-import { dashboardApi, type PinnedTile, type DashboardStats } from '@/lib/api-dashboard';
+import { dashboardApi, dashboardLayout, type DashboardStats } from '@/lib/api-dashboard';
 import { orgApi, type OrgRosterEntry, type OrgAgentSpend } from '@/lib/api-agents';
 import { tickets as ticketsApi } from '@/lib/api-workspace';
 import type { Ticket as TicketItem } from '@/types';
@@ -35,9 +36,52 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell,
 } from 'recharts';
+import { DashboardDataProvider } from '@/contexts/dashboard-data';
+import { DashboardToolbar } from '@/components/dashboard/dashboard-toolbar';
+import { WidgetPicker } from '@/components/dashboard/widget-picker';
+import { WidgetConfigModal } from '@/components/dashboard/widget-config-modal';
+import { AIWidgetBuilder } from '@/components/dashboard/ai-widget-builder';
+import type { WidgetConfig, WidgetType } from '@/components/dashboard/widget-registry';
+import type { Layout, LayoutItem } from 'react-grid-layout';
+
+// Dynamic import for DashboardGrid — avoids SSR issues with react-grid-layout
+const DashboardGrid = dynamic(
+  () => import('@/components/dashboard/dashboard-grid').then((m) => ({ default: m.DashboardGrid })),
+  { ssr: false },
+);
+
+// ─── Default layout & widgets ────────────────────────────────────────────────
+
+const DEFAULT_LAYOUT: LayoutItem[] = [
+  { i: 'kpi-agents',    x: 0,  y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'kpi-spend',     x: 3,  y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'kpi-sessions',  x: 6,  y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'kpi-approvals', x: 9,  y: 0, w: 3, h: 2, minW: 2, minH: 2 },
+  { i: 'chart-spend',   x: 0,  y: 2, w: 8, h: 5, minW: 4, minH: 3 },
+  { i: 'top-spenders',  x: 8,  y: 2, w: 4, h: 5, minW: 3, minH: 3 },
+  { i: 'fleet',         x: 0,  y: 7, w: 4, h: 6, minW: 3, minH: 4 },
+  { i: 'activity',      x: 4,  y: 7, w: 4, h: 6, minW: 3, minH: 4 },
+  { i: 'approvals',     x: 8,  y: 7, w: 4, h: 6, minW: 3, minH: 4 },
+];
+
+const DEFAULT_WIDGETS: Record<string, WidgetConfig> = {
+  'kpi-agents':    { id: 'kpi-agents',    title: 'Active Agents',     type: 'metric',   dataSource: 'agent_status_live',   grid: { w: 3, h: 2 } },
+  'kpi-spend':     { id: 'kpi-spend',     title: 'Spend Today',       type: 'metric',   dataSource: 'spend_total_today',   grid: { w: 3, h: 2 }, config: { prefix: '$', showTrend: true } },
+  'kpi-sessions':  { id: 'kpi-sessions',  title: 'Sessions Today',    type: 'metric',   dataSource: 'session_count_today', grid: { w: 3, h: 2 } },
+  'kpi-approvals': { id: 'kpi-approvals', title: 'Pending Approvals', type: 'metric',   dataSource: 'pending_approvals',   grid: { w: 3, h: 2 } },
+  'chart-spend':   { id: 'chart-spend',   title: 'Daily Spend (30 days)', type: 'area', dataSource: 'spend_by_provider_30d', grid: { w: 8, h: 5 }, config: { xKey: 'date', yKey: 'cost_usd' } },
+  'top-spenders':  { id: 'top-spenders',  title: 'Top Agents',        type: 'bar',      dataSource: 'spend_by_provider_30d', grid: { w: 4, h: 5 }, config: { xKey: 'name', yKey: 'cost_usd' } },
+  'fleet':         { id: 'fleet',         title: 'Agent Fleet',       type: 'agents',   dataSource: 'agent_status_live',   grid: { w: 4, h: 6 } },
+  'activity':      { id: 'activity',      title: "Today's Activity",  type: 'activity', dataSource: 'agent_runs_per_hour', grid: { w: 4, h: 6 } },
+  'approvals':     { id: 'approvals',     title: 'Needs Review',      type: 'tasks',    dataSource: 'pending_approvals',   grid: { w: 4, h: 6 } },
+};
+
+// ─── Page component ───────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const router = useRouter();
+
+  // ── Existing data state ────────────────────────────────────────────────────
   const [souls, setSouls] = useState<Soul[]>([]);
   const [providerCount, setProviderCount] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
@@ -56,6 +100,19 @@ export default function DashboardPage() {
   // refreshes use setRefreshing(true) instead of setLoading(true) so existing
   // content stays visible while new data arrives silently.
   const hasLoadedOnce = useRef(false);
+
+  // ── Grid / customisation state ─────────────────────────────────────────────
+  const [gridLayout, setGridLayout] = useState<LayoutItem[]>([]);
+  const [widgetConfigs, setWidgetConfigs] = useState<Record<string, WidgetConfig>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [dashboardId, setDashboardId] = useState('');
+  const [dashboardName, setDashboardName] = useState('My Dashboard');
+  const [showWidgetPicker, setShowWidgetPicker] = useState(false);
+  const [showAIBuilder, setShowAIBuilder] = useState(false);
+  const [configWidget, setConfigWidget] = useState<WidgetConfig | null>(null);
+  const [layoutDirty, setLayoutDirty] = useState(false);
+
+  // ── Data loading ──────────────────────────────────────────────────────────
 
   const load = useCallback(() => {
     if (hasLoadedOnce.current) {
@@ -148,361 +205,184 @@ export default function DashboardPage() {
     };
   }, [load]);
 
+  // Load saved layout on mount
+  useEffect(() => {
+    dashboardLayout.get().then((dl) => {
+      if (dl.layout && Array.isArray(dl.layout) && dl.layout.length > 0) {
+        setGridLayout(dl.layout as LayoutItem[]);
+        setWidgetConfigs(dl.widgets || {});
+        setDashboardId(dl.id || '');
+        setDashboardName(dl.name || 'My Dashboard');
+      } else {
+        setGridLayout(DEFAULT_LAYOUT);
+        setWidgetConfigs(DEFAULT_WIDGETS);
+      }
+    }).catch(() => {
+      setGridLayout(DEFAULT_LAYOUT);
+      setWidgetConfigs(DEFAULT_WIDGETS);
+    });
+  }, []);
+
+  // ── Layout save ───────────────────────────────────────────────────────────
+
+  const saveLayout = useCallback(() => {
+    dashboardLayout.save(dashboardName, gridLayout, widgetConfigs).catch(() => {});
+    setLayoutDirty(false);
+  }, [dashboardName, gridLayout, widgetConfigs]);
+
+  // ── Widget management ─────────────────────────────────────────────────────
+
+  const handleAddWidget = useCallback((config: WidgetConfig) => {
+    const id = config.id || `widget-${Date.now()}`;
+    const newConfig = { ...config, id };
+    // Place new widget at the bottom
+    const maxY = gridLayout.reduce((m, item) => Math.max(m, item.y + item.h), 0);
+    const newItem: LayoutItem = {
+      i: id,
+      x: 0,
+      y: maxY,
+      w: newConfig.grid.w,
+      h: newConfig.grid.h,
+      minW: 2,
+      minH: 2,
+    };
+    setGridLayout((prev) => [...prev, newItem]);
+    setWidgetConfigs((prev) => ({ ...prev, [id]: newConfig }));
+    setLayoutDirty(true);
+    setShowWidgetPicker(false);
+    setShowAIBuilder(false);
+  }, [gridLayout]);
+
+  const handleRemoveWidget = useCallback((id: string) => {
+    setGridLayout((prev) => prev.filter((item) => item.i !== id));
+    setWidgetConfigs((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setLayoutDirty(true);
+  }, []);
+
+  const handleConfigWidget = useCallback((id: string) => {
+    const cfg = widgetConfigs[id];
+    if (cfg) setConfigWidget(cfg);
+  }, [widgetConfigs]);
+
+  const handleSaveWidgetConfig = useCallback((updated: WidgetConfig) => {
+    setWidgetConfigs((prev) => ({ ...prev, [updated.id]: updated }));
+    setConfigWidget(null);
+    setLayoutDirty(true);
+  }, []);
+
+  const handleLayoutChange = useCallback((newLayout: Layout) => {
+    setGridLayout([...newLayout]);
+    setLayoutDirty(true);
+  }, []);
+
+  // ── Derived values ────────────────────────────────────────────────────────
   const activeAgents = roster.filter((r) => r.status === 'active' || !r.terminated_at).length || souls.filter((s) => s.status === 'active').length;
   const totalApprovals = pendingApprovals.length + pendingOutbound.length;
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col gap-6 pb-8">
+      <DashboardDataProvider>
+        <div className="flex flex-col gap-4 pb-8">
 
-        <CanvasHeader
-          title="Command Center"
-          description="Fleet operations, spend, and activity at a glance"
-          actions={
-            <>
-              <button onClick={load} disabled={loading || refreshing}
-                className="qr-btn-outline qr-btn-sm flex items-center gap-2">
-                <RefreshCw className={cn('h-4 w-4', (loading || refreshing) && 'animate-spin')} />
-                Refresh
-              </button>
-              <button onClick={() => router.push('/qors')}
-                className="qr-btn-primary qr-btn-sm flex items-center gap-2">
-                <Send className="h-4 w-4" />
-                New Chat
-              </button>
-            </>
-          }
+          <CanvasHeader
+            title="Command Center"
+            description="Fleet operations, spend, and activity at a glance"
+            actions={
+              <>
+                <button onClick={load} disabled={loading || refreshing}
+                  className="qr-btn-outline qr-btn-sm flex items-center gap-2">
+                  <RefreshCw className={cn('h-4 w-4', (loading || refreshing) && 'animate-spin')} />
+                  Refresh
+                </button>
+                <button onClick={() => router.push('/qors')}
+                  className="qr-btn-primary qr-btn-sm flex items-center gap-2">
+                  <Send className="h-4 w-4" />
+                  New Chat
+                </button>
+              </>
+            }
+          />
+
+          {error && (
+            <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 mx-6">
+              <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+              <p className="text-sm text-destructive flex-1">{error}</p>
+              <button onClick={load} className="text-sm font-medium text-destructive hover:underline">Retry</button>
+            </div>
+          )}
+
+          {/* Setup checklist — only while onboarding */}
+          {!loading && (
+            <SetupChecklist
+              agents={souls.length} providers={providerCount} sessions={sessionCount}
+            />
+          )}
+
+          {/* Dashboard toolbar — edit / add / AI */}
+          <div className="px-6">
+            <DashboardToolbar
+              isEditing={isEditing}
+              onToggleEdit={() => setIsEditing((v) => !v)}
+              onAddWidget={() => setShowWidgetPicker(true)}
+              onAskAI={() => setShowAIBuilder(true)}
+              onSave={saveLayout}
+              dashboardName={dashboardName}
+            />
+          </div>
+
+          {/* Main customisable grid */}
+          <div className="px-6">
+            {gridLayout.length > 0 && (
+              <DashboardGrid
+                layout={gridLayout}
+                widgets={widgetConfigs}
+                isEditing={isEditing}
+                onLayoutChange={handleLayoutChange}
+                onRemoveWidget={handleRemoveWidget}
+                onConfigWidget={handleConfigWidget}
+                onAddWidget={() => setShowWidgetPicker(true)}
+              />
+            )}
+          </div>
+
+          {/* Quick links */}
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 px-6">
+            <QuickLink href="/models-hub" icon={Cpu} label="Models Hub" desc="Configure LLM providers" />
+            <QuickLink href="/channels" icon={Zap} label="Channels" desc="Connect integrations" />
+            <QuickLink href="/code?tab=inbox" icon={ShieldCheck} label="Inbox" desc="Approvals and escalations" />
+            <QuickLink href="/settings" icon={Settings} label="Settings" desc="Workspace preferences" />
+          </div>
+
+        </div>
+
+        {/* Widget picker sheet */}
+        <WidgetPicker
+          open={showWidgetPicker}
+          onClose={() => setShowWidgetPicker(false)}
+          onAdd={handleAddWidget}
         />
 
-        {error && (
-          <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 mx-6">
-            <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-            <p className="text-sm text-destructive flex-1">{error}</p>
-            <button onClick={load} className="text-sm font-medium text-destructive hover:underline">Retry</button>
-          </div>
-        )}
+        {/* Widget config modal */}
+        <WidgetConfigModal
+          open={configWidget !== null}
+          widget={configWidget}
+          onClose={() => setConfigWidget(null)}
+          onSave={handleSaveWidgetConfig}
+          onRemove={(id) => { handleRemoveWidget(id); setConfigWidget(null); }}
+        />
 
-        {/* Setup checklist — only while onboarding */}
-        {!loading && (
-          <SetupChecklist
-            agents={souls.length} providers={providerCount} sessions={sessionCount}
-          />
-        )}
+        {/* AI widget builder dialog */}
+        <AIWidgetBuilder
+          open={showAIBuilder}
+          onClose={() => setShowAIBuilder(false)}
+          onAdd={handleAddWidget}
+        />
 
-        {/* ── KPI Strip ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 px-6">
-          <KpiCard
-            label="Spend this month"
-            value={loading ? null : `$${(financeSummary?.total_month_usd ?? gwStats?.cost_this_month_usd ?? 0).toFixed(2)}`}
-            icon={DollarSign}
-            trend={financeSummary && financeDaily.length > 1 ? calcTrend(financeDaily) : undefined}
-            href="/usage"
-          />
-          <KpiCard
-            label="Active agents"
-            value={loading ? null : String(activeAgents)}
-            icon={Users}
-            href="/qors"
-          />
-          <KpiCard
-            label="Sessions today"
-            value={loading ? null : String(auditFeed.length)}
-            icon={Activity}
-            href="/audit"
-          />
-          <KpiCard
-            label="Pending approvals"
-            value={loading ? null : String(totalApprovals)}
-            icon={ShieldCheck}
-            alert={totalApprovals > 0}
-            href="/approvals"
-          />
-        </div>
-
-        {/* ── Spend Chart + Top Spenders ── */}
-        <div className="grid gap-6 lg:grid-cols-3 px-6">
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                Daily Spend (30 days)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              {loading ? (
-                <div className="h-[200px] flex items-center justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : financeDaily.length === 0 ? (
-                <div className="h-[200px] flex items-center justify-center text-sm text-muted-foreground">
-                  No spend data yet
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={financeDaily}>
-                    <defs>
-                      <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={(v) => v.slice(5)}
-                      stroke="var(--muted-foreground)"
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={(v) => `$${v}`}
-                      stroke="var(--muted-foreground)"
-                      width={50}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--card)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 8,
-                        fontSize: 12,
-                      }}
-                      formatter={(value: number) => [`$${value.toFixed(4)}`, 'Cost']}
-                      labelFormatter={(l) => l}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="cost_usd"
-                      stroke="var(--chart-1)"
-                      fill="url(#spendGradient)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <PieChart className="h-4 w-4 text-muted-foreground" />
-                Top Spenders
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              {loading ? (
-                <div className="space-y-3">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="h-8 rounded bg-muted animate-pulse" />
-                  ))}
-                </div>
-              ) : !financeSummary || financeSummary.agents.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">No spend data</p>
-              ) : (
-                <div className="space-y-3">
-                  {financeSummary.agents.slice(0, 5).map((agent) => {
-                    const pct = financeSummary.total_month_usd > 0
-                      ? (agent.month_cost_usd / financeSummary.total_month_usd) * 100
-                      : 0;
-                    return (
-                      <div key={agent.agent_id} className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-foreground truncate">
-                            {agent.display_name || agent.org_role || 'Unknown'}
-                          </span>
-                          <span className="text-xs font-mono text-muted-foreground tabular-nums">
-                            ${agent.month_cost_usd.toFixed(2)}
-                          </span>
-                        </div>
-                        <Progress
-                          value={pct}
-                          className="h-1.5"
-                          indicatorClassName={cn(
-                            pct > 80 ? 'bg-destructive' :
-                            pct > 50 ? 'bg-amber-500' :
-                            'bg-primary'
-                          )}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ── Fleet + Activity + Approvals ── */}
-        <div className="grid gap-6 lg:grid-cols-3 px-6">
-
-          {/* Fleet Status */}
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Users className="h-4 w-4 text-muted-foreground" />
-                Fleet
-              </CardTitle>
-              <Link href="/qors" className="text-xs text-primary hover:underline flex items-center gap-1">
-                All <ArrowUpRight className="h-3 w-3" />
-              </Link>
-            </CardHeader>
-            <CardContent className="pt-0">
-              {loading ? (
-                <div className="space-y-2">
-                  {Array.from({ length: 4 }).map((_, i) => <RowSkeleton key={i} />)}
-                </div>
-              ) : roster.length === 0 ? (
-                <EmptyPanel icon={<Bot className="h-5 w-5" />} label="No agents hired yet" />
-              ) : (
-                <div className="space-y-4">
-                  {(['l1', 'l2', 'l3'] as const).map((tier) => {
-                    const tierAgents = roster.filter((r) => r.org_level === tier);
-                    if (tierAgents.length === 0) return null;
-                    const meta = TIER_META[tier];
-                    return (
-                      <div key={tier} className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <meta.icon className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-2xs font-medium text-muted-foreground uppercase tracking-wide">
-                            {meta.label}
-                          </span>
-                          <Badge variant="secondary" size="xs" appearance="light">
-                            {tierAgents.length}
-                          </Badge>
-                        </div>
-                        <div className="space-y-0.5">
-                          {tierAgents.slice(0, 4).map((agent) => (
-                            <Link
-                              key={agent.id}
-                              href={`/qors/${agent.id}`}
-                              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-accent transition-colors"
-                            >
-                              <span className={cn(
-                                'h-2 w-2 rounded-full shrink-0',
-                                agent.status === 'active' ? 'bg-soul-idle' :
-                                agent.terminated_at ? 'bg-soul-offline' :
-                                'bg-soul-running'
-                              )} />
-                              <span className="text-xs font-medium text-foreground truncate flex-1">
-                                {agent.display_name}
-                              </span>
-                              {agent.org_role && (
-                                <span className="text-2xs text-muted-foreground uppercase">
-                                  {agent.org_role}
-                                </span>
-                              )}
-                            </Link>
-                          ))}
-                          {tierAgents.length > 4 && (
-                            <p className="text-2xs text-muted-foreground pl-2">
-                              +{tierAgents.length - 4} more
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Activity Feed */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Activity className="h-4 w-4 text-muted-foreground" />
-                Today&apos;s Activity
-              </CardTitle>
-              <Link href="/audit" className="text-xs text-primary hover:underline flex items-center gap-1">
-                Work Log <ArrowUpRight className="h-3 w-3" />
-              </Link>
-            </CardHeader>
-            <CardContent className="pt-0">
-              {loading ? (
-                <div className="space-y-2">
-                  {Array.from({ length: 5 }).map((_, i) => <RowSkeleton key={i} />)}
-                </div>
-              ) : auditFeed.length === 0 ? (
-                <EmptyPanel icon={<MessageSquare className="h-5 w-5" />} label="No activity yet today" />
-              ) : (
-                <div className="space-y-0.5">
-                  {auditFeed.map((m) => {
-                    const intentLabel = friendlyIntent(m.intent);
-                    const from = friendlyAgentId(m.from, souls);
-                    const isEscalation = m.intent === 'ESCALATION_NOTICE';
-                    const isAck = m.intent === 'ACK';
-                    return (
-                      <div key={m.id} className="flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-accent/50 transition-colors">
-                        <div className={cn(
-                          'flex h-6 w-6 items-center justify-center rounded-md shrink-0 mt-0.5',
-                          isEscalation ? 'bg-amber-500/10 text-amber-500' :
-                          isAck ? 'bg-emerald-500/10 text-emerald-500' :
-                          'bg-primary/10 text-primary'
-                        )}>
-                          {isEscalation ? <AlertCircle className="h-3 w-3" /> :
-                           isAck ? <CheckCircle className="h-3 w-3" /> :
-                           <Zap className="h-3 w-3" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-foreground truncate">{intentLabel}</p>
-                          <p className="text-2xs text-muted-foreground truncate mt-0.5">
-                            {from} &middot; {new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Approvals */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                Needs Review
-                {totalApprovals > 0 && (
-                  <Badge variant="warning" appearance="light" size="xs">{totalApprovals}</Badge>
-                )}
-              </CardTitle>
-              <Link href="/approvals" className="text-xs text-primary hover:underline flex items-center gap-1">
-                All <ArrowUpRight className="h-3 w-3" />
-              </Link>
-            </CardHeader>
-            <CardContent className="pt-0">
-              {loading ? (
-                <div className="space-y-2">
-                  {Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)}
-                </div>
-              ) : totalApprovals === 0 ? (
-                <EmptyPanel icon={<CheckCircle className="h-5 w-5 text-emerald-400" />} label="All clear" />
-              ) : (
-                <div className="space-y-0.5">
-                  {pendingApprovals.slice(0, 4).map((a) => (
-                    <ApprovalRow key={a.id} item={a} onDecide={decideApproval} />
-                  ))}
-                  {pendingOutbound.slice(0, 3).map((ob) => (
-                    <OutboundRow key={ob.id} item={ob} onDecide={decideOutbound} />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-        </div>
-
-        {/* ── Quick links ── */}
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 px-6">
-          <QuickLink href="/models-hub" icon={Cpu} label="Models Hub" desc="Configure LLM providers" />
-          <QuickLink href="/channels" icon={Zap} label="Channels" desc="Connect integrations" />
-          <QuickLink href="/code?tab=inbox" icon={ShieldCheck} label="Inbox" desc="Approvals and escalations" />
-          <QuickLink href="/settings" icon={Settings} label="Settings" desc="Workspace preferences" />
-        </div>
-
-      </div>
+      </DashboardDataProvider>
     </ErrorBoundary>
   );
 }

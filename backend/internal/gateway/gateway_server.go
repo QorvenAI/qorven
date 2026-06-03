@@ -323,6 +323,48 @@ func (gw *Gateway) Start() error {
 			}
 		}()
 
+		// Dashboard data broadcaster — feeds widget data over the realtime WS every 10s
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if gw.db == nil || gw.rtHub == nil {
+					continue
+				}
+				ctx := context.Background()
+
+				// spend_total_today
+				var spendToday float64
+				gw.db.Pool.QueryRow(ctx,
+					`SELECT COALESCE(SUM(cost_usd),0) FROM gateway_spend WHERE tenant_id=$1 AND period=CURRENT_DATE`,
+					defaultTenant).Scan(&spendToday)
+				gw.rtHub.Broadcast(realtime.Event{
+					Type: "dashboard_data",
+					Data: map[string]any{"source": "spend_total_today", "payload": spendToday},
+				})
+
+				// session_count_today
+				var sessionCount int
+				gw.db.Pool.QueryRow(ctx,
+					`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND updated_at>=date_trunc('day',now())`,
+					defaultTenant).Scan(&sessionCount)
+				gw.rtHub.Broadcast(realtime.Event{
+					Type: "dashboard_data",
+					Data: map[string]any{"source": "session_count_today", "payload": sessionCount},
+				})
+
+				// pending_approvals count
+				var pendingCount int
+				gw.db.Pool.QueryRow(ctx,
+					`SELECT COUNT(*) FROM outbound_queue WHERE tenant_id=$1 AND status='pending'`,
+					defaultTenant).Scan(&pendingCount)
+				gw.rtHub.Broadcast(realtime.Event{
+					Type: "dashboard_data",
+					Data: map[string]any{"source": "pending_approvals", "payload": pendingCount},
+				})
+			}
+		}()
+
 		// Daily model discovery scanner
 		scanner := providers.NewDiscoveryScanner(gw.db.Pool, gw.cfg.Auth.EncryptionKey, defaultTenant)
 		scanner.OnNew = func(tenantID, providerID, modelID string) {

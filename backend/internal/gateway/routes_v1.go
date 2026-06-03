@@ -1126,6 +1126,13 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 			r.Post("/tiles", gw.createDashboardTile)
 			r.Delete("/tiles/{id}", gw.deleteDashboardTile)
 			r.Get("/stats", gw.handleDashboardStats)
+			// Per-user customisable layouts (react-grid-layout + widget configs)
+			r.Get("/layout", gw.handleGetDashboardLayout)
+			r.Put("/layout", gw.handleSaveDashboardLayout)
+			r.Get("/layouts", gw.handleListDashboards)
+			r.Post("/layouts", gw.handleCreateDashboard)
+			r.Put("/layouts/{id}/default", gw.handleSetDefaultDashboard)
+			r.Post("/generate-widget", gw.handleGenerateWidget)
 		})
 
 		// Multi-agent daemon: external agent registry, task queue, plan approval.
