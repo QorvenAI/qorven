@@ -3,564 +3,442 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { Tree, TreeNode } from 'react-organizational-chart';
+import { useRouter } from 'next/navigation';
 import {
-  Crown, User, Users, Loader2, AlertCircle,
-  DollarSign, BarChart3, GitBranch, UserCheck, TrendingUp, Shield,
-  Briefcase, BookOpen, Code2, Megaphone, ShoppingCart, HeadphonesIcon,
-  Building2, Cpu, RefreshCw, ZoomIn, ZoomOut, Maximize2,
+  Minus, Plus, Maximize2, RefreshCw, Users,
+  Cpu, Building2, Code2, Megaphone, ShoppingCart, HeadphonesIcon,
+  UserCheck, Shield, BookOpen, DollarSign,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { orgApi, type OrgChartAgent, type OrgAgentSpend } from '@/lib/api-agents';
+import { orgApi, type OrgChartAgent } from '@/lib/api-agents';
+import { useStore } from '@/store';
+import { soulGradient } from '@/components/soul-card';
 
-// ─── Role + level meta ────────────────────────────────────────────────────────
+// ── Layout constants ────────────────────────────────────────────────────────────
+const CARD_W   = 210;
+const CARD_H   = 96;
+const GAP_X    = 28;
+const GAP_Y    = 72;
+const PADDING  = 64;
+const MIN_ZOOM = 0.15;
+const MAX_ZOOM = 2;
 
-const ROLE_META: Record<string, { label: string; color: string; ring: string; Icon: React.ElementType }> = {
-  caio:  { label: 'CAIO',  color: 'bg-violet-500/15 text-violet-500',   ring: 'ring-violet-500/30', Icon: Cpu },
-  coo:   { label: 'COO',   color: 'bg-amber-500/15 text-amber-500',     ring: 'ring-amber-500/30',  Icon: Building2 },
-  cto:   { label: 'CTO',   color: 'bg-blue-500/15 text-blue-500',       ring: 'ring-blue-500/30',   Icon: Code2 },
-  cmo:   { label: 'CMO',   color: 'bg-pink-500/15 text-pink-500',       ring: 'ring-pink-500/30',   Icon: Megaphone },
-  cso:   { label: 'CSO',   color: 'bg-emerald-500/15 text-emerald-500', ring: 'ring-emerald-500/30', Icon: ShoppingCart },
-  cco:   { label: 'CCO',   color: 'bg-cyan-500/15 text-cyan-500',       ring: 'ring-cyan-500/30',   Icon: HeadphonesIcon },
-  chro:  { label: 'CHRO',  color: 'bg-orange-500/15 text-orange-500',   ring: 'ring-orange-500/30', Icon: UserCheck },
-  ciso:  { label: 'CISO',  color: 'bg-red-500/15 text-red-500',         ring: 'ring-red-500/30',    Icon: Shield },
-  cko:   { label: 'CKO',   color: 'bg-teal-500/15 text-teal-500',       ring: 'ring-teal-500/30',   Icon: BookOpen },
-  cfo:   { label: 'CFO',   color: 'bg-lime-500/15 text-lime-600',       ring: 'ring-lime-500/30',   Icon: DollarSign },
+// ── Role metadata ───────────────────────────────────────────────────────────────
+const ROLE_META: Record<string, { label: string; color: string; Icon: React.ElementType }> = {
+  caio:  { label: 'CAIO',  color: '#a78bfa', Icon: Cpu },
+  coo:   { label: 'COO',   color: '#f59e0b', Icon: Building2 },
+  cto:   { label: 'CTO',   color: '#60a5fa', Icon: Code2 },
+  cmo:   { label: 'CMO',   color: '#f472b6', Icon: Megaphone },
+  cso:   { label: 'CSO',   color: '#34d399', Icon: ShoppingCart },
+  cco:   { label: 'CCO',   color: '#22d3ee', Icon: HeadphonesIcon },
+  chro:  { label: 'CHRO',  color: '#fb923c', Icon: UserCheck },
+  ciso:  { label: 'CISO',  color: '#f87171', Icon: Shield },
+  cko:   { label: 'CKO',   color: '#2dd4bf', Icon: BookOpen },
+  cfo:   { label: 'CFO',   color: '#a3e635', Icon: DollarSign },
 };
 
-const LEVEL_LABEL: Record<string, string> = {
-  l1: 'L1 Executive',
-  l2: 'L2 C-Suite',
-  l3: 'L3 Specialist',
-  customer_facing: 'Customer-Facing',
+const STATUS_COLOR: Record<string, string> = {
+  idle:      '#4ade80',
+  thinking:  '#f59e0b',
+  running:   '#22d3ee',
+  error:     '#f87171',
+  offline:   '#71717a',
 };
 
-function roleInitials(name: string): string {
-  return name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
-}
-
-function fmtUSD(n: number): string {
-  if (n === 0) return '$0';
-  if (n < 0.01) return '<$0.01';
-  return `$${n.toFixed(2)}`;
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
-  return String(n);
-}
-
-// ─── Tree data types ──────────────────────────────────────────────────────────
-
-interface OrgNode {
+// ── Tree types ──────────────────────────────────────────────────────────────────
+interface TreeNode {
   agent: OrgChartAgent;
-  children: OrgNode[];
+  children: TreeNode[];
+  x: number;
+  y: number;
 }
 
-function buildTree(agents: OrgChartAgent[]): { roots: OrgNode[]; orphans: OrgChartAgent[] } {
-  const byId = new Map(agents.map((a) => [a.id, { agent: a, children: [] as OrgNode[] }]));
-  const roots: OrgNode[] = [];
-  const orphans: OrgChartAgent[] = [];
+interface Point { x: number; y: number }
 
-  for (const a of agents) {
-    const node = byId.get(a.id)!;
-    if (!a.manager_id) {
-      roots.push(node);
-    } else {
-      const parent = byId.get(a.manager_id);
-      if (parent) parent.children.push(node);
-      else orphans.push(a);
+// ── Layout algorithm (same approach as Paperclip) ───────────────────────────────
+function subtreeWidth(node: TreeNode): number {
+  if (node.children.length === 0) return CARD_W;
+  const childW = node.children.reduce((s, c) => s + subtreeWidth(c), 0);
+  const gaps = (node.children.length - 1) * GAP_X;
+  return Math.max(CARD_W, childW + gaps);
+}
+
+function assignPositions(node: TreeNode, x: number, y: number): void {
+  const total = subtreeWidth(node);
+  node.x = x + (total - CARD_W) / 2;
+  node.y = y;
+  if (node.children.length > 0) {
+    const childTotal = node.children.reduce((s, c) => s + subtreeWidth(c), 0);
+    const gaps = (node.children.length - 1) * GAP_X;
+    let cx = x + (total - childTotal - gaps) / 2;
+    for (const child of node.children) {
+      const cw = subtreeWidth(child);
+      assignPositions(child, cx, y + CARD_H + GAP_Y);
+      cx += cw + GAP_X;
     }
   }
+}
 
-  const lvlOrder = (l?: string) => ({ l1: 0, l2: 1, l3: 2, customer_facing: 3 }[l ?? 'l3'] ?? 2);
-  const sortNodes = (ns: OrgNode[]) =>
-    ns.sort((a, b) => {
-      const ld = lvlOrder(a.agent.org_level) - lvlOrder(b.agent.org_level);
-      if (ld !== 0) return ld;
-      return (a.agent.display_name ?? '').localeCompare(b.agent.display_name ?? '');
-    });
+function layoutForest(roots: TreeNode[]): void {
+  let x = PADDING;
+  for (const root of roots) {
+    assignPositions(root, x, PADDING);
+    x += subtreeWidth(root) + GAP_X;
+  }
+}
 
+function flattenNodes(nodes: TreeNode[]): TreeNode[] {
+  const result: TreeNode[] = [];
+  const walk = (n: TreeNode) => { result.push(n); n.children.forEach(walk); };
+  nodes.forEach(walk);
+  return result;
+}
+
+function collectEdges(nodes: TreeNode[]): Array<{ parent: TreeNode; child: TreeNode }> {
+  const edges: Array<{ parent: TreeNode; child: TreeNode }> = [];
+  const walk = (n: TreeNode) => {
+    for (const c of n.children) { edges.push({ parent: n, child: c }); walk(c); }
+  };
+  nodes.forEach(walk);
+  return edges;
+}
+
+function buildForest(agents: OrgChartAgent[]): TreeNode[] {
+  const byId = new Map<string, TreeNode>(
+    agents.map(a => [a.id, { agent: a, children: [], x: 0, y: 0 }])
+  );
+  const roots: TreeNode[] = [];
+  for (const a of agents) {
+    const node = byId.get(a.id)!;
+    if (!a.manager_id || !byId.has(a.manager_id)) {
+      roots.push(node);
+    } else {
+      byId.get(a.manager_id)!.children.push(node);
+    }
+  }
+  // Sort roots/children by org_level then display_name
+  const levelOrder: Record<string, number> = { l1: 0, l2: 1, l3: 2, customer_facing: 3 };
+  const sortNodes = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) =>
+      (levelOrder[a.agent.org_level ?? 'l3'] ?? 9) - (levelOrder[b.agent.org_level ?? 'l3'] ?? 9) ||
+      (a.agent.display_name ?? '').localeCompare(b.agent.display_name ?? '')
+    );
+    nodes.forEach(n => sortNodes(n.children));
+  };
   sortNodes(roots);
-  for (const n of byId.values()) sortNodes(n.children);
-  return { roots, orphans };
+  return roots;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function clamp(v: number, min: number, max: number) { return Math.min(Math.max(v, min), max); }
 
-function AgentAvatar({ agent, size = 'md' }: { agent: OrgChartAgent; size?: 'sm' | 'md' | 'lg' }) {
-  const meta = ROLE_META[agent.org_role ?? ''];
-  const Icon = meta?.Icon ?? User;
-  const sizeClass = size === 'sm' ? 'size-7' : size === 'lg' ? 'size-12' : 'size-9';
-  const iconSize = size === 'sm' ? 'h-3.5 w-3.5' : size === 'lg' ? 'h-6 w-6' : 'h-4 w-4';
-  return (
-    <Avatar className={sizeClass}>
-      {agent.avatar ? <AvatarImage src={agent.avatar} alt={agent.display_name} /> : null}
-      <AvatarFallback className={cn('rounded-full text-xs font-semibold', meta?.color ?? 'bg-muted text-muted-foreground')}>
-        {agent.display_name ? roleInitials(agent.display_name) : <Icon className={iconSize} />}
-      </AvatarFallback>
-    </Avatar>
-  );
+// ── Avatar gradient initials ───────────────────────────────────────────────────
+function initials(name: string): string {
+  return name.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
 }
 
-function RoleBadge({ orgRole }: { orgRole?: string }) {
-  if (!orgRole) return null;
-  const meta = ROLE_META[orgRole];
-  return (
-    <span className={cn('inline-flex items-center gap-0.5 rounded border px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide border-current/20', meta?.color ?? 'bg-muted text-muted-foreground')}>
-      {meta ? <meta.Icon className="h-2 w-2" /> : null}
-      {meta?.label ?? orgRole.toUpperCase()}
-    </span>
-  );
+// ── Short model name ───────────────────────────────────────────────────────────
+function shortModel(model?: string): string {
+  if (!model) return '';
+  if (model.startsWith('claude-')) {
+    const m = model.replace(/^claude-/, '').replace(/-\d{8,}$/, '');
+    const parts = m.split('-');
+    const name = parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) : '';
+    const ver  = parts.slice(1).join('.');
+    return ver ? `${name} ${ver}` : name;
+  }
+  if (model.startsWith('gpt-')) return model.replace('gpt-', 'GPT-');
+  if (model.startsWith('gemini-')) return 'Gemini ' + model.replace('gemini-', '').split('-')[0];
+  return model.length > 14 ? model.slice(0, 12) + '…' : model;
 }
 
-function LevelBadge({ level }: { level?: string }) {
-  const color =
-    level === 'l1' ? 'bg-amber-500/15 text-amber-600 border-amber-500/20' :
-    level === 'l2' ? 'bg-blue-500/15 text-blue-600 border-blue-500/20' :
-    level === 'customer_facing' ? 'bg-cyan-500/15 text-cyan-600 border-cyan-500/20' :
-    'bg-muted/60 text-muted-foreground border-border';
-  return (
-    <span className={cn('inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide', color)}>
-      {LEVEL_LABEL[level ?? 'l3'] ?? 'L3'}
-    </span>
-  );
-}
+// ── Main page ─────────────────────────────────────────────────────────────────
+export default function OrgChartPage() {
+  const router  = useRouter();
+  const souls   = useStore(s => s.souls);
+  const soulStates = useStore(s => s.soulStates);
 
-function StatusDot({ status }: { status?: string }) {
-  return (
-    <span className={cn('inline-block h-1.5 w-1.5 rounded-full',
-      status === 'active' ? 'bg-emerald-500' :
-      status === 'suspended' ? 'bg-amber-400' : 'bg-muted-foreground/30'
-    )} />
-  );
-}
+  const [agents,   setAgents]   = useState<OrgChartAgent[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [pan,      setPan]      = useState<Point>({ x: 0, y: 0 });
+  const [zoom,     setZoom]     = useState(1);
+  const [dragging, setDragging] = useState(false);
 
-// ─── Interactive node card for the org chart ──────────────────────────────────
-
-function OrgNodeCard({ agent }: { agent: OrgChartAgent }) {
-  const meta = ROLE_META[agent.org_role ?? ''];
-  const isL1 = agent.org_level === 'l1';
-  const isCustomer = agent.org_level === 'customer_facing';
-
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            className={cn(
-              'inline-flex w-44 flex-col gap-1.5 rounded-xl border px-3 py-2.5 shadow-sm cursor-default select-none transition-shadow hover:shadow-md',
-              isL1
-                ? 'border-amber-400/40 bg-amber-400/5 hover:bg-amber-400/8'
-                : isCustomer
-                ? 'border-cyan-400/40 bg-cyan-400/5 hover:bg-cyan-400/8'
-                : meta
-                ? `border-current/10 ${meta.color} bg-opacity-5 hover:bg-opacity-10`
-                : 'border-border bg-card hover:bg-accent/30',
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <AgentAvatar agent={agent} size={isL1 ? 'md' : 'sm'} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1">
-                  <StatusDot status={agent.status} />
-                  <Link
-                    href={`/qors/${agent.id}`}
-                    className="truncate text-xs font-semibold hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {agent.display_name}
-                  </Link>
-                </div>
-                {agent.title ? (
-                  <p className="truncate text-[10px] text-muted-foreground">{agent.title}</p>
-                ) : null}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 flex-wrap">
-              <RoleBadge orgRole={agent.org_role} />
-              <LevelBadge level={agent.org_level} />
-            </div>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          <div className="space-y-0.5">
-            <p className="font-semibold">{agent.display_name}</p>
-            {agent.title ? <p className="text-muted-foreground">{agent.title}</p> : null}
-            {agent.monthly_budget_usd ? (
-              <p className="text-muted-foreground">Budget: {fmtUSD(agent.monthly_budget_usd as number)}/mo</p>
-            ) : null}
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-// CEO root card
-function CEOCard() {
-  return (
-    <div className="inline-flex w-44 flex-col gap-1.5 rounded-xl border border-amber-400/50 bg-gradient-to-b from-amber-400/10 to-amber-400/5 px-3 py-2.5 shadow-sm">
-      <div className="flex items-center gap-2">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-400/20 text-amber-500 ring-2 ring-amber-400/30">
-          <Crown className="h-4 w-4" />
-        </div>
-        <div>
-          <p className="text-xs font-bold">CEO — You</p>
-          <p className="text-[10px] text-muted-foreground">Owner · Full access</p>
-        </div>
-      </div>
-      <Badge variant="outline" className="w-fit border-amber-400/40 bg-amber-400/10 text-amber-600 text-[10px] font-bold uppercase px-1 py-0.5">
-        L0 Owner
-      </Badge>
-    </div>
-  );
-}
-
-// ─── Recursive tree renderer using the library ────────────────────────────────
-
-function OrgTreeNode({ node }: { node: OrgNode }) {
-  return (
-    <TreeNode label={<OrgNodeCard agent={node.agent} />}>
-      {node.children.map((child) => (
-        <OrgTreeNode key={child.agent.id} node={child} />
-      ))}
-    </TreeNode>
-  );
-}
-
-// ─── Org chart tab with zoom + pan ────────────────────────────────────────────
-
-function OrgChartTab({ agents }: { agents: OrgChartAgent[] }) {
-  const { roots, orphans } = useMemo(() => buildTree(agents), [agents]);
-  const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragStart    = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+  const hasInited    = useRef(false);
+  const suppressRef  = useRef(false);
 
-  const clampZoom = (v: number) => Math.min(2, Math.max(0.3, v));
-  const zoomIn = () => setZoom((z) => clampZoom(z + 0.15));
-  const zoomOut = () => setZoom((z) => clampZoom(z - 0.15));
-  const resetZoom = () => setZoom(1);
+  const load = useCallback(() => {
+    setLoading(true);
+    orgApi.chart()
+      .then(r => setAgents(Array.isArray((r as { agents?: OrgChartAgent[] })?.agents)
+        ? ((r as { agents: OrgChartAgent[] }).agents)
+        : Array.isArray(r) ? (r as OrgChartAgent[]) : []))
+      .catch(() => setAgents(souls as unknown as OrgChartAgent[]))
+      .finally(() => setLoading(false));
+  }, [souls]);
 
-  // Wheel-to-zoom
+  useEffect(() => { load(); }, [load]);
+
+  // Merge live status from store
+  const mergedAgents = useMemo<OrgChartAgent[]>(() =>
+    agents.map(a => ({
+      ...a,
+      status: (soulStates[a.id]?.activity as string) ?? a.status ?? 'offline',
+      model: (souls.find(s => s.id === a.id) as { model?: string } | undefined)?.model ?? (a as { model?: string }).model,
+    })),
+  [agents, souls, soulStates]);
+
+  // Build layout
+  const forest   = useMemo(() => buildForest(mergedAgents), [mergedAgents]);
+  const allNodes = useMemo(() => { layoutForest(forest); return flattenNodes(forest); }, [forest]);
+  const edges    = useMemo(() => collectEdges(forest), [forest]);
+
+  // Bounds
+  const bounds = useMemo(() => {
+    if (allNodes.length === 0) return { width: 800, height: 500 };
+    let mx = 0, my = 0;
+    for (const n of allNodes) { mx = Math.max(mx, n.x + CARD_W); my = Math.max(my, n.y + CARD_H); }
+    return { width: mx + PADDING, height: my + PADDING };
+  }, [allNodes]);
+
+  // Fit on first load
   useEffect(() => {
+    if (hasInited.current || allNodes.length === 0 || !containerRef.current) return;
+    hasInited.current = true;
+    fitToScreen();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allNodes, bounds]);
+
+  const fitToScreen = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        setZoom((z) => clampZoom(z - e.deltaY * 0.001));
-      }
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+    const cw = el.clientWidth, ch = el.clientHeight;
+    const z  = clamp(Math.min((cw - 40) / bounds.width, (ch - 40) / bounds.height), MIN_ZOOM, 1);
+    setZoom(z);
+    setPan({ x: (cw - bounds.width * z) / 2, y: (ch - bounds.height * z) / 2 });
+  }, [bounds]);
 
-  return (
-    <div className="space-y-3">
-      {/* Zoom controls */}
-      <div className="flex items-center justify-end gap-1">
-        <span className="mr-1 text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
-        <button onClick={zoomOut} className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-card hover:bg-accent/40 text-muted-foreground hover:text-foreground">
-          <ZoomOut className="h-3.5 w-3.5" />
-        </button>
-        <button onClick={zoomIn} className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-card hover:bg-accent/40 text-muted-foreground hover:text-foreground">
-          <ZoomIn className="h-3.5 w-3.5" />
-        </button>
-        <button onClick={resetZoom} className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-card hover:bg-accent/40 text-muted-foreground hover:text-foreground">
-          <Maximize2 className="h-3.5 w-3.5" />
-        </button>
-        <span className="ml-2 text-[10px] text-muted-foreground/60 hidden sm:inline">Ctrl+scroll to zoom</span>
-      </div>
+  // Mouse pan
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('[data-card]')) return;
+    setDragging(true);
+    dragStart.current = { mx: e.clientX, my: e.clientY, px: pan.x, py: pan.y };
+  }, [pan]);
 
-      {/* Chart area — scrollable, zoomable */}
-      <div
-        ref={containerRef}
-        className="overflow-auto rounded-xl border border-border bg-[hsl(var(--background))] p-6"
-        style={{ maxHeight: '70vh', minHeight: 300 }}
-      >
-        <div
-          style={{
-            transform: `scale(${zoom})`,
-            transformOrigin: 'top center',
-            transition: 'transform 0.15s ease',
-            paddingBottom: zoom < 1 ? `${(1 - zoom) * 100}%` : undefined,
-          }}
-        >
-          <Tree
-            label={<CEOCard />}
-            lineHeight="20px"
-            lineWidth="1.5px"
-            lineColor="hsl(var(--border))"
-            lineBorderRadius="6px"
-            nodePadding="8px"
-          >
-            {roots.map((n) => (
-              <OrgTreeNode key={n.agent.id} node={n} />
-            ))}
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging) return;
+    setPan({
+      x: dragStart.current.px + e.clientX - dragStart.current.mx,
+      y: dragStart.current.py + e.clientY - dragStart.current.my,
+    });
+  }, [dragging]);
 
-            {orphans.map((a) => (
-              <TreeNode key={a.id} label={<OrgNodeCard agent={a} />} />
-            ))}
-          </Tree>
-        </div>
-      </div>
+  const onMouseUp = useCallback(() => setDragging(false), []);
 
-      {/* Orphan notice */}
-      {orphans.length > 0 ? (
-        <p className="text-[11px] text-muted-foreground">
-          {orphans.length} agent{orphans.length !== 1 ? 's' : ''} shown without a parent (manager not in the roster).
-        </p>
-      ) : null}
-    </div>
-  );
-}
+  // Scroll zoom — toward mouse position
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const el = containerRef.current;
+    if (!el) return;
+    const rect  = el.getBoundingClientRect();
+    const mx    = e.clientX - rect.left;
+    const my    = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.12 : 0.88;
+    const nz    = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    const scale = nz / zoom;
+    setPan({ x: mx - scale * (mx - pan.x), y: my - scale * (my - pan.y) });
+    setZoom(nz);
+  }, [zoom, pan]);
 
-// ─── Roster tab ───────────────────────────────────────────────────────────────
+  const zoomToCenter = useCallback((factor: number) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const cx = el.clientWidth / 2, cy = el.clientHeight / 2;
+    const nz = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    const sc = nz / zoom;
+    setPan({ x: cx - sc * (cx - pan.x), y: cy - sc * (cy - pan.y) });
+    setZoom(nz);
+  }, [zoom, pan]);
 
-function RosterTab({ agents }: { agents: OrgChartAgent[] }) {
-  const sorted = useMemo(
-    () =>
-      [...agents].sort((a, b) => {
-        const la = { l1: 0, l2: 1, l3: 2, customer_facing: 3 }[a.org_level ?? 'l3'] ?? 2;
-        const lb = { l1: 0, l2: 1, l3: 2, customer_facing: 3 }[b.org_level ?? 'l3'] ?? 2;
-        if (la !== lb) return la - lb;
-        return (a.display_name ?? '').localeCompare(b.display_name ?? '');
-      }),
-    [agents],
-  );
-
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-border bg-muted/40 text-left text-muted-foreground">
-            <th className="px-3 py-2.5 font-medium">Agent</th>
-            <th className="px-3 py-2.5 font-medium">Role</th>
-            <th className="px-3 py-2.5 font-medium">Level</th>
-            <th className="px-3 py-2.5 font-medium">Status</th>
-            <th className="px-3 py-2.5 font-medium text-right">Budget/mo</th>
-            <th className="px-3 py-2.5 font-medium text-right">Hired</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/60">
-          {sorted.map((a) => (
-            <tr key={a.id} className="group hover:bg-accent/30 transition-colors">
-              <td className="px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <AgentAvatar agent={a} size="sm" />
-                  <div>
-                    <Link href={`/qors/${a.id}`} className="font-medium hover:underline">
-                      {a.display_name}
-                    </Link>
-                    {a.title ? <p className="text-muted-foreground">{a.title}</p> : null}
-                  </div>
-                </div>
-              </td>
-              <td className="px-3 py-2.5"><RoleBadge orgRole={a.org_role} /></td>
-              <td className="px-3 py-2.5"><LevelBadge level={a.org_level} /></td>
-              <td className="px-3 py-2.5">
-                <div className="flex items-center gap-1.5">
-                  <StatusDot status={a.status} />
-                  <span className="capitalize text-muted-foreground">{a.status ?? 'active'}</span>
-                </div>
-              </td>
-              <td className="px-3 py-2.5 text-right text-muted-foreground">
-                {a.monthly_budget_usd ? fmtUSD(a.monthly_budget_usd as number) : '—'}
-              </td>
-              <td className="px-3 py-2.5 text-right text-muted-foreground">
-                {a.hired_at ? new Date(a.hired_at).toLocaleDateString() : '—'}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {sorted.length === 0 ? (
-        <div className="py-10 text-center text-sm text-muted-foreground">No agents yet.</div>
-      ) : null}
-    </div>
-  );
-}
-
-// ─── Finance tab ─────────────────────────────────────────────────────────────
-
-function FinanceTab() {
-  const [data, setData] = useState<{ agents: OrgAgentSpend[]; total_month_usd: number } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    orgApi.financeSummary()
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  const handleCardClick = useCallback((id: string) => {
+    if (suppressRef.current) return;
+    router.push(`/qors/${id}`);
+  }, [router]);
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-10 justify-center text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading spend data…
+      <div className="flex flex-col px-6 py-8 gap-3 text-muted-foreground text-sm">
+        <RefreshCw className="h-4 w-4 animate-spin" />
+        Loading org chart…
       </div>
     );
   }
 
-  const agentRows = data?.agents ?? [];
-  const total = data?.total_month_usd ?? 0;
+  if (allNodes.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+        <Users className="h-10 w-10 opacity-30" />
+        <p className="text-sm">No agents yet. Create your first Qor to populate the org chart.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">This Month Total</p>
-          <p className="mt-1 text-2xl font-bold">{fmtUSD(total)}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Active Agents</p>
-          <p className="mt-1 text-2xl font-bold">{agentRows.length}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4 col-span-2 sm:col-span-1">
-          <p className="text-xs text-muted-foreground">Avg / Agent</p>
-          <p className="mt-1 text-2xl font-bold">
-            {agentRows.length ? fmtUSD(total / agentRows.length) : '$0'}
-          </p>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-left text-muted-foreground">
-              <th className="px-3 py-2.5 font-medium">Agent</th>
-              <th className="px-3 py-2.5 font-medium">Role</th>
-              <th className="px-3 py-2.5 font-medium text-right">Tokens In</th>
-              <th className="px-3 py-2.5 font-medium text-right">Tokens Out</th>
-              <th className="px-3 py-2.5 font-medium text-right">Month Cost</th>
-              <th className="px-3 py-2.5 font-medium w-32">Share</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/60">
-            {agentRows.map((a) => {
-              const pct = total > 0 ? (a.month_cost_usd / total) * 100 : 0;
-              return (
-                <tr key={a.agent_id} className="hover:bg-accent/30 transition-colors">
-                  <td className="px-3 py-2.5 font-medium">{a.display_name || a.agent_id.slice(0, 8)}</td>
-                  <td className="px-3 py-2.5"><RoleBadge orgRole={a.org_role} /></td>
-                  <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtTokens(a.tokens_in)}</td>
-                  <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtTokens(a.tokens_out)}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold">{fmtUSD(a.month_cost_usd)}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary/60"
-                          style={{ width: `${Math.min(100, pct)}%` }}
-                        />
-                      </div>
-                      <span className="w-9 text-right text-muted-foreground">{pct.toFixed(0)}%</span>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {agentRows.length === 0 ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">No spend data yet.</div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
-export default function OrgChartPage() {
-  const [agents, setAgents] = useState<OrgChartAgent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setErr(null);
-    orgApi.chart()
-      .then((res) => setAgents(res.agents ?? []))
-      .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  return (
-    <div className="mx-auto max-w-5xl space-y-5 p-4 lg:p-6">
+    <div className="full-bleed flex flex-col" style={{ height: 'calc(100dvh - var(--header-height, 56px) - var(--status-bar-height, 24px) - var(--agent-pill-height, 56px))' }}>
       <CanvasHeader
         title="Org Chart"
-        description="Your AI organisation — executives, department heads, and specialists."
+        description={`${allNodes.length} agents across ${new Set(mergedAgents.map(a => a.org_level)).size} tiers`}
         actions={
-          <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs hover:bg-accent/40 disabled:opacity-50"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+          <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5" />
             Refresh
-          </button>
+          </Button>
         }
       />
 
-      {err ? (
-        <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{err}</span>
+      {/* Canvas */}
+      <div
+        ref={containerRef}
+        className="relative flex-1 min-h-0 overflow-hidden bg-muted/10 border border-border rounded-xl mx-6 mb-4"
+        style={{ cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', userSelect: 'none' }}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+        onWheel={onWheel}
+      >
+        {/* Zoom controls */}
+        <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
+          {[
+            { icon: Plus,      title: 'Zoom in',        onClick: () => zoomToCenter(1.2) },
+            { icon: Minus,     title: 'Zoom out',       onClick: () => zoomToCenter(0.8) },
+            { icon: Maximize2, title: 'Fit to screen',  onClick: fitToScreen },
+          ].map(({ icon: Icon, title, onClick }) => (
+            <button
+              key={title}
+              title={title}
+              onClick={onClick}
+              className="flex h-7 w-7 items-center justify-center rounded border border-border bg-background/90 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors backdrop-blur-sm"
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+          <div className="mt-1 text-center text-[10px] text-muted-foreground/50 font-mono">
+            {Math.round(zoom * 100)}%
+          </div>
         </div>
-      ) : null}
 
-      {loading && agents.length === 0 ? (
-        <div className="flex items-center gap-2 py-10 justify-center text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading org chart…
+        {/* SVG edges */}
+        <svg className="absolute inset-0 pointer-events-none overflow-visible" style={{ width: '100%', height: '100%' }}>
+          <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+            {edges.map(({ parent, child }) => {
+              const x1 = parent.x + CARD_W / 2;
+              const y1 = parent.y + CARD_H;
+              const x2 = child.x  + CARD_W / 2;
+              const y2 = child.y;
+              const my = (y1 + y2) / 2;
+              return (
+                <path
+                  key={`${parent.agent.id}-${child.agent.id}`}
+                  d={`M${x1},${y1} L${x1},${my} L${x2},${my} L${x2},${y2}`}
+                  fill="none"
+                  stroke="var(--border)"
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                />
+              );
+            })}
+          </g>
+        </svg>
+
+        {/* Cards */}
+        <div
+          className="absolute inset-0"
+          style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, transformOrigin: '0 0' }}
+        >
+          {allNodes.map((node) => {
+            const a        = node.agent;
+            const roleMeta = ROLE_META[a.org_role ?? ''];
+            const status   = (soulStates[a.id]?.activity as string) ?? a.status ?? 'offline';
+            const dotColor = STATUS_COLOR[status] ?? STATUS_COLOR.offline;
+            const lastEvt  = soulStates[a.id]?.lastEvent;
+            const gradCls  = soulGradient(a.display_name);
+            const model    = shortModel((souls.find(s => s.id === a.id) as { model?: string } | undefined)?.model);
+            const isActive = status === 'thinking' || status === 'running';
+
+            return (
+              <div
+                key={a.id}
+                data-card
+                className={cn(
+                  'absolute bg-card border border-border rounded-xl shadow-sm cursor-pointer',
+                  'hover:border-primary/40 hover:shadow-md transition-[border-color,box-shadow] duration-150',
+                  isActive && 'border-primary/30 shadow-[0_0_0_1px_rgba(82,113,255,0.2)]',
+                )}
+                style={{ left: node.x, top: node.y, width: CARD_W, minHeight: CARD_H }}
+                onClick={() => handleCardClick(a.id)}
+              >
+                <div className="flex items-start gap-3 px-4 py-3.5">
+                  {/* Avatar + status dot */}
+                  <div className="relative shrink-0 mt-0.5">
+                    <div className={cn(
+                      'h-9 w-9 rounded-full flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br',
+                      gradCls,
+                    )}>
+                      {initials(a.display_name)}
+                    </div>
+                    <span
+                      className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
+                      style={{ backgroundColor: dotColor }}
+                      title={status}
+                    />
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    {/* Name + role badge */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[120px]">
+                        {a.display_name}
+                      </span>
+                      {roleMeta && (
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-bold border border-current/20"
+                          style={{ color: roleMeta.color, background: roleMeta.color + '18' }}
+                        >
+                          {roleMeta.label}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Title/role */}
+                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate leading-tight">
+                      {a.title ?? a.role ?? (a.org_level === 'l1' ? 'Executive' : a.org_level === 'l2' ? 'Management' : 'Specialist')}
+                    </p>
+
+                    {/* Model name */}
+                    {model && (
+                      <p className="text-[10px] text-muted-foreground/60 font-mono mt-1 truncate leading-tight">
+                        {model}
+                      </p>
+                    )}
+
+                    {/* Last event */}
+                    {lastEvt && (
+                      <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate leading-tight">
+                        {lastEvt}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      ) : null}
-
-      {!loading && agents.length === 0 && !err ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/60 bg-card/40 px-6 py-12 text-center">
-          <Users className="h-7 w-7 text-muted-foreground/50" />
-          <p className="text-sm font-medium">No agents yet</p>
-          <p className="text-xs text-muted-foreground">Create your first agent to start building the org.</p>
-          <Link href="/qors" className="mt-1 text-xs text-primary hover:underline">Go to Agents →</Link>
-        </div>
-      ) : null}
-
-      {agents.length > 0 ? (
-        <Tabs defaultValue="chart">
-          <TabsList variant="line" className="w-full justify-start gap-1">
-            <TabsTrigger value="chart" className="flex items-center gap-1.5 text-xs">
-              <GitBranch className="h-3.5 w-3.5" /> Org Chart
-            </TabsTrigger>
-            <TabsTrigger value="roster" className="flex items-center gap-1.5 text-xs">
-              <Users className="h-3.5 w-3.5" /> Roster
-            </TabsTrigger>
-            <TabsTrigger value="finance" className="flex items-center gap-1.5 text-xs">
-              <BarChart3 className="h-3.5 w-3.5" /> Finance
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="chart" className="mt-4">
-            <OrgChartTab agents={agents} />
-          </TabsContent>
-
-          <TabsContent value="roster" className="mt-4">
-            <RosterTab agents={agents} />
-          </TabsContent>
-
-          <TabsContent value="finance" className="mt-4">
-            <FinanceTab />
-          </TabsContent>
-        </Tabs>
-      ) : null}
+      </div>
     </div>
   );
 }
