@@ -11,6 +11,16 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.2-alpha — 2026-06-06
+
+### Fixed
+- Factory reset no longer fails with a migration error — stale pool connections are now flushed after schema drop before re-running migrations. ([cf025fe](https://github.com/QorvenAI/qorven/commit/cf025fe))
+- Redirect loop on login resolved — the `next` param is now decoded before validation and redirecting back to `/login` is explicitly blocked. ([cf025fe](https://github.com/QorvenAI/qorven/commit/cf025fe))
+- Cookie max-age is now a flat 7 days instead of calculated from JWT expiry, preventing intermittent logouts caused by clock skew on first write. ([cf025fe](https://github.com/QorvenAI/qorven/commit/cf025fe))
+- Session expiry buffer in middleware increased to 60 seconds to avoid false logouts during slow page navigation. ([cf025fe](https://github.com/QorvenAI/qorven/commit/cf025fe))
+
+---
+
 ## v0.5.1-alpha — 2026-06-06
 
 ### Added
