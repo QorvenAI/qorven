@@ -325,17 +325,17 @@ export default function ForgotPasswordPage() {
           </div>
           <div className="space-y-3">
             <h2 className="text-3xl font-bold leading-tight">
-              Secure password<br />recovery
+              Back in<br />60 seconds.
             </h2>
             <p className="text-base text-white/70 leading-relaxed max-w-xs">
-              Reset your password securely via Telegram OTP. No email required — everything stays on your server.
+              OTP to Telegram. No email, no third-party. Everything stays on your server.
             </p>
           </div>
           <div className="space-y-3">
             {[
-              { icon: MessageCircle, text: 'OTP delivered to your paired Telegram' },
-              { icon: KeyRound,      text: 'All active sessions revoked on reset'   },
-              { icon: Terminal,      text: 'CLI fallback via qorven reset-password' },
+              { icon: MessageCircle, text: 'Code sent to Telegram — not email' },
+              { icon: KeyRound,      text: 'All sessions revoked on reset'     },
+              { icon: Terminal,      text: 'No Telegram? SSH: qorven reset-password' },
             ].map(({ icon: Icon, text }) => (
               <div key={text} className="flex items-center gap-3">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/10">
@@ -349,9 +349,9 @@ export default function ForgotPasswordPage() {
 
         <div className="relative flex items-center gap-8">
           {[
-            { value: '15 min', label: 'OTP valid for'   },
-            { value: '7 day',  label: 'Session lifetime' },
-            { value: 'bcrypt', label: 'Password hashing' },
+            { value: '15m',    label: 'Code expires'    },
+            { value: '7d',     label: 'Sessions last'   },
+            { value: 'bcrypt', label: 'Passwords hashed' },
           ].map(({ value, label }) => (
             <div key={label} className="space-y-0.5">
               <p className="text-xl font-bold">{value}</p>

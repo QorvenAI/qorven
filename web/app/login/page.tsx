@@ -10,11 +10,11 @@ import { Loader2, Eye, EyeOff, MessageCircle, Mail, Share2, Code2, Plug } from '
 type Mode = 'loading' | 'login' | 'setup';
 
 const features = [
-  { icon: MessageCircle, title: 'Chat with any AI',           desc: 'Ask questions, write content, get answers. Works with ChatGPT, Gemini, Claude, DeepSeek — your choice.' },
-  { icon: Mail,          title: 'Handles your email',         desc: 'Reads your inbox, drafts replies, sends follow-ups. Your email runs itself while you focus on what matters.' },
-  { icon: Share2,        title: 'Posts to social media',      desc: 'Write once, publish everywhere — Instagram, Twitter/X, LinkedIn, Facebook. Scheduled or instant.' },
-  { icon: Code2,         title: 'Writes and runs code',       desc: 'Your AI writes, tests, and fixes code on its own. Full IDE in the browser. No developer needed.' },
-  { icon: Plug,          title: 'Connects to anything',       desc: 'Tell it what service you need — it figures out the integration, builds the connection, and it\'s ready to use.' },
+  { icon: MessageCircle, title: 'Any AI model',      desc: 'Claude, GPT, Gemini, DeepSeek — switch models per task, no lock-in.' },
+  { icon: Mail,          title: 'Email on autopilot', desc: 'Reads, drafts, and sends. Inbox zero without touching it.' },
+  { icon: Share2,        title: 'Social media',       desc: 'One post, every platform — Instagram, X, LinkedIn, Facebook.' },
+  { icon: Code2,         title: 'Writes your code',   desc: 'Full browser IDE. AI writes, tests, and deploys. Solo or with a team.' },
+  { icon: Plug,          title: 'Connects anything',  desc: '150+ integrations. Describe what you need — it builds the connector.' },
 ];
 
 /** Validate the `next` redirect param — only allow same-origin paths. */
@@ -280,10 +280,10 @@ function LoginForm() {
         <div className="relative space-y-10">
           <div className="space-y-3">
             <h2 className="text-3xl font-bold leading-tight">
-              Your AI handles the work.<br />You handle what matters.
+              Your agents work.<br />You decide what matters.
             </h2>
             <p className="text-base text-white/70 leading-relaxed max-w-xs">
-              Chat, email, social media, code — one AI workspace that runs on your own server, around the clock.
+              Self-hosted. Open source. 42 agents across every department — running 24/7 on your server.
             </p>
           </div>
 
@@ -305,9 +305,9 @@ function LoginForm() {
         {/* Bottom: stat strip */}
         <div className="relative flex items-center gap-8">
           {[
-            { value: '18+',  label: 'Channels'        },
-            { value: '14+',  label: 'AI providers'    },
-            { value: '70+',  label: 'Built-in tools'  },
+            { value: '21+',  label: 'Channels'       },
+            { value: '14+',  label: 'AI providers'  },
+            { value: '42',   label: 'Agents'        },
           ].map(({ value, label }) => (
             <div key={label} className="space-y-0.5">
               <p className="text-2xl font-bold">{value}</p>
