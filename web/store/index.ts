@@ -40,6 +40,10 @@ interface Store {
   liveEvents: LiveEvent[];
   pushEvent: (event: LiveEvent) => void;
 
+  // Dashboard widget data — keyed by dataSource slug, updated by WS dashboard_data events
+  dashboardData: Record<string, unknown>;
+  setDashboardData: (source: string, payload: unknown) => void;
+
   // ───────── Telemetry slice (P9 Step 1) ─────────
   // Per-session log of orchestrator `graph.node_*` + `agent.progress`
   // events. Consumed by in-chat telemetry renderers. Each session's
@@ -283,6 +287,11 @@ export const useStore = create<Store>((set) => ({
   liveEvents: [],
   pushEvent: (event) =>
     set((s) => ({ liveEvents: [event, ...s.liveEvents].slice(0, 200) })),
+
+  // Dashboard widget data
+  dashboardData: {},
+  setDashboardData: (source, payload) =>
+    set((s) => ({ dashboardData: { ...s.dashboardData, [source]: payload } })),
 
   // Telemetry — per-session append-only log, FIFO-capped.
   telemetryBySession: {},

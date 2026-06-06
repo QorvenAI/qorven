@@ -126,7 +126,8 @@ export type WSEventType =
   | 'synthesis_triggered'
   | 'page.navigate'
   | 'app_installed'
-  | 'dashboard_refresh';
+  | 'dashboard_refresh'
+  | 'dashboard_data';
 
 export interface WSEvent {
   type: WSEventType;

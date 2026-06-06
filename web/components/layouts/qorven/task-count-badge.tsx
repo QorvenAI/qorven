@@ -2,32 +2,14 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useState, useEffect } from 'react';
-import { request } from '@/lib/api-core';
-import { wsBase } from '@/lib/api-url';
+import { useStore } from '@/store';
 
 export function TaskCountBadge() {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    request<{ count: number }>('/tasks?status=in_progress&count=true')
-      .then(r => setCount(r.count ?? 0))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const url = wsBase('/ws/realtime');
-    if (!url) return;
-    const ws = new WebSocket(url);
-    ws.onmessage = (e) => {
-      try {
-        const evt = JSON.parse(e.data);
-        if (evt.type === 'task_iteration_start') setCount(c => c + 1);
-        if (['task_done', 'task_blocked'].includes(evt.type)) setCount(c => Math.max(0, c - 1));
-      } catch {}
-    };
-    return () => ws.close();
-  }, []);
+  // Read live task counts from the shared Zustand store instead of opening a
+  // separate WebSocket. The existing websocket.ts handler writes task events
+  // to the store's daemonTasks slice.
+  const tasks = useStore(s => s.daemonTasks);
+  const count = Object.values(tasks).filter(t => t.status === 'in_progress').length;
 
   if (count === 0) return null;
   return (

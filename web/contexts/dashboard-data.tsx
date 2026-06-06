@@ -1,10 +1,16 @@
 'use client';
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
+//
+// DashboardDataProvider — reads dashboard widget data from the shared Zustand
+// store instead of opening its own WebSocket. The existing websocket.ts
+// handler already processes 'dashboard_data' events from the backend and
+// writes them to store.dashboardData. This avoids duplicate WS connections.
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext } from 'react';
+import { useStore } from '@/store';
 
-// --- Available data sources ---
+// ── Available data sources ──────────────────────────────────────────────────
 
 export const AVAILABLE_DATA_SOURCES: Record<string, string> = {
   agent_status_live:       'Live agent status counts (idle / thinking / running)',
@@ -18,12 +24,10 @@ export const AVAILABLE_DATA_SOURCES: Record<string, string> = {
   error_rate_by_agent:     'Error rate breakdown by agent',
 };
 
-// --- Context types ---
+// ── Context ─────────────────────────────────────────────────────────────────
 
 interface DashboardDataContextValue {
-  /** Keyed by data-source slug → latest payload received from the server. */
   data: Record<string, unknown>;
-  /** True when the dashboard WS subscription is active. */
   connected: boolean;
 }
 
@@ -32,101 +36,21 @@ const DashboardDataContext = createContext<DashboardDataContextValue>({
   connected: false,
 });
 
-// --- Provider ---
+// ── Provider ─────────────────────────────────────────────────────────────────
 
 export function DashboardDataProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<Record<string, unknown>>({});
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
-
-  const getWsUrl = useCallback((): string => {
-    if (typeof window === 'undefined') return '';
-    const envUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (envUrl) {
-      return envUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws/realtime';
-    }
-    const { protocol, host } = window.location;
-    const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${wsProtocol}//${host}/ws/realtime`;
-  }, []);
-
-  const connect = useCallback(() => {
-    if (!mountedRef.current) return;
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
-
-    const url = getWsUrl();
-    if (!url) return;
-
-    const token =
-      typeof window !== 'undefined'
-        ? (localStorage.getItem('qorven_token') ?? process.env.NEXT_PUBLIC_API_TOKEN ?? '')
-        : '';
-
-    const fullUrl = token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url;
-
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(fullUrl);
-    } catch {
-      return;
-    }
-
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) { ws.close(); return; }
-      setConnected(true);
-    };
-
-    ws.onmessage = (event) => {
-      if (!mountedRef.current) return;
-      try {
-        const msg = JSON.parse(event.data as string);
-        if (msg?.type === 'dashboard_data' && typeof msg.source === 'string') {
-          setData((prev) => ({ ...prev, [msg.source as string]: msg.payload }));
-        }
-      } catch {
-        // ignore malformed frames
-      }
-    };
-
-    ws.onerror = () => {
-      setConnected(false);
-    };
-
-    ws.onclose = () => {
-      if (!mountedRef.current) return;
-      setConnected(false);
-      wsRef.current = null;
-      // Reconnect after 5 s
-      timerRef.current = setTimeout(() => { connect(); }, 5000);
-    };
-  }, [getWsUrl]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    connect();
-    return () => {
-      mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, [connect]);
+  // Read directly from the shared store — no extra WS connection needed.
+  const dashboardData = useStore(s => s.dashboardData);
+  const wsConnected   = useStore(s => s.wsConnected);
 
   return (
-    <DashboardDataContext.Provider value={{ data, connected }}>
+    <DashboardDataContext.Provider value={{ data: dashboardData, connected: wsConnected }}>
       {children}
     </DashboardDataContext.Provider>
   );
 }
 
-// --- Hook ---
+// ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useDashboardData(): DashboardDataContextValue {
   return useContext(DashboardDataContext);

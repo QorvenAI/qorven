@@ -372,6 +372,15 @@ function handleEvent(event: WSEvent) {
       break;
     }
 
+    case 'dashboard_data': {
+      // Backend pushes { type: 'dashboard_data', source: string, payload: unknown }
+      // every 10s. Store in Zustand so DashboardDataProvider reads from there
+      // instead of opening a second WS connection.
+      const d = event.data as { source?: string; payload?: unknown };
+      if (d?.source) store.setDashboardData(d.source, d.payload);
+      break;
+    }
+
     default: {
       // Phase 9 Step 1 — orchestrator telemetry.
       // `graph.node_*` + `agent.progress` events carry a session_id
