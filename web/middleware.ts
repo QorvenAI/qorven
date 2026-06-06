@@ -49,8 +49,8 @@ function jwtExpiry(token: string): number | null {
 function isTokenExpired(token: string): boolean {
   const exp = jwtExpiry(token);
   if (exp === null) return true; // malformed — treat as expired
-  // Add a 30-second buffer to account for clock drift
-  return Date.now() / 1000 > exp - 30;
+  // 60-second buffer — avoids false redirects from clock drift or slow navigation
+  return Date.now() / 1000 > exp - 60;
 }
 
 export function middleware(request: NextRequest) {

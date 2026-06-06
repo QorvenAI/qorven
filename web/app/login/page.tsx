@@ -17,15 +17,20 @@ const features = [
   { icon: Plug,          title: 'Connects anything',  desc: '150+ integrations. Describe what you need — it builds the connector.' },
 ];
 
-/** Validate the `next` redirect param — only allow same-origin paths. */
+/** Validate the `next` redirect param — only allow same-origin paths, never /login. */
 function safeNext(next: string | null | undefined): string {
   if (!next) return '/';
+  // Decode in case it was double-encoded (%2F → /)
+  let decoded = next;
+  try { decoded = decodeURIComponent(next); } catch { /* use raw */ }
   // Must start with / and not be a protocol-relative URL (//evil.com)
-  if (!next.startsWith('/') || next.startsWith('//')) return '/';
+  if (!decoded.startsWith('/') || decoded.startsWith('//')) return '/';
   try {
-    // Parse relative to current origin — rejects anything with a different host
-    const url = new URL(next, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
-    if (url.origin !== (typeof window !== 'undefined' ? window.location.origin : 'http://localhost')) return '/';
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(decoded, origin);
+    if (url.origin !== origin) return '/';
+    // Never redirect back to /login — breaks the redirect loop
+    if (url.pathname === '/login' || url.pathname.startsWith('/login/')) return '/';
     return url.pathname + url.search;
   } catch {
     return '/';

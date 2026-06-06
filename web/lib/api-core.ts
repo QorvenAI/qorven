@@ -45,10 +45,9 @@ export function getToken(): string {
 
 export function setToken(token: string) {
   localStorage.setItem('qorven_token', token);
-  // Set cookie max-age to match the JWT expiry so middleware sees the right
-  // expiry. Fall back to 7 days if we can't decode the token.
-  const exp = jwtExpiry(token);
-  const maxAge = exp ? Math.max(0, exp - Math.floor(Date.now() / 1000)) : 7 * 24 * 3600;
+  // Always set a flat 7-day max-age — avoids clock-skew bugs where
+  // exp - now() rounds to a very small or negative number on first write.
+  const maxAge = 7 * 24 * 3600;
   document.cookie = `qorven_token=${token}; path=/; max-age=${maxAge}; SameSite=Lax`;
 }
 

@@ -162,7 +162,11 @@ func (gw *Gateway) handleAdminFactoryReset(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "DROP SCHEMA: " + sanitizeError(err)})
 		return
 	}
-	pool.Reset() // evict stale prepared statements before CREATE SCHEMA
+	// Close ALL connections — stale connections hold references to the dropped
+	// schema and cause "cache lookup failed" errors on the very next query.
+	pool.Reset()
+	// Brief pause so Postgres recycles the connections before we reconnect.
+	time.Sleep(500 * time.Millisecond)
 	if _, err := pool.Exec(r.Context(), `CREATE SCHEMA public`); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "CREATE SCHEMA: " + sanitizeError(err)})
 		return
