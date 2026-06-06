@@ -137,6 +137,11 @@ export const sessions = {
   },
   create: (body: { agent_id: string; channel?: string }) => request<Session>('/sessions', { method: 'POST', body: JSON.stringify(body) }),
   delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
+  trimMessages: (id: string, n = 1) =>
+    request<{ ok: boolean; remaining: number }>(
+      `/sessions/${id}/messages?n=${n}`,
+      { method: 'DELETE' }
+    ),
   search: (q: string) =>
     request<{ sessions: Session[]; count: number; query: string }>(
       `/sessions/search?q=${encodeURIComponent(q)}`,
