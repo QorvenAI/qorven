@@ -20,9 +20,20 @@ export const metadata: Metadata = {
   description: 'AI Agent Platform',
 };
 
+// Inline script that runs synchronously before React hydrates — reads the
+// saved theme from localStorage and applies --primary to <html> immediately,
+// preventing the flash where the page paints with the CSS-file default color
+// before ThemeProvider's useEffect fires.
+const themeScript = `(function(){try{var s=localStorage.getItem('qorven-theme');if(s){var t=JSON.parse(s);if(t&&t.primaryOklch){document.documentElement.style.setProperty('--primary',t.primaryOklch);document.documentElement.style.setProperty('--ring',t.primaryOklch);}}}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html className="h-full dark" suppressHydrationWarning>
+      {/* eslint-disable-next-line @next/next/no-before-interactive-script-outside-document */}
+      <head>
+        {/* Synchronous theme init — must run before first paint to avoid color flash */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body suppressHydrationWarning className={cn('antialiased flex h-full w-full text-sm text-foreground bg-background', inter.variable, jetbrains.variable, inter.className)}>
         <ThemeProvider>
           <WebSocketProvider>
