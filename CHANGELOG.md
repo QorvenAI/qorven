@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.3-alpha — 2026-06-06
+
+### Added
+- **/undo command in chat** — type `/undo` to remove the last message pair (user + assistant) from any session. `/undo 2` removes the last 2 pairs. The agent treats the removed messages as if they never happened. Supports up to 50 pairs per undo. ([b660ec3](https://github.com/QorvenAI/qorven/commit/b660ec3))
+
+---
+
 ## v0.5.1-alpha — 2026-06-06
 
 ### Added
