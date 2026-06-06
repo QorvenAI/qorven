@@ -439,7 +439,7 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
       const n = Math.min(parseInt(undoMatch[1] ?? '1', 10) || 1, 50);
       setInputValue('');
       sessionsApi.trimMessages(sessionId, n)
-        .then(({ remaining }) => {
+        .then(() => {
           setInitialMessages((prev) => {
             const remove = n * 2;
             return remove >= prev.length ? [] : prev.slice(0, prev.length - remove);
