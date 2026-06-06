@@ -332,11 +332,29 @@ func versionHeaderMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// isTrustedProxy returns true if the remote address is a loopback or
+// private-range address (127.x, ::1, 10.x, 172.16-31.x, 192.168.x).
+// Only connections from trusted proxies should be allowed to set X-Forwarded-For.
+func isTrustedProxy(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
 func (rl *IPRateLimit) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := r.RemoteAddr
-			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			// Only trust X-Forwarded-For when the connection comes from a
+			// loopback or private-range address (nginx, local Docker, etc.).
+			// Direct internet connections can forge this header arbitrarily.
+			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" && isTrustedProxy(r.RemoteAddr) {
 				ip = strings.Split(fwd, ",")[0]
 			}
 			if !rl.Allow(strings.TrimSpace(ip)) {

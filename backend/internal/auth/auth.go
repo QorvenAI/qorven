@@ -362,11 +362,20 @@ func (s *AuthService) ValidateToken(tokenStr string) (*User, error) {
 		return nil, fmt.Errorf("invalid claims")
 	}
 
+	// Use comma-ok assertions — a JWT signed with the correct secret but
+	// missing any claim would otherwise panic with a nil interface assertion.
+	sub, ok1 := claims["sub"].(string)
+	username, ok2 := claims["username"].(string)
+	role, ok3 := claims["role"].(string)
+	tenant, ok4 := claims["tenant"].(string)
+	if !ok1 || !ok2 || !ok3 || !ok4 || sub == "" {
+		return nil, fmt.Errorf("invalid token claims")
+	}
 	return &User{
-		ID:       claims["sub"].(string),
-		Username: claims["username"].(string),
-		Role:     claims["role"].(string),
-		TenantID: claims["tenant"].(string),
+		ID:       sub,
+		Username: username,
+		Role:     role,
+		TenantID: tenant,
 	}, nil
 }
 
@@ -459,4 +468,14 @@ func loadOrCreateSecret() []byte {
 	slog.Info("auth: generated new JWT secret")
 
 	return secret
+}
+
+// RevokeAllSessionsForUser invalidates all refresh tokens for a user.
+// Call this after password change or password reset to ensure that stolen
+// or compromised sessions cannot be used to mint new JWTs.
+func (s *AuthService) RevokeAllSessionsForUser(ctx context.Context, userID string) {
+	s.pool.Exec(ctx,
+		`UPDATE refresh_tokens SET revoked_at = now()
+		 WHERE user_id = $1 AND revoked_at IS NULL`,
+		userID)
 }

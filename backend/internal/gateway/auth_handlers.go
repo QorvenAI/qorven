@@ -196,7 +196,7 @@ func (gw *Gateway) handleForgotPassword(w http.ResponseWriter, r *http.Request) 
 		delivery = "telegram"
 	}
 
-	slog.Info("auth.otp_created", "user", user.Username, "delivery", delivery, "otp", otp)
+	slog.Info("auth.otp_created", "user", user.Username, "delivery", delivery) // otp intentionally omitted from logs
 
 	writeJSON(w, 200, map[string]any{"status": "ok", "delivery": delivery})
 }
@@ -239,6 +239,8 @@ func (gw *Gateway) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	if err := gw.authSvc.ResetPassword(r.Context(), user.ID, req.NewPassword); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()}); return
 	}
+	// Invalidate all existing sessions — a password reset must log out all devices
+	gw.authSvc.RevokeAllSessionsForUser(r.Context(), user.ID)
 	writeJSON(w, 200, map[string]string{"status": "password reset"})
 }
 
@@ -345,7 +347,7 @@ func (gw *Gateway) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	key, err := gw.authSvc.CreateAPIKey(r.Context(), user.ID, req.Name)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
 
@@ -375,6 +377,8 @@ func (gw *Gateway) handleChangePassword(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
+	// Invalidate all existing sessions — changing password revokes all other sessions
+	gw.authSvc.RevokeAllSessionsForUser(r.Context(), user.ID)
 	writeJSON(w, 200, map[string]string{"status": "password updated"})
 }
 

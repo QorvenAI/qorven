@@ -17,6 +17,21 @@ const features = [
   { icon: Plug,          title: 'Connects to anything',       desc: 'Tell it what service you need — it figures out the integration, builds the connection, and it\'s ready to use.' },
 ];
 
+/** Validate the `next` redirect param — only allow same-origin paths. */
+function safeNext(next: string | null | undefined): string {
+  if (!next) return '/';
+  // Must start with / and not be a protocol-relative URL (//evil.com)
+  if (!next.startsWith('/') || next.startsWith('//')) return '/';
+  try {
+    // Parse relative to current origin — rejects anything with a different host
+    const url = new URL(next, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    if (url.origin !== (typeof window !== 'undefined' ? window.location.origin : 'http://localhost')) return '/';
+    return url.pathname + url.search;
+  } catch {
+    return '/';
+  }
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -45,7 +60,7 @@ function LoginForm() {
             // Re-set the cookie (may be absent if user cleared cookies but kept localStorage)
             // then hard-navigate so the server sees the cookie on the first request.
             setToken(storedToken);
-            window.location.href = searchParams?.get('next') || '/';
+            window.location.href = safeNext(searchParams?.get('next'));
             return;
           }
         } catch {
@@ -82,7 +97,7 @@ function LoginForm() {
       localStorage.setItem('qorven_user', JSON.stringify(data.user));
       // Hard navigation so the browser sends the newly-set cookie on the
       // first request to the server (proxy.ts checks cookies server-side).
-      window.location.href = searchParams?.get('next') || searchParams?.get('from') || '/';
+      window.location.href = safeNext(searchParams?.get('next') ?? searchParams?.get('from'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid username or password');
     } finally {
@@ -99,7 +114,7 @@ function LoginForm() {
       await auth.setup({ username, password, email: email || undefined });
       const data = await auth.login({ username, password });
       setToken(data.token);
-      window.location.href = searchParams?.get('next') || '/';
+      window.location.href = safeNext(searchParams?.get('next'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');
     } finally {

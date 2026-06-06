@@ -60,7 +60,7 @@ func (gw *Gateway) registerRoutes() {
 	r.Get("/ws/realtime", gw.wsAuth(gw.rtHub.HandleWebSocket))
 	// Voice realtime WebSocket
 	if gw.voiceMgr != nil && gw.agentLoop != nil {
-		r.Get("/ws/voice", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Get("/ws/voice", gw.wsAuth(func(w http.ResponseWriter, r *http.Request) {
 			agentID := r.URL.Query().Get("agent_id")
 			// Resolve agent key (like "chief") to actual UUID
 			if agentID == "" || agentID == "chief" {
@@ -108,7 +108,7 @@ func (gw *Gateway) registerRoutes() {
 				return result.Content, nil
 			}).ServeHTTP(w, r)
 		}))
-		r.Get("/ws/voice/webrtc", gw.voiceMgr.HandleWebRTCSignaling(gw.agentLoop.Chat).ServeHTTP)
+		r.Get("/ws/voice/webrtc", gw.wsAuth(gw.voiceMgr.HandleWebRTCSignaling(gw.agentLoop.Chat).ServeHTTP))
 
 		// OpenAI Realtime (and future realtime providers) — the browser
 		// speaks the upstream protocol directly, we just proxy and
@@ -128,8 +128,8 @@ func (gw *Gateway) registerRoutes() {
 		r.Route("/a2a", gw.a2aServer.Routes())
 	}
 
-	// Rate limit login: 10 requests/minute per IP
-	loginRL := NewIPRateLimit(0, 10) // 10 burst, refills slowly
+	// Rate limit login: ~10 attempts per 10 seconds per IP (burst=10, refill=1/s)
+	loginRL := NewIPRateLimit(1, 10)
 	r.With(loginRL.Middleware()).Post("/auth/login", gw.handleLogin)
 	r.With(loginRL.Middleware()).Post("/auth/setup", gw.handleSetup)
 	r.Post("/auth/logout", gw.handleLogout)
@@ -139,10 +139,8 @@ func (gw *Gateway) registerRoutes() {
 	r.Post("/auth/change-password", gw.handleChangePassword)
 	r.Post("/auth/api-keys", gw.handleCreateAPIKey)
 
-	// Forgot password / magic link — stricter rate limit (3/min per IP)
-	// because the endpoints DO real work (DB write + email send) and
-	// are attractive to spray-attackers.
-	forgotRL := NewIPRateLimit(0, 3)
+	// Forgot password / magic link — stricter: 3 burst then 1/5s refill
+	forgotRL := NewIPRateLimit(1, 3)
 	r.With(forgotRL.Middleware()).Post("/auth/forgot-password", gw.handleForgotPassword)
 	r.With(forgotRL.Middleware()).Post("/auth/verify-otp", gw.handleVerifyOTP)
 	r.With(forgotRL.Middleware()).Post("/auth/reset-password", gw.handleResetPassword)
