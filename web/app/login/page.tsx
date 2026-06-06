@@ -137,15 +137,16 @@ function LoginForm() {
     <div className="grid min-h-screen w-full lg:grid-cols-2 bg-background">
 
       {/* ── Left: form panel ─────────────────────────────────────── */}
-      <div className="flex flex-col justify-between px-8 py-10 sm:px-12 lg:px-16">
+      <div className="flex flex-col px-8 py-8 sm:px-12 lg:px-16">
 
         {/* Top: logo */}
         <div>
           <img src="/logo/qorven-wordmark.svg" alt="Qorven" className="h-8" />
         </div>
 
-        {/* Center: form */}
-        <div className="mx-auto w-full max-w-sm">
+        {/* Center: form — flex-1 centers content, py-10 keeps spacing on small screens */}
+        <div className="flex-1 flex flex-col justify-center">
+        <div className="mx-auto w-full max-w-sm py-10">
           <div className="mb-8">
             <h1 className="text-2xl font-bold tracking-tight">
               {isSetup ? 'Create your account' : 'Welcome back'}
@@ -257,6 +258,7 @@ function LoginForm() {
             )}
           </form>
         </div>
+        </div>
 
         {/* Bottom: footer */}
         <p className="text-center text-xs text-muted-foreground/40">
@@ -265,37 +267,37 @@ function LoginForm() {
       </div>
 
       {/* ── Right: feature showcase ───────────────────────────────── */}
-      <div className="relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-between bg-gradient-to-br from-primary via-primary/90 to-primary/70 p-12 text-primary-foreground">
+      <div className="relative hidden overflow-hidden lg:flex lg:flex-col bg-gradient-to-br from-primary via-primary/90 to-primary/70 px-12 py-8 text-primary-foreground">
 
         {/* Decorative blobs */}
         <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-white/5 blur-3xl" />
         <div className="pointer-events-none absolute bottom-0 left-0 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
 
         {/* Top: wordmark */}
-        <div className="relative">
+        <div className="relative shrink-0">
           <img src="/logo/qorven-wordmark-white.svg" alt="Qorven" className="h-8" />
         </div>
 
         {/* Middle: headline + feature list */}
-        <div className="relative space-y-10">
-          <div className="space-y-3">
+        <div className="relative flex flex-1 flex-col justify-center gap-5 py-4">
+          <div className="space-y-2">
             <h2 className="text-3xl font-bold leading-tight">
               Your agents work.<br />You decide what matters.
             </h2>
-            <p className="text-base text-white/70 leading-relaxed max-w-xs">
+            <p className="text-sm text-white/70 leading-relaxed max-w-xs">
               Self-hosted. Open source. 42 agents across every department — running 24/7 on your server.
             </p>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-3">
             {features.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex items-start gap-3.5">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm">
-                  <Icon className="h-4.5 w-4.5" />
+              <div key={title} className="flex items-center gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
+                  <Icon className="h-4 w-4" />
                 </div>
-                <div>
-                  <p className="text-sm font-semibold">{title}</p>
-                  <p className="text-xs text-white/60 mt-0.5 leading-relaxed">{desc}</p>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold leading-none">{title}</p>
+                  <p className="text-xs text-white/55 mt-0.5 truncate">{desc}</p>
                 </div>
               </div>
             ))}
@@ -303,14 +305,14 @@ function LoginForm() {
         </div>
 
         {/* Bottom: stat strip */}
-        <div className="relative flex items-center gap-8">
+        <div className="relative shrink-0 flex items-center gap-8">
           {[
-            { value: '21+',  label: 'Channels'       },
-            { value: '14+',  label: 'AI providers'  },
-            { value: '42',   label: 'Agents'        },
+            { value: '21+', label: 'Channels'     },
+            { value: '14+', label: 'AI providers' },
+            { value: '42',  label: 'Agents'       },
           ].map(({ value, label }) => (
             <div key={label} className="space-y-0.5">
-              <p className="text-2xl font-bold">{value}</p>
+              <p className="text-xl font-bold">{value}</p>
               <p className="text-xs text-white/50">{label}</p>
             </div>
           ))}

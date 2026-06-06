@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, MessageCircle, Terminal, KeyRound, ArrowLeft } from 'lucide-react';
+import { Loader2, MessageCircle, Terminal, KeyRound, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { authBase } from '@/lib/api-url';
 import { extractErrorMessage } from '@/lib/api-core';
 
@@ -21,6 +21,8 @@ export default function ForgotPasswordPage() {
   const [newPassword, setNewPassword]         = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading]   = useState(false);
+  const [showNew, setShowNew]   = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError]       = useState('');
   const [success, setSuccess]   = useState('');
   const [resendCountdown, setResendCountdown] = useState(0);
@@ -126,7 +128,7 @@ export default function ForgotPasswordPage() {
     <div className="grid min-h-screen w-full lg:grid-cols-2 bg-background">
 
       {/* ── Left: form panel ── */}
-      <div className="flex flex-col justify-between px-8 py-10 sm:px-12 lg:px-16">
+      <div className="flex flex-col px-8 py-8 sm:px-12 lg:px-16">
 
         {/* Top: logo */}
         <div>
@@ -134,7 +136,8 @@ export default function ForgotPasswordPage() {
         </div>
 
         {/* Center: form */}
-        <div className="mx-auto w-full max-w-sm">
+        <div className="flex-1 flex flex-col justify-center">
+        <div className="mx-auto w-full max-w-sm py-10">
 
           {/* Back link */}
           <Link href="/login"
@@ -270,19 +273,31 @@ export default function ForgotPasswordPage() {
             <form onSubmit={handleReset} className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-sm font-medium">New password</label>
-                <input type="password" value={newPassword}
-                  onChange={e => setNewPassword(e.target.value)}
-                  autoFocus autoComplete="new-password"
-                  className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
+                <div className="relative">
+                  <input type={showNew ? 'text' : 'password'} value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    autoFocus autoComplete="new-password"
+                    className="h-11 w-full rounded-xl border border-border bg-card pl-4 pr-11 text-sm outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                  />
+                  <button type="button" onClick={() => setShowNew(v => !v)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                    {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium">Confirm password</label>
-                <input type="password" value={confirmPassword}
-                  onChange={e => setConfirmPassword(e.target.value)}
-                  autoComplete="new-password"
-                  className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
+                <div className="relative">
+                  <input type={showConfirm ? 'text' : 'password'} value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                    className="h-11 w-full rounded-xl border border-border bg-card pl-4 pr-11 text-sm outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
+                  />
+                  <button type="button" onClick={() => setShowConfirm(v => !v)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                    {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               {error && (
                 <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -302,6 +317,7 @@ export default function ForgotPasswordPage() {
               </button>
             </form>
           )}
+        </div>
         </div>
 
         {/* Bottom: footer */}

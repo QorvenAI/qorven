@@ -95,8 +95,9 @@ func formatAgentError(err error) string {
 	if containsAny(lower, "billing", "insufficient credits", "payment required", "402") {
 		return "⚠️ API billing error — check your provider's billing dashboard."
 	}
-	// Auth
-	if containsAny(lower, "invalid api key", "unauthorized", "forbidden", "401", "403") {
+	// Auth / expired key
+	if containsAny(lower, "invalid api key", "unauthorized", "forbidden", "401", "403",
+		"api key expired", "api_key_invalid", "key expired", "renew the api key") {
 		return "⚠️ Authentication error. Please check your API key configuration."
 	}
 	// Cancelled (no message needed)
