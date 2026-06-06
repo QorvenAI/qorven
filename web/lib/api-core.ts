@@ -45,7 +45,11 @@ export function getToken(): string {
 
 export function setToken(token: string) {
   localStorage.setItem('qorven_token', token);
-  document.cookie = `qorven_token=${token}; path=/; max-age=${7 * 24 * 3600}; SameSite=Lax`;
+  // Set cookie max-age to match the JWT expiry so middleware sees the right
+  // expiry. Fall back to 7 days if we can't decode the token.
+  const exp = jwtExpiry(token);
+  const maxAge = exp ? Math.max(0, exp - Math.floor(Date.now() / 1000)) : 7 * 24 * 3600;
+  document.cookie = `qorven_token=${token}; path=/; max-age=${maxAge}; SameSite=Lax`;
 }
 
 export function clearToken() {
@@ -53,9 +57,27 @@ export function clearToken() {
   document.cookie = 'qorven_token=; path=/; max-age=0; SameSite=Lax';
 }
 
+/** Decode JWT exp claim without verifying signature (client-side only). */
+function jwtExpiry(token: string): number | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1]!.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isAuthenticated(): boolean {
   if (typeof window === 'undefined') return false;
-  return !!localStorage.getItem('qorven_token');
+  const token = localStorage.getItem('qorven_token');
+  if (!token) return false;
+  const exp = jwtExpiry(token);
+  // If we can't decode the expiry, assume valid (backend will reject if not)
+  if (exp === null) return true;
+  // Expired with 30s buffer
+  return Date.now() / 1000 < exp - 30;
 }
 
 import { isIdempotentMethod, isNetworkError, retryDelayMs } from './resilience';

@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 //
 // Auth guard middleware — runs at the Edge before any page renders.
-// Redirects unauthenticated requests to /login immediately,
+// Redirects unauthenticated OR expired-token requests to /login immediately,
 // preventing the flash of unauthorized content.
 //
 // NOTE: This file is only used by the Next.js dev server.
@@ -29,6 +29,30 @@ const PUBLIC_PATHS = [
   '/app-assets/',
 ];
 
+/**
+ * Decode a JWT payload without verifying the signature.
+ * Only used to check the `exp` claim — signature verification
+ * is done on the backend for every API request.
+ */
+function jwtExpiry(token: string): number | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    // Base64url decode the payload (Edge runtime has atob)
+    const payload = JSON.parse(atob(parts[1]!.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTokenExpired(token: string): boolean {
+  const exp = jwtExpiry(token);
+  if (exp === null) return true; // malformed — treat as expired
+  // Add a 30-second buffer to account for clock drift
+  return Date.now() / 1000 > exp - 30;
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -38,10 +62,22 @@ export function middleware(request: NextRequest) {
 
   const cookieToken = request.cookies.get('qorven_token')?.value;
 
+  // No token → redirect immediately
   if (!cookieToken) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('next', pathname);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Token exists but is expired → clear it and redirect
+  if (isTokenExpired(cookieToken)) {
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('next', pathname);
+    loginUrl.searchParams.set('reason', 'session_expired');
+    const response = NextResponse.redirect(loginUrl);
+    // Clear the stale cookie so middleware doesn't keep seeing it
+    response.cookies.set('qorven_token', '', { path: '/', maxAge: 0 });
+    return response;
   }
 
   return NextResponse.next();
