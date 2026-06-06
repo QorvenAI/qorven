@@ -172,23 +172,27 @@ func (gw *Gateway) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleForgotPassword generates a 6-digit OTP for password reset.
-// Delivery: Telegram (if paired) → always log.
+// Single-user OSS mode: no username required — auto-resolves the admin user.
+// Delivery: Telegram (if paired) → no-telegram (use CLI fallback).
 // Returns delivery channel so UI can show the right message.
 func (gw *Gateway) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	if gw.authSvc == nil { writeJSON(w, 503, map[string]string{"error": "auth not initialized"}); return }
-	var req struct{ Username string `json:"username_or_email"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" {
-		writeJSON(w, 400, map[string]string{"error": "username required"}); return
-	}
 
-	otp, user, err := gw.authSvc.CreateOTP(r.Context(), req.Username)
+	// Auto-resolve the single admin user — no username field needed.
+	user, err := gw.authSvc.GetSingleAdminUser(r.Context())
 	if err != nil {
-		// Generic 200 — don't leak whether user exists
-		writeJSON(w, 200, map[string]any{"status": "ok", "delivery": "log"})
+		// Return 200 to avoid leaking info, but delivery="no_user" for UI
+		writeJSON(w, 200, map[string]any{"status": "ok", "delivery": "no_user"})
 		return
 	}
 
-	delivery := "log"
+	otp, _, err := gw.authSvc.CreateOTP(r.Context(), user.Username)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"status": "ok", "delivery": "error"})
+		return
+	}
+
+	delivery := "no_telegram"
 	tenantID := user.TenantID
 	if tenantID == "" { tenantID = defaultTenant }
 
@@ -205,14 +209,19 @@ func (gw *Gateway) handleForgotPassword(w http.ResponseWriter, r *http.Request) 
 func (gw *Gateway) handleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 	if gw.authSvc == nil { writeJSON(w, 503, map[string]string{"error": "auth not initialized"}); return }
 	var req struct {
-		Username string `json:"username_or_email"`
-		OTP      string `json:"otp"`
+		OTP string `json:"otp"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.OTP == "" {
-		writeJSON(w, 400, map[string]string{"error": "username and otp required"}); return
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OTP == "" {
+		writeJSON(w, 400, map[string]string{"error": "otp required"}); return
 	}
 
-	resetToken, err := gw.authSvc.VerifyOTP(r.Context(), req.Username, req.OTP)
+	// Resolve admin user automatically — no username needed in single-user mode
+	user, err := gw.authSvc.GetSingleAdminUser(r.Context())
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "Invalid or expired code. Please try again."}); return
+	}
+
+	resetToken, err := gw.authSvc.VerifyOTP(r.Context(), user.Username, req.OTP)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "Invalid or expired code. Please try again."}); return
 	}

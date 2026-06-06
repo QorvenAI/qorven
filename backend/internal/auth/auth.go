@@ -479,3 +479,24 @@ func (s *AuthService) RevokeAllSessionsForUser(ctx context.Context, userID strin
 		 WHERE user_id = $1 AND revoked_at IS NULL`,
 		userID)
 }
+
+// GetSingleAdminUser returns the first admin user for single-tenant deployments.
+// Used by the forgot-password flow so users don't need to type their username.
+func (s *AuthService) GetSingleAdminUser(ctx context.Context) (*User, error) {
+	var u User
+	var email *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, tenant_id, username, email, role, is_active
+		 FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1`,
+	).Scan(&u.ID, &u.TenantID, &u.Username, &email, &u.Role, &u.IsActive)
+	if err != nil {
+		return nil, fmt.Errorf("no admin user found")
+	}
+	if email != nil {
+		u.Email = *email
+	}
+	if !u.IsActive {
+		return nil, fmt.Errorf("account disabled")
+	}
+	return &u, nil
+}

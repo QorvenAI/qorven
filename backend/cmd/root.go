@@ -36,12 +36,13 @@ INSTALL / UPDATE:
   qorven init           Bootstrap config and first setup
 
 MAINTENANCE:
-  qorven backup         Backup database + config
-  qorven restore        Restore from backup
-  qorven migrate        Apply database migrations
-  qorven doctor         Run diagnostics
-  qorven config         Show / edit config
-  qorven version        Show version
+  qorven backup           Backup database + config
+  qorven restore          Restore from backup
+  qorven migrate          Apply database migrations
+  qorven doctor           Run diagnostics
+  qorven config           Show / edit config
+  qorven reset-password   Reset admin password via the database (SSH fallback)
+  qorven version          Show version
 
 Use the web UI at http://localhost:8486 to manage agents, chat, channels, and workflows.
 
