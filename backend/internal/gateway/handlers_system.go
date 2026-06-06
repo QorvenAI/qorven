@@ -382,6 +382,10 @@ func (gw *Gateway) handleDeleteSessionMessage(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 503, map[string]string{"error": "no database"})
 		return
 	}
+	if gw.sessions == nil {
+		writeJSON(w, 503, map[string]string{"error": "session store not available"})
+		return
+	}
 	sessionID := chi.URLParam(r, "id")
 
 	// ?n=N — trim the last N user+assistant message pairs
@@ -393,14 +397,20 @@ func (gw *Gateway) handleDeleteSessionMessage(w http.ResponseWriter, r *http.Req
 		}
 		msgs, err := gw.sessions.GetHistory(r.Context(), sessionID)
 		if err != nil {
-			writeJSON(w, 404, map[string]string{"error": "session not found"})
+			code := 500
+			msg := sanitizeError(err)
+			if strings.Contains(err.Error(), "no rows") || strings.Contains(err.Error(), "not found") {
+				code = 404
+				msg = "session not found"
+			}
+			writeJSON(w, code, map[string]string{"error": msg})
 			return
 		}
 		// Remove last n*2 messages (each pair = 1 user + 1 assistant).
 		// If fewer messages exist than requested, clear all.
 		remove := n * 2
 		if remove >= len(msgs) {
-			msgs = nil
+			msgs = []session.Message{}
 		} else {
 			msgs = msgs[:len(msgs)-remove]
 		}
