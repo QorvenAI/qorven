@@ -39,6 +39,11 @@ const ROLE_META: Record<string, { label: string; color: string; Icon: React.Elem
   cfo:   { label: 'CFO',   color: '#a3e635', Icon: DollarSign },
 };
 
+const C_SUITE_ROLES = new Set(['caio','coo','cto','cmo','cso','cco','chro','ciso','cko','cfo']);
+
+// Synthetic CEO node ID — represents the human admin user at the top.
+const CEO_ID = '__ceo__';
+
 const STATUS_COLOR: Record<string, string> = {
   idle:      '#4ade80',
   thinking:  '#f59e0b',
@@ -105,30 +110,99 @@ function collectEdges(nodes: TreeNode[]): Array<{ parent: TreeNode; child: TreeN
   return edges;
 }
 
-function buildForest(agents: OrgChartAgent[]): TreeNode[] {
-  const byId = new Map<string, TreeNode>(
-    agents.map(a => [a.id, { agent: a, children: [], x: 0, y: 0 }])
+function buildForest(agents: OrgChartAgent[], userName = 'You'): TreeNode[] {
+  // Filter out test/system agents — keep only real named agents that are active or have a role
+  const real = agents.filter(a =>
+    a.display_name && a.display_name.trim() !== '' &&
+    !a.agent_key?.startsWith('concurrent-') &&
+    !a.agent_key?.startsWith('xss-test-') &&
+    !a.agent_key?.startsWith('sess-iso-') &&
+    !a.agent_key?.startsWith('adversarial-') &&
+    !a.agent_key?.startsWith('loop-test-') &&
+    !a.agent_key?.startsWith('tester-') &&
+    !a.agent_key?.includes('201231') &&
+    !a.agent_key?.includes('201331') &&
+    !a.agent_key?.includes('201332')
   );
-  const roots: TreeNode[] = [];
-  for (const a of agents) {
-    const node = byId.get(a.id)!;
-    if (!a.manager_id || !byId.has(a.manager_id)) {
-      roots.push(node);
-    } else {
-      byId.get(a.manager_id)!.children.push(node);
+
+  const byId = new Map<string, TreeNode>(
+    real.map(a => [a.id, { agent: a, children: [], x: 0, y: 0 }])
+  );
+
+  // If manager_id links exist in data, use them directly
+  const hasManagerLinks = real.some(a => a.manager_id && byId.has(a.manager_id));
+
+  if (hasManagerLinks) {
+    // Use explicit manager_id hierarchy
+    const roots: TreeNode[] = [];
+    for (const a of real) {
+      const node = byId.get(a.id)!;
+      if (!a.manager_id || !byId.has(a.manager_id)) roots.push(node);
+      else byId.get(a.manager_id)!.children.push(node);
     }
+    return roots;
   }
-  // Sort roots/children by org_level then display_name
-  const levelOrder: Record<string, number> = { l1: 0, l2: 1, l3: 2, customer_facing: 3 };
-  const sortNodes = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) =>
-      (levelOrder[a.agent.org_level ?? 'l3'] ?? 9) - (levelOrder[b.agent.org_level ?? 'l3'] ?? 9) ||
-      (a.agent.display_name ?? '').localeCompare(b.agent.display_name ?? '')
-    );
-    nodes.forEach(n => sortNodes(n.children));
+
+  // Infer hierarchy from org_role and agent_key:
+  // L0: CEO (synthetic — the human admin)
+  // L1: Prime/CROO — agent_key='chief' or org_level='l1' with chief role
+  // L2: C-Suite — org_role in C_SUITE_ROLES
+  // L3: Workers — everyone else
+
+  const ceoNode: TreeNode = {
+    agent: {
+      id: CEO_ID,
+      display_name: userName,
+      org_role: 'ceo',
+      org_level: 'l0',
+      title: 'Chief Executive Officer',
+      status: 'idle',
+    },
+    children: [],
+    x: 0, y: 0,
   };
-  sortNodes(roots);
-  return roots;
+
+  // Find Prime/CROO — agent_key='chief' is canonical, also accept explicit prime role
+  const prime = real.find(a =>
+    a.agent_key === 'chief' || a.org_role === 'croo' || a.org_role === 'prime'
+  );
+
+  // C-Suite agents — have a named C-level role, and are not the Prime
+  const cSuite = real.filter(a =>
+    a !== prime && C_SUITE_ROLES.has(a.org_role ?? '')
+  );
+
+  // Workers — everyone else (no named C-suite role, not Prime)
+  const workers = real.filter(a =>
+    a !== prime && !C_SUITE_ROLES.has(a.org_role ?? '')
+  );
+
+  // Attach prime to CEO
+  const primeNode = prime ? byId.get(prime.id)! : null;
+  if (primeNode) ceoNode.children.push(primeNode);
+
+  // Attach C-suite under prime (or directly under CEO if no prime)
+  const cSuiteParent = primeNode ?? ceoNode;
+  for (const cs of cSuite) {
+    cSuiteParent.children.push(byId.get(cs.id)!);
+  }
+
+  // Attach workers: if their manager_id points to a C-suite agent use that,
+  // otherwise group under prime, otherwise under CEO
+  for (const w of workers) {
+    const explicitParent = w.manager_id ? byId.get(w.manager_id) : undefined;
+    const parent = explicitParent ?? primeNode ?? ceoNode;
+    parent.children.push(byId.get(w.id)!);
+  }
+
+  // Sort children by display_name
+  const sortChildren = (n: TreeNode) => {
+    n.children.sort((a, b) => (a.agent.display_name ?? '').localeCompare(b.agent.display_name ?? ''));
+    n.children.forEach(sortChildren);
+  };
+  sortChildren(ceoNode);
+
+  return [ceoNode];
 }
 
 function clamp(v: number, min: number, max: number) { return Math.min(Math.max(v, min), max); }
@@ -158,6 +232,9 @@ export default function OrgChartPage() {
   const router  = useRouter();
   const souls   = useStore(s => s.souls);
   const soulStates = useStore(s => s.soulStates);
+  const userName = useStore(s => (s as { user?: { display_name?: string; username?: string } }).user?.display_name
+    || (s as { user?: { username?: string } }).user?.username
+    || 'You');
 
   const [agents,   setAgents]   = useState<OrgChartAgent[]>([]);
   const [loading,  setLoading]  = useState(true);
@@ -192,7 +269,7 @@ export default function OrgChartPage() {
   [agents, souls, soulStates]);
 
   // Build layout
-  const forest   = useMemo(() => buildForest(mergedAgents), [mergedAgents]);
+  const forest   = useMemo(() => buildForest(mergedAgents, userName), [mergedAgents, userName]);
   const allNodes = useMemo(() => { layoutForest(forest); return flattenNodes(forest); }, [forest]);
   const edges    = useMemo(() => collectEdges(forest), [forest]);
 
@@ -361,11 +438,12 @@ export default function OrgChartPage() {
         >
           {allNodes.map((node) => {
             const a        = node.agent;
+            const isCEO    = a.id === CEO_ID;
             const roleMeta = ROLE_META[a.org_role ?? ''];
-            const status   = (soulStates[a.id]?.activity as string) ?? a.status ?? 'offline';
+            const status   = isCEO ? 'idle' : ((soulStates[a.id]?.activity as string) ?? a.status ?? 'offline');
             const dotColor = STATUS_COLOR[status] ?? STATUS_COLOR.offline;
             const lastEvt  = soulStates[a.id]?.lastEvent;
-            const gradCls  = soulGradient(a.display_name);
+            const gradCls  = isCEO ? 'from-amber-400 to-yellow-500' : soulGradient(a.display_name);
             const model    = shortModel((souls.find(s => s.id === a.id) as { model?: string } | undefined)?.model);
             const isActive = status === 'thinking' || status === 'running';
 
@@ -374,12 +452,14 @@ export default function OrgChartPage() {
                 key={a.id}
                 data-card
                 className={cn(
-                  'absolute bg-card border border-border rounded-xl shadow-sm cursor-pointer',
-                  'hover:border-primary/40 hover:shadow-md transition-[border-color,box-shadow] duration-150',
+                  'absolute bg-card border rounded-xl shadow-sm transition-[border-color,box-shadow] duration-150',
+                  isCEO
+                    ? 'border-amber-500/40 shadow-[0_0_0_1px_rgba(245,158,11,0.15)] cursor-default'
+                    : 'border-border cursor-pointer hover:border-primary/40 hover:shadow-md',
                   isActive && 'border-primary/30 shadow-[0_0_0_1px_rgba(82,113,255,0.2)]',
                 )}
                 style={{ left: node.x, top: node.y, width: CARD_W, minHeight: CARD_H }}
-                onClick={() => handleCardClick(a.id)}
+                onClick={() => !isCEO && handleCardClick(a.id)}
               >
                 <div className="flex items-start gap-3 px-4 py-3.5">
                   {/* Avatar + status dot */}
@@ -390,11 +470,13 @@ export default function OrgChartPage() {
                     )}>
                       {initials(a.display_name)}
                     </div>
-                    <span
-                      className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
-                      style={{ backgroundColor: dotColor }}
-                      title={status}
-                    />
+                    {!isCEO && (
+                      <span
+                        className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
+                        style={{ backgroundColor: dotColor }}
+                        title={status}
+                      />
+                    )}
                   </div>
 
                   {/* Info */}
@@ -404,7 +486,15 @@ export default function OrgChartPage() {
                       <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[120px]">
                         {a.display_name}
                       </span>
-                      {roleMeta && (
+                      {isCEO ? (
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
+                          CEO
+                        </span>
+                      ) : (a.agent_key === 'chief' || a.org_role === 'croo' || a.org_role === 'prime') ? (
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-bold border border-violet-500/30 text-violet-400 bg-violet-500/10">
+                          Prime
+                        </span>
+                      ) : roleMeta && (
                         <span
                           className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-bold border border-current/20"
                           style={{ color: roleMeta.color, background: roleMeta.color + '18' }}
@@ -416,7 +506,12 @@ export default function OrgChartPage() {
 
                     {/* Title/role */}
                     <p className="text-[11px] text-muted-foreground mt-0.5 truncate leading-tight">
-                      {a.title ?? a.role ?? (a.org_level === 'l1' ? 'Executive' : a.org_level === 'l2' ? 'Management' : 'Specialist')}
+                      {a.title ?? a.role ?? (
+                        a.org_level === 'l0' ? 'Chief Executive Officer' :
+                        a.agent_key === 'chief' || a.org_role === 'croo' || a.org_role === 'prime' ? 'Prime — Chief Reasoning Officer' :
+                        C_SUITE_ROLES.has(a.org_role ?? '') ? 'Executive' :
+                        'Specialist'
+                      )}
                     </p>
 
                     {/* Model name */}

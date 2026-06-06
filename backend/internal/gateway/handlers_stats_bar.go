@@ -2,49 +2,65 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// readCPUPercent reads a 100ms CPU sample from /proc/stat (Linux).
-func readCPUPercent() float64 {
-	sample := func() (idle, total uint64) {
-		data, err := os.ReadFile("/proc/stat")
-		if err != nil {
-			return
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if !strings.HasPrefix(line, "cpu ") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) < 5 {
-				break
-			}
-			var vals [8]uint64
-			for i := 1; i < len(fields) && i <= 8; i++ {
-				vals[i-1], _ = strconv.ParseUint(fields[i], 10, 64)
-			}
-			// user, nice, system, idle, iowait, irq, softirq, steal
-			idle = vals[3] + vals[4]
-			total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
-			return
-		}
+// cpuStat reads a single /proc/stat sample.
+func cpuStat() (idle, total uint64) {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
 		return
 	}
-	idle1, total1 := sample()
-	time.Sleep(200 * time.Millisecond)
-	idle2, total2 := sample()
-	totalDiff := total2 - total1
-	idleDiff := idle2 - idle1
-	if totalDiff == 0 {
-		return 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "cpu ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			break
+		}
+		var vals [8]uint64
+		for i := 1; i < len(fields) && i <= 8; i++ {
+			vals[i-1], _ = strconv.ParseUint(fields[i], 10, 64)
+		}
+		idle = vals[3] + vals[4]
+		total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
+		return
 	}
-	return (1.0 - float64(idleDiff)/float64(totalDiff)) * 100.0
+	return
+}
+
+// startCPUSampler runs a background goroutine that samples CPU every 10s and
+// stores the result in cpuPct (atomic uint32, scaled ×100 to avoid floats).
+// Returns the pointer so handleStatsBar can read it without blocking.
+func startCPUSampler(ctx context.Context) *atomic.Uint32 {
+	v := &atomic.Uint32{}
+	go func() {
+		idle1, total1 := cpuStat()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+			idle2, total2 := cpuStat()
+			totalDiff := total2 - total1
+			idleDiff := idle2 - idle1
+			if totalDiff > 0 {
+				pct := (1.0 - float64(idleDiff)/float64(totalDiff)) * 100.0
+				v.Store(uint32(pct * 100)) // store as integer ×100
+			}
+			idle1, total1 = idle2, total2
+		}
+	}()
+	return v
 }
 
 // readMemInfoGB reads /proc/meminfo for MemTotal and MemAvailable (Linux).
@@ -206,8 +222,11 @@ func (gw *Gateway) handleStatsBar(w http.ResponseWriter, r *http.Request) {
 		).Scan(&pendingApprovals)
 	}
 
-	// --- CPU percent (non-blocking: sample already taken above) ---
-	cpuPct := readCPUPercent()
+	// --- CPU percent (read cached value from background sampler) ---
+	var cpuPct float64
+	if gw.cpuSampler != nil {
+		cpuPct = float64(gw.cpuSampler.Load()) / 100.0
+	}
 
 	writeJSON(w, 200, map[string]any{
 		"mem_used_gb":       memUsedGB,

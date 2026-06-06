@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -219,6 +220,7 @@ type Gateway struct {
 
 	briefingSched *briefing.Scheduler   // daily briefing cron (nil until DB available)
 	dsScheduler   *datasource.Scheduler // connector data source cron (nil until DB available)
+	cpuSampler    *atomic.Uint32        // background CPU % sampler — avoids 200ms block per request
 
 	tileStore *dashboard.TileStore     // pinned dashboard tiles (nil until DB available)
 	snapStore *datasource.SnapshotStore // snapshot data for tile "data" field (nil until DB available)
@@ -389,6 +391,7 @@ func New(cfg *config.Config) (*Gateway, error) {
 		cfg:         cfg,
 		router:      r,
 		startTime:   time.Now(),
+		cpuSampler:  startCPUSampler(context.Background()),
 		providerReg: providers.NewRegistry(),
 		toolReg:     tools.NewRegistry(),
 		mcpClient:   mcp.NewClient(),

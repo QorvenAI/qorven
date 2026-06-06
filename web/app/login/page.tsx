@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { auth, setToken, clearToken } from '@/lib/api';
 import { Loader2, Eye, EyeOff, MessageCircle, Mail, Share2, Code2, Plug } from 'lucide-react';
 
-type Mode = 'loading' | 'login' | 'setup';
+type Mode = 'login' | 'setup';
 
 const features = [
   { icon: MessageCircle, title: 'Any AI model',      desc: 'Claude, GPT, Gemini, DeepSeek — switch models per task, no lock-in.' },
@@ -35,7 +35,7 @@ function safeNext(next: string | null | undefined): string {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<Mode>('loading');
+  const [mode, setMode] = useState<Mode>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -71,15 +71,16 @@ function LoginForm() {
         localStorage.removeItem('qorven_user');
       }
 
+      // Setup check runs silently — form is already visible (mode starts as 'login').
+      // Only switch to 'setup' if the backend says first-run setup is needed.
       try {
         const r = await fetch('/api/auth/setup-check', { signal: ctrl.signal });
         const d: { setup_required?: boolean } = await r.json();
         clearTimeout(timeout);
-        if (d.setup_required) router.replace('/setup');
-        else setMode('login');
+        if (d.setup_required) setMode('setup');
       } catch {
         clearTimeout(timeout);
-        setMode('login');
+        // Backend unreachable — login form stays visible, user will see auth error on submit
       }
     };
 
@@ -121,15 +122,6 @@ function LoginForm() {
       setLoading(false);
     }
   };
-
-  if (mode === 'loading') {
-    return (
-      <div className="flex h-screen w-full flex-col items-center justify-center gap-3 bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Connecting to backend…</p>
-      </div>
-    );
-  }
 
   const isSetup = mode === 'setup';
 
