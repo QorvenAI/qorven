@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -382,11 +383,40 @@ func (gw *Gateway) handleDeleteSessionMessage(w http.ResponseWriter, r *http.Req
 		return
 	}
 	sessionID := chi.URLParam(r, "id")
+
+	// ?n=N — trim the last N user+assistant message pairs
+	if nStr := r.URL.Query().Get("n"); nStr != "" {
+		n, err := strconv.Atoi(nStr)
+		if err != nil || n < 1 || n > 50 {
+			writeJSON(w, 400, map[string]string{"error": "n must be 1–50"})
+			return
+		}
+		msgs, err := gw.sessions.GetHistory(r.Context(), sessionID)
+		if err != nil {
+			writeJSON(w, 404, map[string]string{"error": "session not found"})
+			return
+		}
+		// Remove last n*2 messages (each pair = 1 user + 1 assistant).
+		// If fewer messages exist than requested, clear all.
+		remove := n * 2
+		if remove >= len(msgs) {
+			msgs = nil
+		} else {
+			msgs = msgs[:len(msgs)-remove]
+		}
+		if err := gw.sessions.SetHistory(r.Context(), sessionID, msgs); err != nil {
+			writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "remaining": len(msgs)})
+		return
+	}
+
+	// Legacy: delete by content match (existing behaviour preserved)
 	var body struct {
 		Content string `json:"content"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	// Remove from session messages array (JSONB)
 	gw.db.Pool.Exec(r.Context(),
 		`UPDATE sessions SET messages = (
 			SELECT jsonb_agg(elem) FROM jsonb_array_elements(messages) elem
