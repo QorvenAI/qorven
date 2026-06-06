@@ -433,6 +433,23 @@ export function ChatPlayground({ agentId, sessionId, className, systemContext, a
   const handleComposerSubmit = useCallback((attachments?: Array<{ name: string; type: string; url: string; size: number }>) => {
     if (!inputValue.trim() && !attachments?.length) return;
 
+    // /undo [n] — remove last N message pairs from session
+    const undoMatch = inputValue.trim().match(/^\/undo(?:\s+(\d+))?$/i);
+    if (undoMatch) {
+      const n = Math.min(parseInt(undoMatch[1] ?? '1', 10) || 1, 50);
+      setInputValue('');
+      sessionsApi.trimMessages(sessionId, n)
+        .then(({ remaining }) => {
+          setInitialMessages((prev) => {
+            const remove = n * 2;
+            return remove >= prev.length ? [] : prev.slice(0, prev.length - remove);
+          });
+          toast.success(n === 1 ? 'Last message removed' : `Last ${n} messages removed`);
+        })
+        .catch(() => toast.error('Could not undo — try again'));
+      return;
+    }
+
     // If agent is currently running, inject rather than start a new turn
     if (isAgentBusy) {
       const msg = inputValue.trim();
