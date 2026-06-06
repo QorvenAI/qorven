@@ -135,11 +135,10 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	return s.IssueToken(&user), &user, nil
 }
 
-// JWTLifetime is the short-lived access-token window. 24h is long enough
-// for a workday without re-login but short enough that a leaked token
-// can't be used indefinitely — the refresh-token flow issues a new JWT
-// when the client hits 401, preserving the single-sign-in UX.
-const JWTLifetime = 24 * time.Hour
+// JWTLifetime controls how long an issued access token is valid.
+// 7 days matches the refresh-token lifetime so users stay logged in
+// across a full work week without re-authenticating.
+const JWTLifetime = 7 * 24 * time.Hour
 
 // RefreshTokenLifetime controls how long the persisted refresh token
 // stays valid. Beyond this the user must log in with their password

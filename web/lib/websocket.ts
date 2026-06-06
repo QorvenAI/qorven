@@ -506,6 +506,29 @@ export async function connectWebSocket() {
       }
     });
 
+    // If we've failed to connect several times in quick succession, probe
+    // the HTTP endpoint to see if the token has expired (401).  When it
+    // has, clear the stale token and redirect to login so the user gets a
+    // fresh session instead of an infinite silent retry loop.
+    if (reconnectAttempt >= 2 && typeof window !== 'undefined') {
+      const tk = getWsToken();
+      const httpBase = wsUrl().replace(/^ws/, 'http');
+      const probeUrl = tk ? `${httpBase}?token=${encodeURIComponent(tk)}` : httpBase;
+      fetch(probeUrl, { headers: tk ? { Authorization: `Bearer ${tk}` } : {} })
+        .then((r) => {
+          if (r.status === 401) {
+            // Token expired — clear it and redirect to login
+            if (typeof localStorage !== 'undefined') localStorage.removeItem('qorven_token');
+            if (typeof document !== 'undefined') {
+              document.cookie = 'qorven_token=; path=/; max-age=0';
+            }
+            const next = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = `/login?next=${next}&reason=session_expired`;
+          }
+        })
+        .catch(() => {/* backend down — normal reconnect will handle */});
+    }
+
     reconnectAttempt += 1;
     store.setWsReconnecting(reconnectAttempt, disconnectedAt);
     const delay = nextBackoffMs(reconnectAttempt - 1);
