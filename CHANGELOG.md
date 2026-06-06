@@ -4,6 +4,25 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.1-alpha — 2026-06-06
+
+### Added
+- **Password visibility toggle on reset** — new password and confirm password fields on the reset-password page now have show/hide eye icons, matching the login page. ([9b01276](https://github.com/QorvenAI/qorven/commit/9b01276))
+- **Org chart — pure SVG canvas** — pan, drag, zoom, fit-to-screen, gradient avatars, live status dots, and model names. No third-party chart library. ([f93b097](https://github.com/QorvenAI/qorven/commit/f93b097))
+- **Simplified password reset** — no username required. Qorven auto-resolves the admin account. Telegram-first with SSH fallback via `qorven reset-password`. ([e93a774](https://github.com/QorvenAI/qorven/commit/e93a774))
+
+### Fixed
+- Login and forgot-password pages now fit correctly on short screens (700px height) — no scrollbars, no clipped content. ([9b01276](https://github.com/QorvenAI/qorven/commit/9b01276))
+- Login page right panel content compressed smartly — all features and stats visible without overflow on any viewport. ([9b01276](https://github.com/QorvenAI/qorven/commit/9b01276))
+- Theme colour no longer flashes from default to custom on page load — applied before first paint via inline script. ([ed90cf7](https://github.com/QorvenAI/qorven/commit/ed90cf7))
+- Expired or invalid API key errors from Telegram agents now report "Authentication error" instead of the generic "something went wrong" message. ([9b01276](https://github.com/QorvenAI/qorven/commit/9b01276))
+- Sessions expired at the server now redirect to login before the page renders — middleware validates JWT expiry, not just cookie presence. ([389edf0](https://github.com/QorvenAI/qorven/commit/389edf0))
+- JWT session lifetime extended to 7 days; WS 401 triggers logout instead of infinite retry. ([118a06f](https://github.com/QorvenAI/qorven/commit/118a06f))
+- Duplicate WebSocket connections removed — dashboard data and task count badge now share a single connection via Zustand store. ([d1a840d](https://github.com/QorvenAI/qorven/commit/d1a840d))
+- Security: rate limiter fixed (was permanently blocking after burst), voice WS authenticated, OTP removed from server logs, sessions revoked on password change, XFF header only trusted from private IPs, open redirect prevented on login. ([868cec0](https://github.com/QorvenAI/qorven/commit/868cec0))
+
+---
+
 ## v0.5.0-alpha — 2026-06-03
 
 ### Added
