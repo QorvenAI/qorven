@@ -433,7 +433,7 @@ export default function SetupPage() {
       {/* Right panel */}
       <div className="grow min-w-0 h-screen overflow-y-auto flex flex-col">
         <div className="flex-1 flex flex-col justify-center py-8 px-8">
-        <div className="w-full max-w-[680px] mx-auto space-y-5">
+        <div className="w-full max-w-[860px] mx-auto space-y-5">
 
           {globalError && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
