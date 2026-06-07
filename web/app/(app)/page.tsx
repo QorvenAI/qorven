@@ -155,7 +155,6 @@ export default function DashboardPage() {
         setLoading(false);
         setRefreshing(false);
         hasLoadedOnce.current = true;
-        if (pc === 0) router.replace('/setup');
       })
       .catch((e) => { setError(e.message); setLoading(false); setRefreshing(false); });
   }, [router]);

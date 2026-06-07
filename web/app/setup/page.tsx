@@ -101,9 +101,9 @@ export default function SetupPage() {
         setAdminCreated(!r.setup_required);
         if (!r.setup_required) { setAccepted(true); setStep(2); }
 
-        if (!r.setup_required && isAuthenticated()) {
-          // Setup is complete and user is logged in — redirect to app
-          router.replace('/');
+        if (!r.setup_required) {
+          // Setup already done — send to app if logged in, login page otherwise
+          router.replace(isAuthenticated() ? '/' : '/login');
           return;
         }
       } catch (e) {
