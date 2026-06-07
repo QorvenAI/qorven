@@ -7,6 +7,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -181,8 +182,20 @@ func (gw *Gateway) handleAdminFactoryReset(w http.ResponseWriter, r *http.Reques
 
 	// Re-create extensions that were dropped with the schema.
 	// Must run outside a transaction and before migrations (migration 1 needs vector + pgcrypto).
-	for _, ext := range []string{"pgcrypto", "vector", "uuid-ossp"} {
-		pool.Exec(r.Context(), fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS "%s"`, ext))
+	// Note: "vector" requires superuser or pg_extension_owner privilege. On production the DB
+	// user is granted superuser during install. In dev, run:
+	//   sudo -u postgres psql -c "ALTER USER qorven SUPERUSER;"
+	for _, ext := range []string{"pgcrypto", "uuid-ossp", "vector"} {
+		if _, err := pool.Exec(r.Context(), fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS "%s"`, ext)); err != nil {
+			slog.Warn("factory_reset.extension_create_failed", "extension", ext, "error", sanitizeError(err))
+			if ext == "vector" {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "Cannot recreate vector extension — database user needs superuser privilege. " +
+						"Ask your DBA to run: ALTER USER <dbuser> SUPERUSER;",
+				})
+				return
+			}
+		}
 	}
 
 	migDir := "migrations"
