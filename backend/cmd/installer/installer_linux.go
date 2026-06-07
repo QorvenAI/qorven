@@ -432,8 +432,10 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		psql("GRANT ALL PRIVILEGES ON DATABASE qorven TO qorven;", "postgres")
 		psql("GRANT ALL ON SCHEMA public TO qorven;", "qorven")
 
-		// pgvector — try to enable, check if it actually loaded
-		psql("CREATE EXTENSION IF NOT EXISTS vector;", "qorven")
+		// pgvector — must be created as superuser (postgres), not the app user.
+		// Also grant qorven SUPERUSER so it can recreate the extension after factory reset.
+		psql("CREATE EXTENSION IF NOT EXISTS vector;", "postgres")
+		psql("ALTER USER qorven SUPERUSER;", "postgres")
 		if pgvectorEnabled() {
 			return "ready — pgvector enabled", false, nil
 		}
