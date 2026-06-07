@@ -45,15 +45,17 @@ export function getToken(): string {
 
 export function setToken(token: string) {
   localStorage.setItem('qorven_token', token);
-  // Always set a flat 7-day max-age — avoids clock-skew bugs where
-  // exp - now() rounds to a very small or negative number on first write.
   const maxAge = 7 * 24 * 3600;
   document.cookie = `qorven_token=${token}; path=/; max-age=${maxAge}; SameSite=Lax`;
+  // Setup-done marker — tells middleware setup is complete so it can redirect
+  // to /login instead of /setup for unauthenticated requests.
+  document.cookie = `qorven_setup_done=1; path=/; max-age=${365 * 24 * 3600}; SameSite=Lax`;
 }
 
 export function clearToken() {
   localStorage.removeItem('qorven_token');
   document.cookie = 'qorven_token=; path=/; max-age=0; SameSite=Lax';
+  // Keep qorven_setup_done — setup is still done even after logout
 }
 
 /** Decode JWT exp claim without verifying signature (client-side only). */

@@ -60,9 +60,15 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const cookieToken = request.cookies.get('qorven_token')?.value;
+  const cookieToken  = request.cookies.get('qorven_token')?.value;
+  const setupDone    = !!request.cookies.get('qorven_setup_done')?.value;
 
-  // No token → redirect immediately
+  // Setup not done yet — send everything to /setup immediately (no flash)
+  if (!setupDone) {
+    return NextResponse.redirect(new URL('/setup', request.url));
+  }
+
+  // No token → redirect to login immediately (no flash)
   if (!cookieToken) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('next', pathname);
@@ -75,7 +81,6 @@ export function middleware(request: NextRequest) {
     loginUrl.searchParams.set('next', pathname);
     loginUrl.searchParams.set('reason', 'session_expired');
     const response = NextResponse.redirect(loginUrl);
-    // Clear the stale cookie so middleware doesn't keep seeing it
     response.cookies.set('qorven_token', '', { path: '/', maxAge: 0 });
     return response;
   }
