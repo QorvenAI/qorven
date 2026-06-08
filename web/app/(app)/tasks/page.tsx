@@ -2,9 +2,9 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
-  Plus, Loader2, Filter, X, Send, MessageSquare, Bot, User,
+  Plus, Loader2, Filter, X,
   Circle, CircleDot, CircleCheck, CircleDashed, GitCommit, File, Ticket,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
@@ -14,6 +14,7 @@ import { useStore } from '@/store';
 import { toast } from 'sonner';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request } from '@/lib/api-core';
+import { TaskComments } from '@/components/qors/task-comments';
 
 type Task = {
   id: string; title: string; description: string; state: string;
@@ -25,7 +26,6 @@ type Task = {
 };
 
 type TaskFile = { id: string; path: string; operation: 'created' | 'modified' | 'deleted' };
-type TaskComment = { id: string; author_type: 'user' | 'agent'; author_id: string; body: string; created_at: string };
 
 const STATE_OPTS = [
   { value: '', label: 'All states' },
@@ -82,37 +82,15 @@ function TaskDrawer({ task, onClose, souls }: {
   souls: import('@/types').Soul[];
 }) {
   const [files, setFiles] = useState<TaskFile[]>([]);
-  const [comments, setComments] = useState<TaskComment[]>([]);
-  const [commentBody, setCommentBody] = useState('');
-  const [submitting, setSubmitting] = useState(false);
   const [currentState, setCurrentState] = useState(task.state);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     request<TaskFile[]>(`/tasks/${task.id}/files`).then(setFiles).catch(() => {});
-    request<TaskComment[]>(`/tasks/${task.id}/comments`).then(setComments).catch(() => {});
   }, [task.id]);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [comments]);
 
   const changeState = async (newState: string) => {
     setCurrentState(newState);
     await tasksApi.updateStatus(task.id, newState).catch(() => toast.error('Failed to update state'));
-  };
-
-  const submitComment = async () => {
-    if (!commentBody.trim()) return;
-    setSubmitting(true);
-    try {
-      await request<any>(`/tasks/${task.id}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ body: commentBody.trim() }),
-      });
-      setCommentBody('');
-      request<TaskComment[]>(`/tasks/${task.id}/comments`).then(setComments).catch(() => {});
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const { icon: DotIcon, cls: dotCls } = STATE_DOT[currentState] ?? STATE_DOT.todo!;
@@ -207,47 +185,9 @@ function TaskDrawer({ task, onClose, souls }: {
         </div>
       )}
 
-      {/* Comments */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {comments.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
-            <MessageSquare className="h-8 w-8 text-muted-foreground/20" />
-            <p className="text-xs text-muted-foreground/60">No comments yet</p>
-          </div>
-        ) : (
-          comments.map(c => (
-            <div key={c.id} className={cn('flex gap-2.5', c.author_type === 'user' ? 'flex-row-reverse' : '')}>
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted mt-0.5">
-                {c.author_type === 'agent'
-                  ? <Bot className="h-3.5 w-3.5 text-primary" />
-                  : <User className="h-3.5 w-3.5 text-muted-foreground" />}
-              </div>
-              <div className={cn('max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap',
-                c.author_type === 'user' ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-muted rounded-tl-sm')}>
-                {c.body}
-              </div>
-            </div>
-          ))
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Comment input */}
-      <div className="shrink-0 border-t border-border px-3 py-2.5 flex items-end gap-2">
-        <textarea
-          value={commentBody}
-          onChange={e => setCommentBody(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
-          placeholder="Add a comment…"
-          rows={2}
-          className="qr-textarea flex-1 resize-none text-xs" />
-        <button
-          onClick={submitComment}
-          disabled={!commentBody.trim() || submitting}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-        >
-          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-        </button>
+      {/* Comments — shared thread component */}
+      <div className="flex-1 min-h-0">
+        <TaskComments taskId={task.id} />
       </div>
     </div>
   );
