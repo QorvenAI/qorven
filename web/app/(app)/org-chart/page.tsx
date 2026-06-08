@@ -15,10 +15,11 @@ import { cn } from '@/lib/utils';
 import { orgApi, type OrgChartAgent } from '@/lib/api-agents';
 import { useStore } from '@/store';
 import { soulGradient } from '@/components/soul-card';
+import { agentDepartment } from '@/components/agents/agent-card-meta';
 
 // ── Layout constants ────────────────────────────────────────────────────────────
-const CARD_W   = 210;
-const CARD_H   = 96;
+const CARD_W   = 224;
+const CARD_H   = 76;
 const GAP_X    = 28;
 const GAP_Y    = 72;
 const PADDING  = 64;
@@ -446,6 +447,7 @@ export default function OrgChartPage() {
             const gradCls  = isCEO ? 'from-amber-400 to-yellow-500' : soulGradient(a.display_name);
             const model    = shortModel((souls.find(s => s.id === a.id) as { model?: string } | undefined)?.model);
             const isActive = status === 'thinking' || status === 'running';
+            const department = isCEO ? '' : agentDepartment({ org_role: a.org_role, role: (a as { role?: string }).role ?? '' });
 
             return (
               <div
@@ -461,72 +463,48 @@ export default function OrgChartPage() {
                 style={{ left: node.x, top: node.y, width: CARD_W, minHeight: CARD_H }}
                 onClick={() => !isCEO && handleCardClick(a.id)}
               >
-                <div className="flex items-start gap-3 px-4 py-3.5">
-                  {/* Avatar + status dot */}
-                  <div className="relative shrink-0 mt-0.5">
-                    <div className={cn(
-                      'h-9 w-9 rounded-full flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br',
-                      gradCls,
-                    )}>
-                      {initials(a.display_name)}
-                    </div>
-                    {!isCEO && (
-                      <span
-                        className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
-                        style={{ backgroundColor: dotColor }}
-                        title={status}
-                      />
-                    )}
+                <div className="flex items-center gap-3 px-4 py-3.5 h-full">
+                  {/* Avatar — pulse ring only while actively working, no status dot */}
+                  <div className={cn(
+                    'h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br',
+                    gradCls,
+                    isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-card animate-pulse',
+                  )}>
+                    {initials(a.display_name)}
                   </div>
 
                   {/* Info */}
                   <div className="min-w-0 flex-1">
-                    {/* Name + role badge */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[120px]">
+                    {/* Name + designation badge */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[110px]">
                         {a.display_name}
                       </span>
                       {isCEO ? (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
+                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
                           CEO
                         </span>
-                      ) : (a.agent_key === 'chief' || a.org_role === 'croo' || a.org_role === 'prime') ? (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-bold border border-violet-500/30 text-violet-400 bg-violet-500/10">
-                          Prime
+                      ) : (a.agent_key === 'chief' || a.org_role === 'coo') ? (
+                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border border-violet-500/30 text-violet-400 bg-violet-500/10">
+                          {roleMeta?.label ?? 'COO'}
                         </span>
-                      ) : roleMeta && (
+                      ) : roleMeta ? (
                         <span
-                          className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-bold border border-current/20"
+                          className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold border border-current/20"
                           style={{ color: roleMeta.color, background: roleMeta.color + '18' }}
                         >
                           {roleMeta.label}
                         </span>
-                      )}
+                      ) : null}
                     </div>
 
-                    {/* Title/role */}
-                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate leading-tight">
-                      {a.title ?? a.role ?? (
-                        a.org_level === 'l0' ? 'Chief Executive Officer' :
-                        a.agent_key === 'chief' || a.org_role === 'croo' || a.org_role === 'prime' ? 'Prime — Chief Reasoning Officer' :
-                        C_SUITE_ROLES.has(a.org_role ?? '') ? 'Executive' :
-                        'Specialist'
-                      )}
-                    </p>
-
-                    {/* Model name */}
-                    {model && (
-                      <p className="text-[10px] text-muted-foreground/60 font-mono mt-1 truncate leading-tight">
-                        {model}
-                      </p>
-                    )}
-
-                    {/* Last event */}
-                    {lastEvt && (
-                      <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate leading-tight">
-                        {lastEvt}
-                      </p>
-                    )}
+                    {/* model · department subline */}
+                    <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/70 leading-tight">
+                      {model && <span className="truncate">{model}</span>}
+                      {model && department && <span className="text-border">·</span>}
+                      {department && <span className="truncate">{department}</span>}
+                      {isCEO && !model && <span>You</span>}
+                    </div>
                   </div>
                 </div>
               </div>

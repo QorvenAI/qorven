@@ -12,6 +12,7 @@ import { SoulCardSkeleton } from '@/components/skeletons';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { soulGradient } from '@/components/soul-card';
+import { agentDepartment, agentTagline } from '@/components/agents/agent-card-meta';
 import { useSoulRun } from '@/hooks/use-soul';
 import { useSelectedModels, type SelectedModel } from '@/hooks/use-selected-models';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
@@ -77,7 +78,7 @@ function OrgRoleBadge({ orgRole }: { orgRole?: string }) {
   const meta = ORG_ROLE_META[orgRole];
   if (!meta) return null;
   return (
-    <Badge variant="secondary" className="h-5 gap-1 px-1.5 text-[10px] font-semibold uppercase tracking-wider">
+    <Badge variant="secondary" className="shrink-0 h-5 gap-1 px-1.5 text-[10px] font-semibold uppercase tracking-wider">
       <meta.Icon className="size-2.5" />
       {meta.label}
     </Badge>
@@ -119,24 +120,11 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
     }
   };
 
-  const statusVariant = ACTIVITY_STATUS[activity] ?? 'offline';
-  const statusLabel   = ACTIVITY_LABEL[activity]  ?? 'Offline';
-  const isActive      = activity === 'thinking' || activity === 'running';
-
-  const roleDesc = soul.org_role && ORG_ROLE_META[soul.org_role]
-    ? `${ORG_ROLE_META[soul.org_role]!.label} — ${soul.org_level === 'l1' ? 'Executive' : soul.org_level === 'l2' ? 'Management' : 'Specialist'}`
-    : soul.title || soul.role || 'Assistant';
-
-  const modelLabel = shortModel(soul.model);
-  const spentUSD   = soul.credit_used_cents ? `$${(soul.credit_used_cents / 100).toFixed(2)}` : null;
-  const tokensK    = tokensToday > 0
-    ? (tokensToday >= 1000 ? `${(tokensToday / 1000).toFixed(1)}k tok` : `${tokensToday} tok`)
-    : null;
-
-  const caps: string[] = [];
-  if (soul.web_search_enabled) caps.push('Web');
-  if (soul.memory_enabled) caps.push('Memory');
-  if (soul.can_delegate) caps.push('Delegate');
+  const isActive    = activity === 'thinking' || activity === 'running';
+  const department  = agentDepartment(soul);
+  const tagline     = agentTagline(soul);
+  const modelLabel  = shortModel(soul.model);
+  const spentUSD    = soul.credit_used_cents ? `$${(soul.credit_used_cents / 100).toFixed(2)}` : null;
 
   return (
     <Card
@@ -144,36 +132,33 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
       className={cn(
         'group relative cursor-pointer transition-all duration-150',
         'hover:border-primary/40 hover:shadow-md hover:-translate-y-px',
-        isActive && 'ring-1 ring-primary/20',
         deleting && 'opacity-50 pointer-events-none',
       )}
     >
       <CardContent className="p-4">
 
-        {/* Identity row */}
+        {/* Identity row — avatar left, name + designation right */}
         <div className="flex items-start gap-3">
-          <div className="relative shrink-0">
-            <Avatar className="size-10">
-              <AvatarFallback className={cn('bg-gradient-to-br font-semibold text-white text-sm', soulGradient(soul.display_name))}>
-                {soul.display_name.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="absolute -bottom-0.5 -right-0.5">
-                  <AvatarStatus variant={statusVariant} className="size-2.5 border-2 border-card" />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">{statusLabel}</TooltipContent>
-            </Tooltip>
-          </div>
+          <Avatar className={cn(
+            'size-11 shrink-0 transition-shadow',
+            isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-card animate-pulse',
+          )}>
+            <AvatarFallback className={cn('bg-gradient-to-br font-semibold text-white text-base', soulGradient(soul.display_name))}>
+              {soul.display_name.charAt(0).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <p className="truncate text-sm font-semibold leading-tight">{soul.display_name}</p>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <p className="min-w-0 truncate text-sm font-semibold leading-tight">{soul.display_name}</p>
               <OrgRoleBadge orgRole={soul.org_role} />
             </div>
-            <p className="truncate text-xs text-muted-foreground mt-0.5">{roleDesc}</p>
+            {/* model · department on the sub-line */}
+            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground min-w-0">
+              {modelLabel && <span className="truncate shrink">{modelLabel}</span>}
+              {modelLabel && department && <span className="text-border shrink-0">·</span>}
+              {department && <span className="truncate shrink-0">{department}</span>}
+            </div>
           </div>
 
           <DropdownMenu>
@@ -203,25 +188,19 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
           </DropdownMenu>
         </div>
 
-        {/* Meta row — model · tokens · spend */}
-        {(modelLabel || tokensK || spentUSD) && (
-          <div className="mt-2.5 flex items-center gap-2 text-[11px] text-muted-foreground/70">
-            {modelLabel && <span className="font-medium">{modelLabel}</span>}
-            {tokensK    && <><span className="text-border">·</span><span>{tokensK}</span></>}
-            {spentUSD   && <><span className="text-border">·</span><span>{spentUSD}</span></>}
+        {/* Tagline — what this agent does (or live event when working) */}
+        {(isActive && lastEvent) ? (
+          <p className="mt-2.5 truncate text-xs text-primary/80">{lastEvent}</p>
+        ) : tagline ? (
+          <p className="mt-2.5 line-clamp-2 text-xs text-muted-foreground/80 leading-relaxed">{tagline}</p>
+        ) : null}
+
+        {/* Footer — quiet spend stat, right aligned */}
+        {spentUSD && (
+          <div className="mt-3 flex items-center justify-end border-t border-border/50 pt-2 text-[11px] text-muted-foreground/60">
+            <span>{spentUSD} spent</span>
           </div>
         )}
-
-        {/* Last event or capability pills */}
-        {lastEvent ? (
-          <p className="mt-1 truncate text-[11px] text-muted-foreground/50">{lastEvent}</p>
-        ) : caps.length > 0 ? (
-          <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-            {caps.map((c) => (
-              <span key={c} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground font-medium">{c}</span>
-            ))}
-          </div>
-        ) : null}
 
       </CardContent>
     </Card>
@@ -245,7 +224,7 @@ function TierSection({
   const TierIcon = meta.Icon;
 
   // All tiers use the same 3-col grid — uniform card size, content fills the space
-  const gridCols = 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+  const gridCols = 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3';
 
   return (
     <div className="space-y-3">
@@ -420,7 +399,7 @@ export default function QorsPage() {
               actionLabel={search ? undefined : emptyStates.souls.actionLabel}
             />
           ) : viewMode === 'grid' ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {filtered.map((soul) => (
                 <QorCard key={soul.id} soul={soul} onDeleted={load} />
               ))}
