@@ -464,13 +464,15 @@ export default function OrgChartPage() {
                 onClick={() => !isCEO && handleCardClick(a.id)}
               >
                 <div className="flex items-center gap-3 px-4 py-3.5 h-full">
-                  {/* Avatar — pulse ring only while actively working, no status dot */}
+                  {/* Avatar — image if set, else gradient initials. Pulse ring only while working, no status dot. */}
                   <div className={cn(
-                    'h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br',
+                    'h-10 w-10 shrink-0 rounded-full overflow-hidden flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br',
                     gradCls,
                     isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-card animate-pulse',
                   )}>
-                    {initials(a.display_name)}
+                    {(a as { avatar?: string }).avatar
+                      ? <img src={(a as { avatar?: string }).avatar} alt={a.display_name} className="h-full w-full object-cover" />
+                      : initials(a.display_name)}
                   </div>
 
                   {/* Info */}

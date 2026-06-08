@@ -12,12 +12,13 @@ import { SoulCardSkeleton } from '@/components/skeletons';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { soulGradient } from '@/components/soul-card';
-import { agentDepartment, agentTagline } from '@/components/agents/agent-card-meta';
+import { agentDepartment, agentTagline, directReportCount, agentCapabilities } from '@/components/agents/agent-card-meta';
+import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { useSoulRun } from '@/hooks/use-soul';
 import { useSelectedModels, type SelectedModel } from '@/hooks/use-selected-models';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarStatus } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -103,6 +104,7 @@ function shortModel(model: string): string {
 // ─── QorCard ───────────────────────────────────────────────────────────────────
 function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
   const router = useRouter();
+  const allSouls = useStore((s) => s.souls);
   const { activity, lastEvent, tokensToday } = useSoulRun(soul.id);
   const [deleting, setDeleting] = useState(false);
 
@@ -125,85 +127,137 @@ function QorCard({ soul, onDeleted }: { soul: Soul; onDeleted: () => void }) {
   const tagline     = agentTagline(soul);
   const modelLabel  = shortModel(soul.model);
   const spentUSD    = soul.credit_used_cents ? `$${(soul.credit_used_cents / 100).toFixed(2)}` : null;
+  const reports     = directReportCount(soul.id, allSouls);
+  const caps        = agentCapabilities(soul);
+  const tokensLabel = tokensToday > 0
+    ? (tokensToday >= 1000 ? `${(tokensToday / 1000).toFixed(1)}k tokens today` : `${tokensToday} tokens today`)
+    : null;
 
   return (
-    <Card
-      onClick={() => !deleting && router.push(`/qors/${soul.id}`)}
-      className={cn(
-        'group relative cursor-pointer transition-all duration-150',
-        'hover:border-primary/40 hover:shadow-md hover:-translate-y-px',
-        deleting && 'opacity-50 pointer-events-none',
-      )}
-    >
-      <CardContent className="p-4">
+    <HoverCard openDelay={350} closeDelay={120}>
+      <HoverCardTrigger asChild>
+        <Card
+          onClick={() => !deleting && router.push(`/qors/${soul.id}`)}
+          className={cn(
+            'group relative cursor-pointer transition-all duration-150',
+            'hover:border-primary/40 hover:shadow-md hover:-translate-y-px',
+            deleting && 'opacity-50 pointer-events-none',
+          )}
+        >
+          <CardContent className="p-4">
 
-        {/* Identity row — avatar left, name + designation right */}
+            {/* Identity row — avatar left, name + designation right */}
+            <div className="flex items-start gap-3">
+              <Avatar className={cn(
+                'size-11 shrink-0 transition-shadow',
+                isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-card animate-pulse',
+              )}>
+                {soul.avatar && <AvatarImage src={soul.avatar} alt={soul.display_name} />}
+                <AvatarFallback className={cn('bg-gradient-to-br font-semibold text-white text-base', soulGradient(soul.display_name))}>
+                  {soul.display_name.charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p className="min-w-0 truncate text-sm font-semibold leading-tight">{soul.display_name}</p>
+                  <OrgRoleBadge orgRole={soul.org_role} />
+                </div>
+                {/* model · department on the sub-line */}
+                <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground min-w-0">
+                  {modelLabel && <span className="truncate shrink">{modelLabel}</span>}
+                  {modelLabel && department && <span className="text-border shrink-0">·</span>}
+                  {department && <span className="truncate shrink-0">{department}</span>}
+                </div>
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => e.stopPropagation()}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0 shrink-0"
+                    aria-label="More options"
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40" onClick={(e) => e.stopPropagation()}>
+                  <DropdownMenuItem onClick={() => router.push(`/qors/${soul.id}`)}>
+                    <MessageSquare className="size-3.5 mr-2" /> Chat
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push(`/qors/${soul.id}?tab=settings`)}>
+                    <Settings className="size-3.5 mr-2" /> Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                    <Trash2 className="size-3.5 mr-2" /> Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {/* Tagline — what this agent does (or live event when working) */}
+            {(isActive && lastEvent) ? (
+              <p className="mt-2.5 truncate text-xs text-primary/80">{lastEvent}</p>
+            ) : tagline ? (
+              <p className="mt-2.5 line-clamp-2 text-xs text-muted-foreground/80 leading-relaxed">{tagline}</p>
+            ) : null}
+
+            {/* Footer — reports (left) + spend (right) */}
+            {(reports > 0 || spentUSD) && (
+              <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-2 text-[11px] text-muted-foreground/60">
+                {reports > 0 ? (
+                  <span className="flex items-center gap-1">
+                    <Users className="size-3" /> {reports} {reports === 1 ? 'report' : 'reports'}
+                  </span>
+                ) : <span />}
+                {spentUSD ? <span>{spentUSD} spent</span> : <span />}
+              </div>
+            )}
+
+          </CardContent>
+        </Card>
+      </HoverCardTrigger>
+
+      {/* Hover preview — full identity, capabilities, and usage */}
+      <HoverCardContent side="right" align="start" className="w-72">
         <div className="flex items-start gap-3">
-          <Avatar className={cn(
-            'size-11 shrink-0 transition-shadow',
-            isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-card animate-pulse',
-          )}>
-            <AvatarFallback className={cn('bg-gradient-to-br font-semibold text-white text-base', soulGradient(soul.display_name))}>
+          <Avatar className="size-10 shrink-0">
+            {soul.avatar && <AvatarImage src={soul.avatar} alt={soul.display_name} />}
+            <AvatarFallback className={cn('bg-gradient-to-br font-semibold text-white text-sm', soulGradient(soul.display_name))}>
               {soul.display_name.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <p className="min-w-0 truncate text-sm font-semibold leading-tight">{soul.display_name}</p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="truncate text-sm font-semibold">{soul.display_name}</p>
               <OrgRoleBadge orgRole={soul.org_role} />
             </div>
-            {/* model · department on the sub-line */}
-            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground min-w-0">
-              {modelLabel && <span className="truncate shrink">{modelLabel}</span>}
-              {modelLabel && department && <span className="text-border shrink-0">·</span>}
-              {department && <span className="truncate shrink-0">{department}</span>}
-            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {[modelLabel, department].filter(Boolean).join(' · ')}
+            </p>
           </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={(e) => e.stopPropagation()}
-                className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0 shrink-0"
-                aria-label="More options"
-              >
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuItem onClick={() => router.push(`/qors/${soul.id}`)}>
-                <MessageSquare className="size-3.5 mr-2" /> Chat
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push(`/qors/${soul.id}?tab=settings`)}>
-                <Settings className="size-3.5 mr-2" /> Settings
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                <Trash2 className="size-3.5 mr-2" /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
 
-        {/* Tagline — what this agent does (or live event when working) */}
-        {(isActive && lastEvent) ? (
-          <p className="mt-2.5 truncate text-xs text-primary/80">{lastEvent}</p>
-        ) : tagline ? (
-          <p className="mt-2.5 line-clamp-2 text-xs text-muted-foreground/80 leading-relaxed">{tagline}</p>
-        ) : null}
+        {tagline && <p className="mt-3 text-xs text-muted-foreground leading-relaxed">{tagline}</p>}
 
-        {/* Footer — quiet spend stat, right aligned */}
-        {spentUSD && (
-          <div className="mt-3 flex items-center justify-end border-t border-border/50 pt-2 text-[11px] text-muted-foreground/60">
-            <span>{spentUSD} spent</span>
+        {caps.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1">
+            {caps.map((c) => (
+              <span key={c} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{c}</span>
+            ))}
           </div>
         )}
 
-      </CardContent>
-    </Card>
+        <div className="mt-3 flex items-center gap-3 border-t border-border/50 pt-2 text-[11px] text-muted-foreground/70">
+          {reports > 0 && <span className="flex items-center gap-1"><Users className="size-3" /> {reports} {reports === 1 ? 'report' : 'reports'}</span>}
+          {tokensLabel && <span>{tokensLabel}</span>}
+          {spentUSD && <span>{spentUSD} spent</span>}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 

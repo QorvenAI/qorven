@@ -47,6 +47,44 @@ export function agentDepartment(soul: Pick<Soul, 'org_role' | 'role'>): string {
   return '';
 }
 
+/** Number of agents that report to the given manager (direct reports). */
+export function directReportCount(managerId: string, all: Pick<Soul, 'manager_id'>[]): number {
+  return all.filter((a) => a.manager_id === managerId).length;
+}
+
+// Capability flag → human-readable skill chip label.
+const CAPABILITY_LABELS: { test: (s: Soul) => boolean; label: string }[] = [
+  { test: (s) => !!s.web_search_enabled,            label: 'Web Search' },
+  { test: (s) => !!s.memory_enabled,                label: 'Memory' },
+  { test: (s) => !!s.can_delegate,                  label: 'Delegation' },
+  { test: (s) => s.tool_profile === 'full',         label: 'Full Tools' },
+];
+
+// skills[] slug → friendly label.
+const SKILL_LABELS: Record<string, string> = {
+  sdk:        'SDK',
+  coding:     'Coding',
+  delegation: 'Delegation',
+  dashboard:  'Dashboard',
+  research:   'Research',
+  content:    'Content',
+  sales:      'Sales',
+  support:    'Support',
+  analytics:  'Analytics',
+};
+
+/** Human-readable capability chips for an agent — combines skills[] + capability flags, deduped. */
+export function agentCapabilities(soul: Soul): string[] {
+  const out = new Set<string>();
+  for (const s of soul.skills ?? []) {
+    out.add(SKILL_LABELS[s] ?? (s.charAt(0).toUpperCase() + s.slice(1)));
+  }
+  for (const c of CAPABILITY_LABELS) {
+    if (c.test(soul)) out.add(c.label);
+  }
+  return Array.from(out);
+}
+
 /** A one-line tagline from the agent's system prompt — the first meaningful sentence. */
 export function agentTagline(soul: Pick<Soul, 'system_prompt' | 'title'>): string {
   const sp = (soul.system_prompt ?? '').trim();
