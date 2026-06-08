@@ -93,6 +93,16 @@ jobs:
           printf 'Release build populated this dir.\n' > backend/internal/webui/dist/.embedded
           cp CHANGELOG.md backend/cmd/CHANGELOG.md
 
+      - name: Download modules
+        working-directory: backend
+        run: |
+          # Retry to ride out transient proxy.golang.org EOFs that otherwise
+          # fail the build mid-download.
+          for i in 1 2 3; do
+            go mod download && break
+            echo "go mod download failed (attempt $i), retrying…" && sleep 10
+          done
+
       - name: Build binary
         working-directory: backend
         env:
