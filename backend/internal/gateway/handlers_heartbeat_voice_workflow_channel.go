@@ -326,6 +326,21 @@ func (gw *Gateway) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "channel_type required"})
 		return
 	}
+	if body.AgentID == "" {
+		writeJSON(w, 400, map[string]string{"error": "agent_id required"})
+		return
+	}
+	if err := gw.channelAllowedForAgent(r.Context(), body.AgentID); err != nil {
+		if err.Error() == "channel_requires_executive" {
+			writeJSON(w, 403, map[string]any{
+				"error": "Channels can only be attached to executive agents (COO or C-officers). Promote this agent to a C-officer role first.",
+				"code":  "channel_requires_executive",
+			})
+			return
+		}
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
 	configJSON, _ := json.Marshal(body.Config)
 	var agentID *string
 	if body.AgentID != "" {
