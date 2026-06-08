@@ -73,6 +73,24 @@ func (gw *Gateway) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// L3 workers are managed by their C-officer and observed through their
+	// monitor view — users cannot open a direct chat with them. Only the
+	// user-facing chat channels (web, tui) are blocked; delegated/task/A2A
+	// and external-channel sessions still flow so workers can do their jobs.
+	if in.Channel == "web" || in.Channel == "tui" {
+		if err := gw.agentChatAllowed(r.Context(), in.AgentID); err != nil {
+			if isNotChattable(err) {
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"error": "This worker is managed by its C-officer and cannot be chatted directly. Open its monitor to review tasks, or message its manager.",
+					"code":  "agent_not_chattable",
+				})
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
 	// One-Qor-one-chat: for the chat-family channels (web, tui, telegram,
 	// whatsapp, slack DM, discord DM) we return the Qor's existing
 	// canonical session if one is active. POST /v1/sessions is the old
