@@ -471,8 +471,8 @@ export default function SetupPage() {
           </div>
         )}
 
-        {/* Scrollable content — fills all available space between banner and footer */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* Scrollable content — fills all available space between header and footer */}
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col justify-center">
           <div className="w-full max-w-[860px] mx-auto px-10 py-8">
             {!accepted && (
               <CapabilitiesNotice onConfirmChange={setDisclaimerConfirmed} version={appVersion} />
