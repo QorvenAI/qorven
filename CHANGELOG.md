@@ -4,6 +4,20 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.5-alpha — 2026-06-08
+
+### Added
+- **Worker view for your team** — agents now follow a clear org model: you chat with your COO and C-officers, while the specialists working under them get a dedicated read-only monitor instead of a chat box. Open a worker to see what it's doing right now, its task list and history, its profile and skills, and the external services it can use — with a one-click "Message its manager" shortcut. ([dbd7b2f](https://github.com/QorvenAI/qorven/commit/dbd7b2f), [ea6d1e8](https://github.com/QorvenAI/qorven/commit/ea6d1e8))
+- **Review and comment on a worker's tasks** — every task in a worker's monitor has a comment thread, so you can leave feedback or a review directly on the work. ([fd12552](https://github.com/QorvenAI/qorven/commit/fd12552))
+- **Create workers with a manager** — the New Qor dialog now lets you create a specialist and choose which C-officer it reports to. ([bd28c8c](https://github.com/QorvenAI/qorven/commit/bd28c8c))
+- **Workers keep their job tools** — specialists can still use external services like GitHub, Zoho, and other connectors to get work done; only direct chat and communication channels (Telegram/WhatsApp/email) are reserved for your C-officers. ([4d9d5a2](https://github.com/QorvenAI/qorven/commit/4d9d5a2))
+
+### Changed
+- The chat picker and voice switcher now list only your COO and C-officers — the executives you actually talk to. ([e8a243d](https://github.com/QorvenAI/qorven/commit/e8a243d), [2b337b5](https://github.com/QorvenAI/qorven/commit/2b337b5))
+- Direct chat with a specialist worker is now blocked across every entry point — opening one takes you to its monitor instead. ([723e51c](https://github.com/QorvenAI/qorven/commit/723e51c), [d55a8eb](https://github.com/QorvenAI/qorven/commit/d55a8eb), [4da1387](https://github.com/QorvenAI/qorven/commit/4da1387))
+
+---
+
 ## v0.5.4-alpha — 2026-06-08
 
 ### Added
