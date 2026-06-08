@@ -306,10 +306,10 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
         display_name: primeName,
         provider_id: a._provider_db_id ?? '',
         model,
-        org_role: 'croo',
+        org_role: 'coo',
         org_level: 'l1',
-        title: 'Prime',
-        system_prompt: `You are ${primeName}, a personal AI assistant. Be helpful, clear, and direct.`,
+        title: 'COO',
+        system_prompt: `You are ${primeName}, the user's COO and Chief of Staff. You are the single point of contact for the user — every request flows through you. Delegate specialist work to C-officers (CTO for code, CMO for marketing) and never expose lower-level workers to the user. Be concise and decisive.`,
       }),
     });
   }
