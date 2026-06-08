@@ -7,7 +7,7 @@ import { ArrowRight, Check, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, listAgents } from '@/components/setup/setup-api';
 import { PROVIDER_OPTIONS_FALLBACK, RECOMMENDED_PRIMARY } from '@/components/setup/setup-config';
-import { setToken } from '@/lib/api';
+import { setToken } from '@/lib/api-core';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -162,6 +162,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
   const [error,    setError]    = useState('');
   const [showPw,   setShowPw]   = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const submittingRef = useRef(false);
 
   const currentQ = SCRIPT[qIndex];
 
@@ -310,63 +311,78 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
   }
 
   const submit = useCallback(async (rawValue: string, skip = false) => {
-    if (!currentQ) return;
-    if (loading) return;
-
-    const value = skip ? '' : rawValue.trim();
-
-    if (!skip && currentQ.required && !value) {
-      setError('This field is required.'); return;
-    }
-    if (!skip && currentQ.minLength && value.length < currentQ.minLength) {
-      setError(`Minimum ${currentQ.minLength} characters.`); return;
-    }
-
-    setError('');
-
-    // Push user bubble
-    if (currentQ.inputType === 'confirm') {
-      setThread(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: currentQ.confirmLabel ?? 'Confirmed', animate: false }]);
-    } else if (currentQ.inputType !== 'info' && currentQ.inputType !== 'launch') {
-      const display = skip ? 'Skipped' : currentQ.inputType === 'password' ? '•'.repeat(Math.min(value.length, 12)) : value;
-      setThread(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: display || 'Skipped', animate: false }]);
-    }
-
-    const newAnswers = { ...answers, [currentQ.key]: value };
-    setLoading(true);
-
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
-      if (currentQ.afterAnswer === 'create_account') {
-        await doCreateAccount(newAnswers);
+      if (!currentQ) return;
+      if (loading) return;
+
+      const value = skip ? '' : rawValue.trim();
+
+      if (!skip && currentQ.required && !value) {
+        setError('This field is required.'); return;
       }
-      if (currentQ.afterAnswer === 'test_provider') {
-        try {
-          await doTestProvider(newAnswers);
-          newAnswers._provider_ok = 'true';
-        } catch (e) {
-          newAnswers._provider_ok = 'false';
-          newAnswers._provider_err = e instanceof Error ? e.message : 'failed';
+      if (!skip && currentQ.minLength && value.length < currentQ.minLength) {
+        setError(`Minimum ${currentQ.minLength} characters.`); return;
+      }
+
+      setError('');
+
+      // Push user bubble
+      if (currentQ.inputType === 'confirm') {
+        setThread(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: currentQ.confirmLabel ?? 'Confirmed', animate: false }]);
+      } else if (currentQ.inputType !== 'info' && currentQ.inputType !== 'launch') {
+        const display = skip ? 'Skipped' : currentQ.inputType === 'password' ? '•'.repeat(Math.min(value.length, 12)) : value;
+        setThread(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: display || 'Skipped', animate: false }]);
+      }
+
+      const newAnswers = { ...answers, [currentQ.key]: value };
+      setLoading(true);
+
+      try {
+        if (currentQ.afterAnswer === 'create_account') {
+          await doCreateAccount(newAnswers);
         }
-      }
-      if (currentQ.afterAnswer === 'connect_telegram' && value) {
-        await doConnectTelegram(newAnswers).catch(() => {});
-      }
-      if (currentQ.afterAnswer === 'finalise') {
-        await doFinalise(newAnswers);
+        if (currentQ.afterAnswer === 'test_provider') {
+          try {
+            await doTestProvider(newAnswers);
+            newAnswers._provider_ok = 'true';
+          } catch (e) {
+            newAnswers._provider_ok = 'false';
+            newAnswers._provider_err = e instanceof Error ? e.message : 'failed';
+          }
+        }
+        if (currentQ.afterAnswer === 'connect_telegram' && value) {
+          await doConnectTelegram(newAnswers).catch(() => {});
+        }
+        if (currentQ.afterAnswer === 'finalise') {
+          await doFinalise(newAnswers);
+          setLoading(false);
+          onComplete();
+          return;
+        }
+      } catch (e) {
         setLoading(false);
-        onComplete();
+        setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
         return;
       }
-    } catch (e) {
-      setLoading(false);
-      setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
-      return;
-    }
 
-    setLoading(false);
-    advance(newAnswers, qIndex + 1);
+      setLoading(false);
+      advance(newAnswers, qIndex + 1);
+    } finally {
+      submittingRef.current = false;
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentQ, answers, qIndex, loading, onComplete]);
+
+  const handleRetry = useCallback(() => {
+    const prevIdx = qIndex - 1;
+    setQIndex(prevIdx);
+    setError('');
+    const item = SCRIPT[prevIdx]!;
+    const text = typeof item.text === 'function' ? item.text(answers) : item.text;
+    setThread(prev => [...prev, { id: `p-retry-${Date.now()}`, role: 'prime', content: text, animate: true }]);
+  }, [qIndex, answers]);
 
   const visibleThread = thread.slice(-6);
 
@@ -429,6 +445,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
           showPw={showPw}
           onTogglePw={() => setShowPw(v => !v)}
           onSubmit={submit}
+          onRetry={handleRetry}
           answers={answers}
         />
       )}
@@ -445,10 +462,11 @@ interface InputAreaProps {
   showPw: boolean;
   onTogglePw: () => void;
   onSubmit: (value: string, skip?: boolean) => void;
+  onRetry?: () => void;
   answers: Record<string, string>;
 }
 
-function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, answers }: InputAreaProps) {
+function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetry, answers }: InputAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -485,7 +503,7 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, answer
         {(item.options ?? []).map(opt => (
           <button
             key={opt.value}
-            onClick={() => onSubmit(opt.label)}
+            onClick={() => onSubmit(opt.value)}
             className="flex flex-col items-start rounded-xl border border-border bg-card px-4 py-3 hover:border-primary/50 hover:bg-accent transition-colors cursor-pointer text-left min-w-[140px]">
             <span className="text-sm font-semibold text-foreground">{opt.label}</span>
             <span className="text-xs text-muted-foreground">{opt.desc}</span>
@@ -520,7 +538,7 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, answer
     return (
       <div className="shrink-0 border-t border-border px-8 py-5">
         <button
-          onClick={() => onSubmit('ack')}
+          onClick={() => ok ? onSubmit('ack') : onRetry?.()}
           className={cn(
             'inline-flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold transition-opacity cursor-pointer',
             ok
