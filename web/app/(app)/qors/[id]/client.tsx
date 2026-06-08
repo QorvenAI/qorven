@@ -29,6 +29,7 @@ import { ChatPlayground } from '@/components/chat-v2/chat-playground';
 import { SoulSettingsPage } from '@/components/soul-settings-page';
 import { MailTab } from '@/components/qors/mail-tab';
 import { InboxTab } from '@/components/qors/inbox-tab';
+import { WorkerMonitor } from '@/components/qors/worker-monitor';
 import { PermissionsTab } from '@/components/qors/permissions-tab';
 import { SchedulesTab } from '@/components/qors/schedules-tab';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -189,7 +190,10 @@ export default function QorDetailPage() {
   }, [setLiveTaskStore, clearLiveTasksStore]);
 
   // Register workspace tabs in the toolbar
-  const tabBar = useMemo(() => (
+  const isWorker = !!soul && soul.org_level !== 'l1' && soul.org_level !== 'l2';
+  const tabBar = useMemo(() => {
+    if (isWorker) return null; // workers use the monitor's own sub-tabs
+    return (
     <nav className="flex items-stretch self-stretch gap-0 -mx-1">
       {workspaceTabs.map((tab) => {
         const Icon = tab.icon;
@@ -215,7 +219,8 @@ export default function QorDetailPage() {
         </button>
       ))}
     </nav>
-  ), [activeTab, setWorkspaceTab, appAgentTabs]);
+    );
+  }, [activeTab, setWorkspaceTab, appAgentTabs, isWorker]);
   const activeLiveTaskCount = useMemo(
     () => Object.values(liveTasks).filter(t => t.status === 'in_progress').length,
     [liveTasks]
@@ -370,6 +375,9 @@ export default function QorDetailPage() {
 
   return (
     <ErrorBoundary fallbackTitle={`${brand.agentName} workspace failed`}>
+      {isWorker ? (
+        <WorkerMonitor soul={soul} liveTasks={Object.values(liveTasks)} />
+      ) : (
       <div className="full-bleed flex flex-col" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height) - var(--status-bar-height, 24px))' }}>
         <div className="flex-1 overflow-hidden">
           {/* Chat tab — one Qor, one chat. No session sidebar; the
@@ -542,6 +550,7 @@ export default function QorDetailPage() {
           )}
         </div>
       </div>
+      )}
     </ErrorBoundary>
   );
 }
