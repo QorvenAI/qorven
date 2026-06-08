@@ -382,6 +382,8 @@ function PillWithVoice() {
   const agentId = agent?.id ?? '';
   const isVoiceActive = activeVoiceAgentId === agentId && !!agentId;
   const voice = useVoice({ agentId: agentId || '__noop__' });
+  // Workers (L3) are not chattable — voice is a chat surface, so block it.
+  const voiceChattable = agent?.org_level === 'l1' || agent?.org_level === 'l2';
 
   useEffect(() => {
     if (!agentId) return;
@@ -411,20 +413,20 @@ function PillWithVoice() {
   // (happens after sidebar row switches the pill's agent via above effect)
   useEffect(() => {
     if (!agentId || activeVoiceAgentId !== agentId) return;
+    if (!voiceChattable) return;
     if (voice.state === 'idle') {
       voice.start();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId]);
+  }, [agentId, voiceChattable]);
 
   const handleMic = useCallback(async () => {
     if (!agentId) return;
-    if (isVoiceActive) { await voice.stop(); setActiveVoiceAgent(null); }
-    else {
-      if (activeVoiceAgentId) { const p = agentVoiceRegistry.get(activeVoiceAgentId); if (p) await p(); setActiveVoiceAgent(null); await new Promise(r => setTimeout(r, 80)); }
-      await voice.start(); setActiveVoiceAgent(agentId);
-    }
-  }, [agentId, isVoiceActive, voice, activeVoiceAgentId, setActiveVoiceAgent]);
+    if (isVoiceActive) { await voice.stop(); setActiveVoiceAgent(null); return; }
+    if (!voiceChattable) return; // workers are not chattable — ignore mic taps
+    if (activeVoiceAgentId) { const p = agentVoiceRegistry.get(activeVoiceAgentId); if (p) await p(); setActiveVoiceAgent(null); await new Promise(r => setTimeout(r, 80)); }
+    await voice.start(); setActiveVoiceAgent(agentId);
+  }, [agentId, isVoiceActive, voice, activeVoiceAgentId, setActiveVoiceAgent, voiceChattable]);
 
   const handleSwitch = useCallback(async (soul: Soul) => {
     if (isVoiceActive) { await voice.stop(); setActiveVoiceAgent(null); await new Promise(r => setTimeout(r, 80)); }
