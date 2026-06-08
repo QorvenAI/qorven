@@ -343,6 +343,7 @@ Respond with JSON: {"route_to": ["agent_key"], "reasoning": "brief reason"}`, ag
 				if provider == nil || len(agents) == 0 {
 					return
 				}
+				bgCtx = providers.WithMeterScope(bgCtx, providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
 				routeResp, err := provider.Chat(bgCtx, providers.ChatRequest{
 					Model: agents[0].Model,
 					Messages: []providers.Message{

@@ -183,6 +183,7 @@ Respond with JSON only:
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{{Role: "user", Content: prompt}},
 		Options:  map[string]any{"temperature": 0, "max_tokens": 1000},

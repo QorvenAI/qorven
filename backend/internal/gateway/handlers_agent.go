@@ -176,7 +176,8 @@ Rules:
 	if gw.agentLoop != nil && gw.agentLoop.SmartRouter != nil {
 		model = gw.agentLoop.SmartRouter.BestModelForTier(providers.TierStandard)
 	}
-	resp, err := provider.Chat(r.Context(), providers.ChatRequest{
+	sctx := providers.WithMeterScope(r.Context(), providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
+	resp, err := provider.Chat(sctx, providers.ChatRequest{
 		Model:    model,
 		Messages: []providers.Message{{Role: "user", Content: prompt}},
 	})
@@ -298,7 +299,8 @@ func (gw *Gateway) handleUpsertBundle(w http.ResponseWriter, r *http.Request) {
 
 Text to fix:
 %s`, content)
-			resp, err := p.Chat(r.Context(), providers.ChatRequest{
+			pctx := providers.WithMeterScope(r.Context(), providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
+			resp, err := p.Chat(pctx, providers.ChatRequest{
 				Model:    model,
 				Messages: []providers.Message{{Role: "user", Content: polishPrompt}},
 			})

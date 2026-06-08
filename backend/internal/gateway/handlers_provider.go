@@ -148,6 +148,7 @@ func (gw *Gateway) handleVerifyProvider(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
 	resp, err := p.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{{Role: "user", Content: "Say hi"}},
 		Options:  map[string]any{"max_tokens": 5},
@@ -208,6 +209,7 @@ func (gw *Gateway) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	// can take 8-12s to warm up).
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
 	resp, err := p.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{{Role: "user", Content: "Say hi"}},
 		Options:  map[string]any{"max_tokens": 5},

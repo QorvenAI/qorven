@@ -20,6 +20,7 @@ func (l *gatewayLabeller) GenerateLabel(ctx context.Context, excerpt string) (st
 		return "", nil
 	}
 	prompt := "In 4-6 words, name the topic of this conversation. Be specific, use nouns. Examples: 'Election results NTK scraping', 'DB migration planning'. Excerpt:\n\n" + excerpt
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
 	resp, err := prov.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{
 			{Role: "user", Content: prompt},

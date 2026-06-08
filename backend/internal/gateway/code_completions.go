@@ -120,7 +120,8 @@ func (gw *Gateway) generateCompletion(ctx context.Context, prompt string) (strin
 			model = provider.DefaultModel()
 		}
 
-		resp, err := provider.Chat(ctx, providers.ChatRequest{
+		cctx := providers.WithMeterScope(ctx, providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
+		resp, err := provider.Chat(cctx, providers.ChatRequest{
 			Model: model,
 			Messages: []providers.Message{
 				{Role: "user", Content: prompt},

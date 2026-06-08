@@ -1781,7 +1781,8 @@ func (gw *Gateway) loadProvidersFromDB() {
 		slog.Error("NO LLM PROVIDER CONFIGURED — agents will not be able to respond. Add a provider in Settings → Models Hub or set one in config.toml")
 	} else {
 		// Quick health check: try a minimal chat using the provider's own default model
-		testResp, testErr := defProv.Chat(context.Background(), providers.ChatRequest{
+		hctx := providers.WithMeterScope(context.Background(), providers.MeterScope{TenantID: defaultTenant, Origin: providers.OriginSystem})
+		testResp, testErr := defProv.Chat(hctx, providers.ChatRequest{
 			Model: defProv.DefaultModel(), Messages: []providers.Message{{Role: "user", Content: "hi"}},
 			Options: map[string]any{"max_tokens": 1},
 		})

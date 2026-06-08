@@ -80,7 +80,12 @@ func (gw *Gateway) handleBTW(w http.ResponseWriter, r *http.Request) {
 	if systemPrompt == "" {
 		systemPrompt = "You are a helpful assistant. Answer briefly and directly."
 	}
-	resp, err := provider.Chat(r.Context(), providers.ChatRequest{
+	qctx := providers.WithMeterScope(r.Context(), providers.MeterScope{
+		TenantID: defaultTenant,
+		AgentID:  req.AgentID,
+		Origin:   providers.OriginSystem,
+	})
+	resp, err := provider.Chat(qctx, providers.ChatRequest{
 		Model: "",
 		Messages: []providers.Message{
 			{Role: "system", Content: systemPrompt + "\n\nThis is a quick side-question. Answer briefly. Do not use tools."},
