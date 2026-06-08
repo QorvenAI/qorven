@@ -100,6 +100,7 @@ func ClassifyIntent(ctx context.Context, provider providers.Provider, model, msg
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginBackground})
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{
 			{Role: "system", Content: intentSystemPrompt},

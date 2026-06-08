@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/qorvenai/qorven/internal/llm"
+	"github.com/qorvenai/qorven/internal/providers"
 )
 
 // BackgroundTasks generates title, tags, and follow-ups after agent responds.
@@ -32,6 +33,7 @@ type BackgroundResult struct {
 
 // GenerateTitle creates a 3-5 word title with emoji.
 func (bt *BackgroundTasks) GenerateTitle(ctx context.Context, userMsg, assistantMsg string) string {
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginBackground})
 	resp, err := bt.provider.Chat(ctx, llm.ChatRequest{
 		Model: bt.model,
 		Messages: []llm.Message{
@@ -47,6 +49,7 @@ func (bt *BackgroundTasks) GenerateTitle(ctx context.Context, userMsg, assistant
 
 // GenerateTags creates 1-3 broad + 1-3 specific tags.
 func (bt *BackgroundTasks) GenerateTags(ctx context.Context, userMsg, assistantMsg string) []string {
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginBackground})
 	resp, err := bt.provider.Chat(ctx, llm.ChatRequest{
 		Model: bt.model,
 		Messages: []llm.Message{
@@ -64,6 +67,7 @@ func (bt *BackgroundTasks) GenerateTags(ctx context.Context, userMsg, assistantM
 
 // GenerateFollowUps suggests 3-5 follow-up questions.
 func (bt *BackgroundTasks) GenerateFollowUps(ctx context.Context, userMsg, assistantMsg string) []string {
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginBackground})
 	resp, err := bt.provider.Chat(ctx, llm.ChatRequest{
 		Model: bt.model,
 		Messages: []llm.Message{

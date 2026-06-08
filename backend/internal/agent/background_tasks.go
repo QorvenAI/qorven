@@ -30,6 +30,13 @@ func (l *Loop) RunBackgroundTasks(
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// Attribute background title/tags/follow-up spend to the owning agent.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		AgentID:   agentID,
+		SessionID: sessionID,
+		Origin:    providers.OriginBackground,
+	})
+
 	// Use BackgroundModel (cheap/fast) if configured — saves expensive tokens for the main loop.
 	// Falls back to the agent's primary model if not set.
 	bgModel := l.BackgroundModel
