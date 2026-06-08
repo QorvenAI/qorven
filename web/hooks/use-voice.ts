@@ -247,6 +247,9 @@ export function useVoice({
   // Files are committed under web/public/vad and web/public/onnx.
   const vad = useMicVAD({
     startOnLoad: false,
+    // Use the Silero v5 model — the legacy model fails to load under
+    // onnxruntime-web 1.22 (incompatible opset). v5 file ships in web/public/vad/.
+    model: 'v5',
     baseAssetPath: '/vad/',
     onnxWASMBasePath: '/vad/',
     positiveSpeechThreshold: vadCfg.positiveSpeechThreshold,
