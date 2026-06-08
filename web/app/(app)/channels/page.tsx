@@ -40,6 +40,7 @@ export default function ChannelsPage() {
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
   const [activeAgentId, setActiveAgentId] = useState<string>('');
+  const isExecutive = (a: Soul) => a.org_level === 'l1' || a.org_level === 'l2';
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const load = () => {
@@ -140,14 +141,17 @@ export default function ChannelsPage() {
               <button
                 key={a.id}
                 onClick={() => setActiveAgentId(a.id)}
+                title={isExecutive(a) ? undefined : 'Workers cannot own channels — promote to a C-officer'}
                 className={cn(
                   'shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap',
                   activeAgentId === a.id
                     ? 'bg-primary text-primary-foreground'
-                    : 'border border-border text-muted-foreground hover:bg-accent'
+                    : 'border border-border text-muted-foreground hover:bg-accent',
+                  !isExecutive(a) && 'opacity-60',
                 )}
               >
                 {a.display_name}
+                {!isExecutive(a) && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-amber-400">L3</span>}
                 {countByAgent(a.id) > 0 && (
                   <span className="ml-1.5 text-xs opacity-70">{countByAgent(a.id)}</span>
                 )}
@@ -193,6 +197,11 @@ export default function ChannelsPage() {
                 >
                   <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', !collapsed[agent.id] && 'rotate-90')} />
                   {agent.display_name}
+                  {!isExecutive(agent) && (
+                    <span className="ml-2 inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                      Not a C-officer — promote or move this channel
+                    </span>
+                  )}
                   <span className="text-xs opacity-60 ml-1">{agentChannels.length} channel{agentChannels.length !== 1 ? 's' : ''}</span>
                 </button>
                 {!collapsed[agent.id] && (
@@ -267,6 +276,11 @@ export default function ChannelsPage() {
                           setShowAddPicker(false);
                           if (!activeAgentId) {
                             toast.error('Select an agent tab before adding a channel');
+                            return;
+                          }
+                          const target = agentList.find((a) => a.id === activeAgentId);
+                          if (target && !isExecutive(target)) {
+                            toast.error('Channels are for C-officers (L1/L2). Promote this agent first.');
                             return;
                           }
                           setDrawer({ mode: 'add', agentId: activeAgentId, type });
