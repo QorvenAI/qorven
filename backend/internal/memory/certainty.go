@@ -85,6 +85,7 @@ func LLMExtractConclusions(ctx context.Context, provider providers.Provider, mod
 		{Role: "system", Content: NeuromancerPrompt},
 		{Role: "user", Content: turn},
 	}
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginMemory})
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
 		Model:    model,
 		Messages: messages,

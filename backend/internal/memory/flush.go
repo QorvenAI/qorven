@@ -90,6 +90,7 @@ func FlushMemories(
 	})
 
 	// Run flush (simple — no tool calls, just extract text and save directly)
+	flushCtx = providers.WithMeterScope(flushCtx, providers.MeterScope{Origin: providers.OriginMemory})
 	resp, err := provider.Chat(flushCtx, providers.ChatRequest{
 		Model:    model,
 		Messages: messages,

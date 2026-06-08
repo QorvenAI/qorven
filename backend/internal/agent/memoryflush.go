@@ -100,6 +100,11 @@ func (f *MemoryFlusher) Run(ctx context.Context, history []providers.Message, su
 
 	flushCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+	flushCtx = providers.WithMeterScope(flushCtx, providers.MeterScope{
+		AgentID:   f.agentID,
+		SessionID: f.sessionID,
+		Origin:    providers.OriginMemory,
+	})
 
 	// Replace YYYY-MM-DD placeholder with today's date
 	today := time.Now().Format("2006-01-02")

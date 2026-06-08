@@ -511,6 +511,7 @@ func CompactWithLLM(ctx context.Context, provider providers.Provider, model stri
 	sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	sctx = providers.WithMeterScope(sctx, providers.MeterScope{Origin: providers.OriginMemory})
 	resp, err := provider.Chat(sctx, providers.ChatRequest{
 		Messages: []providers.Message{{
 			Role:    "user",

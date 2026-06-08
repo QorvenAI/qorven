@@ -38,6 +38,7 @@ func ExtractEntities(ctx context.Context, provider providers.Provider, model, us
 
 	prompt := strings.Replace(strings.Replace(entityExtractionPrompt, "%s", userMsg, 1), "%s", assistantMsg, 1)
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginMemory})
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
 		Model:    model,
 		Messages: []providers.Message{{Role: "user", Content: prompt}},

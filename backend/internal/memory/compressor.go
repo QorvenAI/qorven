@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/qorvenai/qorven/internal/llm"
+	"github.com/qorvenai/qorven/internal/providers"
 )
 
 // Compressor implements 5-phase context compression.
@@ -164,6 +165,7 @@ func (c *Compressor) generateSummary(ctx context.Context, middle []llm.Message, 
 		prompt += "\n\nPrevious summary (PRESERVE relevant info, ADD new progress):\n" + prevSummary
 	}
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginMemory})
 	resp, err := c.provider.Chat(ctx, llm.ChatRequest{
 		Model:     c.summaryModel,
 		Messages:  []llm.Message{{Role: "user", Content: prompt}},

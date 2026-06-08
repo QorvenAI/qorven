@@ -61,6 +61,12 @@ Maximum 5 entries. If nothing is worth extracting, return [].
 CONVERSATION:
 ` + transcript
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID:  tenantID,
+		AgentID:   agentID,
+		SessionID: sessionID,
+		Origin:    providers.OriginMemory,
+	})
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{
 			{Role: "user", Content: prompt},
