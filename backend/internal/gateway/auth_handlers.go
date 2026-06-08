@@ -47,6 +47,14 @@ func (gw *Gateway) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure default tenant exists — guards against factory-reset or fresh-DB scenarios
+	// where the startup-time seed may not have run yet.
+	if gw.db != nil {
+		gw.db.Pool.Exec(r.Context(),
+			`INSERT INTO tenants (id, name, slug) VALUES ($1, 'Default', 'default') ON CONFLICT (id) DO NOTHING`,
+			defaultTenant)
+	}
+
 	writeJSON(w, 201, map[string]any{"user": user, "message": "Admin account created. Please login."})
 }
 
