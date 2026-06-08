@@ -174,6 +174,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       const item = SCRIPT[0]!;
       const text = typeof item.text === 'function' ? item.text({}) : item.text;
       setThread([{ id: 'p-0', role: 'prime', content: text, animate: false }]);
+      onPhaseChange?.(0);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -272,6 +273,8 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
           system_prompt: `You are ${primeName}, a personal AI assistant. Be helpful, clear, and direct.`,
         }),
       });
+    } else {
+      console.warn('setup: prime agent not found, skipping model assignment');
     }
   }
 
