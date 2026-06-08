@@ -7,7 +7,7 @@ import { ArrowRight, Check, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, listAgents } from '@/components/setup/setup-api';
 import { PROVIDER_OPTIONS_FALLBACK, RECOMMENDED_PRIMARY } from '@/components/setup/setup-config';
-import { setToken } from '@/lib/api-core';
+import { setToken, markSetupDone } from '@/lib/api-core';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -306,6 +306,9 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
         language: 'en',
       }),
     }).catch(() => {});
+    // Mark setup complete only after all steps finish — prevents mid-setup
+    // refresh from redirecting to dashboard before provider/channels are configured.
+    markSetupDone();
   }
 
   const submit = useCallback(async (rawValue: string, skip = false) => {

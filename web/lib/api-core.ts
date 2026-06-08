@@ -47,8 +47,13 @@ export function setToken(token: string) {
   localStorage.setItem('qorven_token', token);
   const maxAge = 7 * 24 * 3600;
   document.cookie = `qorven_token=${token}; path=/; max-age=${maxAge}; SameSite=Lax`;
-  // Setup-done marker — tells middleware setup is complete so it can redirect
-  // to /login instead of /setup for unauthenticated requests.
+  // NOTE: qorven_setup_done is NOT set here — it is set explicitly by markSetupDone()
+  // only when the full setup wizard completes. Setting it here would cause mid-setup
+  // refreshes to redirect to the dashboard before all steps are finished.
+}
+
+/** Call once when setup wizard fully completes (last step). */
+export function markSetupDone() {
   document.cookie = `qorven_setup_done=1; path=/; max-age=${365 * 24 * 3600}; SameSite=Lax`;
 }
 

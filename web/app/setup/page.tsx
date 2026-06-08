@@ -24,13 +24,15 @@ export default function SetupPage() {
         if (h?.version) setAppVersion(String(h.version));
 
         const sc = await api<{ setup_required: boolean }>('/auth/setup-check');
-        if (!sc.setup_required && isAuthenticated()) {
-          router.replace('/');
-          return;
-        }
         if (!sc.setup_required) {
-          router.replace('/login');
-          return;
+          // Setup is done on the backend. Only redirect away if the wizard
+          // was explicitly completed (qorven_setup_done cookie is set).
+          // Without it, the user refreshed mid-wizard — stay on setup.
+          const setupDone = document.cookie.includes('qorven_setup_done=1');
+          if (setupDone && isAuthenticated()) { router.replace('/'); return; }
+          if (setupDone) { router.replace('/login'); return; }
+          // Mid-wizard refresh: account exists but wizard not finished.
+          // Stay on setup page — the wizard will resume from the current step.
         }
       } catch { /* backend not ready — proceed to wizard */ }
       finally { setBootstrapping(false); }
