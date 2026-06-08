@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.6-alpha — 2026-06-08
+
+### Fixed
+- **Voice now starts reliably** — fixed the voice activity detector failing to load its model, which previously threw an error whenever a chat or voice surface opened. Voice input works on first try again. ([7e68176](https://github.com/QorvenAI/qorven/commit/7e68176))
+
+---
+
 ## v0.5.5-alpha — 2026-06-08
 
 ### Added
