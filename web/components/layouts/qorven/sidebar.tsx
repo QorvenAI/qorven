@@ -453,15 +453,17 @@ function AgentDetailSidebar({
               {(soul.display_name?.[0] ?? '?').toUpperCase()}
             </div>
           )}
-          <span className="absolute -bottom-0.5 -right-0.5">
-            <SoulPulseRing activity={activity} size="md" />
-          </span>
+          {(activity === 'thinking' || activity === 'running') && (
+            <span className="absolute -bottom-0.5 -right-0.5">
+              <SoulPulseRing activity={activity} size="md" />
+            </span>
+          )}
         </div>
 
         <div className="text-center">
           <p className="text-[14px] font-semibold leading-tight">{soul.display_name}</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            {soul.title || soul.role || soul.org_role || 'Agent'}
+            {soul.title || soul.org_role?.toUpperCase() || soul.role || 'Agent'}
           </p>
           {soulState?.lastEvent && (
             <p className="text-[11px] text-amber-400/80 mt-1 line-clamp-2">

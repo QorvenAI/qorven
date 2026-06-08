@@ -6,8 +6,8 @@ import { useCallback } from 'react';
 import { motion } from 'motion/react';
 import { Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SoulPulseRing } from '@/components/soul-pulse-ring';
 import { useVoiceEnabled } from '@/hooks/use-voice-enabled';
+import { agentDepartment } from '@/components/agents/agent-card-meta';
 import { useStore } from '@/store';
 import type { Soul, SoulActivity } from '@/types';
 import { agentVoiceRegistry } from '@/lib/voice-registry';
@@ -52,10 +52,12 @@ function Waveform() {
 }
 
 // ── Activity subtitle text ────────────────────────────────────────────────
+// Subtitle: while working show the live event; otherwise show the agent's
+// designation (department/role). Agents are 24/7 — never show "Offline".
 function activitySubtitle(
   activity: SoulActivity,
   lastEvent: string | undefined,
-  fallback: string,
+  designation: string,
 ): string {
   if (activity === 'thinking' || activity === 'running') {
     const ev = lastEvent?.trim();
@@ -63,11 +65,7 @@ function activitySubtitle(
     return activity === 'thinking' ? 'Thinking…' : 'Working…';
   }
   if (activity === 'error') return 'Error';
-  if (activity === 'offline') return 'Offline';
-  // idle
-  const ev = lastEvent?.trim();
-  if (ev) return ev.length > 42 ? ev.slice(0, 40) + '…' : ev;
-  return fallback;
+  return designation;
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────
@@ -125,12 +123,20 @@ export function SidebarAgentRow({
     [isVoiceActive, voiceEnabled, activeVoiceAgentId, setActiveVoiceAgent, soul.id],
   );
 
-  const subtitle = activitySubtitle(
-    activity,
-    lastEvent,
-    soul.title || soul.role || soul.org_role || 'Agent',
-  );
+  // Designation: prefer the C-suite title/org_role, else the department, else generic.
+  const ORG_LABELS: Record<string, string> = {
+    coo: 'COO', cto: 'CTO', cmo: 'CMO', cso: 'CSO', cco: 'CCO',
+    chro: 'CHRO', ciso: 'CISO', cko: 'CKO', cfo: 'CFO', caio: 'CAIO',
+  };
+  const designation =
+    (soul.org_role && ORG_LABELS[soul.org_role]) ||
+    soul.title ||
+    agentDepartment(soul) ||
+    soul.role ||
+    'Agent';
 
+  const subtitle = activitySubtitle(activity, lastEvent, designation);
+  const isWorking = activity === 'thinking' || activity === 'running';
   const gradient = gradientFor(soul.id);
 
   return (
@@ -147,28 +153,28 @@ export function SidebarAgentRow({
         isVoiceActive && 'ring-1 ring-primary/30',
       )}
     >
-      {/* Avatar with pulse overlay */}
-      <div className="relative shrink-0">
+      {/* Avatar — pulse ring only while actively working; no idle/offline dot (agents are 24/7) */}
+      <div className="shrink-0">
         {soul.avatar ? (
           <img
             src={soul.avatar}
             alt={soul.display_name}
-            className="h-8 w-8 rounded-full object-cover"
+            className={cn(
+              'h-8 w-8 rounded-full object-cover',
+              isWorking && 'ring-2 ring-primary/60 ring-offset-1 ring-offset-background animate-pulse',
+            )}
           />
         ) : (
           <div
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white',
               gradient,
+              isWorking && 'ring-2 ring-primary/60 ring-offset-1 ring-offset-background animate-pulse',
             )}
           >
             {(soul.display_name?.[0] ?? '?').toUpperCase()}
           </div>
         )}
-        {/* Status dot — bottom-right of avatar */}
-        <span className="absolute -bottom-0.5 -right-0.5">
-          <SoulPulseRing activity={activity} size="sm" />
-        </span>
       </div>
 
       {/* Name + subtitle */}
