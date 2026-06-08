@@ -203,7 +203,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       setTimeout(() => {
         const item = SCRIPT[nextIdx]!;
         const text = typeof item.text === 'function' ? item.text(newAnswers) : item.text;
-        setThread(prev => [...prev, { id: `p-${nextIdx}`, role: 'prime', content: text, animate: true }]);
+        setThread(prev => [...prev, { id: `p-${nextIdx}-${Date.now()}`, role: 'prime', content: text, animate: true }]);
       }, 150);
     }
   }
