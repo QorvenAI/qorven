@@ -165,6 +165,11 @@ If nothing worth extracting, return: {"memories": [], "user_preferences": []}
 USER: ` + userMsg + `
 ASSISTANT: ` + response
 
+	// Learning insight extraction runs on behalf of a specific agent — charge it.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		AgentID: agentID,
+		Origin:  providers.OriginSystem,
+	})
 	resp, err := ll.provider.Chat(ctx, providers.ChatRequest{
 		Model: ll.model,
 		Messages: []providers.Message{

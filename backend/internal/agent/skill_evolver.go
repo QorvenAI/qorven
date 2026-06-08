@@ -47,6 +47,12 @@ func (se *SkillEvolver) DetectAndEvolve(ctx context.Context, agentID, userMsg, p
 
 	skill := matchedSkills[0]
 
+	// Skill evolution runs on behalf of a specific agent — charge it.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		AgentID: agentID,
+		Origin:  providers.OriginSkills,
+	})
+
 	// Ask LLM to generate the improvement
 	improvement := se.generateImprovement(ctx, skill.Procedure, userMsg, newResponse)
 	if improvement == "" {

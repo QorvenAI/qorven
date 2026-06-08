@@ -30,6 +30,12 @@ func (l *Loop) ChatStream(ctx context.Context, agentID, message string, onDelta 
 		return "", errNoProvider
 	}
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID: l.tenantID,
+		AgentID:  agentID,
+		Origin:   providers.OriginAgent,
+	})
+
 	rc := RuntimeContext{Mode: PromptFull, Channel: "room", TriggerBy: "mention", NoTools: true}
 	pb := NewPromptBuilder(ag, rc)
 	if l.agentStore != nil {
@@ -107,6 +113,12 @@ func (l *Loop) chatInternal(ctx context.Context, agentID, message string, env *E
 	if provider == nil {
 		return "", errNoProvider
 	}
+
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID: l.tenantID,
+		AgentID:  agentID,
+		Origin:   providers.OriginAgent,
+	})
 
 	// Build system prompt via PromptBuilder
 	rc := RuntimeContext{Mode: PromptFull, Channel: "room", TriggerBy: "mention", Environment: env, NoTools: true}
@@ -203,6 +215,13 @@ func (l *Loop) RunReAct(ctx context.Context, req RunRequest, onEvent func(Stream
 	if model == "" {
 		model = ag.Model
 	}
+
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID:  l.tenantID,
+		AgentID:   ag.ID,
+		SessionID: req.SessionID,
+		Origin:    providers.OriginAgent,
+	})
 
 	// Build tool descriptions for the prompt
 	cb := NewContextBuilder(ag, l.skillLoader, l.memStore, l.toolReg)

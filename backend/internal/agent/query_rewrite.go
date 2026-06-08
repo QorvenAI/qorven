@@ -67,6 +67,7 @@ Current message: %s`, time.Now().Format("January 2, 2006"), historyText.String()
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	resp, err := qr.provider.Chat(ctx, providers.ChatRequest{
 		Model:    qr.model,
 		Messages: []providers.Message{{Role: "user", Content: prompt}},

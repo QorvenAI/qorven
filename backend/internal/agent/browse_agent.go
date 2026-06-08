@@ -95,6 +95,8 @@ func (ba *BrowseAgent) BrowseAndAct(ctx context.Context, goal, startURL string) 
 	var steps []AgentStep
 	var memory string
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
+
 	for step := 0; step < ba.maxSteps; step++ {
 		stepStart := time.Now()
 

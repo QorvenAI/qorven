@@ -34,6 +34,7 @@ Each persona should represent a different stakeholder perspective.
 Return JSON array: [{"name":"...","role":"...","bio":"one sentence","stance":"bullish/bearish/neutral/skeptical","traits":"2-3 traits"}]
 Only return the JSON array, nothing else.`, count, seed)
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	resp, err := e.provider.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{{Role: "user", Content: prompt}},
 		Options:  map[string]any{"temperature": 0.8, "max_tokens": 2000},
@@ -63,6 +64,8 @@ func (e *Engine) RunSimulation(ctx context.Context, seed string, agents []Agent,
 	var history []string
 
 	slog.Info("scenario.simulation.start", "agents", len(agents), "rounds", numRounds)
+
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 
 	for r := 1; r <= numRounds; r++ {
 		// Pick 2-3 agents to speak this round
@@ -124,6 +127,7 @@ Write a report with these sections:
 Use markdown formatting. Be specific and cite agent statements.`,
 		seed, formatAgents(agents), transcript.String())
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	resp, err := e.provider.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{{Role: "user", Content: prompt}},
 		Options:  map[string]any{"temperature": 0.3, "max_tokens": 4000},
@@ -175,6 +179,7 @@ func (e *Engine) InjectEvent(ctx context.Context, seed string, agents []Agent, r
 	rounds = append(rounds, injectionRound)
 
 	// Run 2 more rounds of reactions
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	var history []string
 	for _, r := range rounds {
 		history = append(history, fmt.Sprintf("[%s]: %s", r.AgentName, r.Content))

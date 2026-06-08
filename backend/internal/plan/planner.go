@@ -61,6 +61,7 @@ Rules:
 - Use depends_on when a task needs another's output
 - If a task can be done by any Soul, use "qorven"`, soulsJSON, request)
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	resp, err := p.provider.Chat(ctx, providers.ChatRequest{
 		Model:    p.model,
 		Messages: []providers.Message{{Role: "user", Content: prompt}},
@@ -166,6 +167,7 @@ func (p *Planner) Aggregate(ctx context.Context, plan *Plan) (string, error) {
 		taskSummaries += fmt.Sprintf("## %s (@%s) [%s]\n%s\n\n", st.Description, st.AssignTo, st.Status, st.Result)
 	}
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	resp, err := p.provider.Chat(ctx, providers.ChatRequest{
 		Model: p.model,
 		Messages: []providers.Message{

@@ -308,6 +308,12 @@ func (l *Loop) flushMemoryBeforeCompaction(ctx context.Context, provider provide
 	fctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// Pre-compaction memory flush for a specific agent — charge it.
+	fctx = providers.WithMeterScope(fctx, providers.MeterScope{
+		TenantID: l.tenantID,
+		AgentID:  ag.ID,
+		Origin:   providers.OriginMemory,
+	})
 	resp, err := provider.Chat(fctx, providers.ChatRequest{
 		Model:    ag.Model,
 		Messages: []providers.Message{{Role: "user", Content: sb.String()}},

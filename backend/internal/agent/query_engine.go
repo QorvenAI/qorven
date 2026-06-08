@@ -58,6 +58,8 @@ func (qe *QueryEngine) Run(ctx context.Context, system, message string, tools []
 	var results []TurnResult
 	spent := 0
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
+
 	for turn := 0; turn < qe.maxTurns; turn++ {
 		if spent > qe.budgetTokens {
 			slog.Info("query_engine.budget", "spent", spent, "budget", qe.budgetTokens)

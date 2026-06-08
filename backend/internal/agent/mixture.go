@@ -31,6 +31,8 @@ func (m *MixtureOfAgents) Consult(ctx context.Context, systemPrompt, query strin
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
+
 	// Get diverse responses in parallel
 	type modelResp struct {
 		Model   string

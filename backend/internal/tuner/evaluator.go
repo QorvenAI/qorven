@@ -58,6 +58,11 @@ Actual response: %s
 
 Respond with JSON: {"score": 0.0-1.0, "reasoning": "brief explanation"}`, tc.Prompt, tc.ExpectedOutput, actual)
 
+	// Tuning evaluates a specific agent's response — charge that agent.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		AgentID: tc.AgentID,
+		Origin:  providers.OriginSystem,
+	})
 	resp, err := e.provider.Chat(ctx, providers.ChatRequest{
 		Model: e.model,
 		Messages: []providers.Message{

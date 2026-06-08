@@ -436,6 +436,13 @@ func (d *SoulDesk) runSoul(ctx context.Context, soul *agent.Agent, task, taskCon
 	var finalContent string
 	start := time.Now()
 
+	// Souls are agents — charge the delegated Soul.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID: d.tenantID,
+		AgentID:  soul.ID,
+		Origin:   providers.OriginSouldesk,
+	})
+
 	for iter := 0; iter < maxIter; iter++ {
 		resp, err := provider.Chat(ctx, providers.ChatRequest{
 			Model:    model,
@@ -1013,6 +1020,12 @@ func (t *HandoffTool) Execute(ctx context.Context, args map[string]any) *tools.R
 	messages = append(messages, history...)
 	messages = append(messages, providers.Message{Role: "user", Content: handoffMsg})
 
+	// Souls are agents — charge the Soul taking over the conversation.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID: t.desk.tenantID,
+		AgentID:  soul.ID,
+		Origin:   providers.OriginSouldesk,
+	})
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
 		Model:    soul.Model,
 		Messages: messages,

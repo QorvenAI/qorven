@@ -82,6 +82,11 @@ Respond with JSON:
   "procedure": "step-by-step procedure that can be reused for similar tasks"
 }`, userMessage, strings.Join(toolsUsed, ", "), response[:min(len(response), 500)])
 
+	// Skill crystallization runs on behalf of a specific agent — charge it.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		AgentID: agentID,
+		Origin:  providers.OriginSkills,
+	})
 	resp, err := c.provider.Chat(ctx, providers.ChatRequest{
 		Model:    c.model,
 		Messages: []providers.Message{{Role: "user", Content: prompt}},

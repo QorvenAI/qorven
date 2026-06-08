@@ -62,6 +62,7 @@ func (p *Pipeline) Search(ctx context.Context, query string, max int) ([]Result,
 func (p *Pipeline) RewriteQuery(ctx context.Context, query string) string {
 	if p.provider == nil { return query }
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second); defer cancel()
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSystem})
 	resp, err := p.provider.Chat(ctx, providers.ChatRequest{
 		Messages: []providers.Message{{Role: "user", Content: "Rewrite into optimal search query. Return ONLY the query:\n" + query}},
 		Options: map[string]any{"temperature": 0, "max_tokens": 50},

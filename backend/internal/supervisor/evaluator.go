@@ -61,6 +61,11 @@ func (e *Evaluator) Evaluate(ctx context.Context, agentID, agentName, task, outp
 
 	prompt := fmt.Sprintf(evalPrompt, agentName, task, evalOutput)
 
+	// Supervision judges a specific agent's output — charge that agent.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		AgentID: agentID,
+		Origin:  providers.OriginSystem,
+	})
 	resp, err := e.provider.Chat(ctx, providers.ChatRequest{
 		Model:    e.model,
 		Messages: []providers.Message{{Role: "user", Content: prompt}},
