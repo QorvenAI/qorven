@@ -20,6 +20,7 @@ import { integrationsApi, RelayKeyRecord } from '@/lib/api-integrations';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState } from '@/components/empty-state';
+import { OfficerSetupCard } from '@/components/setup/officer-setup-card';
 import { toast } from 'sonner';
 
 // ─── Platform config ──────────────────────────────────────────────────────────
@@ -358,6 +359,56 @@ export default function SocialPage() {
 
   const souls = useStore(s => s.souls);
   const [agentFilter, setAgentFilter] = useState('');
+
+  const [cmo, setCmo] = useState<import('@/types').Soul | null>(null);
+  const [cmoChecked, setCmoChecked] = useState(false);
+
+  useEffect(() => {
+    import('@/lib/api-agents')
+      .then(({ agents }) => agents.byRole('cmo'))
+      .then((existing) => setCmo(existing))
+      .catch(() => setCmo(null))
+      .finally(() => setCmoChecked(true));
+  }, []);
+
+  // Once the CMO exists, default the agent filter to it so social work attributes to the CMO.
+  useEffect(() => {
+    if (cmo?.id && !agentFilter) setAgentFilter(cmo.id);
+  }, [cmo, agentFilter]);
+
+  const createCmo = async ({ name, model }: { name: string; model: string; providerId: string }) => {
+    const { agents } = await import('@/lib/api-agents');
+    const coo = (await agents.byRole('coo')) ?? (await agents.byKey('chief'));
+    const created = await agents.create({
+      agent_key: 'cmo',
+      role: 'marketer',
+      display_name: name,
+      title: 'CMO',
+      org_role: 'cmo',
+      org_level: 'l2',
+      manager_id: coo?.id ?? null,
+      ...(model ? { model } : {}),
+      system_prompt: `You are ${name}, the CMO. You own marketing and social on the /social page. You plan campaigns and content with the user and delegate execution to specialist writers and social workers. Be brand-aware and concise.`,
+    } as Partial<import('@/types').Soul>);
+    setCmo(created);
+  };
+
+  if (cmoChecked && !cmo) {
+    return (
+      <ErrorBoundary>
+        <div className="h-full">
+          <OfficerSetupCard
+            role="cmo"
+            roleLabel="CMO"
+            pageName="social"
+            defaultName="Prime Marketer"
+            blurb="Your Chief Marketing Officer plans campaigns and content across every platform, delegating execution to specialist writers."
+            onCreate={createCmo}
+          />
+        </div>
+      </ErrorBoundary>
+    );
+  }
 
   return (
     <ErrorBoundary>
