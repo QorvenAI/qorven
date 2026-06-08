@@ -7,6 +7,8 @@
 
 **Open-source, self-hosted AI workspace. Deploy a team of agents on your own infrastructure.**
 
+Built by [Jayakumar Sengottaian](https://linkedin.com/in/jayakumarsengottaian).
+
 Purpose-built for developers and teams that require full data control, model flexibility, and the ability to extend the platform without a vendor dependency.
 
 > **Alpha.** API and configuration schema are subject to change before v1.0. Suitable for development and non-critical production workloads. Maintain a current database backup for any persistent deployment.
@@ -194,6 +196,14 @@ Built on excellent open-source foundations:
 [PostgreSQL](https://www.postgresql.org/) · [pgvector](https://github.com/pgvector/pgvector) · [Next.js](https://nextjs.org/) · [Tailwind CSS](https://tailwindcss.com/) · [Chi](https://github.com/go-chi/chi) · [pgx](https://github.com/jackc/pgx) · [Cobra](https://github.com/spf13/cobra) · [Bubbletea](https://github.com/charmbracelet/bubbletea) · [Lucide](https://lucide.dev/) · [Zustand](https://github.com/pmndrs/zustand)
 
 Full dependency list: [`backend/go.mod`](./backend/go.mod) · [`web/package.json`](./web/package.json)
+
+---
+
+## Author
+
+Qorven was designed and built by **[Jayakumar Sengottaian](https://linkedin.com/in/jayakumarsengottaian)** — the full platform (Go backend, Next.js dashboard, 42-agent org system, AI gateway, 20+ channel integrations) developed solo.
+
+Available for AI engineering and automation work — reach out on [LinkedIn](https://linkedin.com/in/jayakumarsengottaian) or at [hello@qorven.ai](mailto:hello@qorven.ai).
 
 ---
 

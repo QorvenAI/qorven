@@ -2,6 +2,7 @@
   "name": "qorven-web",
   "version": "0.1.0",
   "private": true,
+  "author": "Jayakumar Sengottaian (https://linkedin.com/in/jayakumarsengottaian)",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
