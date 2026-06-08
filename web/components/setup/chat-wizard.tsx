@@ -17,7 +17,7 @@ export interface ChatWizardProps {
   onPhaseChange?: (phase: number) => void;
 }
 
-type InputType = 'confirm' | 'text' | 'password' | 'email' | 'pill' | 'card_pick' | 'info' | 'launch';
+type InputType = 'confirm' | 'text' | 'password' | 'email' | 'pill' | 'card_pick' | 'info' | 'model_pick' | 'launch';
 
 interface PillOption { value: string; label: string; desc: string; }
 
@@ -31,7 +31,7 @@ interface ScriptItem {
   skippable?: boolean;
   defaultValue?: string;
   derivedFrom?: string;
-  afterAnswer?: 'create_account' | 'test_provider' | 'connect_telegram' | 'finalise';
+  afterAnswer?: 'create_account' | 'test_provider' | 'save_model' | 'connect_telegram' | 'finalise';
   options?: PillOption[];
   confirmItems?: string[];
   confirmLabel?: string;
@@ -47,11 +47,11 @@ interface Message {
 // ── Script ────────────────────────────────────────────────────────────────────
 
 const PHASE_BOUNDARIES: Record<number, number> = {
-  0: 0,
-  1: 1,
-  5: 2,
-  7: 3,
-  10: 4,
+  0: 0,   // disclaimer
+  1: 1,   // account
+  5: 2,   // workspace
+  7: 3,   // provider
+  11: 4,  // channels (telegram) — shifted +1 by _model_pick insertion
 };
 
 const SCRIPT: ScriptItem[] = [
@@ -132,6 +132,15 @@ const SCRIPT: ScriptItem[] = [
       ? '✓ Connected. Your agents can think.'
       : "✗ That key didn't work. Paste it again and I'll retry.",
     inputType: 'info',
+  },
+  {
+    key: '_model_pick',
+    text: (a) => {
+      const label = PROVIDER_OPTIONS_FALLBACK.find(p => p.id === a.provider)?.label ?? a.provider;
+      return `Which ${label} model should I use?`;
+    },
+    inputType: 'model_pick',
+    afterAnswer: 'save_model',
   },
   {
     key: 'telegram',
@@ -259,7 +268,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       providerDbId = created.id;
     }
 
-    // Resolve a sensible default model for this provider
+    // Store discovered models + provider DB ID in answers for the model picker step
     const PROVIDER_DEFAULT_MODEL: Record<string, string> = {
       bedrock:    RECOMMENDED_PRIMARY,
       anthropic:  'claude-sonnet-4-6',
@@ -276,30 +285,33 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       ollama:     'llama3.2',
       custom:     '',
     };
-    // Use first model from test response, fallback to per-provider default
-    const resolvedModel = (res.models && res.models.length > 0)
-      ? res.models[0]!
-      : (PROVIDER_DEFAULT_MODEL[opt.id] ?? '');
+    const defaultModel = PROVIDER_DEFAULT_MODEL[opt.id] ?? '';
+    const availableModels = (res.models && res.models.length > 0) ? res.models : [defaultModel].filter(Boolean);
 
+    // Store for model picker step — JSON string so it fits in answers Record<string,string>
+    a._available_models = JSON.stringify(availableModels);
+    a._provider_db_id   = providerDbId;
+    a._provider_default_model = defaultModel;
+  }
+
+  async function doSaveModel(a: Record<string, string>) {
     const agents = await listAgents();
     const prime = agents.find(ag => ag.agent_key === 'chief') ?? agents.find(ag => ag.agent_key === 'prime');
-    if (prime) {
-      const primeName = a.prime_name || 'Prime';
-      await api(`/v1/agents/${prime.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          display_name: primeName,
-          provider_id: providerDbId,
-          model: resolvedModel,
-          org_role: 'croo',
-          org_level: 'l1',
-          title: 'Chief Reasoning Officer',
-          system_prompt: `You are ${primeName}, a personal AI assistant. Be helpful, clear, and direct.`,
-        }),
-      });
-    } else {
-      console.warn('setup: prime agent not found, skipping model assignment');
-    }
+    if (!prime) { console.warn('setup: prime agent not found'); return; }
+    const primeName = a.prime_name || 'Prime';
+    const model = a._model_pick || a._provider_default_model || '';
+    await api(`/v1/agents/${prime.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        display_name: primeName,
+        provider_id: a._provider_db_id ?? '',
+        model,
+        org_role: 'croo',
+        org_level: 'l1',
+        title: 'Chief Reasoning Officer',
+        system_prompt: `You are ${primeName}, a personal AI assistant. Be helpful, clear, and direct.`,
+      }),
+    });
   }
 
   async function doConnectTelegram(a: Record<string, string>) {
@@ -383,6 +395,9 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
             newAnswers._provider_ok = 'false';
             newAnswers._provider_err = e instanceof Error ? e.message : 'failed';
           }
+        }
+        if (currentQ.afterAnswer === 'save_model') {
+          await doSaveModel(newAnswers);
         }
         if (currentQ.afterAnswer === 'connect_telegram' && value) {
           await doConnectTelegram(newAnswers).catch(() => {});
@@ -604,6 +619,35 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
               className="flex flex-col items-start rounded-xl border border-border bg-card px-3 py-2.5 hover:border-primary/50 hover:bg-accent transition-colors cursor-pointer text-left">
               <span className="text-sm font-semibold text-foreground">{opt.label}</span>
               <span className="text-xs text-muted-foreground leading-snug">{opt.hint}</span>
+            </button>
+          ))}
+        </div>
+      </W>
+    );
+  }
+
+  if (item.inputType === 'model_pick') {
+    let models: string[] = [];
+    try { models = JSON.parse(answers._available_models ?? '[]'); } catch { /* empty */ }
+    const defaultModel = answers._provider_default_model ?? '';
+    if (!models.length && defaultModel) models = [defaultModel];
+    return (
+      <W>
+        <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
+          {models.map(m => (
+            <button
+              key={m}
+              onClick={() => onSubmit(m)}
+              className={cn(
+                'flex items-center justify-between rounded-xl border px-4 py-2.5 text-left text-sm transition-colors cursor-pointer',
+                m === defaultModel
+                  ? 'border-primary/50 bg-primary/5 text-foreground font-medium'
+                  : 'border-border bg-card text-foreground hover:border-primary/40 hover:bg-accent',
+              )}>
+              <span className="font-mono text-xs truncate">{m}</span>
+              {m === defaultModel && (
+                <span className="shrink-0 ml-3 text-[10px] font-semibold text-primary uppercase tracking-wide">Recommended</span>
+              )}
             </button>
           ))}
         </div>
