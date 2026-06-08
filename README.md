@@ -180,9 +180,8 @@ See [`ROADMAP.md`](./ROADMAP.md) for what's planned toward v1.0.
 
 Sponsorship funds core development, integrations, documentation, and long-term maintenance.
 
-- **GitHub Sponsors:** [github.com/sponsors/QorvenAI](https://github.com/sponsors/QorvenAI)
 - **Ko-fi:** [ko-fi.com/qorvenai](https://ko-fi.com/qorvenai)
-- **Razorpay** (India): [qorven.ai/sponsor](https://qorven.ai/sponsor)
+- **Sponsor page:** [qorven.ai/sponsor](https://qorven.ai/sponsor)
 
 Enterprise sponsors receive logo placement and priority issue handling. [Contact us](mailto:hello@qorven.ai).
 
