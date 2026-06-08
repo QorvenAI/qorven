@@ -498,7 +498,19 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   const [name,    setName]    = useState('');
   const [role,    setRole]    = useState('');
   const [model,   setModel]   = useState('');
+  const [managerId, setManagerId] = useState('');
+  const [execs, setExecs] = useState<Soul[]>([]);
   const [saving,  setSaving]  = useState(false);
+
+  // A worker (L3) needs a manager. Offer L1/L2 agents as options.
+  useEffect(() => {
+    agents.list()
+      .then((list) => setExecs(list.filter((a) => a.org_level === 'l1' || a.org_level === 'l2')))
+      .catch(() => setExecs([]));
+  }, []);
+
+  // Is the currently-selected role an L3 worker? (blank/general and specialist)
+  const isWorkerRole = !role || (ORG_LEVEL_FOR_ROLE[role] ?? 'l3') === 'l3';
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -516,6 +528,12 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
       if (role) {
         payload.org_role  = role;
         payload.org_level = ORG_LEVEL_FOR_ROLE[role] ?? 'l3';
+      }
+      // Workers report to a manager. Stamp org_level=l3 even with no role so
+      // the new agent lands as a worker (monitor view), not an orphan.
+      if (isWorkerRole) {
+        payload.org_level = 'l3';
+        if (managerId) payload.manager_id = managerId;
       }
       await agents.create(payload as Parameters<typeof agents.create>[0]);
       toast.success(`${name.trim()} created`);
@@ -567,6 +585,27 @@ function CreateQorDialog({ onClose, onCreated }: { onClose: () => void; onCreate
               ))}
             </select>
           </div>
+
+          {isWorkerRole && (
+            <div className="space-y-1.5">
+              <label htmlFor="qor-manager" className="text-sm font-medium">
+                Manager <span className="text-muted-foreground font-normal">(who this worker reports to)</span>
+              </label>
+              <select
+                id="qor-manager"
+                value={managerId}
+                onChange={(e) => setManagerId(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="">Unassigned</option>
+                {execs.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name}{m.org_role ? ` — ${m.org_role.toUpperCase()}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label htmlFor="qor-model" className="text-sm font-medium">
