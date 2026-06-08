@@ -490,6 +490,17 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 				}
 				costLedger      := gatewayllm.NewCostLedger(db.Pool, budgetEngine)
 				gw.llmCostLedger = costLedger
+
+				// Single budget-enforcement engine over the bank-grade µUSD ledger.
+				// Install metering at the provider-registry boundary so EVERY LLM
+				// call — agent, failover, memory, background, council, etc. — is
+				// enforced and recorded, not just the agent happy-path through the
+				// pipeline. The pipeline's own budget check delegates to this same
+				// engine so there is exactly one enforcement implementation.
+				dbEnforcer := gatewayllm.NewDBEnforcer(db.Pool)
+				budgetEngine.SetEnforcer(dbEnforcer)
+				gw.providerReg.SetMetering(dbEnforcer, costLedger)
+
 				gw.llmPipeline   = gatewayllm.NewPipeline(
 					gw.providerReg,
 					providers.NewKeyPoolStore(db.Pool, cfg.Auth.EncryptionKey),

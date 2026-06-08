@@ -100,3 +100,13 @@ func TestEnforcer_WarnDedupedWithinTTL(t *testing.T) {
 		t.Fatalf("expected exactly 1 warn within TTL window, got %d", warned)
 	}
 }
+
+func TestBudgetEngine_DelegatesToEnforcer(t *testing.T) {
+	enf := newTestEnforcer(&fakeBudgetRepo{agentCapUUSD: 1_000_000, agentSpentUUSD: 1_000_000}) // maxed
+	be := NewBudgetEngine(nil)
+	be.SetEnforcer(enf)
+	err := be.Check(context.Background(), GatewayRequest{TenantID: "t", AgentID: "a"})
+	if err != ErrBudgetExceeded {
+		t.Fatalf("BudgetEngine.Check must delegate and block, got %v", err)
+	}
+}

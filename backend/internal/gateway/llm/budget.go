@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qorvenai/qorven/internal/providers"
 )
 
 // agentBudget is the cached per-agent spend state.
@@ -26,7 +27,12 @@ type BudgetEngine struct {
 	mu       sync.Mutex
 	cache    map[string]*agentBudget // agentID → cached budget (60s TTL)
 	OnSpend  func(agentID string, cents int64) // optional: feeds in-memory enforcer
+	enforcer *DBEnforcer // when set, Check delegates to the single µUSD engine
 }
+
+// SetEnforcer makes Check delegate to the single µUSD enforcement engine so the
+// pipeline path and the provider-boundary path share one implementation.
+func (e *BudgetEngine) SetEnforcer(enf *DBEnforcer) { e.enforcer = enf }
 
 // NewBudgetEngine creates a BudgetEngine backed by the given pool.
 func NewBudgetEngine(db *pgxpool.Pool) *BudgetEngine {
@@ -39,6 +45,11 @@ func NewBudgetEngine(db *pgxpool.Pool) *BudgetEngine {
 // Check returns ErrBudgetExceeded if the agent has hit its monthly or
 // daily cap. A missing budget row means "no cap" — returns nil.
 func (e *BudgetEngine) Check(ctx context.Context, req GatewayRequest) error {
+	if e.enforcer != nil {
+		return e.enforcer.Check(ctx, providers.MeterScope{
+			TenantID: req.TenantID, AgentID: req.AgentID, SessionID: req.SessionID,
+		})
+	}
 	if req.AgentID == "" || e.db == nil {
 		return nil
 	}
