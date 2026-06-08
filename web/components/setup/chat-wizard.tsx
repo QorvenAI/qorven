@@ -492,6 +492,15 @@ interface InputAreaProps {
   answers: Record<string, string>;
 }
 
+// Module-level wrapper — must NOT be defined inside InputArea or it remounts on every keystroke
+function W({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`shrink-0 border-t border-border bg-background px-6 py-4 ${className}`}>
+      <div className="max-w-[680px] mx-auto">{children}</div>
+    </div>
+  );
+}
+
 function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetry, answers }: InputAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -502,13 +511,6 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit(value); }
   };
-
-  // Shared outer wrapper — matches in-app composer style
-  const W = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
-    <div className={`shrink-0 border-t border-border bg-background px-6 py-4 ${className}`}>
-      <div className="max-w-[680px] mx-auto">{children}</div>
-    </div>
-  );
 
   // confirm is handled inline inside the Prime bubble — no bottom input needed
   if (item.inputType === 'confirm') {
