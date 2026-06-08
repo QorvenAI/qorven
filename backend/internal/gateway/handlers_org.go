@@ -212,6 +212,12 @@ func (gw *Gateway) handleOrgHireAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If this hire/update demotes the agent to a non-executive level (L3),
+	// disable any channels it owns — workers never face the outside world.
+	if !levelAllowsChannel(body.OrgLevel) {
+		gw.disableAgentChannels(r.Context(), body.AgentID)
+	}
+
 	var displayName, existingPrompt string
 	_ = gw.db.Pool.QueryRow(r.Context(),
 		`SELECT COALESCE(display_name,''), COALESCE(system_prompt,'') FROM agents WHERE id=$1`, body.AgentID).
