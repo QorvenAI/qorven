@@ -24,8 +24,15 @@ export function ChatClient() {
     agentsApi.list()
       .then((list) => {
         if (!active) return;
-        setAgentList(list);
-        if (list.length > 0) setSelectedAgent(list[0] ?? null);
+        // Only executives (L1 COO / L2 C-officers) are chattable. L3 workers
+        // are observed through their monitor view, not chatted. The backend
+        // enforces this on session creation; here we just hide them from the
+        // picker so the user never lands on a worker that 403s.
+        const chattable = list.filter(
+          (a) => a.org_level === 'l1' || a.org_level === 'l2',
+        );
+        setAgentList(chattable);
+        if (chattable.length > 0) setSelectedAgent(chattable[0] ?? null);
       })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : 'Failed to load agents'); })
       .finally(() => { if (active) setLoading(false); });
