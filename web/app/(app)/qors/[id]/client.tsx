@@ -469,6 +469,7 @@ export default function QorDetailPage() {
             <div className="h-full overflow-y-auto p-5">
               <ChannelsTab
                 agentId={soul.id}
+                isExecutive={soul.org_level === 'l1' || soul.org_level === 'l2'}
                 channels={soulChannels}
                 onRefresh={() => channelsApi.list().then((chs) => setSoulChannels(chs.filter((c: Channel) => c.agent_id === id)))}
               />
@@ -931,7 +932,7 @@ const ALL_CHANNEL_TYPES = [
   { type: 'mattermost', label: 'Mattermost',      singleton: false, fields: ['server_url', 'bot_token', 'channel_id'] },
 ] as const;
 
-function ChannelsTab({ agentId, channels, onRefresh }: { agentId: string; channels: Channel[]; onRefresh: () => void }) {
+function ChannelsTab({ agentId, isExecutive, channels, onRefresh }: { agentId: string; isExecutive: boolean; channels: Channel[]; onRefresh: () => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [newChannel, setNewChannel] = useState({ channel_type: 'telegram', config: {} as Record<string, string> });
   const [saving, setSaving] = useState(false);
@@ -995,7 +996,7 @@ function ChannelsTab({ agentId, channels, onRefresh }: { agentId: string; channe
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Channels</h2>
-        {availableTypes.length > 0 && (
+        {isExecutive && availableTypes.length > 0 && (
           <button onClick={() => setShowAdd(!showAdd)} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer">
             <Plus className="h-3.5 w-3.5" />
             Add Channel
@@ -1003,7 +1004,13 @@ function ChannelsTab({ agentId, channels, onRefresh }: { agentId: string; channe
         )}
       </div>
 
-      {showAdd && availableTypes.length > 0 && (
+      {!isExecutive && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-400">
+          Channels are for C-officers (L1/L2). Promote this agent to a C-officer role to connect channels.
+        </div>
+      )}
+
+      {isExecutive && showAdd && availableTypes.length > 0 && (
         <div className="rounded-xl border border-border p-5 space-y-4">
           <div>
             <label className="text-xs text-muted-foreground">Provider</label>
