@@ -350,5 +350,8 @@ func (gw *Gateway) handleOrgTerminateAgent(w http.ResponseWriter, r *http.Reques
 		 WHERE agent_id=$3 AND status='active'`,
 		terminatedBy, body.Reason, agentID)
 
+	// A terminated agent must not keep channels polling.
+	gw.disableAgentChannels(r.Context(), agentID)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "terminated", "agent_id": agentID})
 }

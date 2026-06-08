@@ -373,7 +373,7 @@ func (gw *Gateway) handleBindAgentChannel(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := gw.channelAllowedForAgent(r.Context(), agentID); err != nil {
-		if err.Error() == "channel_requires_executive" {
+		if isExecutiveDenied(err) {
 			writeJSON(w, 403, map[string]any{
 				"error": "Channels can only be attached to executive agents (COO or C-officers). Promote this agent to a C-officer role first.",
 				"code":  "channel_requires_executive",

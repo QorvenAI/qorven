@@ -331,7 +331,7 @@ func (gw *Gateway) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := gw.channelAllowedForAgent(r.Context(), body.AgentID); err != nil {
-		if err.Error() == "channel_requires_executive" {
+		if isExecutiveDenied(err) {
 			writeJSON(w, 403, map[string]any{
 				"error": "Channels can only be attached to executive agents (COO or C-officers). Promote this agent to a C-officer role first.",
 				"code":  "channel_requires_executive",
@@ -384,6 +384,28 @@ func (gw *Gateway) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 			body.Name, id, defaultTenant)
 	}
 	if body.Enabled != nil {
+		// Re-enabling a channel is gated the same as creating one: the owning
+		// agent must be an executive (L1/L2). Prevents bypassing the create
+		// gate by toggling a disabled channel back on for an L3 worker.
+		if *body.Enabled {
+			var ownerID string
+			gw.db.Pool.QueryRow(r.Context(),
+				`SELECT COALESCE(agent_id::text, '') FROM channel_instances WHERE id = $1 AND tenant_id = $2`,
+				id, defaultTenant).Scan(&ownerID)
+			if ownerID != "" {
+				if err := gw.channelAllowedForAgent(r.Context(), ownerID); err != nil {
+					if isExecutiveDenied(err) {
+						writeJSON(w, 403, map[string]any{
+							"error": "Channels can only be enabled for executive agents (COO or C-officers). Promote this agent to a C-officer role first.",
+							"code":  "channel_requires_executive",
+						})
+						return
+					}
+					writeJSON(w, 400, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+		}
 		gw.db.Pool.Exec(r.Context(), `UPDATE channel_instances SET enabled = $1 WHERE id = $2 AND tenant_id = $3`,
 			*body.Enabled, id, defaultTenant)
 	}

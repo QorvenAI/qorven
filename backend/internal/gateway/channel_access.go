@@ -6,10 +6,22 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 )
+
+// errChannelRequiresExecutive is returned by channelAllowedForAgent when the
+// target agent is not an executive (L1/L2). Matched with errors.Is at call
+// sites so wrapping the error never silently degrades the 403 response.
+var errChannelRequiresExecutive = errors.New("channel_requires_executive")
+
+// isExecutiveDenied reports whether err is the executive-only channel denial.
+// Wrapper-safe via errors.Is — keeps call sites from string-matching.
+func isExecutiveDenied(err error) bool {
+	return errors.Is(err, errChannelRequiresExecutive)
+}
 
 // levelAllowsChannel reports whether an agent at the given org_level may own
 // communication channels. Only executives (L1 COO, L2 C-officers) qualify —
@@ -41,7 +53,7 @@ func (gw *Gateway) channelAllowedForAgent(ctx context.Context, agentID string) e
 		return fmt.Errorf("agent not found")
 	}
 	if !levelAllowsChannel(level) {
-		return fmt.Errorf("channel_requires_executive")
+		return errChannelRequiresExecutive
 	}
 	return nil
 }
@@ -68,6 +80,9 @@ func (gw *Gateway) disableAgentChannels(ctx context.Context, agentID string) (in
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
