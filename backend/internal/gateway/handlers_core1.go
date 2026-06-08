@@ -372,6 +372,17 @@ func (gw *Gateway) handleBindAgentChannel(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 503, map[string]string{"error": "channel bindings not available"})
 		return
 	}
+	if err := gw.channelAllowedForAgent(r.Context(), agentID); err != nil {
+		if err.Error() == "channel_requires_executive" {
+			writeJSON(w, 403, map[string]any{
+				"error": "Channels can only be attached to executive agents (COO or C-officers). Promote this agent to a C-officer role first.",
+				"code":  "channel_requires_executive",
+			})
+			return
+		}
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
 
 	binding := channels.AgentBinding{
 		AgentID:     agentID,
