@@ -201,6 +201,9 @@ type spendEntry struct {
 	// pricingMissing mirrors cost.PricingMissing — duplicated here so
 	// flush() can write it to DB without deriving it from cost again.
 	pricingMissing bool
+	// origin classifies what triggered the call (agent, memory, council, …)
+	// for cost attribution. Empty for pipeline (agent-path) calls.
+	origin string
 }
 
 // writeBufSize is the primary channel buffer depth.
@@ -305,6 +308,50 @@ func (l *CostLedger) Record(ctx context.Context, req GatewayRequest, resp *Gatew
 	}
 }
 
+// RecordScoped records a completed LLM call attributed by MeterScope. Entry
+// point for calls that do NOT go through the gateway pipeline (memory,
+// background, council, etc.). Reuses the same async ledger as Record.
+// Implements providers.Recorder.
+func (l *CostLedger) RecordScoped(ctx context.Context, scope providers.MeterScope, model, providerID, keyID string, usage providers.Usage) {
+	if l.db == nil {
+		return
+	}
+	cost := ComputeCost(model, &usage, providerID)
+	if cost.TotalUUSD == 0 && cost.TokensIn == 0 && cost.TokensOut == 0 &&
+		cost.TokensThinking == 0 && !cost.PricingMissing {
+		return
+	}
+	if cost.PricingMissing {
+		slog.Warn("gateway.cost_ledger: unknown model price (scoped)",
+			"model", model, "provider", providerID, "origin", scope.Origin)
+		if l.gaps != nil {
+			go l.gaps.ReportPricingGap(ctx, model, providerID, cost.TokensIn, cost.TokensOut)
+		}
+	}
+	entry := spendEntry{
+		tenantID:       scope.TenantID,
+		agentID:        scope.AgentID,
+		sessionID:      scope.SessionID,
+		providerID:     providerID,
+		modelID:        model,
+		keyID:          keyID,
+		cost:           cost,
+		pricingMissing: cost.PricingMissing,
+		origin:         scope.Origin,
+	}
+	select {
+	case l.writes <- entry:
+	default:
+		select {
+		case l.retries <- entry:
+		default:
+			slog.Error("gateway.cost_ledger: buffers full, SCOPED SPEND LOST",
+				"agent", scope.AgentID, "origin", scope.Origin, "model", model,
+				"total_uusd", cost.TotalUUSD)
+		}
+	}
+}
+
 func (l *CostLedger) worker() {
 	for {
 		select {
@@ -367,15 +414,15 @@ func (l *CostLedger) flush(e spendEntry) {
 			tenant_id, agent_id, session_id, provider_id, model_id, key_id,
 			tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
 			cost_input_uusd, cost_output_uusd, cost_thinking_uusd, cost_cache_w_uusd, cost_cache_r_uusd,
-			cost_total_uusd, cache_hit, pricing_missing
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			cost_total_uusd, cache_hit, pricing_missing, origin
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 	`,
 		e.tenantID, agentIDPtr, sessionIDPtr, e.providerID, e.modelID, keyIDPtr,
 		e.cost.TokensIn, e.cost.TokensOut, e.cost.TokensThinking,
 		e.cost.TokensCacheWrite, e.cost.TokensCacheRead,
 		e.cost.CostInputUUSD, e.cost.CostOutputUUSD, e.cost.CostThinkingUUSD,
 		e.cost.CostCacheWUUSD, e.cost.CostCacheRUUSD,
-		e.cost.TotalUUSD, e.cacheHit, e.pricingMissing,
+		e.cost.TotalUUSD, e.cacheHit, e.pricingMissing, e.origin,
 	)
 	if err != nil {
 		slog.Error("gateway.cost_ledger: raw insert failed",
