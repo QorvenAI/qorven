@@ -411,12 +411,30 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
               </div>
             )}
             <div className={cn(
-              'rounded-2xl px-4 py-2.5 text-sm leading-relaxed max-w-[580px]',
+              'rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[580px]',
               msg.role === 'prime' ? 'bg-card border border-border text-foreground rounded-tl-sm' : '',
               msg.role === 'user' ? 'bg-primary text-primary-foreground rounded-tr-sm' : '',
               msg.role === 'error' ? 'bg-destructive/10 border border-destructive/30 text-destructive' : '',
             )}>
               {msg.content}
+              {/* Disclaimer checklist + confirm button embedded in the bubble */}
+              {msg.id === 'p-0' && currentQ?.inputType === 'confirm' && !loading && (
+                <div className="mt-3 space-y-3">
+                  <ul className="space-y-1.5">
+                    {(currentQ.confirmItems ?? []).map(c => (
+                      <li key={c} className="flex items-start gap-2 text-xs text-muted-foreground">
+                        <Check className="h-3 w-3 shrink-0 text-primary mt-0.5" />
+                        {c}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    onClick={() => submit('confirmed')}
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-opacity cursor-pointer mt-1">
+                    {currentQ.confirmLabel ?? 'Proceed'} <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -492,26 +510,9 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
     </div>
   );
 
+  // confirm is handled inline inside the Prime bubble — no bottom input needed
   if (item.inputType === 'confirm') {
-    return (
-      <W className="space-y-0">
-        <div className="space-y-4">
-          <ul className="space-y-2">
-            {(item.confirmItems ?? []).map(c => (
-              <li key={c} className="flex items-start gap-2.5 text-sm text-foreground">
-                <Check className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-                {c}
-              </li>
-            ))}
-          </ul>
-          <button
-            onClick={() => onSubmit('confirmed')}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-opacity cursor-pointer">
-            {item.confirmLabel ?? 'Continue'} <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
-      </W>
-    );
+    return null;
   }
 
   if (item.inputType === 'pill') {
