@@ -234,7 +234,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       api_key: a.api_key ?? '',
       api_base: opt.defaultApiBase ?? '',
     };
-    const res = await api<{ success: boolean; error?: string }>('/v1/providers/test', {
+    const res = await api<{ success: boolean; error?: string; models?: string[] }>('/v1/providers/test', {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -259,6 +259,28 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       providerDbId = created.id;
     }
 
+    // Resolve a sensible default model for this provider
+    const PROVIDER_DEFAULT_MODEL: Record<string, string> = {
+      bedrock:    RECOMMENDED_PRIMARY,
+      anthropic:  'claude-sonnet-4-6',
+      openai:     'gpt-4o',
+      gemini:     'gemini-2.5-flash',
+      deepseek:   'deepseek-chat',
+      groq:       'llama-3.3-70b-versatile',
+      mistral:    'mistral-large-latest',
+      xai:        'grok-3',
+      openrouter: 'openai/gpt-4o',
+      together:   'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+      fireworks:  'accounts/fireworks/models/llama-v3p3-70b-instruct',
+      cohere:     'command-r-plus',
+      ollama:     'llama3.2',
+      custom:     '',
+    };
+    // Use first model from test response, fallback to per-provider default
+    const resolvedModel = (res.models && res.models.length > 0)
+      ? res.models[0]!
+      : (PROVIDER_DEFAULT_MODEL[opt.id] ?? '');
+
     const agents = await listAgents();
     const prime = agents.find(ag => ag.agent_key === 'chief') ?? agents.find(ag => ag.agent_key === 'prime');
     if (prime) {
@@ -268,7 +290,10 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
         body: JSON.stringify({
           display_name: primeName,
           provider_id: providerDbId,
-          model: RECOMMENDED_PRIMARY,
+          model: resolvedModel,
+          org_role: 'croo',
+          org_level: 'l1',
+          title: 'Chief Reasoning Officer',
           system_prompt: `You are ${primeName}, a personal AI assistant. Be helpful, clear, and direct.`,
         }),
       });
