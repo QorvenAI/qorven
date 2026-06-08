@@ -128,3 +128,21 @@ func TestMetered_StreamRecordsFromFinalResp(t *testing.T) {
 		t.Fatalf("stream must record from final resp.Usage, got %+v", rec.calls)
 	}
 }
+
+func TestMetered_BypassSkipsEnforceAndRecord(t *testing.T) {
+	inner := &fakeProvider{resp: &ChatResponse{Usage: &Usage{PromptTokens: 9}}}
+	enf := &fakeEnforcer{err: errors.New("would block")}
+	rec := &fakeRecorder{}
+	m := NewMeteredProvider(inner, enf, rec)
+	ctx := WithMeterBypass(context.Background())
+	resp, err := m.Chat(ctx, ChatRequest{Model: "x"})
+	if err != nil {
+		t.Fatalf("bypass must skip the (blocking) enforcer, got %v", err)
+	}
+	if resp == nil || !inner.chatCalled {
+		t.Fatal("bypass must still call the inner provider")
+	}
+	if len(rec.calls) != 0 {
+		t.Fatal("bypass must NOT record (pipeline records instead)")
+	}
+}

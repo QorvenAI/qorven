@@ -54,6 +54,23 @@ func MeterScopeFromCtx(ctx context.Context) MeterScope {
 	return MeterScope{}
 }
 
+type meterBypassKey struct{}
+
+// WithMeterBypass marks a context so the MeteredProvider does NOT enforce or
+// record. The gateway pipeline sets this before dispatching, because the
+// pipeline already enforces and records with richer data (resolved model,
+// provider key id, cache status). Without this flag the pipeline path would
+// double-count, since the pipeline dispatches through the metered registry.
+func WithMeterBypass(ctx context.Context) context.Context {
+	return context.WithValue(ctx, meterBypassKey{}, true)
+}
+
+// meterBypassFromCtx reports whether metering should be skipped for this call.
+func meterBypassFromCtx(ctx context.Context) bool {
+	v, _ := ctx.Value(meterBypassKey{}).(bool)
+	return v
+}
+
 // Enforcer gates an LLM call against budget caps before it is dispatched.
 // Implemented by the gateway/llm package; injected into the registry so the
 // providers package never imports llm (no import cycle).

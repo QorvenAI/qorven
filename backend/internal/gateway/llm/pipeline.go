@@ -145,6 +145,12 @@ func (p *Pipeline) ChatStream(
 		return err
 	}
 
+	// The pipeline enforces (above) and records (below) with richer data than
+	// the provider-boundary meter has. Mark the context so the MeteredProvider
+	// the registry hands us does NOT also enforce/record — otherwise the agent
+	// path would double-count spend.
+	ctx = providers.WithMeterBypass(ctx)
+
 	// 2. Priority queue
 	if err := p.queue.Acquire(ctx, req.Priority); err != nil {
 		return err

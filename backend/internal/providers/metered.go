@@ -24,6 +24,12 @@ func NewMeteredProvider(inner Provider, enforcer Enforcer, recorder Recorder) *M
 }
 
 func (m *MeteredProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	// The gateway pipeline already enforces + records with richer data (resolved
+	// model, provider key id, cache status); it sets the bypass flag so we don't
+	// double-count when it dispatches through the metered registry.
+	if meterBypassFromCtx(ctx) {
+		return m.inner.Chat(ctx, req)
+	}
 	scope := MeterScopeFromCtx(ctx)
 	if m.enforcer != nil {
 		if err := m.enforcer.Check(ctx, scope); err != nil {
@@ -36,6 +42,9 @@ func (m *MeteredProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 }
 
 func (m *MeteredProvider) ChatStream(ctx context.Context, req ChatRequest, onChunk func(StreamChunk)) (*ChatResponse, error) {
+	if meterBypassFromCtx(ctx) {
+		return m.inner.ChatStream(ctx, req, onChunk)
+	}
 	scope := MeterScopeFromCtx(ctx)
 	if m.enforcer != nil {
 		if err := m.enforcer.Check(ctx, scope); err != nil {
