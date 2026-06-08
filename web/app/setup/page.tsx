@@ -430,12 +430,40 @@ export default function SetupPage() {
         </div>
       </div>
 
-      {/* Right panel — 3-row flex column: error banner / scrollable content / fixed footer */}
+      {/* Right panel — 3 full-width bands: header / content / footer */}
       <div className="grow min-w-0 h-screen overflow-hidden flex flex-col">
 
-        {/* Error banner — shrinks to zero when no error */}
+        {/* ── Band 1: Header ─────────────────────────────────────── */}
+        <div className="shrink-0 border-b border-border px-10 py-4 flex items-center gap-4">
+          {(() => {
+            const STEP_META: Record<number, { title: string; desc: string }> = {
+              0: { title: 'Before you begin',   desc: 'Review what Qorven agents are able to do on this system.' },
+              1: { title: 'Admin account',       desc: 'Create the administrator account for this installation.' },
+              2: { title: 'Workspace',           desc: 'Name your workspace and configure your AI colleague.' },
+              3: { title: 'AI provider',         desc: 'Connect an LLM provider so your agents can think.' },
+              4: { title: 'Channels',            desc: 'Optionally connect Telegram or other messaging channels.' },
+              5: { title: "You're all set",      desc: 'Qorven is ready. Launch your workspace.' },
+            };
+            const meta = STEP_META[accepted ? step : 0] ?? STEP_META[0];
+            return (
+              <>
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-base font-semibold text-foreground leading-tight">{meta!.title}</h1>
+                  <p className="text-xs text-muted-foreground mt-0.5">{meta!.desc}</p>
+                </div>
+                {accepted && (
+                  <span className="shrink-0 text-xs text-muted-foreground font-medium">
+                    Step {step} of 5
+                  </span>
+                )}
+              </>
+            );
+          })()}
+        </div>
+
+        {/* Error banner — only shown when there's an error */}
         {globalError && (
-          <div className="shrink-0 px-10 pt-5">
+          <div className="shrink-0 px-10 pt-4">
             <div className="w-full max-w-[860px] mx-auto rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {globalError}
             </div>
