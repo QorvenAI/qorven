@@ -267,13 +267,18 @@ export default function QorDetailPage() {
       setSoulChannels(chs);
       setLoading(false); // show the UI immediately — session loads in background
 
-      try {
-        const full = await loadCanonicalSession(soulData.id);
-        setActiveSession(full);
-        setSessionStore(full);
-        setAllSessions([full]);
-      } catch {
-        // non-fatal
+      // Workers (L3) render the read-only monitor, not chat — the backend
+      // rejects a web chat session for them, so don't even attempt one.
+      const chattable = soulData.org_level === 'l1' || soulData.org_level === 'l2';
+      if (chattable) {
+        try {
+          const full = await loadCanonicalSession(soulData.id);
+          setActiveSession(full);
+          setSessionStore(full);
+          setAllSessions([full]);
+        } catch {
+          // non-fatal
+        }
       }
     }).catch(async (e) => {
       // Agent not found — redirect to the first available agent rather than
