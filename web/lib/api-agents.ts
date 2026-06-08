@@ -90,6 +90,16 @@ export const agents = {
   chief: () => request<Soul>('/agents/chief'),
   create: (body: Partial<Soul>) => request<Soul>('/agents', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: Partial<Soul>) => request<Soul>(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  // Find the first live agent with a given org_role (e.g. 'cto', 'cmo'). Returns null if none.
+  byRole: async (orgRole: string): Promise<Soul | null> => {
+    const all = await listRequest<Soul>('/agents');
+    return all.find((a) => a.org_role === orgRole) ?? null;
+  },
+  // Find an agent by its agent_key (e.g. 'chief', 'coder'). Returns null if none.
+  byKey: async (agentKey: string): Promise<Soul | null> => {
+    const all = await listRequest<Soul>('/agents');
+    return all.find((a) => a.agent_key === agentKey) ?? null;
+  },
   delete: (id: string) => request<void>(`/agents/${id}`, { method: 'DELETE' }),
   skills: (id: string) => listRequest<Skill>(`/agents/${id}/skills`),
   orgChart: () => request<unknown>('/org-chart'),
