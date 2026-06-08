@@ -16,6 +16,8 @@ type Registry struct {
 	providers map[string]Provider
 	configs   map[string]ProviderConfig
 	sem       *Semaphore
+	enforcer  Enforcer
+	recorder  Recorder
 }
 
 func NewRegistry() *Registry {
@@ -26,6 +28,31 @@ func NewRegistry() *Registry {
 	}
 }
 
+// SetMetering installs the budget enforcer + cost recorder. After this call,
+// every provider handed out by the registry is wrapped in a MeteredProvider so
+// all LLM calls are enforced and recorded. Safe to call once at startup.
+func (r *Registry) SetMetering(enforcer Enforcer, recorder Recorder) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.enforcer = enforcer
+	r.recorder = recorder
+	for id, p := range r.providers {
+		r.providers[id] = r.meter(p)
+	}
+}
+
+// meter wraps p in a MeteredProvider when metering is configured; otherwise
+// returns p unchanged. Idempotent — never double-wraps. Caller must hold r.mu.
+func (r *Registry) meter(p Provider) Provider {
+	if r.enforcer == nil && r.recorder == nil {
+		return p
+	}
+	if _, already := p.(*MeteredProvider); already {
+		return p
+	}
+	return NewMeteredProvider(p, r.enforcer, r.recorder)
+}
+
 // Register creates a provider instance from config and stores it.
 func (r *Registry) Register(cfg ProviderConfig) error {
 	p, err := NewProvider(cfg)
@@ -34,7 +61,7 @@ func (r *Registry) Register(cfg ProviderConfig) error {
 	}
 	wrapped := NewRateLimitedProvider(p, r.sem)
 	r.mu.Lock()
-	r.providers[cfg.ID] = wrapped
+	r.providers[cfg.ID] = r.meter(wrapped)
 	r.configs[cfg.ID] = cfg
 	r.mu.Unlock()
 	return nil
@@ -44,7 +71,7 @@ func (r *Registry) Register(cfg ProviderConfig) error {
 func (r *Registry) RegisterProvider(name string, p Provider) {
 	wrapped := NewRateLimitedProvider(p, r.sem)
 	r.mu.Lock()
-	r.providers[name] = wrapped
+	r.providers[name] = r.meter(wrapped)
 	r.configs[name] = ProviderConfig{ID: name, Name: name, Enabled: true}
 	r.mu.Unlock()
 }
