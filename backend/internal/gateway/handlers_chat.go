@@ -281,6 +281,21 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		}
+		// Workers (L3) are managed by their C-officer and observed via their
+		// monitor — block direct user chat on the user-facing channels. Only a
+		// confirmed not-chattable verdict blocks; alias/lookup misses fall
+		// through so legitimate non-UUID callers are unaffected. Internal
+		// callers (task/cron/a2a/room) invoke agentLoop.Run directly and never
+		// reach this handler.
+		if req.Channel == "" || req.Channel == "web" || req.Channel == "tui" {
+			if isNotChattable(gw.agentChatAllowed(r.Context(), req.AgentID)) {
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"error": "This worker is managed by its C-officer and cannot be chatted directly. Open its monitor to review tasks, or message its manager.",
+					"code":  "agent_not_chattable",
+				})
+				return
+			}
+		}
 		agentID := req.AgentID
 		userMsg := req.Message
 		if userMsg == "" && len(req.Messages) > 0 {

@@ -80,6 +80,14 @@ func (gw *Gateway) registerRoutes() {
 					}
 				}
 			}
+			// Voice is a chat surface — workers (L3) are not chattable.
+			if isNotChattable(gw.agentChatAllowed(r.Context(), agentID)) {
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"error": "This worker cannot be reached by voice.",
+					"code":  "agent_not_chattable",
+				})
+				return
+			}
 			// Find or create a voice session for this agent
 			var sessID string
 			if gw.sessions != nil && agentID != "" {

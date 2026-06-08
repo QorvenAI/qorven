@@ -130,6 +130,11 @@ func (gw *Gateway) rpcChatSend(ctx context.Context, client *WSClient, req RPCReq
 		return RPCResponse{ID: req.ID, Error: &RPCError{Code: 400, Message: "agent_id and message required"}}
 	}
 
+	// Workers (L3) are not chattable — this WS path always uses channel "web".
+	if isNotChattable(gw.agentChatAllowed(ctx, params.AgentID)) {
+		return RPCResponse{ID: req.ID, Error: &RPCError{Code: 403, Message: "This worker cannot be chatted directly."}}
+	}
+
 	// Stream events back to this WebSocket client
 	result, err := gw.agentLoop.Run(ctx, agent.RunRequest{
 		AgentID:     params.AgentID,
