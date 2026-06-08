@@ -325,6 +325,12 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
       if (!skip && currentQ.minLength && value.length < currentQ.minLength) {
         setError(`Minimum ${currentQ.minLength} characters.`); return;
       }
+      if (!skip && currentQ.inputType === 'email' && value) {
+        const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+        if (!EMAIL_RE.test(value)) {
+          setError('Please enter a valid email address.'); return;
+        }
+      }
 
       setError('');
 
@@ -388,7 +394,8 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto py-6">
+        <div className="max-w-[680px] mx-auto px-8 space-y-4">
         {visibleThread.map((msg) => (
           <div
             key={msg.id}
@@ -429,11 +436,12 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
         )}
 
         <div ref={bottomRef} />
+        </div>
       </div>
 
       {error && (
-        <div className="shrink-0 px-8 pb-2">
-          <p className="text-xs text-destructive">{error}</p>
+        <div className="shrink-0 pb-2">
+          <p className="text-xs text-destructive max-w-[680px] mx-auto px-8">{error}</p>
         </div>
       )}
 
@@ -477,39 +485,50 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit(value); }
   };
 
+  // Shared outer wrapper — matches in-app composer style
+  const W = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
+    <div className={`shrink-0 border-t border-border bg-background px-6 py-4 ${className}`}>
+      <div className="max-w-[680px] mx-auto">{children}</div>
+    </div>
+  );
+
   if (item.inputType === 'confirm') {
     return (
-      <div className="shrink-0 border-t border-border px-8 py-5 space-y-4">
-        <ul className="space-y-2">
-          {(item.confirmItems ?? []).map(c => (
-            <li key={c} className="flex items-start gap-2.5 text-sm text-foreground">
-              <Check className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-              {c}
-            </li>
-          ))}
-        </ul>
-        <button
-          onClick={() => onSubmit('confirmed')}
-          className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-opacity cursor-pointer">
-          {item.confirmLabel ?? 'Continue'} <ArrowRight className="h-4 w-4" />
-        </button>
-      </div>
+      <W className="space-y-0">
+        <div className="space-y-4">
+          <ul className="space-y-2">
+            {(item.confirmItems ?? []).map(c => (
+              <li key={c} className="flex items-start gap-2.5 text-sm text-foreground">
+                <Check className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
+                {c}
+              </li>
+            ))}
+          </ul>
+          <button
+            onClick={() => onSubmit('confirmed')}
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-opacity cursor-pointer">
+            {item.confirmLabel ?? 'Continue'} <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      </W>
     );
   }
 
   if (item.inputType === 'pill') {
     return (
-      <div className="shrink-0 border-t border-border px-8 py-5 flex gap-3 flex-wrap">
-        {(item.options ?? []).map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => onSubmit(opt.value)}
-            className="flex flex-col items-start rounded-xl border border-border bg-card px-4 py-3 hover:border-primary/50 hover:bg-accent transition-colors cursor-pointer text-left min-w-[140px]">
-            <span className="text-sm font-semibold text-foreground">{opt.label}</span>
-            <span className="text-xs text-muted-foreground">{opt.desc}</span>
-          </button>
-        ))}
-      </div>
+      <W>
+        <div className="flex gap-3 flex-wrap">
+          {(item.options ?? []).map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => onSubmit(opt.value)}
+              className="flex flex-col items-start rounded-xl border border-border bg-card px-4 py-3 hover:border-primary/50 hover:bg-accent transition-colors cursor-pointer text-left min-w-[140px]">
+              <span className="text-sm font-semibold text-foreground">{opt.label}</span>
+              <span className="text-xs text-muted-foreground">{opt.desc}</span>
+            </button>
+          ))}
+        </div>
+      </W>
     );
   }
 
@@ -517,8 +536,8 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
     const clouds = PROVIDER_OPTIONS_FALLBACK.filter(p => p.category === 'cloud');
     const others = PROVIDER_OPTIONS_FALLBACK.filter(p => p.category !== 'cloud');
     return (
-      <div className="shrink-0 border-t border-border px-8 py-5">
-        <div className="grid grid-cols-3 gap-2 max-w-[680px]">
+      <W>
+        <div className="grid grid-cols-3 gap-2">
           {[...clouds, ...others].map(opt => (
             <button
               key={opt.id}
@@ -529,14 +548,14 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
             </button>
           ))}
         </div>
-      </div>
+      </W>
     );
   }
 
   if (item.inputType === 'info') {
     const ok = answers._provider_ok === 'true';
     return (
-      <div className="shrink-0 border-t border-border px-8 py-5">
+      <W>
         <button
           onClick={() => ok ? onSubmit('ack') : onRetry?.()}
           className={cn(
@@ -547,26 +566,26 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
           )}>
           {ok ? <><span>Continue</span> <ArrowRight className="h-4 w-4" /></> : <span>Try again</span>}
         </button>
-      </div>
+      </W>
     );
   }
 
   if (item.inputType === 'launch') {
     return (
-      <div className="shrink-0 border-t border-border px-8 py-5">
+      <W>
         <button
           onClick={() => onSubmit('launch')}
           className="inline-flex items-center gap-2 rounded-xl bg-primary px-8 py-3 text-base font-semibold text-primary-foreground hover:bg-primary/90 transition-opacity cursor-pointer">
           Launch Qorven <ArrowRight className="h-5 w-5" />
         </button>
-      </div>
+      </W>
     );
   }
 
-  // text / email / password
+  // text / email / password — in-app composer style
   return (
-    <div className="shrink-0 border-t border-border px-8 py-5">
-      <div className="flex gap-3 max-w-[680px]">
+    <W>
+      <div className="flex gap-3">
         <div className="relative flex-1">
           <input
             ref={inputRef}
@@ -601,6 +620,6 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
           </button>
         )}
       </div>
-    </div>
+    </W>
   );
 }
