@@ -313,6 +313,10 @@ function PillNoVoice() {
   const [agent, setAgent] = useState<Soul | null>(null);
   const [open, setOpen] = useState(false);
 
+  // The pill is a chat/voice surface — only executives (L1/L2) are chattable.
+  // Workers are observed through their monitor, so keep them out of the switcher.
+  const chattableSouls = souls.filter((s) => s.org_level === 'l1' || s.org_level === 'l2');
+
   useEffect(() => { if (def && !agent) setAgent(def); }, [def, agent]);
   if (!agent) return null;
 
@@ -359,7 +363,7 @@ function PillNoVoice() {
         </div>
 
         <AnimatePresence>
-          {open && <SwitcherDropdown souls={souls} soulStates={soulStates} selectedId={agent.id} onSelect={setAgent} onClose={() => setOpen(false)} />}
+          {open && <SwitcherDropdown souls={chattableSouls} soulStates={soulStates} selectedId={agent.id} onSelect={setAgent} onClose={() => setOpen(false)} />}
         </AnimatePresence>
       </div>
     </PillShell>
@@ -376,6 +380,9 @@ function PillWithVoice() {
   const setActiveVoiceAgent = useStore((s) => s.setActiveVoiceAgent);
   const [agent, setAgent] = useState<Soul | null>(null);
   const [open, setOpen] = useState(false);
+
+  // The pill is a chat/voice surface — only executives (L1/L2) are chattable.
+  const chattableSouls = souls.filter((s) => s.org_level === 'l1' || s.org_level === 'l2');
 
   useEffect(() => { if (def && !agent) setAgent(def); }, [def, agent]);
 
@@ -501,7 +508,7 @@ function PillWithVoice() {
 
         <AnimatePresence>
           {open && !isVoiceActive && (
-            <SwitcherDropdown souls={souls} soulStates={soulStates} selectedId={agent.id} onSelect={handleSwitch} onClose={() => setOpen(false)} />
+            <SwitcherDropdown souls={chattableSouls} soulStates={soulStates} selectedId={agent.id} onSelect={handleSwitch} onClose={() => setOpen(false)} />
           )}
         </AnimatePresence>
       </div>

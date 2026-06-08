@@ -2,7 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Loader2, Send, MessageSquare, Bot, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { request } from '@/lib/api-core';
@@ -27,11 +27,12 @@ export function TaskComments({ taskId }: { taskId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const reload = () =>
-    request<TaskComment[]>(`/tasks/${taskId}/comments`).then(setComments).catch(() => {});
+  const reload = useCallback(
+    () => request<TaskComment[]>(`/tasks/${taskId}/comments`).then(setComments).catch(() => {}),
+    [taskId],
+  );
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { reload(); }, [taskId]);
+  useEffect(() => { reload(); }, [reload]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [comments]);
 
   const submitComment = async () => {
