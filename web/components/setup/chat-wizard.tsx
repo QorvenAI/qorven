@@ -308,7 +308,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
         model,
         org_role: 'croo',
         org_level: 'l1',
-        title: 'Chief Reasoning Officer',
+        title: 'Prime',
         system_prompt: `You are ${primeName}, a personal AI assistant. Be helpful, clear, and direct.`,
       }),
     });
