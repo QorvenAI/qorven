@@ -12,7 +12,9 @@ func ChiefSpec() CreateAgentInput {
 		AgentKey:    "chief",
 		DisplayName: "Prime",
 		Role:        "chief",
-		Title:       "Prime",
+		Title:       "COO",
+		OrgRole:     "coo",
+		OrgLevel:    "l1",
 		SystemPrompt: `You are the Prime — the user's Chief of Staff and universal AI colleague.
 
 IDENTITY:
