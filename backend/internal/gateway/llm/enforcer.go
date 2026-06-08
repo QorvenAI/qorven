@@ -81,9 +81,21 @@ func (e *DBEnforcer) maybeWarn(scopeKey string, spent, cap int64, warnPct int) {
 		return
 	}
 	threshold := cap * int64(warnPct) / 100
-	if spent >= threshold && e.warn != nil {
-		e.warn(scopeKey)
+	if spent < threshold || e.warn == nil {
+		return
 	}
+	// Dedup: warn at most once per scope per ttl window to avoid log storms
+	// when an agent keeps calling after crossing the threshold.
+	e.mu.Lock()
+	if e.cache != nil {
+		if v, ok := e.cache[scopeKey]; ok && e.ttl > 0 && time.Since(v.loaded) < e.ttl {
+			e.mu.Unlock()
+			return
+		}
+		e.cache[scopeKey] = cachedVerdict{loaded: time.Now()}
+	}
+	e.mu.Unlock()
+	e.warn(scopeKey)
 }
 
 // pgBudgetRepo reads gateway_budgets caps and gateway_spend.cost_total_uusd.

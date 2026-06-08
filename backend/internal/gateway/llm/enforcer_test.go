@@ -86,3 +86,17 @@ func TestEnforcer_WarnThresholdFires(t *testing.T) {
 		t.Fatalf("expected a warn callback at 85%% of cap with warn_percent=80")
 	}
 }
+
+func TestEnforcer_WarnDedupedWithinTTL(t *testing.T) {
+	var warned int
+	e := newTestEnforcer(&fakeBudgetRepo{agentCapUUSD: 10_000_000, agentSpentUUSD: 8_500_000, warnPercent: 80})
+	e.warn = func(scopeKey string) { warned++ }
+	scope := providers.MeterScope{TenantID: "t", AgentID: "a"}
+	// Three checks in quick succession, all above the 80% warn threshold.
+	_ = e.Check(context.Background(), scope)
+	_ = e.Check(context.Background(), scope)
+	_ = e.Check(context.Background(), scope)
+	if warned != 1 {
+		t.Fatalf("expected exactly 1 warn within TTL window, got %d", warned)
+	}
+}
