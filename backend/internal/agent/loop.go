@@ -832,6 +832,17 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 		}
 	}
 
+	// Stamp cost-attribution scope on the context so every LLM call this turn
+	// makes — including the failover / model-fallback / self-heal paths that
+	// bypass the pipeline — is enforced and recorded against this agent. The
+	// pipeline path sets its own bypass flag, so this never double-counts.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID:  l.tenantID,
+		AgentID:   ag.ID,
+		SessionID: req.SessionID,
+		Origin:    providers.OriginAgent,
+	})
+
 	// Use model's actual context window as an upper bound on the agent's configured window.
 	// If the provider registry doesn't know the model, contextWindow stays at ag.ContextWindow.
 	// When ag.ContextWindow is 0 (agent not explicitly configured), resolve from model registry
