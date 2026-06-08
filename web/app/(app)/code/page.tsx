@@ -48,6 +48,9 @@ import { CodeChatSidebar } from '@/components/code/code-chat-sidebar';
 import { SessionTabBar, type SessionEntry } from '@/components/code/session-tab-bar';
 import type { SlashCommand } from '@/components/code/slash-command-palette';
 import type { FileNode, FileTab, ChatMsg, CodeProject, BuildEntry } from '@/components/code/code-types';
+import { OfficerSetupCard } from '@/components/setup/officer-setup-card';
+import { agents as agentsApi } from '@/lib/api-agents';
+import type { Soul } from '@/types';
 
 async function apiFetch(endpoint: string, options?: RequestInit) {
   return fetchWithRetry(`${API_BASE}${endpoint}`, {
@@ -80,6 +83,10 @@ export default function CodePage() {
   const activeCodeTab = (searchParams.get('tab') as CodeTabId) || 'editor';
 
   const [activeProject, setActiveProject] = useState<CodeProject | null>(null);
+  const [cto, setCto] = useState<Soul | null>(null);
+  const [ctoChecked, setCtoChecked] = useState(false);
+  // Ref keeps the latest codeAgentId available inside stale callbacks (e.g. getSessionId).
+  const codeAgentIdRef = useRef<string>('coder');
 
   // ── Multi-session state ──────────────────────────────────────────────────────
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -211,7 +218,7 @@ export default function CodePage() {
 
   const sessionId = useRef('');
   const getSessionId = useCallback(
-    () => ensureCanonicalSessionId(sessionId, { agentId: 'prime', channel: 'code' }),
+    () => ensureCanonicalSessionId(sessionId, { agentId: codeAgentIdRef.current, channel: 'code' }),
     [],
   );
 
@@ -228,6 +235,13 @@ export default function CodePage() {
   }, [setStoreProjects]);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  useEffect(() => {
+    agentsApi.byRole('cto')
+      .then((existing) => setCto(existing))
+      .catch(() => setCto(null))
+      .finally(() => setCtoChecked(true));
+  }, []);
 
   // Close the per-build WS subscription and any in-flight chat stream on unmount.
   useEffect(() => () => {
@@ -259,7 +273,7 @@ export default function CodePage() {
             }
             const sid = await getSessionId();
             await apiPost('/chat/completions', {
-              agent_id: 'prime', session_id: sid, stream: false,
+              agent_id: codeAgentIdRef.current, session_id: sid, stream: false,
               message: `Use write_file to save the file at path "${tab.path}" with this exact content:\n\n${tab.content}`,
             });
             setTabs(ts => ts.map(t => t.path === tab.path ? { ...t, dirty: false } : t));
@@ -300,7 +314,7 @@ export default function CodePage() {
     try {
       const sid = await getSessionId();
       const data = await apiPost('/chat/completions', {
-        agent_id: 'prime', session_id: sid, stream: false,
+        agent_id: codeAgentIdRef.current, session_id: sid, stream: false,
         message: `Use list_files to list the contents of ${path}. Return ONLY file/directory names one per line, directories end with /.`,
       }) as any;
       const parsed = parseTree(data?.choices?.[0]?.message?.content || '', path);
@@ -683,7 +697,7 @@ export default function CodePage() {
     try {
       const sid = await getSessionId();
       const data = await apiPost('/chat/completions', {
-        agent_id: 'prime', session_id: sid, stream: false,
+        agent_id: codeAgentIdRef.current, session_id: sid, stream: false,
         message: `Use read_file to read ${path}. Return ONLY the raw file contents, no formatting or explanation.`,
       }) as any;
       const content = (data?.choices?.[0]?.message?.content || '').replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
@@ -733,7 +747,7 @@ export default function CodePage() {
       const sid = await getSessionId();
       const res = await apiFetch('/chat/completions', {
         method: 'POST',
-        body: JSON.stringify({ agent_id: 'prime', message: fullMsg, session_id: sid, stream: true, ...(codeThinkingLevel !== 'off' ? { thinking_level: codeThinkingLevel } : {}), ...(planMode ? { plan_mode: true } : {}) }),
+        body: JSON.stringify({ agent_id: codeAgentIdRef.current, message: fullMsg, session_id: sid, stream: true, ...(codeThinkingLevel !== 'off' ? { thinking_level: codeThinkingLevel } : {}), ...(planMode ? { plan_mode: true } : {}) }),
         signal: abort.signal,
       });
 
@@ -878,6 +892,27 @@ export default function CodePage() {
   }, [exportSession, handleChat]);
 
 
+  const codeAgentId = cto?.agent_key ?? 'coder';
+  codeAgentIdRef.current = codeAgentId;
+
+  const createCto = async ({ name, model }: { name: string; model: string; providerId: string }) => {
+    const coo = (await agentsApi.byRole('coo')) ?? (await agentsApi.byKey('chief'));
+    const coder = await agentsApi.byKey('coder');
+    const body: Partial<Soul> = {
+      display_name: name,
+      title: 'CTO',
+      org_role: 'cto',
+      org_level: 'l2',
+      manager_id: coo?.id ?? null,
+      ...(model ? { model } : {}),
+      system_prompt: `You are ${name}, the CTO. You talk with the user about what to build on the /code page. You plan and coordinate; you delegate the actual coding to specialist worker agents and report progress back to the user. You never expose those workers directly. Be concise and technical.`,
+    };
+    const updated = coder
+      ? await agentsApi.update(coder.id, body)
+      : await agentsApi.create({ agent_key: 'cto', role: 'code', ...body });
+    setCto(updated);
+  };
+
   if (activeCodeTab !== 'editor') {
     return (
       <div className="full-bleed flex flex-col" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
@@ -892,6 +927,21 @@ export default function CodePage() {
           {activeCodeTab === 'goals'     && <GoalsTab />}
           {activeCodeTab === 'inception' && <InceptionTab />}
         </div>
+      </div>
+    );
+  }
+
+  if (ctoChecked && !cto) {
+    return (
+      <div className="full-bleed flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height) - var(--toolbar-height, 0px) - var(--status-bar-height, 0px))' }}>
+        <OfficerSetupCard
+          role="cto"
+          roleLabel="CTO"
+          pageName="code"
+          defaultName="Prime Coder"
+          blurb="Your Chief Technology Officer plans and ships code. They lead engineering and delegate to specialist coders."
+          onCreate={createCto}
+        />
       </div>
     );
   }
