@@ -221,6 +221,14 @@ func (gw *Gateway) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If this update demotes the agent to a non-executive level (L3 worker),
+	// disable any channels it owns — workers never face the outside world.
+	if lvl, ok := updates["org_level"].(string); ok && !levelAllowsChannel(lvl) {
+		if n, derr := gw.disableAgentChannels(r.Context(), id); derr == nil && n > 0 {
+			slog.Info("agent.demote.channels_disabled", "agent", id, "count", n)
+		}
+	}
+
 	// Invalidate prompt cache for this agent
 	if gw.agentLoop != nil {
 		gw.agentLoop.InvalidatePromptCache(id)
@@ -234,6 +242,9 @@ func (gw *Gateway) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
+	// Stop + disable the agent's channels before deletion so no listener
+	// keeps polling for a terminated agent.
+	gw.disableAgentChannels(r.Context(), chi.URLParam(r, "id"))
 	gw.agents.Delete(r.Context(), chi.URLParam(r, "id"))
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
