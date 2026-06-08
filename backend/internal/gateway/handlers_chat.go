@@ -369,6 +369,14 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		Tools:    req.Tools,
 	}
 
+	// Agentless passthrough — attribute as tenant overhead so the spend is
+	// captured even though no agent owns it. (The agent-bound path returned
+	// earlier and is metered via the loop's scope.)
+	r = r.WithContext(providers.WithMeterScope(r.Context(), providers.MeterScope{
+		TenantID: defaultTenant,
+		Origin:   providers.OriginPassthrough,
+	}))
+
 	if req.Stream {
 		gw.streamChat(w, r, p, chatReq)
 		return
