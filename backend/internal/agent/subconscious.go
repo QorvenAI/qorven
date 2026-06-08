@@ -51,6 +51,13 @@ func (s *Subconscious) RunLoop(ctx context.Context, agentID string, cfg Subconsc
 		return nil, fmt.Errorf("no LLM provider")
 	}
 
+	// Self-improvement runs on behalf of a specific agent — charge that agent.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID: s.tenantID,
+		AgentID:  agentID,
+		Origin:   providers.OriginSubconscious,
+	})
+
 	// 1. INSPECT — gather evidence from recent runs
 	evidence, err := s.gatherEvidence(ctx, agentID)
 	if err != nil {

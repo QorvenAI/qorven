@@ -98,6 +98,10 @@ func (c *Council) Run(ctx context.Context, query string) (*Result, error) {
 	start := time.Now()
 	result := &Result{Query: query}
 
+	// Council is global multi-model deliberation with no single owning agent —
+	// attribute its spend to the council overhead bucket.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginCouncil})
+
 	// Stage 1: parallel queries
 	slog.Info("council.stage1.start", "members", len(c.config.Members))
 	stage1, err := c.stage1(ctx, query)

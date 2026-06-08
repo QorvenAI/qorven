@@ -60,6 +60,17 @@ func (e *Executor) Run(ctx context.Context, wf *Workflow, input map[string]any) 
 		return nil, err
 	}
 
+	// Workflows run on behalf of their owning agent — charge that agent.
+	wfAgentID := ""
+	if wf.AgentID != nil {
+		wfAgentID = *wf.AgentID
+	}
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
+		TenantID: e.tenantID,
+		AgentID:  wfAgentID,
+		Origin:   providers.OriginWorkflow,
+	})
+
 	slog.Info("workflow.run.start", "workflow", wf.Name, "run", runID, "steps", len(steps))
 
 	// Build step index for branching

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/qorvenai/qorven/internal/llm"
+	"github.com/qorvenai/qorven/internal/providers"
 )
 
 type Mode string
@@ -67,6 +68,10 @@ func (e *Engine) ResearchWithProgress(ctx context.Context, query string, mode Mo
 	case ModeQuality:
 		numSearches = 5
 	}
+
+	// Research is a global capability with no single owning agent — attribute
+	// its model spend to the research overhead bucket.
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginResearch})
 
 	progress := func(ev ProgressEvent) { if onProgress != nil { onProgress(ev) } }
 
@@ -233,7 +238,8 @@ Question: %s
 Return ONLY a JSON array of strings, nothing else:
 ["sub-query 1", "sub-query 2", ...]`, n, query)
 
-		resp, err := e.llm.Chat(context.Background(), llm.ChatRequest{
+		qctx := providers.WithMeterScope(context.Background(), providers.MeterScope{Origin: providers.OriginResearch})
+		resp, err := e.llm.Chat(qctx, llm.ChatRequest{
 			Model:    "balanced",
 			Messages: []llm.Message{{Role: "user", Content: prompt}},
 		})

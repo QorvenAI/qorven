@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/qorvenai/qorven/internal/llm"
+	"github.com/qorvenai/qorven/internal/providers"
 )
 
 const (
@@ -77,6 +78,7 @@ func (o *Orchestrator) Spawn(ctx context.Context, task Task) (*Result, error) {
 	slog.Info("sub-agent spawned", "task", task.ID, "depth", task.Depth, "brief", task.Brief[:min(50, len(task.Brief))])
 
 	// Execute with isolated context — sub-agent only sees its task brief
+	taskCtx = providers.WithMeterScope(taskCtx, providers.MeterScope{Origin: providers.OriginSubagent})
 	resp, err := o.llm.Chat(taskCtx, llm.ChatRequest{
 		Model: "balanced",
 		Messages: []llm.Message{
@@ -137,6 +139,7 @@ Task: %s
 
 Return ONLY valid JSON array, no explanation.`, maxSubtasks, task)
 
+	ctx = providers.WithMeterScope(ctx, providers.MeterScope{Origin: providers.OriginSubagent})
 	resp, err := o.llm.Chat(ctx, llm.ChatRequest{
 		Model:    "balanced",
 		Messages: []llm.Message{{Role: "user", Content: prompt}},
@@ -173,6 +176,7 @@ func (o *Orchestrator) evaluateQuality(ctx context.Context, brief, result string
 	evalCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	evalCtx = providers.WithMeterScope(evalCtx, providers.MeterScope{Origin: providers.OriginSubagent})
 	resp, err := o.llm.Chat(evalCtx, llm.ChatRequest{
 		Model: "balanced",
 		Messages: []llm.Message{{Role: "user", Content: fmt.Sprintf(
