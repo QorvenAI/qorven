@@ -267,7 +267,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) e
 		"avatar": true, "role": true, "title": true, "manager_id": true,
 		"provider_id": true, "status": true, "credit_budget_cents": true,
 		"thinking_level": true, "runtime_mode": true, "can_delegate": true,
-		"mail_policy": true,
+		"mail_policy": true, "org_level": true, "org_role": true,
 	}
 	setClauses := ""
 	args := []any{id}
