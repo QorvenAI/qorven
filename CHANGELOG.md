@@ -4,6 +4,25 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.5.4-alpha — 2026-06-08
+
+### Added
+- **Conversational setup** — first-run setup is now a guided chat with Prime instead of a form. Prime introduces itself, walks you through your account, workspace, AI provider, and channels one question at a time, and lets you pick which model powers your agents. ([e1b3561](https://github.com/QorvenAI/qorven/commit/e1b3561))
+- **Org hierarchy with C-suite roles** — your workspace now has a clear structure: you are CEO, Prime is your COO (the agent you chat with), and dedicated C-officers run each area. Opening **/code** sets up your CTO; opening **/social** sets up your CMO. Each is created on first visit with a lightweight "Meet your CTO/CMO" card. ([a40b276](https://github.com/QorvenAI/qorven/commit/a40b276), [2c3bcb5](https://github.com/QorvenAI/qorven/commit/2c3bcb5))
+- **Redesigned agent cards** — agents now appear as clean profile cards across the org chart, the Qors directory, and the sidebar: avatar, name, designation, model, and department. Hovering a card reveals capabilities, direct-report count, and usage. ([f2e87b5](https://github.com/QorvenAI/qorven/commit/f2e87b5), [d58cc25](https://github.com/QorvenAI/qorven/commit/d58cc25))
+- **Model picker in setup** — after connecting a provider, choose exactly which model your COO should use from the provider's available models. ([297d2d8](https://github.com/QorvenAI/qorven/commit/297d2d8))
+
+### Changed
+- Agents no longer show "Offline" status dots — they are available 24/7. A subtle pulse appears on an agent's avatar only while it is actively working. ([124c500](https://github.com/QorvenAI/qorven/commit/124c500))
+
+### Fixed
+- Voice activity detection now loads reliably — switched to the Silero v5 model, which is compatible with the current ONNX runtime. ([0a249c2](https://github.com/QorvenAI/qorven/commit/0a249c2))
+- Factory reset no longer fails on the vector database extension; the installer now grants the database user the required privilege. ([086f5e0](https://github.com/QorvenAI/qorven/commit/086f5e0), [79cca45](https://github.com/QorvenAI/qorven/commit/79cca45))
+- Fixed the setup ↔ dashboard redirect loop and the page flash before redirecting to login or setup. ([46c43c8](https://github.com/QorvenAI/qorven/commit/46c43c8), [7ae9ed0](https://github.com/QorvenAI/qorven/commit/7ae9ed0))
+- Provider connection in setup now shows the correct API-key format per provider and lets you switch providers if a key fails. ([e3abfc2](https://github.com/QorvenAI/qorven/commit/e3abfc2))
+
+---
+
 ## v0.5.3-alpha — 2026-06-06
 
 ### Added
