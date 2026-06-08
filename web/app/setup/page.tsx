@@ -33,6 +33,7 @@ export default function SetupPage() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
   const [adminCreated, setAdminCreated] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [disclaimerConfirmed, setDisclaimerConfirmed] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   // Step 1 — admin
@@ -474,7 +475,7 @@ export default function SetupPage() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="w-full max-w-[860px] mx-auto px-10 py-8">
             {!accepted && (
-              <CapabilitiesNotice onAccept={() => setAccepted(true)} version={appVersion} />
+              <CapabilitiesNotice onConfirmChange={setDisclaimerConfirmed} version={appVersion} />
             )}
             {accepted && step === 1 && (
               <Step1Admin
@@ -540,27 +541,39 @@ export default function SetupPage() {
           </div>
         </div>
 
-        {/* Footer nav — pinned to bottom, full width, always visible */}
-        {(accepted && step !== 5) && (
+        {/* Footer nav — always visible, full width */}
+        {step !== 5 && (
           <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur-sm px-10 py-4">
             <div className="w-full max-w-[860px] mx-auto flex items-center justify-between">
+              {/* Back — hidden on disclaimer and step 1 */}
               <button
                 onClick={goBack}
-                disabled={step === 1}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-40 cursor-pointer transition-colors">
+                disabled={!accepted || step === 1}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-0 cursor-pointer transition-colors">
                 <ArrowLeft className="h-4 w-4" /> Back
               </button>
-              <button
-                onClick={step === 1 ? handleCreateAdmin : goNext}
-                disabled={step === 1 ? creatingAdmin : isNextDisabled()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer transition-opacity">
-                {step === 1 && creatingAdmin
-                  ? <><QorvenSpinner className="h-4 w-4" /> Creating…</>
-                  : step === 1 && !adminCreated
-                  ? <>Create Account <ArrowRight className="h-4 w-4" /></>
-                  : <>Continue <ArrowRight className="h-4 w-4" /></>
-                }
-              </button>
+
+              {/* Primary action */}
+              {!accepted ? (
+                <button
+                  onClick={() => setAccepted(true)}
+                  disabled={!disclaimerConfirmed}
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity">
+                  Begin Setup <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={step === 1 ? handleCreateAdmin : goNext}
+                  disabled={step === 1 ? creatingAdmin : isNextDisabled()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer transition-opacity">
+                  {step === 1 && creatingAdmin
+                    ? <><QorvenSpinner className="h-4 w-4" /> Creating…</>
+                    : step === 1 && !adminCreated
+                    ? <>Create Account <ArrowRight className="h-4 w-4" /></>
+                    : <>Continue <ArrowRight className="h-4 w-4" /></>
+                  }
+                </button>
+              )}
             </div>
           </div>
         )}

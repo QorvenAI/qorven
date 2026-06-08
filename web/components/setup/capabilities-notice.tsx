@@ -3,7 +3,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useState } from 'react';
-import { ArrowRight, Terminal, Globe2, MessageSquare, Database, Clock, Wrench, Mail, Mic } from 'lucide-react';
+import { Terminal, Globe2, MessageSquare, Database, Clock, Wrench, Mail, Mic } from 'lucide-react';
 
 const CAPABILITIES = [
   { Icon: Terminal,      label: 'Execute code and shell commands on this server' },
@@ -16,7 +16,7 @@ const CAPABILITIES = [
   { Icon: Mic,           label: 'Process voice input and initiate outbound voice sessions' },
 ];
 
-export function CapabilitiesNotice({ onAccept, version }: { onAccept: () => void; version: string }) {
+export function CapabilitiesNotice({ onConfirmChange, version }: { onConfirmChange: (v: boolean) => void; version: string }) {
   const [confirmed, setConfirmed] = useState(false);
   return (
     <div className="space-y-6">
@@ -59,20 +59,11 @@ export function CapabilitiesNotice({ onAccept, version }: { onAccept: () => void
         <input
           type="checkbox"
           checked={confirmed}
-          onChange={e => setConfirmed(e.target.checked)}
+          onChange={e => { setConfirmed(e.target.checked); onConfirmChange(e.target.checked); }}
           className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
         />
         <span className="text-sm font-medium text-foreground">I understand and want to proceed</span>
       </label>
-
-      <div className="flex justify-end">
-        <button
-          onClick={onAccept}
-          disabled={!confirmed}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity">
-          Begin Setup <ArrowRight className="h-4 w-4" />
-        </button>
-      </div>
     </div>
   );
 }
