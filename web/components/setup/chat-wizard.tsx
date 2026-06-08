@@ -125,7 +125,7 @@ const SCRIPT: ScriptItem[] = [
     key: 'api_key',
     text: (a) => `Paste your ${PROVIDER_OPTIONS_FALLBACK.find(p => p.id === a.provider)?.label ?? a.provider} API key:`,
     inputType: 'password',
-    placeholder: 'sk-…',
+    placeholder: 'sk-…', // overridden dynamically in InputArea via keyPlaceholder()
     afterAnswer: 'test_provider',
   },
   {
@@ -382,12 +382,23 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
   }, [currentQ, answers, qIndex, loading, onComplete]);
 
   const handleRetry = useCallback(() => {
+    // Go back to api_key step (qIndex - 1)
     const prevIdx = qIndex - 1;
     setQIndex(prevIdx);
     setError('');
     const item = SCRIPT[prevIdx]!;
     const text = typeof item.text === 'function' ? item.text(answers) : item.text;
     setThread(prev => [...prev, { id: `p-retry-${Date.now()}`, role: 'prime', content: text, animate: true }]);
+  }, [qIndex, answers]);
+
+  const handleChangeProvider = useCallback(() => {
+    // Go back to provider card_pick step (qIndex - 2 from _provider_status)
+    const providerIdx = qIndex - 2;
+    setQIndex(providerIdx);
+    setError('');
+    const item = SCRIPT[providerIdx]!;
+    const text = typeof item.text === 'function' ? item.text(answers) : item.text;
+    setThread(prev => [...prev, { id: `p-change-${Date.now()}`, role: 'prime', content: text, animate: true }]);
   }, [qIndex, answers]);
 
   const visibleThread = thread.slice(-6);
@@ -472,6 +483,7 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
           onTogglePw={() => setShowPw(v => !v)}
           onSubmit={submit}
           onRetry={handleRetry}
+          onChangeProvider={handleChangeProvider}
           answers={answers}
         />
       )}
@@ -481,6 +493,23 @@ export function ChatWizard({ appVersion: _appVersion, onComplete, onPhaseChange 
 
 // ── InputArea ─────────────────────────────────────────────────────────────────
 
+// Per-provider API key placeholder hints
+const KEY_PLACEHOLDER: Record<string, string> = {
+  anthropic:  'sk-ant-…',
+  openai:     'sk-proj-… or sk-…',
+  gemini:     'AIza…',
+  groq:       'gsk_…',
+  openrouter: 'sk-or-…',
+  mistral:    'your-mistral-key',
+  xai:        'xai-…',
+  deepseek:   'sk-…',
+  together:   'your-together-key',
+  fireworks:  'fw_…',
+  cohere:     'your-cohere-key',
+  ollama:     '(no key needed)',
+  custom:     'optional key',
+};
+
 interface InputAreaProps {
   item: ScriptItem;
   value: string;
@@ -489,6 +518,7 @@ interface InputAreaProps {
   onTogglePw: () => void;
   onSubmit: (value: string, skip?: boolean) => void;
   onRetry?: () => void;
+  onChangeProvider?: () => void;
   answers: Record<string, string>;
 }
 
@@ -501,7 +531,7 @@ function W({ children, className = '' }: { children: React.ReactNode; className?
   );
 }
 
-function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetry, answers }: InputAreaProps) {
+function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetry, onChangeProvider, answers }: InputAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -559,16 +589,26 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
     const ok = answers._provider_ok === 'true';
     return (
       <W>
-        <button
-          onClick={() => ok ? onSubmit('ack') : onRetry?.()}
-          className={cn(
-            'inline-flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold transition-opacity cursor-pointer',
-            ok
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : 'bg-destructive/10 border border-destructive/30 text-destructive hover:bg-destructive/20',
-          )}>
-          {ok ? <><span>Continue</span> <ArrowRight className="h-4 w-4" /></> : <span>Try again</span>}
-        </button>
+        {ok ? (
+          <button
+            onClick={() => onSubmit('ack')}
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-opacity cursor-pointer">
+            Continue <ArrowRight className="h-4 w-4" />
+          </button>
+        ) : (
+          <div className="flex gap-3">
+            <button
+              onClick={() => onRetry?.()}
+              className="inline-flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/30 px-5 py-2.5 text-sm font-semibold text-destructive hover:bg-destructive/20 transition-opacity cursor-pointer">
+              Retry key
+            </button>
+            <button
+              onClick={() => onChangeProvider?.()}
+              className="inline-flex items-center gap-2 rounded-xl border border-border px-5 py-2.5 text-sm font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer">
+              Change provider
+            </button>
+          </div>
+        )}
       </W>
     );
   }
@@ -596,7 +636,7 @@ function InputArea({ item, value, onChange, showPw, onTogglePw, onSubmit, onRetr
             value={value}
             onChange={e => onChange(e.target.value)}
             onKeyDown={handleKey}
-            placeholder={item.placeholder}
+            placeholder={item.key === 'api_key' ? (KEY_PLACEHOLDER[answers.provider ?? ''] ?? 'Paste API key…') : item.placeholder}
             autoComplete={item.inputType === 'password' ? 'new-password' : 'off'}
             className="h-11 w-full rounded-xl border border-border bg-card px-4 pr-10 text-sm outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary"
           />
