@@ -81,7 +81,6 @@ const SCRIPT: ScriptItem[] = [
     inputType: 'text',
     placeholder: 'admin',
     required: true,
-    derivedFrom: 'display_name',
   },
   {
     key: 'password',
@@ -104,7 +103,6 @@ const SCRIPT: ScriptItem[] = [
     text: (a) => `Nice to meet you, ${a.display_name}. What should I call myself?`,
     inputType: 'text',
     placeholder: 'Prime',
-    defaultValue: 'Prime',
   },
   {
     key: 'work_style',
