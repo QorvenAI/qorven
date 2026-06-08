@@ -430,110 +430,112 @@ export default function SetupPage() {
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className="grow min-w-0 h-screen overflow-y-auto flex flex-col">
-        <div className="flex-1 flex flex-col justify-center py-8 px-8">
-        <div className="w-full max-w-[860px] mx-auto space-y-5">
+      {/* Right panel — 3-row flex column: error banner / scrollable content / fixed footer */}
+      <div className="grow min-w-0 h-screen overflow-hidden flex flex-col">
 
-          {globalError && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        {/* Error banner — shrinks to zero when no error */}
+        {globalError && (
+          <div className="shrink-0 px-10 pt-5">
+            <div className="w-full max-w-[860px] mx-auto rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {globalError}
             </div>
-          )}
-
-          <div className="rounded-2xl border border-border bg-card/80 backdrop-blur-sm p-6 shadow-sm overflow-y-auto" style={{ minHeight: '420px', maxHeight: 'calc(100vh - 220px)' }}>
-            <div className="space-y-5">
-              {!accepted && (
-                <CapabilitiesNotice onAccept={() => setAccepted(true)} version={appVersion} />
-              )}
-              {accepted && step === 1 && (
-                <Step1Admin
-                  displayName={displayName} setDisplayName={setDisplayName}
-                  email={email} setEmail={setEmail}
-                  username={username} setUsername={setUsername}
-                  password={password} setPassword={setPassword}
-                  showPw={showPw} setShowPw={setShowPw}
-                  busy={creatingAdmin} adminCreated={adminCreated}
-                  submit={handleCreateAdmin} skippable={!setupRequired}
-                />
-              )}
-              {accepted && step === 2 && (
-                <Step2Workspace
-                  displayName={displayName}
-                  primeName={primeName} setPrimeName={setPrimeName}
-                  gradient={primeGradient} setGradient={setPrimeGradient}
-                  callMe={callMe} setCallMe={setCallMe}
-                  style={style} setStyle={setStyle}
-                  language={language} setLanguage={setLanguage}
-                />
-              )}
-              {accepted && step === 3 && (
-                <Step4Provider
-                  catalog={catalog}
-                  selectedOption={selectedOption}
-                  setSelectedOption={(v) => { setSelectedOption(v); setProviderStatus('idle'); setApiKey(''); setApiBase(''); setAwsAccessKey(''); setAwsSecretKey(''); }}
-                  region={region} setRegion={setRegion}
-                  apiKey={apiKey} setApiKey={setApiKey}
-                  apiBase={apiBase} setApiBase={setApiBase}
-                  awsAccessKey={awsAccessKey} setAwsAccessKey={setAwsAccessKey}
-                  awsSecretKey={awsSecretKey} setAwsSecretKey={setAwsSecretKey}
-                  status={providerStatus} error={providerError} sample={providerSample}
-                  bedrockModels={bedrockModels}
-                  primary={primaryModel} setPrimary={setPrimaryModel}
-                  fast={fastModel} setFast={setFastModel}
-                  coding={codingModel} setCoding={setCodingModel}
-                  setup={setupProvider}
-                  addedProviders={addedProviders}
-                />
-              )}
-              {accepted && step === 4 && (
-                <Step7Channels
-                  primeName={primeName}
-                  telegram={telegramToken} setTelegram={setTelegramToken}
-                  connected={connectedChannels} busy={channelBusy} error={channelError}
-                  connect={connectChannel}
-                  onSkip={() => setStep(5)}
-                />
-              )}
-              {accepted && step === 5 && (
-                <Step9Summary
-                  workspaceName="My Workspace"
-                  username={username || 'admin'}
-                  primeName={primeName}
-                  region={region}
-                  selectedProvider={selectedOption}
-                  primaryModel={primaryModel}
-                  connectedChannels={connectedChannels}
-                  onDone={finalise}
-                />
-              )}
-
-            </div>
           </div>
+        )}
 
-          {(accepted && step !== 5) && (
-            <div className="flex items-center justify-between">
+        {/* Scrollable content — fills all available space between banner and footer */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="w-full max-w-[860px] mx-auto px-10 py-8">
+            {!accepted && (
+              <CapabilitiesNotice onAccept={() => setAccepted(true)} version={appVersion} />
+            )}
+            {accepted && step === 1 && (
+              <Step1Admin
+                displayName={displayName} setDisplayName={setDisplayName}
+                email={email} setEmail={setEmail}
+                username={username} setUsername={setUsername}
+                password={password} setPassword={setPassword}
+                showPw={showPw} setShowPw={setShowPw}
+                busy={creatingAdmin} adminCreated={adminCreated}
+                submit={handleCreateAdmin} skippable={!setupRequired}
+              />
+            )}
+            {accepted && step === 2 && (
+              <Step2Workspace
+                displayName={displayName}
+                primeName={primeName} setPrimeName={setPrimeName}
+                gradient={primeGradient} setGradient={setPrimeGradient}
+                callMe={callMe} setCallMe={setCallMe}
+                style={style} setStyle={setStyle}
+                language={language} setLanguage={setLanguage}
+              />
+            )}
+            {accepted && step === 3 && (
+              <Step4Provider
+                catalog={catalog}
+                selectedOption={selectedOption}
+                setSelectedOption={(v) => { setSelectedOption(v); setProviderStatus('idle'); setApiKey(''); setApiBase(''); setAwsAccessKey(''); setAwsSecretKey(''); }}
+                region={region} setRegion={setRegion}
+                apiKey={apiKey} setApiKey={setApiKey}
+                apiBase={apiBase} setApiBase={setApiBase}
+                awsAccessKey={awsAccessKey} setAwsAccessKey={setAwsAccessKey}
+                awsSecretKey={awsSecretKey} setAwsSecretKey={setAwsSecretKey}
+                status={providerStatus} error={providerError} sample={providerSample}
+                bedrockModels={bedrockModels}
+                primary={primaryModel} setPrimary={setPrimaryModel}
+                fast={fastModel} setFast={setFastModel}
+                coding={codingModel} setCoding={setCodingModel}
+                setup={setupProvider}
+                addedProviders={addedProviders}
+              />
+            )}
+            {accepted && step === 4 && (
+              <Step7Channels
+                primeName={primeName}
+                telegram={telegramToken} setTelegram={setTelegramToken}
+                connected={connectedChannels} busy={channelBusy} error={channelError}
+                connect={connectChannel}
+                onSkip={() => setStep(5)}
+              />
+            )}
+            {accepted && step === 5 && (
+              <Step9Summary
+                workspaceName="My Workspace"
+                username={username || 'admin'}
+                primeName={primeName}
+                region={region}
+                selectedProvider={selectedOption}
+                primaryModel={primaryModel}
+                connectedChannels={connectedChannels}
+                onDone={finalise}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Footer nav — pinned to bottom, full width, always visible */}
+        {(accepted && step !== 5) && (
+          <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur-sm px-10 py-4">
+            <div className="w-full max-w-[860px] mx-auto flex items-center justify-between">
               <button
                 onClick={goBack}
                 disabled={step === 1}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground hover:bg-accent disabled:opacity-40 cursor-pointer">
-                <ArrowLeft className="h-3.5 w-3.5" /> Back
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-40 cursor-pointer transition-colors">
+                <ArrowLeft className="h-4 w-4" /> Back
               </button>
               <button
                 onClick={step === 1 ? handleCreateAdmin : goNext}
                 disabled={step === 1 ? creatingAdmin : isNextDisabled()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer">
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer transition-opacity">
                 {step === 1 && creatingAdmin
-                  ? <><QorvenSpinner className="h-3.5 w-3.5" /> Creating…</>
+                  ? <><QorvenSpinner className="h-4 w-4" /> Creating…</>
                   : step === 1 && !adminCreated
-                  ? <>Create Account <ArrowRight className="h-3.5 w-3.5" /></>
-                  : <>Continue <ArrowRight className="h-3.5 w-3.5" /></>
+                  ? <>Create Account <ArrowRight className="h-4 w-4" /></>
+                  : <>Continue <ArrowRight className="h-4 w-4" /></>
                 }
               </button>
             </div>
-          )}
-        </div>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
