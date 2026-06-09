@@ -216,6 +216,9 @@ func (l *Loop) stagePrompt(ctx context.Context, s *PipelineState) error {
 
 	// ContextBuilder + system prompt.
 	cb := NewContextBuilder(ag, l.skillLoader, l.memStore, l.toolReg)
+	if l.briefStore != nil {
+		cb.SetBriefStore(l.briefStore)
+	}
 	if len(s.Req.ExtraTools) > 0 {
 		cb.SetExtraTools(s.Req.ExtraTools)
 	}

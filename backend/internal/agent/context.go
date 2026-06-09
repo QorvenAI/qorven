@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qorvenai/qorven/internal/memory"
 	"github.com/qorvenai/qorven/internal/providers"
@@ -23,6 +24,7 @@ type ContextBuilder struct {
 	skillLoader  *skills.Loader
 	skillStore   *skills.Store
 	memStore     *memory.Store
+	briefStore   *memory.BriefStore
 	toolReg      *tools.Registry
 	teamRoster   []*Agent
 	runtime      RuntimeContext
@@ -46,6 +48,9 @@ func (cb *ContextBuilder) SetLearnedHints(hints string) { cb.learnedHints = hint
 func (cb *ContextBuilder) SetTeamRoster(agents []*Agent) {
 	cb.teamRoster = agents
 }
+
+// SetBriefStore wires the CKO knowledge-brief store for org-knowledge injection.
+func (cb *ContextBuilder) SetBriefStore(bs *memory.BriefStore) { cb.briefStore = bs }
 
 // SetSkillStore sets the DB skill store for loading installed marketplace skills.
 func (cb *ContextBuilder) SetSkillStore(store *skills.Store) {
@@ -89,6 +94,23 @@ func (cb *ContextBuilder) BuildStableSystem() providers.Message {
 	}
 }
 
+// renderOrgKnowledge formats clearance-filtered briefs into a single prompt
+// section, capped at maxChars to keep the prompt lean. Returns "" when empty.
+func renderOrgKnowledge(briefs []string, maxChars int) string {
+	if len(briefs) == 0 {
+		return ""
+	}
+	body := strings.Join(briefs, "\n\n")
+	if maxChars > 0 && len(body) > maxChars {
+		cut := maxChars
+		for cut > 0 && !utf8.RuneStart(body[cut]) {
+			cut--
+		}
+		body = body[:cut] + "\n…"
+	}
+	return "\n\n## Organizational Knowledge\n" + body
+}
+
 // BuildSystemPrompt assembles the 12-section system prompt via PromptBuilder.
 func (cb *ContextBuilder) BuildSystemPrompt(bulletin string) string {
 	// Use the new PromptBuilder
@@ -99,6 +121,19 @@ func (cb *ContextBuilder) BuildSystemPrompt(bulletin string) string {
 	if len(cb.memResults) > 0 { pb.SetMemoryResults(cb.memResults) }
 
 	prompt := pb.Build()
+
+	// Organizational knowledge — CKO-curated, clearance-filtered briefs.
+	// NOTE: briefStore is wired at the ContextBuilder construction sites in Task 7;
+	// until then this block is intentionally inert (guard is nil).
+	if cb.briefStore != nil && cb.agent != nil {
+		clearance := memory.ClearanceForRole(cb.agent.OrgRole)
+		briefs := cb.briefStore.GetForAgent(context.Background(), cb.agent.OrgRole, cb.agent.DepartmentID, clearance)
+		texts := make([]string, 0, len(briefs))
+		for _, b := range briefs {
+			texts = append(texts, b.Content)
+		}
+		prompt += renderOrgKnowledge(texts, 4000) // ~1k tokens cap
+	}
 
 	// Append learned preferences from learning loop
 	if cb.learnedHints != "" {

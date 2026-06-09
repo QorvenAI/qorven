@@ -919,6 +919,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 
 		// Dead-letter queue (FU-021)
 		r.Get("/admin/dead-letters", gw.handleListDeadLetters)
+		r.Post("/cko/refresh", gw.handleCKORefresh)
 		r.Post("/admin/reset/{target}", gw.handleAdminReset)
 		r.Post("/admin/factory-reset", gw.handleAdminFactoryReset)
 		r.Get("/admin/update/check", gw.handleAdminUpdateCheck)

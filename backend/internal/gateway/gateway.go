@@ -151,6 +151,9 @@ type Gateway struct {
 	billingStore     *billing.Store
 	budgetStore      *budgets.Store
 	bundleStore      *agent.BundleStore
+	onboarding       *agent.OnboardingPipeline
+	briefStore       *memory.BriefStore
+	ckoCurator       *agent.CKOCurator
 	customTools      *tools.CustomToolStore
 	mcpClient        *mcp.Client
 	agentLoop        *agent.Loop
@@ -552,6 +555,20 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			)
 			gw.billingStore = billing.NewStore(db.Pool)
 			gw.bundleStore = agent.NewBundleStore(db.Pool)
+			// CKO onboarding pipeline: provisions clearance + baseline KB grants at hire.
+			gw.onboarding = agent.NewOnboardingPipeline(db.Pool, memory.NewGrantStore(db.Pool, defaultTenant), defaultTenant)
+			// CKO knowledge briefs: curator gathers org knowledge and synthesizes
+			// clearance-tagged briefs that the ContextBuilder injects per agent.
+			gw.briefStore = memory.NewBriefStore(db.Pool, defaultTenant)
+			gw.ckoCurator = &agent.CKOCurator{
+				TenantID:      defaultTenant,
+				GatherSources: gw.gatherCKOSources,
+				Synthesize:    gw.synthesizeBrief,
+				WriteBrief: func(ctx context.Context, b memory.Brief) error {
+					return gw.briefStore.Upsert(ctx, b)
+				},
+				ExternalResearchEnabled: false,
+			}
 			gw.customTools = tools.NewCustomToolStore(db.Pool, cfg.Auth.EncryptionKey)
 			gw.memStore = memory.NewStore(db.Pool)
 			gw.dreamer = memory.NewDreamer(gw.memStore, defaultTenant, 6*time.Hour)
@@ -695,6 +712,11 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 		gw.runRouter = agent.NewRouter()
 		if gw.skillStore != nil {
 			gw.agentLoop.SetSkillStore(gw.skillStore)
+		}
+		// Activate CKO org-knowledge injection: the Loop threads the brief
+		// store into every ContextBuilder it constructs (Task 5/7 wiring).
+		if gw.briefStore != nil {
+			gw.agentLoop.SetBriefStore(gw.briefStore)
 		}
 		ragPipeline := rag.NewPipeline(gw.db.Pool, gw.memStore, nil, defaultTenant, gw.getEmbeddingURL())
 		gw.agentLoop.Hooks = agent.NewHookChain(
@@ -1320,6 +1342,28 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		gw.briefingSched = briefing.NewScheduler(briefingCron, briefingBuilder, gw.db.Pool)
 		if err := gw.briefingSched.SyncAll(context.Background()); err != nil {
 			slog.Warn("briefing.sync_all_failed", "err", err)
+		}
+
+		// Nightly CKO brief refresh — curates the company-scope knowledge brief
+		// once per day. Department/role briefs refresh on demand (POST
+		// /v1/cko/refresh) or via the knowledge_govern tool until per-scope
+		// scheduling is added. Background origin → tenant overhead bucket.
+		if gw.ckoCurator != nil {
+			go func() {
+				ticker := time.NewTicker(24 * time.Hour)
+				defer ticker.Stop()
+				for range ticker.C {
+					func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+						defer cancel()
+						if err := gw.ckoCurator.Refresh(ctx, "company", ""); err != nil {
+							slog.Warn("cko.refresh.failed", "scope", "company", "err", err)
+						} else {
+							slog.Info("cko.refresh.done", "scope", "company")
+						}
+					}()
+				}
+			}()
 		}
 
 		// Boot persistent agent runtimes (migration 071).
