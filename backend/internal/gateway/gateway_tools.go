@@ -16,6 +16,7 @@ import (
 
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/budgets"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
 	"github.com/qorvenai/qorven/internal/connectors"
 	"github.com/qorvenai/qorven/internal/config"
@@ -992,23 +993,17 @@ func (gw *Gateway) registerTools() {
 
 		// SetBudget: CFO sets monthly/daily cap for an agent
 		tools.OnSetBudget = func(ctx context.Context, agentID string, monthlyUSD, dailyUSD float64) error {
-			pool := gw.db.Pool
-			_, err := pool.Exec(ctx,
-				`UPDATE agents SET monthly_budget_usd=$1 WHERE id=$2 AND tenant_id=$3`,
-				monthlyUSD, agentID, defaultTenant)
-			if err != nil {
-				return err
+			if gw.budgetStore == nil {
+				return fmt.Errorf("budget store not available")
 			}
-			// Also update/insert gateway_budgets for the daily cap
-			if dailyUSD > 0 {
-				_, err = pool.Exec(ctx, `
-					INSERT INTO gateway_budgets (tenant_id, agent_id, monthly_usd, daily_usd)
-					VALUES ($1, $2, $3, $4)
-					ON CONFLICT (tenant_id, agent_id) WHERE agent_id IS NOT NULL
-					DO UPDATE SET monthly_usd=$3, daily_usd=$4, updated_at=now()`,
-					defaultTenant, agentID, monthlyUSD, dailyUSD)
-			}
-			return err
+			// Agent-scoped budget via the validated hierarchy store — replaces the
+			// old direct agents.monthly_budget_usd write so department/tenant caps
+			// are respected (carved over-allocation is rejected).
+			return gw.budgetStore.SetBudget(ctx, defaultTenant, budgets.BudgetScope{
+				Scope:      "agent",
+				ScopeID:    agentID,
+				MonthlyUSD: monthlyUSD,
+			})
 		}
 
 		// RequestBudgetRaise: any agent can request a budget increase
@@ -1084,8 +1079,10 @@ func (gw *Gateway) registerTools() {
 				var requestedUSD float64
 				pool.QueryRow(ctx,
 					`SELECT agent_id, requested_usd FROM budget_requests WHERE id=$1`, requestID).Scan(&agentID, &requestedUSD)
-				if agentID != "" {
-					pool.Exec(ctx, `UPDATE agents SET monthly_budget_usd=$1 WHERE id=$2`, requestedUSD, agentID)
+				if agentID != "" && gw.budgetStore != nil {
+					_ = gw.budgetStore.SetBudget(ctx, defaultTenant, budgets.BudgetScope{
+						Scope: "agent", ScopeID: agentID, MonthlyUSD: requestedUSD,
+					})
 				}
 			}
 			return nil
