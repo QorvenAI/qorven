@@ -28,10 +28,13 @@ const (
 // A blank AgentID means the call is overhead (system/maintenance) charged to
 // the tenant's overall budget rather than to a specific agent.
 type MeterScope struct {
-	TenantID  string
-	AgentID   string
-	SessionID string
-	Origin    string
+	TenantID     string
+	AgentID      string
+	SessionID    string
+	Origin       string
+	DepartmentID string
+	ProjectID    string
+	TaskID       string
 }
 
 // IsOverhead reports whether this call should be charged to the overall

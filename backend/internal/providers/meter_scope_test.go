@@ -43,3 +43,13 @@ func TestMeterScopeOverwrite(t *testing.T) {
 		t.Errorf("expected overwrite to a2")
 	}
 }
+
+func TestMeterScopeCarriesHierarchyIDs(t *testing.T) {
+	ctx := WithMeterScope(context.Background(), MeterScope{
+		TenantID: "t", AgentID: "a", DepartmentID: "d1", ProjectID: "p1", TaskID: "k1",
+	})
+	got := MeterScopeFromCtx(ctx)
+	if got.DepartmentID != "d1" || got.ProjectID != "p1" || got.TaskID != "k1" {
+		t.Fatalf("hierarchy ids not carried: %+v", got)
+	}
+}
