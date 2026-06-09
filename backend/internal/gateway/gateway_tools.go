@@ -944,6 +944,9 @@ func (gw *Gateway) registerTools() {
 				gw.notifyBudgetProposal(ctx, pid, len(pending))
 				fmt.Fprintf(&sb, "Opened approval request %s for %d allocation(s).", pid, len(pending))
 			}
+			if len(pending) == 0 && strings.Contains(sb.String(), "NOT applied") {
+				return sb.String(), fmt.Errorf("one or more allocations could not be applied")
+			}
 			return sb.String(), nil
 		}
 
