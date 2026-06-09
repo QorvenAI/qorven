@@ -451,6 +451,31 @@ func (gw *Gateway) registerTools() {
 
 		// Wire hr_manage callbacks — CHRO/COO org lifecycle tool
 		tools.OnHRHireAgent = func(ctx context.Context, name, model, role, orgRole, orgLevel, dept, prompt string, monthlyBudgetUSD float64, managerAgentID string) (string, error) {
+			// Model-by-designation: if the caller didn't pin a model, pick one by
+			// role + tier band, ranked by the role's benchmark index, restricted to
+			// the user's enabled models. Store a concrete model; if nothing
+			// qualifies, store "auto" (NOT "default") so the runtime router resolves.
+			if model == "" {
+				tier := tierBandForHire(orgLevel, monthlyBudgetUSD)
+				var availProviders []string
+				for _, cfg := range gw.providerReg.List() {
+					if cfg.Enabled {
+						availProviders = append(availProviders, cfg.Name)
+					}
+				}
+				var enabled map[string]bool
+				if gw.db != nil && gw.db.Pool != nil {
+					ks := providers.NewKeyPoolStore(gw.db.Pool, gw.cfg.Auth.EncryptionKey)
+					enabled = ks.EnabledModelIDs(ctx, defaultTenant)
+				}
+				cat, _ := providers.LoadCatalog()
+				if picked := providers.SelectModelForHire(cat, orgRole, tier, availProviders, enabled); picked != "" {
+					model = picked
+				} else {
+					model = "auto"
+					slog.Warn("hire.no_enabled_model_for_designation", "org_role", orgRole, "org_level", orgLevel)
+				}
+			}
 			a, err := gw.agents.Create(ctx, defaultTenant, agent.CreateAgentInput{
 				AgentKey:       strings.ToLower(strings.ReplaceAll(name, " ", "-")),
 				DisplayName:    name,
@@ -1914,5 +1939,53 @@ func (gw *Gateway) notifyBudgetProposal(ctx context.Context, proposalID string, 
 	)
 	if err != nil {
 		slog.Warn("budget.proposal.notify_failed", "proposal", proposalID, "count", n, "error", err)
+	}
+}
+
+// tierBandForHire returns the catalog tier string to target for a new hire:
+// C-level (l1/l2) use the org-level ceiling (premium band); workers (l3) use
+// their budget tier, never above the l3 ceiling (standard).
+func tierBandForHire(orgLevel string, monthlyBudgetUSD float64) string {
+	switch orgLevel {
+	case "l1", "l2":
+		return tierEnumToString(agent.OrgTierCeiling(orgLevel))
+	default: // l3 / worker
+		cents := int64(monthlyBudgetUSD * 100)
+		tier := agent.TierForBudget(cents, "")
+		ceiling := tierEnumToString(agent.OrgTierCeiling("l3"))
+		if tierRank(tier) > tierRank(ceiling) {
+			tier = ceiling
+		}
+		return tier
+	}
+}
+
+// tierEnumToString maps the agent int Tier enum to a catalog tier string.
+func tierEnumToString(t agent.Tier) string {
+	switch t {
+	case agent.TierReasoning:
+		return providers.TierReasoning
+	case agent.TierComplex:
+		return providers.TierComplex
+	case agent.TierStandard:
+		return providers.TierStandard
+	default:
+		return providers.TierSimple
+	}
+}
+
+// tierRank gives a premium ordering for catalog tier strings so the l3 budget
+// tier can be clamped against the worker ceiling. "coding" ranks alongside
+// "complex" (a specialist high-capability band).
+func tierRank(tier string) int {
+	switch tier {
+	case providers.TierReasoning:
+		return 3
+	case providers.TierComplex, providers.TierCoding:
+		return 2
+	case providers.TierStandard:
+		return 1
+	default:
+		return 0
 	}
 }

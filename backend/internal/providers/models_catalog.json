@@ -42043,8 +42043,8 @@
     "id": "grok-4-fast-reasoning",
     "provider": "xai",
     "display_name": "Grok 4 Fast Reasoning",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
@@ -42064,8 +42064,8 @@
     "id": "grok-4-fast-non-reasoning",
     "provider": "xai",
     "display_name": "Grok 4 Fast Non Reasoning",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
@@ -42127,8 +42127,8 @@
     "id": "grok-4-1-fast",
     "provider": "xai",
     "display_name": "Grok 4 1 Fast",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
@@ -42151,8 +42151,8 @@
     "id": "grok-4-1-fast-reasoning",
     "provider": "xai",
     "display_name": "Grok 4 1 Fast Reasoning",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
@@ -42175,8 +42175,8 @@
     "id": "grok-4-1-fast-reasoning-latest",
     "provider": "xai",
     "display_name": "Grok 4 1 Fast Reasoning Latest",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
@@ -42199,8 +42199,8 @@
     "id": "grok-4-1-fast-non-reasoning",
     "provider": "xai",
     "display_name": "Grok 4 1 Fast Non Reasoning",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
@@ -42222,8 +42222,8 @@
     "id": "grok-4-1-fast-non-reasoning-latest",
     "provider": "xai",
     "display_name": "Grok 4 1 Fast Non Reasoning Latest",
-    "context_window": 2000000.0,
-    "max_output": 2000000.0,
+    "context_window": 2000000,
+    "max_output": 2000000,
     "pricing": {
       "input_per_m": 0.2,
       "output_per_m": 0.5
