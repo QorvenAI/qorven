@@ -64,9 +64,9 @@ type Project struct {
 func (s *Store) CreateDepartment(ctx context.Context, tenantID, name, headAgentID string) (string, error) {
 	var id string
 	err := s.db.QueryRow(ctx,
-		`INSERT INTO departments (tenant_id, name, head_agent_id)
-		 VALUES ($1, $2, NULLIF($3,'')::uuid) RETURNING id::text`,
-		tenantID, name, headAgentID).Scan(&id)
+		`INSERT INTO departments (tenant_id, name, head_agent_id, autonomy_policy)
+		 VALUES ($1, $2, NULLIF($3,'')::uuid, $4) RETURNING id::text`,
+		tenantID, name, headAgentID, DefaultPolicyForDepartment(name)).Scan(&id)
 	return id, err
 }
 
