@@ -503,23 +503,36 @@ Respond with JSON: {"route_to": ["agent_key"], "reasoning": "brief reason"}`, ag
 						turns, _ := gw.roomBudget.TurnsInWindow(context.Background(), roomID, rooms.DefaultWindow)
 						if !rooms.BudgetAllows(turns, rooms.DefaultTurnCap) {
 							slog.Info("room.budget.exhausted", "room", roomID, "turns", turns)
-							if turns == rooms.DefaultTurnCap {
+							if turns >= rooms.DefaultTurnCap {
 								notice := "⏸️ This room hit its automated-reply limit for now — pausing agent replies. Mention an agent again in a bit."
-								// Serialize the one-time notice across concurrent mention goroutines:
-								// take a room-scoped advisory lock, then insert only if no recent
-								// system notice exists. Two goroutines can't both insert.
-								gw.db.Pool.Exec(context.Background(),
-									`WITH lock AS (SELECT pg_advisory_xact_lock(hashtext($1)))
-									 INSERT INTO room_messages (room_id, sender_id, sender_type, content)
-									 SELECT $1::uuid,'system','system',$2
-									 FROM lock
-									 WHERE NOT EXISTS (
-									     SELECT 1 FROM room_messages
-									     WHERE room_id=$1::uuid AND sender_type='system'
-									       AND created_at >= now() - make_interval(secs => $3)
-									 )`,
-									roomID, notice, rooms.DefaultWindow.Seconds())
-								gw.rtHub.Broadcast(realtime.Event{Type: "room_message", Data: map[string]string{"room_id": roomID, "sender": "system", "content": notice}})
+								// Serialize the one-time notice across concurrent mention goroutines.
+								// An explicit tx is required: the advisory lock must be granted BEFORE the
+								// NOT-EXISTS check's snapshot is taken, so the waiting goroutine sees the
+								// already-committed notice and inserts nothing. (A single-statement CTE
+								// fails here — its snapshot predates the mid-statement lock.)
+								inserted := false
+								if tx, err := gw.db.Pool.Begin(context.Background()); err == nil {
+									if _, err := tx.Exec(context.Background(), `SELECT pg_advisory_xact_lock(hashtext($1))`, roomID); err == nil {
+										tag, ierr := tx.Exec(context.Background(),
+											`INSERT INTO room_messages (room_id, sender_id, sender_type, content)
+											 SELECT $1::uuid,'system','system',$2
+											 WHERE NOT EXISTS (
+											     SELECT 1 FROM room_messages
+											     WHERE room_id=$1::uuid AND sender_type='system'
+											       AND created_at >= now() - make_interval(secs => $3)
+											 )`,
+											roomID, notice, rooms.DefaultWindow.Seconds())
+										if ierr == nil && tag.RowsAffected() == 1 {
+											inserted = true
+										}
+									}
+									if cerr := tx.Commit(context.Background()); cerr != nil {
+										inserted = false
+									}
+								}
+								if inserted {
+									gw.rtHub.Broadcast(realtime.Event{Type: "room_message", Data: map[string]string{"room_id": roomID, "sender": "system", "content": notice}})
+								}
 							}
 							break
 						}
