@@ -740,6 +740,14 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/approvals", gw.handleListApprovals)
 		r.Post("/approvals/{id}/decide", gw.handleDecideApproval)
 
+		// Fabric work items + unified approvals
+		r.Get("/work-items", gw.handleListWorkItems)
+		r.Post("/work-items", gw.handleCreateWorkItem)
+		r.Get("/work-items/{id}", gw.handleGetWorkItem)
+		r.Post("/work-items/{id}/transition", gw.handleTransitionWorkItem)
+		r.Get("/fabric-approvals", gw.handleListFabricApprovals)
+		r.Post("/fabric-approvals/{id}/decide", gw.handleDecideFabricApproval)
+
 		// Outbound approval queue
 		r.Get("/outbound/pending", gw.handleOutboundPending)
 		r.Post("/outbound/{id}/approve", gw.handleOutboundApprove)
