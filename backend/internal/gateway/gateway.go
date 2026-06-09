@@ -36,6 +36,7 @@ import (
 	"github.com/qorvenai/qorven/internal/audit"
 	"github.com/qorvenai/qorven/internal/auth"
 	"github.com/qorvenai/qorven/internal/billing"
+	"github.com/qorvenai/qorven/internal/budgets"
 	"github.com/qorvenai/qorven/internal/calendar"
 	"github.com/qorvenai/qorven/internal/connectors"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
@@ -148,6 +149,7 @@ type Gateway struct {
 	discussionStore  *discussion.Store
 	clusterer        *discussion.Clusterer
 	billingStore     *billing.Store
+	budgetStore      *budgets.Store
 	bundleStore      *agent.BundleStore
 	customTools      *tools.CustomToolStore
 	mcpClient        *mcp.Client
@@ -476,6 +478,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.deployMgr.SetDB(db.Pool)
 
 			gw.agents = agent.NewStore(db.Pool)
+			gw.budgetStore = budgets.NewStore(db.Pool)
 			gw.sessions = session.NewStore(db.Pool)
 			gw.providerStore = providers.NewStore(db.Pool, cfg.Auth.EncryptionKey)
 			// AI Gateway pipeline — full middleware stack: budget check,
