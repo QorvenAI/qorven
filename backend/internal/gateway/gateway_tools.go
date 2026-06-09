@@ -420,6 +420,13 @@ func (gw *Gateway) registerTools() {
 				})
 				gw.bundleStore.SeedDefaults(ctx, a.ID, role)
 			}
+			// Provision clearance + baseline knowledge access (CKO stage of onboarding).
+			// This path has no org level / budget in scope — pass "" and 0 (Run defaults budget when <=0).
+			if gw.onboarding != nil {
+				if _, err := gw.onboarding.Run(ctx, a.ID, role, "", 0); err != nil {
+					slog.Warn("onboarding.run.failed", "agent_id", a.ID, "err", err)
+				}
+			}
 			// Activate runtime so the agent can receive delegated tasks immediately.
 			if gw.runtimeMgr != nil {
 				gw.runtimeMgr.EnsureRuntime(a.ID, defaultTenant)
@@ -521,6 +528,12 @@ func (gw *Gateway) registerTools() {
 					Content: soulContent, Priority: 200, Enabled: true,
 				})
 				gw.bundleStore.SeedDefaults(ctx, a.ID, role)
+			}
+			// Provision clearance + baseline knowledge access (CKO stage of onboarding).
+			if gw.onboarding != nil {
+				if _, err := gw.onboarding.Run(ctx, a.ID, orgRole, orgLevel, monthlyBudgetUSD); err != nil {
+					slog.Warn("onboarding.run.failed", "agent_id", a.ID, "err", err)
+				}
 			}
 			// Write to org_roster
 			gw.db.Pool.Exec(ctx,

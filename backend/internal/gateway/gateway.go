@@ -151,6 +151,7 @@ type Gateway struct {
 	billingStore     *billing.Store
 	budgetStore      *budgets.Store
 	bundleStore      *agent.BundleStore
+	onboarding       *agent.OnboardingPipeline
 	customTools      *tools.CustomToolStore
 	mcpClient        *mcp.Client
 	agentLoop        *agent.Loop
@@ -552,6 +553,8 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			)
 			gw.billingStore = billing.NewStore(db.Pool)
 			gw.bundleStore = agent.NewBundleStore(db.Pool)
+			// CKO onboarding pipeline: provisions clearance + baseline KB grants at hire.
+			gw.onboarding = agent.NewOnboardingPipeline(db.Pool, memory.NewGrantStore(db.Pool, defaultTenant), defaultTenant)
 			gw.customTools = tools.NewCustomToolStore(db.Pool, cfg.Auth.EncryptionKey)
 			gw.memStore = memory.NewStore(db.Pool)
 			gw.dreamer = memory.NewDreamer(gw.memStore, defaultTenant, 6*time.Hour)
