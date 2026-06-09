@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/approvalsx"
 	"github.com/qorvenai/qorven/internal/bus"
 	"github.com/qorvenai/qorven/internal/channels"
 	"github.com/qorvenai/qorven/internal/config"
@@ -83,6 +84,7 @@ import (
 	"github.com/qorvenai/qorven/internal/webintel"
 	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/workflow"
+	"github.com/qorvenai/qorven/internal/workitems"
 
 	"github.com/qorvenai/qorven/internal/autonomy"
 	"github.com/qorvenai/qorven/internal/briefing"
@@ -147,6 +149,8 @@ type Gateway struct {
 	skillStore       *skills.Store
 	notifStore       *notifications.Store
 	reach            *reachuser.Engine
+	workItems        *workitems.Store
+	fabricApprovals  *approvalsx.Store
 	auditStore       *audit.Store
 	discussionStore  *discussion.Store
 	clusterer        *discussion.Clusterer
@@ -591,6 +595,8 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.slaStore = governance.NewSLAStore(db.Pool)
 			gw.assetStore = governance.NewAssetStore(db.Pool)
 			gw.forecastStore = governance.NewForecastStore(db.Pool)
+			gw.workItems = workitems.NewStore(db.Pool)
+			gw.fabricApprovals = approvalsx.NewStore(db.Pool)
 			governance.SeedDefaults(context.Background(), db.Pool, defaultTenant)
 			gw.policyEngine.LoadPolicies(context.Background(), defaultTenant)
 			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)
