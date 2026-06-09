@@ -232,7 +232,19 @@ func (gw *Gateway) handleMarkNotificationRead(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 		return
 	}
-	gw.notifStore.MarkRead(r.Context(), chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	gw.notifStore.MarkRead(r.Context(), id)
+	// Ack any matching reach-the-user escalation so its ladder climb stops.
+	// deliverInApp stores e.Kind as the notification source and e.RefID as
+	// the source_id, which is exactly the engine's ack key (kind, refID).
+	if gw.reach != nil && gw.db != nil {
+		var source, sourceID string
+		if err := gw.db.Pool.QueryRow(r.Context(),
+			`SELECT COALESCE(source,''), COALESCE(source_id,'') FROM notifications WHERE id=$1`, id,
+		).Scan(&source, &sourceID); err == nil && sourceID != "" {
+			gw.reach.Ack(r.Context(), source, sourceID)
+		}
+	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
@@ -240,6 +252,21 @@ func (gw *Gateway) handleMarkAllNotificationsRead(w http.ResponseWriter, r *http
 	if gw.notifStore == nil {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 		return
+	}
+	// Ack any escalations whose notifications are being cleared, so "mark all read"
+	// honors "one acknowledgement cancels all" and stops further IM/email climbs.
+	if gw.reach != nil && gw.db != nil {
+		rows, err := gw.db.Pool.Query(r.Context(),
+			`SELECT COALESCE(source,''), COALESCE(source_id,'') FROM notifications WHERE read = false AND source_id <> ''`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var src, srcID string
+				if rows.Scan(&src, &srcID) == nil && srcID != "" {
+					gw.reach.Ack(r.Context(), src, srcID)
+				}
+			}
+		}
 	}
 	gw.notifStore.MarkAllRead(r.Context())
 	writeJSON(w, 200, map[string]string{"status": "ok"})

@@ -68,6 +68,7 @@ import (
 	wasmregistry "github.com/qorvenai/qorven/internal/plugins/registry"
 	"github.com/qorvenai/qorven/internal/plugins/wasm"
 	"github.com/qorvenai/qorven/internal/presence"
+	"github.com/qorvenai/qorven/internal/reachuser"
 	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/research"
 	"github.com/qorvenai/qorven/internal/scenario"
@@ -145,6 +146,7 @@ type Gateway struct {
 	skillLoader      *skills.Loader
 	skillStore       *skills.Store
 	notifStore       *notifications.Store
+	reach            *reachuser.Engine
 	auditStore       *audit.Store
 	discussionStore  *discussion.Store
 	clusterer        *discussion.Clusterer
@@ -544,6 +546,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 				}
 			}
 			gw.notifStore = notifications.NewStore(db.Pool)
+			gw.reach = reachuser.NewEngine(reachuser.NewStore(db.Pool), &reachDeliverer{gw: gw, presence: presence.NewStore(db.Pool)}, nil)
 			gw.auditStore = audit.NewStore(db.Pool)
 			gw.discussionStore = discussion.NewStore(db.Pool)
 			// Wire no-op embedder for now — topic drift detection without vector embeddings.
@@ -1365,6 +1368,9 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 				}
 			}()
 		}
+
+		// Reach-the-user engine: advance due escalations up the ladder.
+		gw.startReachUserTicker()
 
 		// Boot persistent agent runtimes (migration 071).
 		if gw.agents != nil && gw.taskStore != nil {
