@@ -55,6 +55,7 @@ const routes: [string, RailSection][] = [
   ['/terminal', 'settings'],
   ['/models-hub', 'models'],
   ['/provider-keys', 'models'],
+  ['/budgets', 'models'],
   ['/mcp', 'settings'],
   ['/settings', 'settings'],
   ['/system', 'settings'],
