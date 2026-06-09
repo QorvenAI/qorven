@@ -185,17 +185,14 @@ func (r *pgBudgetRepo) TenantBudget(ctx context.Context, tenantID string) (int64
 		return 0, 0, 0, false
 	}
 
-	// Month-to-date spend.
-	var mtd *int64
+	// Month-to-date and all-time spend (latter for prepaid_fixed deplete) in one read.
+	var mtd, allTime *int64
 	_ = r.db.QueryRow(ctx, `
-		SELECT SUM(cost_total_uusd) FILTER (WHERE period >= date_trunc('month', CURRENT_DATE))
+		SELECT
+		  SUM(cost_total_uusd) FILTER (WHERE period >= date_trunc('month', CURRENT_DATE)),
+		  SUM(cost_total_uusd)
 		FROM gateway_spend WHERE tenant_id = $1
-	`, tenantID).Scan(&mtd)
-	// All-time spend (for prepaid_fixed deplete).
-	var allTime *int64
-	_ = r.db.QueryRow(ctx, `
-		SELECT SUM(cost_total_uusd) FROM gateway_spend WHERE tenant_id = $1
-	`, tenantID).Scan(&allTime)
+	`, tenantID).Scan(&mtd, &allTime)
 
 	var mtdU, allU int64
 	if mtd != nil {

@@ -289,14 +289,21 @@ func (s *Store) EffectiveAvailable(ctx context.Context, tenantID string) (Effect
 	if fundingMode != nil {
 		mode = *fundingMode
 	}
+	// Month-to-date and all-time spend in one read; pick per funding mode below.
+	var mtd, allTime *int64
+	_ = s.db.QueryRow(ctx, `
+		SELECT
+		  SUM(cost_total_uusd) FILTER (WHERE period >= date_trunc('month', CURRENT_DATE)),
+		  SUM(cost_total_uusd)
+		FROM gateway_spend WHERE tenant_id = $1
+	`, tenantID).Scan(&mtd, &allTime)
+
 	var capUSD float64
 	var spentUUSD int64
 	if mode == "prepaid_fixed" {
 		if lifetimeUSD != nil {
 			capUSD = *lifetimeUSD
 		}
-		var allTime *int64
-		_ = s.db.QueryRow(ctx, `SELECT SUM(cost_total_uusd) FROM gateway_spend WHERE tenant_id = $1`, tenantID).Scan(&allTime)
 		if allTime != nil {
 			spentUUSD = *allTime
 		}
@@ -304,11 +311,6 @@ func (s *Store) EffectiveAvailable(ctx context.Context, tenantID string) (Effect
 		if monthlyUSD != nil {
 			capUSD = *monthlyUSD
 		}
-		var mtd *int64
-		_ = s.db.QueryRow(ctx, `
-			SELECT SUM(cost_total_uusd) FILTER (WHERE period >= date_trunc('month', CURRENT_DATE))
-			FROM gateway_spend WHERE tenant_id = $1
-		`, tenantID).Scan(&mtd)
 		if mtd != nil {
 			spentUUSD = *mtd
 		}
