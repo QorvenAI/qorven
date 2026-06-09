@@ -319,10 +319,14 @@ func (s *KeyPoolStore) loadWindows(ctx context.Context, tenantID string, keys []
 	if len(keys) == 0 {
 		return
 	}
+	ids := make([]string, 0, len(keys))
+	for _, k := range keys {
+		ids = append(ids, k.ID)
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT key_id::text, window_kind, limit_count, used_count, window_resets_at
-		FROM provider_usage_windows WHERE tenant_id = $1 AND key_id IS NOT NULL
-	`, tenantID)
+		FROM provider_usage_windows WHERE tenant_id = $1 AND key_id = ANY($2)
+	`, tenantID, ids)
 	if err != nil {
 		return
 	}

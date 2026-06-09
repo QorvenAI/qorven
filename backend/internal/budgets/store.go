@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -315,7 +316,7 @@ func (s *Store) EffectiveAvailable(ctx context.Context, tenantID string) (Effect
 			spentUUSD = *mtd
 		}
 	}
-	declaredRemaining := int64(capUSD*uusdPerUSD) - spentUUSD
+	declaredRemaining := int64(math.Round(capUSD*uusdPerUSD)) - spentUUSD
 	if declaredRemaining < 0 {
 		declaredRemaining = 0
 	}
@@ -339,13 +340,13 @@ func (s *Store) EffectiveAvailable(ctx context.Context, tenantID string) (Effect
 			case "prepaid":
 				if balance != nil {
 					if rem := *balance - spent; rem > 0 {
-						providerRemainingUUSD += int64(rem * uusdPerUSD)
+						providerRemainingUUSD += int64(math.Round(rem * uusdPerUSD))
 					}
 				}
 			case "postpaid":
 				if monthlyCap != nil {
 					if rem := *monthlyCap - spent; rem > 0 {
-						providerRemainingUUSD += int64(rem * uusdPerUSD)
+						providerRemainingUUSD += int64(math.Round(rem * uusdPerUSD))
 					}
 				}
 			}
