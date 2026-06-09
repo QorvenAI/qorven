@@ -3,10 +3,12 @@ package rooms
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/workitems"
 )
 
 func ptr(s string) *string { return &s }
@@ -66,6 +68,7 @@ func TestOrchestrator_DelegateWork_FullLoop(t *testing.T) {
 	var hubPosts []string
 	var transitions []string
 	wiCreated := ""
+	wiStatus := "assigned" // tracks the work item's status for CanTransition validation
 
 	runner := &fakeRunner{results: map[string]string{"w1": "rebuilt the flow"}}
 
@@ -78,7 +81,15 @@ func TestOrchestrator_DelegateWork_FullLoop(t *testing.T) {
 			wiCreated = ownerID + "|" + origin
 			return "wi-1", nil
 		},
+		// Validate against the REAL work-item status guard so an illegal
+		// transition sequence (e.g. in_progress→done) fails the test rather
+		// than being silently accepted.
 		TransitionWorkItem: func(ctx context.Context, id, to, actor, detail string) error {
+			from := wiStatus
+			if !workitems.CanTransition(from, to) {
+				return fmt.Errorf("illegal transition %s→%s", from, to)
+			}
+			wiStatus = to
 			transitions = append(transitions, id+"|"+to)
 			return nil
 		},
@@ -120,9 +131,15 @@ func TestOrchestrator_DelegateWork_FullLoop(t *testing.T) {
 	if !foundResult {
 		t.Errorf("L3 result not posted in room; posts=%v", posts)
 	}
-	wantT := []string{"wi-1|in_progress", "wi-1|done"}
-	if len(transitions) != 2 || transitions[0] != wantT[0] || transitions[1] != wantT[1] {
-		t.Errorf("transitions: want %v got %v", wantT, transitions)
+	// Legal close path: in_progress → in_review → done.
+	wantT := []string{"wi-1|in_progress", "wi-1|in_review", "wi-1|done"}
+	if len(transitions) != len(wantT) {
+		t.Fatalf("transitions: want %v got %v", wantT, transitions)
+	}
+	for i := range wantT {
+		if transitions[i] != wantT[i] {
+			t.Errorf("transition %d: want %s got %s", i, wantT[i], transitions[i])
+		}
 	}
 	if len(hubPosts) != 1 {
 		t.Errorf("expected 1 hub roll-up, got %v", hubPosts)

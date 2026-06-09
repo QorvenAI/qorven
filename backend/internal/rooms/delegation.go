@@ -121,7 +121,10 @@ func (o *Orchestrator) DelegateWork(ctx context.Context, in DelegateInput) Deleg
 }
 
 // runWorkerAndReport runs the L3, posts its result in the room, closes the work
-// item (assigned→in_progress→done), and wakes the head once for the roll-up.
+// item, and wakes the head once for the roll-up. The legal close path is
+// assigned→in_progress→in_review→done (done is only reachable via in_review);
+// a failed run goes assigned→in_progress→blocked. Each step only proceeds if the
+// prior one succeeded, so a transition error can never leave an illegal jump.
 func (o *Orchestrator) runWorkerAndReport(ctx context.Context, meta RunMeta, worker *agent.Agent, task string) {
 	result, err := o.Runner.Run(ctx, worker.ID, task)
 	if err != nil || result == "" {
@@ -135,9 +138,12 @@ func (o *Orchestrator) runWorkerAndReport(ctx context.Context, meta RunMeta, wor
 		return
 	}
 	o.PostRoom(ctx, meta.RoomID, worker.AgentKey, "soul", result)
+	// Walk the legal close path: in_progress → in_review → done.
 	if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "in_progress", worker.ID, "started"); terr != nil {
 		slog.Warn("rooms.delegation.transition_inprogress_failed", "work_item", meta.WorkItemID, "err", terr)
-	} else if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "done", worker.ID, "reported"); terr != nil {
+	} else if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "in_review", worker.ID, "reported"); terr != nil {
+		slog.Warn("rooms.delegation.transition_inreview_failed", "work_item", meta.WorkItemID, "err", terr)
+	} else if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "done", worker.ID, "accepted"); terr != nil {
 		slog.Warn("rooms.delegation.transition_done_failed", "work_item", meta.WorkItemID, "err", terr)
 	}
 	o.rollUp(ctx, meta, worker, task)
