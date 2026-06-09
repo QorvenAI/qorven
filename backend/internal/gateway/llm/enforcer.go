@@ -162,7 +162,7 @@ func (r *pgBudgetRepo) TenantBudget(ctx context.Context, tenantID string) (int64
 	err := r.db.QueryRow(ctx, `
 		SELECT monthly_usd, warn_percent
 		FROM gateway_budgets
-		WHERE tenant_id = $1 AND agent_id IS NULL AND project_id IS NULL
+		WHERE tenant_id = $1 AND scope = 'tenant'
 		LIMIT 1
 	`, tenantID).Scan(&monthlyUSD, &warnPct)
 	if err != nil || monthlyUSD == nil {

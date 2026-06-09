@@ -46,8 +46,14 @@ func NewBudgetEngine(db *pgxpool.Pool) *BudgetEngine {
 // daily cap. A missing budget row means "no cap" — returns nil.
 func (e *BudgetEngine) Check(ctx context.Context, req GatewayRequest) error {
 	if e.enforcer != nil {
+		sc := providers.MeterScopeFromCtx(ctx)
 		return e.enforcer.Check(ctx, providers.MeterScope{
-			TenantID: req.TenantID, AgentID: req.AgentID, SessionID: req.SessionID,
+			TenantID:     req.TenantID,
+			AgentID:      req.AgentID,
+			SessionID:    req.SessionID,
+			DepartmentID: sc.DepartmentID,
+			ProjectID:    sc.ProjectID,
+			TaskID:       sc.TaskID,
 		})
 	}
 	if req.AgentID == "" || e.db == nil {

@@ -290,6 +290,13 @@ func (l *CostLedger) Record(ctx context.Context, req GatewayRequest, resp *Gatew
 		cacheHit:       resp.CacheHit,
 		pricingMissing: cost.PricingMissing,
 	}
+	// Hierarchy scope (dept/project/task) rides on the context, not the
+	// GatewayRequest — pull it so pipeline calls record the same attribution
+	// as the provider-boundary path.
+	sc := providers.MeterScopeFromCtx(ctx)
+	entry.departmentID = sc.DepartmentID
+	entry.projectID = sc.ProjectID
+	entry.taskID = sc.TaskID
 	select {
 	case l.writes <- entry:
 		return
