@@ -2110,6 +2110,15 @@ func (gw *Gateway) notifyBudgetProposal(ctx context.Context, proposalID string, 
 	if err != nil {
 		slog.Warn("budget.proposal.notify_failed", "proposal", proposalID, "count", n, "error", err)
 	}
+
+	// Also reach the user via the escalation ladder so a pending budget approval
+	// chases them like a colleague (chat → IM → email) until they decide.
+	if gw.reach != nil {
+		body := fmt.Sprintf("The CFO proposed %d budget allocation(s) awaiting your approval.", n)
+		if _, err := gw.ReachUser(ctx, "user", "budget_proposal", proposalID, "Budget approval needed", body, "normal"); err != nil {
+			slog.Warn("budget.proposal.reach_user_failed", "proposal", proposalID, "err", err)
+		}
+	}
 }
 
 // tierBandForHire returns the catalog tier string to target for a new hire:
