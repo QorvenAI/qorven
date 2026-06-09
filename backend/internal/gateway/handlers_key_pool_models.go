@@ -683,6 +683,79 @@ func (gw *Gateway) handleMarkPrepaidTopUp(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, map[string]any{"ok": true, "new_balance_usd": body.NewBalanceUSD})
 }
 
+// handleSetKeyFunding sets a provider key's funding type and prepaid balance.
+func (gw *Gateway) handleSetKeyFunding(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	keyID := chi.URLParam(r, "key_id")
+	var body struct {
+		BudgetType string   `json:"budget_type"`
+		BalanceUSD *float64 `json:"balance_usd,omitempty"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.BudgetType == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "budget_type required"})
+		return
+	}
+	_, err := gw.db.Pool.Exec(r.Context(),
+		`UPDATE provider_keys SET budget_type = $1, balance_usd = $2 WHERE id = $3 AND tenant_id = $4`,
+		body.BudgetType, body.BalanceUSD, keyID, defaultTenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "set"})
+}
+
+// handleSetKeyWindow declares (or replaces) the usage window for a provider key.
+func (gw *Gateway) handleSetKeyWindow(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	keyID := chi.URLParam(r, "key_id")
+	var body struct {
+		WindowKind     string `json:"window_kind"`
+		LimitCount     int64  `json:"limit_count"`
+		WindowResetsAt string `json:"window_resets_at"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.WindowKind == "" || body.LimitCount <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "window_kind and positive limit_count required"})
+		return
+	}
+	_, err := gw.db.Pool.Exec(r.Context(), `
+		INSERT INTO provider_usage_windows (tenant_id, key_id, window_kind, limit_count, window_resets_at)
+		VALUES ($1, $2::uuid, $3, $4, NULLIF($5,'')::timestamptz)
+		ON CONFLICT (key_id) WHERE key_id IS NOT NULL DO UPDATE
+		SET window_kind = EXCLUDED.window_kind, limit_count = EXCLUDED.limit_count,
+		    window_resets_at = EXCLUDED.window_resets_at, used_count = 0, updated_at = now()
+	`, defaultTenant, keyID, body.WindowKind, body.LimitCount, body.WindowResetsAt)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "set"})
+}
+
 func (gw *Gateway) handleTestKeyAndFetchModels(w http.ResponseWriter, r *http.Request) {
 	if gw.db == nil {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
