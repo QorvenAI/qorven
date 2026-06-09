@@ -27,6 +27,25 @@ var OnCFOReport func(ctx context.Context, days int) (CFOReportData, error)
 // allowances. Read-only — allocation tools are a later subsystem.
 var OnEffectiveBudget func(ctx context.Context) (declaredRemainingUUSD, providerRemainingUUSD, effectiveUUSD int64, binding string, warnings []string, err error)
 
+// OnProposeAllocation runs the CFO's allocation proposal: it resolves each line,
+// auto-applies those within authority, opens a user-approval proposal for the
+// rest, and returns a human-readable summary.
+var OnProposeAllocation func(ctx context.Context, reason string, lines []AllocationLineInput) (string, error)
+
+// OnEffectiveBudgetReport returns a human-readable reconciliation summary.
+var OnEffectiveBudgetReport func(ctx context.Context) (string, error)
+
+// AllocationLineInput is one proposed allocation from the CFO tool call.
+type AllocationLineInput struct {
+	Scope          string  `json:"scope"`
+	ScopeID        string  `json:"scope_id"`
+	MonthlyUSD     float64 `json:"monthly_usd"`
+	Pct            float64 `json:"pct"`
+	AllocationMode string  `json:"allocation_mode"`
+	ParentScope    string  `json:"parent_scope"`
+	ParentScopeID  string  `json:"parent_scope_id"`
+}
+
 // ─── Data types ──────────────────────────────────────────────────────────────
 
 type ReconciliationReport struct {
@@ -517,6 +536,107 @@ func Mean(data []float64) float64 {
 		sum += v
 	}
 	return sum / float64(len(data))
+}
+
+func strFromMap(m map[string]any, k string) string { v, _ := m[k].(string); return v }
+func floatFromMap(m map[string]any, k string) float64 {
+	switch n := m[k].(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	}
+	return 0
+}
+
+// ─── propose_allocation ──────────────────────────────────────────────────────
+
+type ProposeAllocationTool struct{}
+
+func NewProposeAllocationTool() *ProposeAllocationTool { return &ProposeAllocationTool{} }
+func (t *ProposeAllocationTool) Name() string          { return "propose_allocation" }
+func (t *ProposeAllocationTool) Description() string {
+	return "Propose budget allocations across departments, projects, or agents. " +
+		"Allocations within your authority apply immediately; larger ones are sent to the user for approval. " +
+		"Each line: scope (department|project|agent), scope_id, monthly_usd, allocation_mode (carved|fresh), parent_scope/parent_scope_id."
+}
+func (t *ProposeAllocationTool) Parameters() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "description": "Why these allocations"},
+			"lines": map[string]any{
+				"type":        "array",
+				"description": "Allocation lines",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"scope":           map[string]any{"type": "string"},
+						"scope_id":        map[string]any{"type": "string"},
+						"monthly_usd":     map[string]any{"type": "number"},
+						"allocation_mode": map[string]any{"type": "string"},
+						"parent_scope":    map[string]any{"type": "string"},
+						"parent_scope_id": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+		"required": []string{"lines"},
+	}
+}
+func (t *ProposeAllocationTool) Execute(ctx context.Context, args map[string]any) *Result {
+	if OnProposeAllocation == nil {
+		return ErrorResult("propose_allocation not available")
+	}
+	reason, _ := args["reason"].(string)
+	rawLines, _ := args["lines"].([]any)
+	var lines []AllocationLineInput
+	for _, rl := range rawLines {
+		m, ok := rl.(map[string]any)
+		if !ok {
+			continue
+		}
+		lines = append(lines, AllocationLineInput{
+			Scope:          strFromMap(m, "scope"),
+			ScopeID:        strFromMap(m, "scope_id"),
+			MonthlyUSD:     floatFromMap(m, "monthly_usd"),
+			Pct:            floatFromMap(m, "pct"),
+			AllocationMode: strFromMap(m, "allocation_mode"),
+			ParentScope:    strFromMap(m, "parent_scope"),
+			ParentScopeID:  strFromMap(m, "parent_scope_id"),
+		})
+	}
+	if len(lines) == 0 {
+		return ErrorResult("at least one allocation line is required")
+	}
+	summary, err := OnProposeAllocation(ctx, reason, lines)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("propose_allocation failed: %v", err))
+	}
+	return TextResult(summary)
+}
+
+// ─── effective_budget ────────────────────────────────────────────────────────
+
+type EffectiveBudgetTool struct{}
+
+func NewEffectiveBudgetTool() *EffectiveBudgetTool { return &EffectiveBudgetTool{} }
+func (t *EffectiveBudgetTool) Name() string        { return "effective_budget" }
+func (t *EffectiveBudgetTool) Description() string {
+	return "Report the effective available budget: the declared overall budget reconciled against what the connected provider keys actually allow."
+}
+func (t *EffectiveBudgetTool) Parameters() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (t *EffectiveBudgetTool) Execute(ctx context.Context, args map[string]any) *Result {
+	if OnEffectiveBudgetReport == nil {
+		return ErrorResult("effective_budget not available")
+	}
+	out, err := OnEffectiveBudgetReport(ctx)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("effective_budget failed: %v", err))
+	}
+	return TextResult(out)
 }
 
 // keep time import used

@@ -866,6 +866,62 @@ func (gw *Gateway) registerTools() {
 			return res.DeclaredRemainingUUSD, res.ProviderRemainingUUSD, res.EffectiveUUSD, res.Binding, res.Warnings, nil
 		}
 
+		tools.OnEffectiveBudgetReport = func(ctx context.Context) (string, error) {
+			if gw.budgetStore == nil {
+				return "", fmt.Errorf("budget store not available")
+			}
+			res, err := gw.budgetStore.EffectiveAvailable(ctx, defaultTenant)
+			if err != nil {
+				return "", err
+			}
+			warn := ""
+			if len(res.Warnings) > 0 {
+				warn = " ⚠ " + strings.Join(res.Warnings, "; ")
+			}
+			return fmt.Sprintf("Effective available: $%.2f (declared remaining $%.2f, provider ceiling $%.2f, limited by %s).%s",
+				float64(res.EffectiveUUSD)/1e6, float64(res.DeclaredRemainingUUSD)/1e6,
+				float64(res.ProviderRemainingUUSD)/1e6, res.Binding, warn), nil
+		}
+
+		tools.OnProposeAllocation = func(ctx context.Context, reason string, lines []tools.AllocationLineInput) (string, error) {
+			if gw.budgetStore == nil {
+				return "", fmt.Errorf("budget store not available")
+			}
+			fs := gw.budgetStore.GetFinanceSettings(ctx, defaultTenant)
+			proposedBy := tools.AgentIDFromCtx(ctx)
+			var pending []budgets.ProposalLine
+			var sb strings.Builder
+			for _, in := range lines {
+				amount := in.MonthlyUSD // explicit $ for now; % resolution is a fast-follow
+				pl := budgets.ProposalLine{
+					Scope: in.Scope, ScopeID: in.ScopeID, ProposedMonthlyUSD: amount,
+					AllocationMode: in.AllocationMode, ParentScope: in.ParentScope, ParentScopeID: in.ParentScopeID,
+				}
+				if pl.AllocationMode == "" {
+					pl.AllocationMode = "carved"
+				}
+				if budgets.AuthorityDecision(fs.Authority, fs.ThresholdUSD, amount) == "apply" {
+					if err := gw.budgetStore.SetBudget(ctx, defaultTenant, pl.ToBudgetScope()); err != nil {
+						fmt.Fprintf(&sb, "• %s %s: NOT applied (%v)\n", in.Scope, in.ScopeID, err)
+					} else {
+						fmt.Fprintf(&sb, "• %s %s: applied $%.2f/mo\n", in.Scope, in.ScopeID, amount)
+					}
+				} else {
+					pending = append(pending, pl)
+					fmt.Fprintf(&sb, "• %s %s: $%.2f/mo — pending your approval\n", in.Scope, in.ScopeID, amount)
+				}
+			}
+			if len(pending) > 0 {
+				pid, err := gw.budgetStore.CreateProposal(ctx, defaultTenant, proposedBy, reason, pending)
+				if err != nil {
+					return sb.String(), err
+				}
+				gw.notifyBudgetProposal(ctx, pid, len(pending))
+				fmt.Fprintf(&sb, "Opened approval request %s for %d allocation(s).", pid, len(pending))
+			}
+			return sb.String(), nil
+		}
+
 		// Forecast: project month-end spend + anomaly detection
 		tools.OnForecastSpend = func(ctx context.Context, lookbackDays int) (tools.SpendForecast, error) {
 			pool := gw.db.Pool
@@ -1200,6 +1256,8 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewListBudgetRequestsTool())
 	reg.Register(tools.NewDecideBudgetRequestTool())
 	reg.Register(tools.NewCFOReportTool())
+	reg.Register(tools.NewProposeAllocationTool())
+	reg.Register(tools.NewEffectiveBudgetTool())
 	reg.Register(emailSend)
 	reg.Register(emailRead)
 
@@ -1836,3 +1894,7 @@ func (gw *Gateway) loadProvidersFromDB() {
 func daysInMonth(t time.Time) int {
 	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
 }
+
+// notifyBudgetProposal surfaces a pending CFO allocation proposal to the user.
+// Filled in by the proposal-delivery task; no-op until then.
+func (gw *Gateway) notifyBudgetProposal(ctx context.Context, proposalID string, n int) {}
