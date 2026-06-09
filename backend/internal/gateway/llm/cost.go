@@ -204,6 +204,10 @@ type spendEntry struct {
 	// origin classifies what triggered the call (agent, memory, council, …)
 	// for cost attribution. Empty for pipeline (agent-path) calls.
 	origin string
+	// hierarchy scope ids (S2) — nullable in DB when empty.
+	departmentID string
+	projectID    string
+	taskID       string
 }
 
 // writeBufSize is the primary channel buffer depth.
@@ -312,11 +316,32 @@ func (l *CostLedger) Record(ctx context.Context, req GatewayRequest, resp *Gatew
 // point for calls that do NOT go through the gateway pipeline (memory,
 // background, council, etc.). Reuses the same async ledger as Record.
 // Implements providers.Recorder.
+// buildScopedEntry assembles a spendEntry from a MeterScope + usage. Split out
+// so the attribution mapping is unit-testable without a DB or the async queue.
+func buildScopedEntry(scope providers.MeterScope, model, providerID, keyID string, usage providers.Usage) spendEntry {
+	cost := ComputeCost(model, &usage, providerID)
+	return spendEntry{
+		tenantID:       scope.TenantID,
+		agentID:        scope.AgentID,
+		sessionID:      scope.SessionID,
+		providerID:     providerID,
+		modelID:        model,
+		keyID:          keyID,
+		cost:           cost,
+		pricingMissing: cost.PricingMissing,
+		origin:         scope.Origin,
+		departmentID:   scope.DepartmentID,
+		projectID:      scope.ProjectID,
+		taskID:         scope.TaskID,
+	}
+}
+
 func (l *CostLedger) RecordScoped(ctx context.Context, scope providers.MeterScope, model, providerID, keyID string, usage providers.Usage) {
 	if l.db == nil {
 		return
 	}
-	cost := ComputeCost(model, &usage, providerID)
+	entry := buildScopedEntry(scope, model, providerID, keyID, usage)
+	cost := entry.cost
 	if cost.TotalUUSD == 0 && cost.TokensIn == 0 && cost.TokensOut == 0 &&
 		cost.TokensThinking == 0 && !cost.PricingMissing {
 		return
@@ -327,17 +352,6 @@ func (l *CostLedger) RecordScoped(ctx context.Context, scope providers.MeterScop
 		if l.gaps != nil {
 			go l.gaps.ReportPricingGap(ctx, model, providerID, cost.TokensIn, cost.TokensOut)
 		}
-	}
-	entry := spendEntry{
-		tenantID:       scope.TenantID,
-		agentID:        scope.AgentID,
-		sessionID:      scope.SessionID,
-		providerID:     providerID,
-		modelID:        model,
-		keyID:          keyID,
-		cost:           cost,
-		pricingMissing: cost.PricingMissing,
-		origin:         scope.Origin,
 	}
 	select {
 	case l.writes <- entry:
@@ -382,6 +396,15 @@ func (l *CostLedger) retryWorker() {
 	}
 }
 
+// nullableUUID returns nil for an empty id so Postgres stores NULL — UUID
+// columns reject empty strings.
+func nullableUUID(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // flush performs the actual dual-write:
 //  1. INSERT into gateway_spend_raw (immutable audit log, always)
 //  2. UPSERT into gateway_spend (daily aggregate, skipped for cache hits
@@ -414,8 +437,9 @@ func (l *CostLedger) flush(e spendEntry) {
 			tenant_id, agent_id, session_id, provider_id, model_id, key_id,
 			tokens_in, tokens_out, tokens_thinking, tokens_cache_write, tokens_cache_read,
 			cost_input_uusd, cost_output_uusd, cost_thinking_uusd, cost_cache_w_uusd, cost_cache_r_uusd,
-			cost_total_uusd, cache_hit, pricing_missing, origin
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			cost_total_uusd, cache_hit, pricing_missing, origin,
+			department_id, project_id, task_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 	`,
 		e.tenantID, agentIDPtr, sessionIDPtr, e.providerID, e.modelID, keyIDPtr,
 		e.cost.TokensIn, e.cost.TokensOut, e.cost.TokensThinking,
@@ -423,6 +447,7 @@ func (l *CostLedger) flush(e spendEntry) {
 		e.cost.CostInputUUSD, e.cost.CostOutputUUSD, e.cost.CostThinkingUUSD,
 		e.cost.CostCacheWUUSD, e.cost.CostCacheRUUSD,
 		e.cost.TotalUUSD, e.cacheHit, e.pricingMissing, e.origin,
+		nullableUUID(e.departmentID), nullableUUID(e.projectID), nullableUUID(e.taskID),
 	)
 	if err != nil {
 		slog.Error("gateway.cost_ledger: raw insert failed",

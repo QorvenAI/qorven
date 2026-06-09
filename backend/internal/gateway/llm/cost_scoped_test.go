@@ -19,3 +19,16 @@ func TestCostLedger_RecordScoped_NilDBNoPanic(t *testing.T) {
 	l.RecordScoped(context.Background(), providers.MeterScope{TenantID: "t", AgentID: "a", Origin: providers.OriginMemory},
 		"gpt-4o", "openai", "", providers.Usage{PromptTokens: 1, CompletionTokens: 1})
 }
+
+func TestRecordScoped_BuildsEntryWithHierarchyIDs(t *testing.T) {
+	e := buildScopedEntry(providers.MeterScope{
+		TenantID: "t", AgentID: "a", DepartmentID: "d1", ProjectID: "p1", TaskID: "k1",
+		Origin: providers.OriginAgent,
+	}, "gpt-4o", "openai", "key1", providers.Usage{PromptTokens: 5, CompletionTokens: 5})
+	if e.departmentID != "d1" || e.projectID != "p1" || e.taskID != "k1" {
+		t.Fatalf("entry missing hierarchy ids: %+v", e)
+	}
+	if e.tenantID != "t" || e.agentID != "a" || e.modelID != "gpt-4o" {
+		t.Fatalf("entry base fields wrong: %+v", e)
+	}
+}
