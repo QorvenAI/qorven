@@ -652,6 +652,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/budgets/projects", gw.handleCreateProjectBudget)
 		r.Post("/budgets/scope", gw.handleSetScopeBudget)
 		r.Get("/budgets/effective", gw.handleEffectiveBudget)
+		r.Get("/budgets/proposals", gw.handleListProposals)
+		r.Post("/budgets/proposals/{id}/decide", gw.handleDecideProposal)
+		r.Get("/budgets/finance-settings", gw.handleGetFinanceSettings)
+		r.Put("/budgets/finance-settings", gw.handleSetFinanceSettings)
 
 		// Heartbeat
 		r.Get("/agents/{id}/heartbeat", gw.handleGetHeartbeat)

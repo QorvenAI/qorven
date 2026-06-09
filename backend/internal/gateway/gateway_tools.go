@@ -1895,6 +1895,24 @@ func daysInMonth(t time.Time) int {
 	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
 }
 
-// notifyBudgetProposal surfaces a pending CFO allocation proposal to the user.
-// Filled in by the proposal-delivery task; no-op until then.
-func (gw *Gateway) notifyBudgetProposal(ctx context.Context, proposalID string, n int) {}
+// notifyBudgetProposal surfaces a pending CFO allocation proposal to the user
+// via the in-app notification store. Pending never blocks work — just notify.
+func (gw *Gateway) notifyBudgetProposal(ctx context.Context, proposalID string, n int) {
+	if gw.notifStore == nil {
+		slog.Info("budget.proposal.pending", "proposal", proposalID, "count", n)
+		return
+	}
+	_, err := gw.notifStore.Create(ctx,
+		"",                                                                      // agentID
+		"cfo",                                                                   // agentKey
+		"CFO",                                                                   // agentName
+		"budget_proposal",                                                       // type
+		"Budget approval needed",                                                // title
+		fmt.Sprintf("The CFO proposed %d budget allocation(s) awaiting your approval.", n), // highlight
+		"budget",                                                                // source
+		proposalID,                                                              // sourceID
+	)
+	if err != nil {
+		slog.Warn("budget.proposal.notify_failed", "proposal", proposalID, "count", n, "error", err)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/budgets"
 )
 
@@ -172,4 +173,88 @@ func (gw *Gateway) handleEffectiveBudget(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (gw *Gateway) handleListProposals(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	list, err := gw.budgetStore.ListPendingProposals(r.Context(), defaultTenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	if list == nil {
+		list = []budgets.Proposal{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"proposals": list})
+}
+
+func (gw *Gateway) handleDecideProposal(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	proposalID := chi.URLParam(r, "id")
+	var body struct {
+		Decisions []budgets.LineDecision `json:"decisions"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if err := gw.budgetStore.DecideProposal(r.Context(), defaultTenant, proposalID, user.ID, body.Decisions); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "decided"})
+}
+
+func (gw *Gateway) handleGetFinanceSettings(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	writeJSON(w, http.StatusOK, gw.budgetStore.GetFinanceSettings(r.Context(), defaultTenant))
+}
+
+func (gw *Gateway) handleSetFinanceSettings(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil || user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	var fs budgets.FinanceSettings
+	if json.NewDecoder(r.Body).Decode(&fs) != nil || fs.Authority == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cfo_authority required"})
+		return
+	}
+	if err := gw.budgetStore.SetFinanceSettings(r.Context(), defaultTenant, fs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "set"})
 }
