@@ -245,51 +245,71 @@ func tierLadder(start string) []string {
 //  2. If no benchmark data is present, fall back to cheapest output price
 //     (original behaviour).
 func (c *StaticModelCatalog) BestForTier(tier string, availableProviders []string) *ModelCatalogEntry {
-	if c == nil { return nil }
+	return c.BestForTierByIndex(tier, "intelligence_index", availableProviders, nil)
+}
+
+// BestForTierByIndex picks the highest-scoring model on the given benchmark
+// index within a tier, among available providers and (when enabled is
+// non-empty) restricted to enabled model IDs. Keeps the 3× output-cost guard
+// vs the cheapest in-tier model. Returns nil if no candidate qualifies.
+func (c *StaticModelCatalog) BestForTierByIndex(tier, indexKey string, availableProviders []string, enabled map[string]bool) *ModelCatalogEntry {
+	if c == nil {
+		return nil
+	}
 	avail := make(map[string]struct{})
-	for _, p := range availableProviders { avail[p] = struct{}{} }
+	for _, p := range availableProviders {
+		avail[p] = struct{}{}
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	var candidates []*ModelCatalogEntry
 	for i := range c.entries {
 		e := &c.entries[i]
-		if e.Tier != tier { continue }
-		if _, ok := avail[e.Provider]; !ok { continue }
+		if e.Tier != tier {
+			continue
+		}
+		if _, ok := avail[e.Provider]; !ok {
+			continue
+		}
+		if len(enabled) > 0 && !enabled[e.ID] {
+			continue
+		}
 		candidates = append(candidates, e)
 	}
-	if len(candidates) == 0 { return nil }
-
-	// Find cheapest for the cost-guard baseline.
+	if len(candidates) == 0 {
+		return nil
+	}
 	var cheapest *ModelCatalogEntry
 	for _, e := range candidates {
 		if cheapest == nil || e.Pricing.OutputPerM < cheapest.Pricing.OutputPerM {
 			cheapest = e
 		}
 	}
-
-	// Try benchmark-driven selection: prefer highest intelligence_index
-	// within the 3× cost guard.
 	const costGuardMultiplier = 3.0
 	maxAllowedCost := cheapest.Pricing.OutputPerM * costGuardMultiplier
-	var benchBest *ModelCatalogEntry
-	var benchBestScore float64
+	var best *ModelCatalogEntry
+	var bestScore float64
 	for _, e := range candidates {
-		if len(e.BenchmarkScores) == 0 { continue }
-		score, ok := e.BenchmarkScores["intelligence_index"]
-		if !ok { continue }
-		if e.Pricing.OutputPerM > maxAllowedCost { continue }
-		if benchBest == nil || score > benchBestScore {
-			benchBest = e
-			benchBestScore = score
+		if len(e.BenchmarkScores) == 0 {
+			continue
+		}
+		score, ok := e.BenchmarkScores[indexKey]
+		if !ok {
+			continue
+		}
+		if e.Pricing.OutputPerM > maxAllowedCost {
+			continue
+		}
+		if best == nil || score > bestScore {
+			best = e
+			bestScore = score
 		}
 	}
-	if benchBest != nil {
-		cp := *benchBest
+	if best != nil {
+		cp := *best
 		return &cp
 	}
-
-	// No benchmark data — cheapest wins.
 	cp := *cheapest
 	return &cp
 }
