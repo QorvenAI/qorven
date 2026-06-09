@@ -151,6 +151,9 @@ func (s *Store) SetBudget(ctx context.Context, tenantID string, b BudgetScope) e
 	if mode == "" {
 		mode = "carved"
 	}
+	if mode == "carved" && b.Scope != "tenant" && b.ParentScope == "" {
+		return fmt.Errorf("carved allocation requires a parent_scope")
+	}
 	if mode == "carved" && b.ParentScope != "" {
 		parentCap, _ := s.scopeCapUSD(ctx, tenantID, b.ParentScope, b.ParentScopeID)
 		existing, _ := s.carvedChildrenSumUSD(ctx, tenantID, b.ParentScope, b.ParentScopeID, b.Scope, b.ScopeID)

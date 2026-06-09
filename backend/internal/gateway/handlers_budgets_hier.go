@@ -17,6 +17,15 @@ func (gw *Gateway) handleListDepartments(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
 		return
 	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
 	list, err := gw.budgetStore.ListDepartments(r.Context(), defaultTenant)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
@@ -31,6 +40,15 @@ func (gw *Gateway) handleListDepartments(w http.ResponseWriter, r *http.Request)
 func (gw *Gateway) handleCreateDepartment(w http.ResponseWriter, r *http.Request) {
 	if gw.budgetStore == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
 		return
 	}
 	var body struct {
@@ -54,6 +72,15 @@ func (gw *Gateway) handleListProjectsBudget(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
 		return
 	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
 	list, err := gw.budgetStore.ListProjects(r.Context(), defaultTenant)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
@@ -68,6 +95,15 @@ func (gw *Gateway) handleListProjectsBudget(w http.ResponseWriter, r *http.Reque
 func (gw *Gateway) handleCreateProjectBudget(w http.ResponseWriter, r *http.Request) {
 	if gw.budgetStore == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
 		return
 	}
 	var body struct {
@@ -89,6 +125,15 @@ func (gw *Gateway) handleCreateProjectBudget(w http.ResponseWriter, r *http.Requ
 func (gw *Gateway) handleSetScopeBudget(w http.ResponseWriter, r *http.Request) {
 	if gw.budgetStore == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
 		return
 	}
 	var b budgets.BudgetScope
