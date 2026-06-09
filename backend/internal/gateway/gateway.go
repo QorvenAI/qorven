@@ -72,6 +72,7 @@ import (
 	"github.com/qorvenai/qorven/internal/reachuser"
 	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/research"
+	"github.com/qorvenai/qorven/internal/rooms"
 	"github.com/qorvenai/qorven/internal/scenario"
 	"github.com/qorvenai/qorven/internal/serviceaccounts"
 	"github.com/qorvenai/qorven/internal/session"
@@ -149,6 +150,7 @@ type Gateway struct {
 	skillStore       *skills.Store
 	notifStore       *notifications.Store
 	reach            *reachuser.Engine
+	roomBudget       *rooms.BudgetStore
 	workItems        *workitems.Store
 	fabricApprovals  *approvalsx.Store
 	auditStore       *audit.Store
@@ -551,6 +553,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			}
 			gw.notifStore = notifications.NewStore(db.Pool)
 			gw.reach = reachuser.NewEngine(reachuser.NewStore(db.Pool), &reachDeliverer{gw: gw, presence: presence.NewStore(db.Pool)}, nil)
+			gw.roomBudget = rooms.NewBudgetStore(db.Pool)
 			gw.auditStore = audit.NewStore(db.Pool)
 			gw.discussionStore = discussion.NewStore(db.Pool)
 			// Wire no-op embedder for now — topic drift detection without vector embeddings.
