@@ -1353,13 +1353,15 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 				ticker := time.NewTicker(24 * time.Hour)
 				defer ticker.Stop()
 				for range ticker.C {
-					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-					if err := gw.ckoCurator.Refresh(ctx, "company", ""); err != nil {
-						slog.Warn("cko.refresh.failed", "scope", "company", "err", err)
-					} else {
-						slog.Info("cko.refresh.done", "scope", "company")
-					}
-					cancel()
+					func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+						defer cancel()
+						if err := gw.ckoCurator.Refresh(ctx, "company", ""); err != nil {
+							slog.Warn("cko.refresh.failed", "scope", "company", "err", err)
+						} else {
+							slog.Info("cko.refresh.done", "scope", "company")
+						}
+					}()
 				}
 			}()
 		}

@@ -50,9 +50,9 @@ func (s *BriefStore) GetForAgent(ctx context.Context, orgRole, departmentKey str
 		 FROM knowledge_briefs
 		 WHERE tenant_id=$1
 		   AND clearance <= $2
-		   AND ( (scope='company')
+		   AND ( (scope='company' AND scope_key='')
 		      OR (scope='department' AND $3 <> '' AND scope_key=$3)
-		      OR (scope='role' AND scope_key=$4) )
+		      OR (scope='role' AND $4 <> '' AND scope_key=$4) )
 		 ORDER BY scope`,
 		s.tenantID, int(clearance), departmentKey, orgRole)
 	if err != nil {

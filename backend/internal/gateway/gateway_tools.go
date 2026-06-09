@@ -421,13 +421,10 @@ func (gw *Gateway) registerTools() {
 				})
 				gw.bundleStore.SeedDefaults(ctx, a.ID, role)
 			}
-			// Provision clearance + baseline knowledge access (CKO stage of onboarding).
-			// This path has no org level / budget in scope — pass "" and 0 (Run defaults budget when <=0).
-			if gw.onboarding != nil {
-				if _, err := gw.onboarding.Run(ctx, a.ID, role, "", 0); err != nil {
-					slog.Warn("onboarding.run.failed", "agent_id", a.ID, "err", err)
-				}
-			}
+			// OnAgentCreate (manage_agents) has no orgRole — skip the onboarding
+			// pipeline here; clearance/KB grants are provisioned via OnHRHireAgent,
+			// which carries the real org_role. Provisioning off a display-name role
+			// would silently assign wrong clearance.
 			// Activate runtime so the agent can receive delegated tasks immediately.
 			if gw.runtimeMgr != nil {
 				gw.runtimeMgr.EnsureRuntime(a.ID, defaultTenant)
