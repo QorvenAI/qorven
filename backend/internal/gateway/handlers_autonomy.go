@@ -6,8 +6,8 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -41,7 +41,7 @@ func (gw *Gateway) EvaluatePlannedWork(ctx context.Context, departmentID string,
 	res := PlannedWorkResult{Decision: decision, Feasibility: f}
 
 	if decision == "apply" {
-		planUSD := math.Round(float64(planUUSD)) / 1_000_000.0
+		planUSD := float64(planUUSD) / 1_000_000.0
 		if err := gw.budgetStore.SetBudget(ctx, defaultTenant, budgets.BudgetScope{
 			Scope: "department", ScopeID: departmentID, MonthlyUSD: planUSD,
 			AllocationMode: "carved", ParentScope: "tenant", ParentScopeID: "",
@@ -72,6 +72,10 @@ func (gw *Gateway) EvaluatePlannedWork(ctx context.Context, departmentID string,
 
 // handleGetDepartmentAutonomy returns a department's policy + threshold. Admin.
 func (gw *Gateway) handleGetDepartmentAutonomy(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budget store not available"})
+		return
+	}
 	user := userFromContext(r.Context())
 	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
@@ -79,10 +83,6 @@ func (gw *Gateway) handleGetDepartmentAutonomy(w http.ResponseWriter, r *http.Re
 	}
 	if user.Role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
-		return
-	}
-	if gw.budgetStore == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budget store not available"})
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -96,6 +96,10 @@ func (gw *Gateway) handleGetDepartmentAutonomy(w http.ResponseWriter, r *http.Re
 
 // handleSetDepartmentAutonomy sets a department's policy + threshold. Admin.
 func (gw *Gateway) handleSetDepartmentAutonomy(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budget store not available"})
+		return
+	}
 	user := userFromContext(r.Context())
 	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
@@ -103,10 +107,6 @@ func (gw *Gateway) handleSetDepartmentAutonomy(w http.ResponseWriter, r *http.Re
 	}
 	if user.Role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
-		return
-	}
-	if gw.budgetStore == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budget store not available"})
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -133,6 +133,10 @@ func (gw *Gateway) handleSetDepartmentAutonomy(w http.ResponseWriter, r *http.Re
 
 // handleEvaluatePlannedWork projects a department plan and applies/proposes it. Admin.
 func (gw *Gateway) handleEvaluatePlannedWork(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budget store not available"})
+		return
+	}
 	user := userFromContext(r.Context())
 	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
@@ -140,10 +144,6 @@ func (gw *Gateway) handleEvaluatePlannedWork(w http.ResponseWriter, r *http.Requ
 	}
 	if user.Role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
-		return
-	}
-	if gw.budgetStore == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budget store not available"})
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -161,6 +161,10 @@ func (gw *Gateway) handleEvaluatePlannedWork(w http.ResponseWriter, r *http.Requ
 	}
 	res, err := gw.EvaluatePlannedWork(r.Context(), id, body.PlanUUSD, user.ID, body.Summary)
 	if err != nil {
+		if errors.Is(err, budgets.ErrOverAllocated) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": sanitizeError(err)})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 		return
 	}
