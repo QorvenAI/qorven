@@ -14,4 +14,5 @@ ALTER TABLE gateway_budgets DROP COLUMN IF EXISTS scope;
 
 ALTER TABLE agents DROP COLUMN IF EXISTS department_id;
 DROP TABLE IF EXISTS projects;
+DROP INDEX IF EXISTS uq_departments_tenant_name;
 DROP TABLE IF EXISTS departments;

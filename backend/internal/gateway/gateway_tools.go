@@ -513,7 +513,9 @@ func (gw *Gateway) registerTools() {
 						defaultTenant, orgRole).Scan(&deptID)
 					if derr != nil || deptID == "" {
 						_ = gw.db.Pool.QueryRow(ctx,
-							`INSERT INTO departments (tenant_id, name, head_agent_id) VALUES ($1, $2, $3::uuid) RETURNING id::text`,
+							`INSERT INTO departments (tenant_id, name, head_agent_id) VALUES ($1, $2, $3::uuid)
+							 ON CONFLICT (tenant_id, name) DO UPDATE SET head_agent_id = EXCLUDED.head_agent_id
+							 RETURNING id::text`,
 							defaultTenant, orgRole, a.ID).Scan(&deptID)
 					} else {
 						gw.db.Pool.Exec(ctx, `UPDATE departments SET head_agent_id = $1 WHERE id = $2`, a.ID, deptID)

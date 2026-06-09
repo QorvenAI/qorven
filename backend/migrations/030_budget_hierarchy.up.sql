@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS departments (
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_departments_tenant ON departments (tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_tenant_name ON departments (tenant_id, name);
 
 CREATE TABLE IF NOT EXISTS projects (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
