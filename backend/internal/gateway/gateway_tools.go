@@ -17,6 +17,7 @@ import (
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/budgets"
+	"github.com/qorvenai/qorven/internal/memory"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
 	"github.com/qorvenai/qorven/internal/connectors"
 	"github.com/qorvenai/qorven/internal/config"
@@ -650,6 +651,162 @@ func (gw *Gateway) registerTools() {
 				"id": a.ID, "name": a.DisplayName, "role": role,
 				"org_level": a.OrgLevel, "org_role": a.OrgRole,
 				"status": a.Status, "model": a.Model,
+			}, nil
+		}
+
+		// ─── knowledge_govern (CKO) callbacks ───────────────────────────────
+		grantStore := memory.NewGrantStore(gw.db.Pool, defaultTenant)
+
+		tools.OnKGSetClearance = func(ctx context.Context, agentID string, level int, reason, setBy string) error {
+			_, err := gw.db.Pool.Exec(ctx,
+				`INSERT INTO agent_clearances (agent_id, tenant_id, max_classification, updated_by, reason, updated_at)
+				 VALUES ($1, $2, $3, $4, $5, now())
+				 ON CONFLICT (agent_id) DO UPDATE
+				 SET max_classification = EXCLUDED.max_classification,
+				     updated_by = EXCLUDED.updated_by,
+				     reason = EXCLUDED.reason,
+				     updated_at = now()`,
+				agentID, defaultTenant, level, setBy, reason)
+			return err
+		}
+
+		tools.OnKGGetClearance = func(ctx context.Context, agentID string) (map[string]any, error) {
+			var level int
+			err := gw.db.Pool.QueryRow(ctx,
+				`SELECT max_classification FROM agent_clearances WHERE agent_id = $1 AND tenant_id = $2`,
+				agentID, defaultTenant).Scan(&level)
+			if err != nil {
+				// No override row — fall back to the internal default.
+				return map[string]any{
+					"agent_id":           agentID,
+					"max_classification": int(memory.ClassInternal),
+					"default":            true,
+				}, nil
+			}
+			return map[string]any{
+				"agent_id":           agentID,
+				"max_classification": level,
+				"default":            false,
+			}, nil
+		}
+
+		tools.OnKGGrantAccess = func(ctx context.Context, grantorID, granteeID, scope string, maxClass int, purpose string) (string, error) {
+			return grantStore.Create(ctx, memory.Grant{
+				GrantorAgentID: grantorID,
+				GranteeAgentID: granteeID,
+				Scope:          memory.Scope(scope),
+				MaxClass:       memory.Classification(maxClass),
+				ReadOnly:       true,
+				Purpose:        purpose,
+				GrantedBy:      grantorID,
+			})
+		}
+
+		tools.OnKGRevokeGrant = func(ctx context.Context, grantID, revokedBy string) error {
+			return grantStore.Revoke(ctx, grantID, revokedBy)
+		}
+
+		tools.OnKGListGrants = func(ctx context.Context) ([]map[string]any, error) {
+			grants, err := grantStore.ListAll(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]map[string]any, 0, len(grants))
+			for _, g := range grants {
+				out = append(out, map[string]any{
+					"id":                 g.ID,
+					"grantor_agent_id":   g.GrantorAgentID,
+					"grantee_agent_id":   g.GranteeAgentID,
+					"scope":              string(g.Scope),
+					"max_classification": int(g.MaxClass),
+					"read_only":          g.ReadOnly,
+					"purpose":            g.Purpose,
+					"granted_by":         g.GrantedBy,
+					"created_at":         g.CreatedAt,
+					"expires_at":         g.ExpiresAt,
+				})
+			}
+			return out, nil
+		}
+
+		tools.OnKGAuditAccess = func(ctx context.Context, agentID string, limit int) ([]map[string]any, error) {
+			if limit <= 0 {
+				limit = 50
+			}
+			query := `SELECT agent_id, operation, COALESCE(scope,''), COALESCE(classification,0),
+			                 COALESCE(result_count,0), denied, COALESCE(deny_reason,''), accessed_at
+			          FROM knowledge_access_log
+			          WHERE tenant_id = $1`
+			args := []any{defaultTenant}
+			if agentID != "" {
+				args = append(args, agentID)
+				query += fmt.Sprintf(" AND agent_id = $%d", len(args))
+			}
+			args = append(args, limit)
+			query += fmt.Sprintf(" ORDER BY accessed_at DESC LIMIT $%d", len(args))
+
+			rows, err := gw.db.Pool.Query(ctx, query, args...)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			out := []map[string]any{}
+			for rows.Next() {
+				var (
+					aid, op, scope, denyReason string
+					class, resultCount         int
+					denied                     bool
+					accessedAt                 time.Time
+				)
+				if err := rows.Scan(&aid, &op, &scope, &class, &resultCount, &denied, &denyReason, &accessedAt); err != nil {
+					continue
+				}
+				out = append(out, map[string]any{
+					"agent_id":       aid,
+					"operation":      op,
+					"scope":          scope,
+					"classification": class,
+					"result_count":   resultCount,
+					"denied":         denied,
+					"deny_reason":    denyReason,
+					"accessed_at":    accessedAt,
+				})
+			}
+			return out, nil
+		}
+
+		tools.OnKGOnboardingStatus = func(ctx context.Context, agentID string) (map[string]any, error) {
+			var (
+				stage          string
+				chro, cko, cfo bool
+				clearance      int
+				budget         float64
+				completedAt    *time.Time
+			)
+			err := gw.db.Pool.QueryRow(ctx,
+				`SELECT stage, chro_completed, cko_completed, cfo_completed,
+				        COALESCE(clearance_level,1), COALESCE(budget_usd,0), completed_at
+				 FROM agent_onboarding
+				 WHERE agent_id = $1 AND tenant_id = $2
+				 ORDER BY created_at DESC LIMIT 1`,
+				agentID, defaultTenant).Scan(&stage, &chro, &cko, &cfo, &clearance, &budget, &completedAt)
+			if err != nil {
+				return map[string]any{
+					"agent_id": agentID,
+					"stage":    "none",
+					"found":    false,
+				}, nil
+			}
+			return map[string]any{
+				"agent_id":        agentID,
+				"stage":           stage,
+				"chro_completed":  chro,
+				"cko_completed":   cko,
+				"cfo_completed":   cfo,
+				"clearance_level": clearance,
+				"budget_usd":      budget,
+				"completed_at":    completedAt,
+				"found":           true,
 			}, nil
 		}
 

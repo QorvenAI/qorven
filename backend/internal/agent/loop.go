@@ -41,6 +41,7 @@ type Loop struct {
 	skillLoader     *skills.Loader
 	skillStore      *skills.Store
 	memStore        *memory.Store
+	briefStore      *memory.BriefStore // CKO org-knowledge briefs, injected into the system prompt
 	connKB          *connectors.KnowledgeStore
 	mcpMgr          *mcp.Manager
 	billingStore    *billing.Store
@@ -111,6 +112,10 @@ type PIIRedactor interface {
 // goroutines, since assignment is a simple field write and Run may be
 // reading it from another goroutine. Call once at startup.
 func (l *Loop) SetPIIRedactor(r PIIRedactor) { l.PIIRedactor = r }
+
+// SetBriefStore wires the CKO knowledge-brief store so the ContextBuilder can
+// inject clearance-filtered org knowledge into each agent's system prompt.
+func (l *Loop) SetBriefStore(bs *memory.BriefStore) { l.briefStore = bs }
 
 func (l *Loop) SetOutputValidator(v *OutputValidator)    { l.outputValidator = v }
 func (l *Loop) SetSubagentRunStore(s *SubagentRunStore)  { l.subagentRunStore = s }
@@ -371,6 +376,9 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 
 	// 6. Build context
 	cb := NewContextBuilder(ag, l.skillLoader, l.memStore, l.toolReg)
+	if l.briefStore != nil {
+		cb.SetBriefStore(l.briefStore)
+	}
 	// propagate per-request extra tools (tenant-scoped
 	// Wasm plugins injected by the orchestrator) so BuildToolDefs
 	// includes them in the LLM's offered tool list.
