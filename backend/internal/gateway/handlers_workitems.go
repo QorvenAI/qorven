@@ -113,6 +113,10 @@ func (gw *Gateway) handleTransitionWorkItem(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
 	if gw.workItems == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "work items not available"})
 		return

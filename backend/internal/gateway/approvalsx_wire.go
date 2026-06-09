@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/qorvenai/qorven/internal/approvalsx"
@@ -17,6 +18,9 @@ import (
 // the caller should also SetBlockedOn that work item to the approval id.
 // Returns the approval id.
 func (gw *Gateway) OpenApproval(ctx context.Context, userID string, a approvalsx.Approval) (string, error) {
+	if gw.fabricApprovals == nil {
+		return "", fmt.Errorf("unified approvals not available")
+	}
 	id, err := gw.fabricApprovals.Open(ctx, a)
 	if err != nil {
 		return "", err
@@ -42,8 +46,8 @@ func (gw *Gateway) DecideApproval(ctx context.Context, id string, approved bool,
 	if err == nil && a.WorkItemID != "" && gw.workItems != nil {
 		if approved {
 			_ = gw.workItems.Unblock(ctx, a.WorkItemID, decidedBy)
-		} else {
-			_ = gw.workItems.Transition(ctx, a.WorkItemID, workitems.StatusCancelled, decidedBy, "approval rejected")
+		} else if err := gw.workItems.Transition(ctx, a.WorkItemID, workitems.StatusCancelled, decidedBy, "approval rejected"); err != nil {
+			slog.Warn("approvalsx.decide.cancel_work_item_failed", "work_item_id", a.WorkItemID, "err", err)
 		}
 	}
 	return nil
