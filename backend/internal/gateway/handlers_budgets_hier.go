@@ -234,6 +234,15 @@ func (gw *Gateway) handleGetFinanceSettings(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
 		return
 	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
 	writeJSON(w, http.StatusOK, gw.budgetStore.GetFinanceSettings(r.Context(), defaultTenant))
 }
 
@@ -243,7 +252,11 @@ func (gw *Gateway) handleSetFinanceSettings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	user := userFromContext(r.Context())
-	if user == nil || user.Role != "admin" {
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
 		return
 	}
