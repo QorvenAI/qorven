@@ -269,3 +269,86 @@ func reconcile(declaredRemainingUUSD, providerRemainingUUSD int64) EffectiveAvai
 	}
 	return res
 }
+
+// EffectiveAvailable reconciles the declared overall budget against the sum of
+// what connected provider keys still allow. Returns µUSD figures + the binding
+// constraint. Provider remaining: prepaid → balance−spent; postpaid →
+// budget_usd_monthly−spent (when a monthly cap is set); quota/free → no $
+// ceiling (excluded). It informs; it does not itself block.
+func (s *Store) EffectiveAvailable(ctx context.Context, tenantID string) (EffectiveAvailableResult, error) {
+	const uusdPerUSD = 1_000_000.0
+
+	var monthlyUSD, lifetimeUSD *float64
+	var fundingMode *string
+	_ = s.db.QueryRow(ctx, `
+		SELECT monthly_usd, lifetime_usd, funding_mode
+		FROM gateway_budgets WHERE tenant_id = $1 AND scope = 'tenant' LIMIT 1
+	`, tenantID).Scan(&monthlyUSD, &lifetimeUSD, &fundingMode)
+
+	mode := ""
+	if fundingMode != nil {
+		mode = *fundingMode
+	}
+	var capUSD float64
+	var spentUUSD int64
+	if mode == "prepaid_fixed" {
+		if lifetimeUSD != nil {
+			capUSD = *lifetimeUSD
+		}
+		var allTime *int64
+		_ = s.db.QueryRow(ctx, `SELECT SUM(cost_total_uusd) FROM gateway_spend WHERE tenant_id = $1`, tenantID).Scan(&allTime)
+		if allTime != nil {
+			spentUUSD = *allTime
+		}
+	} else {
+		if monthlyUSD != nil {
+			capUSD = *monthlyUSD
+		}
+		var mtd *int64
+		_ = s.db.QueryRow(ctx, `
+			SELECT SUM(cost_total_uusd) FILTER (WHERE period >= date_trunc('month', CURRENT_DATE))
+			FROM gateway_spend WHERE tenant_id = $1
+		`, tenantID).Scan(&mtd)
+		if mtd != nil {
+			spentUUSD = *mtd
+		}
+	}
+	declaredRemaining := int64(capUSD*uusdPerUSD) - spentUUSD
+	if declaredRemaining < 0 {
+		declaredRemaining = 0
+	}
+
+	var providerRemainingUUSD int64
+	rows, err := s.db.Query(ctx, `
+		SELECT budget_type, balance_usd, budget_usd_monthly, spent_usd_month
+		FROM provider_keys
+		WHERE tenant_id = $1 AND status = 'verified'
+	`, tenantID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var btype string
+			var balance, monthlyCap *float64
+			var spent float64
+			if rows.Scan(&btype, &balance, &monthlyCap, &spent) != nil {
+				continue
+			}
+			switch btype {
+			case "prepaid":
+				if balance != nil {
+					if rem := *balance - spent; rem > 0 {
+						providerRemainingUUSD += int64(rem * uusdPerUSD)
+					}
+				}
+			case "postpaid":
+				if monthlyCap != nil {
+					if rem := *monthlyCap - spent; rem > 0 {
+						providerRemainingUUSD += int64(rem * uusdPerUSD)
+					}
+				}
+			}
+		}
+	}
+
+	return reconcile(declaredRemaining, providerRemainingUUSD), nil
+}
