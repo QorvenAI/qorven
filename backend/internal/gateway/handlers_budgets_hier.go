@@ -151,3 +151,25 @@ func (gw *Gateway) handleSetScopeBudget(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "set"})
 }
+
+func (gw *Gateway) handleEffectiveBudget(w http.ResponseWriter, r *http.Request) {
+	if gw.budgetStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	res, err := gw.budgetStore.EffectiveAvailable(r.Context(), defaultTenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

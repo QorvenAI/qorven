@@ -23,6 +23,10 @@ var OnListBudgetRequests func(ctx context.Context) ([]BudgetRequest, error)
 var OnDecideBudgetRequest func(ctx context.Context, requestID, decision, note string) error
 var OnCFOReport func(ctx context.Context, days int) (CFOReportData, error)
 
+// OnEffectiveBudget reconciles the declared overall budget against provider-key
+// allowances. Read-only — allocation tools are a later subsystem.
+var OnEffectiveBudget func(ctx context.Context) (declaredRemainingUUSD, providerRemainingUUSD, effectiveUUSD int64, binding string, warnings []string, err error)
+
 // ─── Data types ──────────────────────────────────────────────────────────────
 
 type ReconciliationReport struct {

@@ -854,6 +854,17 @@ func (gw *Gateway) registerTools() {
 			return report, nil
 		}
 
+		tools.OnEffectiveBudget = func(ctx context.Context) (int64, int64, int64, string, []string, error) {
+			if gw.budgetStore == nil {
+				return 0, 0, 0, "", nil, fmt.Errorf("budget store not available")
+			}
+			res, err := gw.budgetStore.EffectiveAvailable(ctx, defaultTenant)
+			if err != nil {
+				return 0, 0, 0, "", nil, err
+			}
+			return res.DeclaredRemainingUUSD, res.ProviderRemainingUUSD, res.EffectiveUUSD, res.Binding, res.Warnings, nil
+		}
+
 		// Forecast: project month-end spend + anomaly detection
 		tools.OnForecastSpend = func(ctx context.Context, lookbackDays int) (tools.SpendForecast, error) {
 			pool := gw.db.Pool
