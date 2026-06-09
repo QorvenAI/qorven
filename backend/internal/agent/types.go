@@ -26,6 +26,7 @@ type RunRequest struct {
 	AgentID        string
 	SessionID      string
 	SessionKey     string
+	TaskID         string // set when this run is executing a task — drives task-budget enforcement
 	UserMessage    string
 	UserID         string
 	ChannelType    string

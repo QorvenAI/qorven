@@ -208,6 +208,7 @@ func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *ta
 		Channel:       "task",
 		ExtraTools:    taskTools,
 		SessionID:     task.OriginSessionID,
+		TaskID:        task.ID,
 		NoPersist:     task.OriginSessionID == "",
 		DiscussionID:  task.DiscussionID,
 		SourceChannel: "task",
