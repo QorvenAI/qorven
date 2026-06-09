@@ -33,6 +33,7 @@ type Agent struct {
 	// Org chart
 	OrgLevel          string          `json:"org_level,omitempty"`        // l1, l2, l3, customer_facing
 	OrgRole           string          `json:"org_role,omitempty"`         // coo, cto, cmo, chro, …
+	DepartmentID      string          `json:"department_id,omitempty"`
 	CustomerFacing    bool            `json:"customer_facing,omitempty"`
 	MonthlyBudgetUSD  float64         `json:"monthly_budget_usd,omitempty"`
 	HiredAt           *time.Time      `json:"hired_at,omitempty"`
@@ -215,7 +216,8 @@ const agentSelectCols = `SELECT id, tenant_id, agent_key, display_name, COALESCE
         COALESCE(project_brief_id::text,''),
         COALESCE(mail_policy,''),
         COALESCE(org_level,'l3'), COALESCE(org_role,''), COALESCE(customer_facing,false),
-        COALESCE(monthly_budget_usd,0), hired_at
+        COALESCE(monthly_budget_usd,0), hired_at,
+        COALESCE(department_id::text,'')
  FROM agents`
 
 func (s *Store) scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
@@ -227,7 +229,8 @@ func (s *Store) scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 		&a.WebSearchEnabled, &a.OutboundApproval,
 		&a.CreditBudgetCents, &a.CreditUsedCents, &a.Status, &a.CreatedAt, &a.UpdatedAt,
 		&a.ThinkingLevel, &a.RuntimeMode, &a.CanDelegate, &a.ProjectBriefID, &a.MailPolicy,
-		&a.OrgLevel, &a.OrgRole, &a.CustomerFacing, &a.MonthlyBudgetUSD, &a.HiredAt)
+		&a.OrgLevel, &a.OrgRole, &a.CustomerFacing, &a.MonthlyBudgetUSD, &a.HiredAt,
+		&a.DepartmentID)
 	return a, err
 }
 
@@ -268,6 +271,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) e
 		"provider_id": true, "status": true, "credit_budget_cents": true,
 		"thinking_level": true, "runtime_mode": true, "can_delegate": true,
 		"mail_policy": true, "org_level": true, "org_role": true,
+		"department_id": true,
 	}
 	setClauses := ""
 	args := []any{id}
