@@ -152,6 +152,7 @@ type Gateway struct {
 	reach            *reachuser.Engine
 	roomBudget       *rooms.BudgetStore
 	workItems        *workitems.Store
+	delegation       *rooms.Orchestrator
 	fabricApprovals  *approvalsx.Store
 	auditStore       *audit.Store
 	discussionStore  *discussion.Store
@@ -600,6 +601,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.forecastStore = governance.NewForecastStore(db.Pool)
 			gw.workItems = workitems.NewStore(db.Pool)
 			gw.fabricApprovals = approvalsx.NewStore(db.Pool)
+			gw.delegation = gw.buildDelegationOrchestrator()
 			governance.SeedDefaults(context.Background(), db.Pool, defaultTenant)
 			gw.policyEngine.LoadPolicies(context.Background(), defaultTenant)
 			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)

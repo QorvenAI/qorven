@@ -77,7 +77,8 @@ func (s *MessageStore) MarkRead(ctx context.Context, agentID string) error {
 // GetSubordinates returns agents that report to the given manager.
 func GetSubordinates(ctx context.Context, pool *pgxpool.Pool, managerID string) ([]*Agent, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, agent_key, display_name, role, title, model, status
+		`SELECT id, agent_key, display_name, role, title, model, status,
+		        COALESCE(org_level,'l3'), COALESCE(org_role,'')
 		 FROM agents WHERE manager_id = $1 AND deleted_at IS NULL ORDER BY display_name`, managerID)
 	if err != nil {
 		return nil, err
@@ -87,7 +88,7 @@ func GetSubordinates(ctx context.Context, pool *pgxpool.Pool, managerID string) 
 	agents := []*Agent{}
 	for rows.Next() {
 		a := &Agent{}
-		rows.Scan(&a.ID, &a.AgentKey, &a.DisplayName, &a.Role, &a.Title, &a.Model, &a.Status)
+		rows.Scan(&a.ID, &a.AgentKey, &a.DisplayName, &a.Role, &a.Title, &a.Model, &a.Status, &a.OrgLevel, &a.OrgRole)
 		agents = append(agents, a)
 	}
 	return agents, nil

@@ -93,6 +93,7 @@ const (
 	ctxForkFunc     ctxKey = "tool_fork_func"
 	ctxSandboxKey   ctxKey = "tool_sandbox_key"
 	ctxAllowElevated ctxKey = "tool_allow_elevated"
+	ctxRoomID        ctxKey = "tool_room_id"
 )
 
 func WithWorkspace(ctx context.Context, ws string) context.Context {
@@ -107,6 +108,20 @@ func WithAgentID(ctx context.Context, id string) context.Context {
 }
 func AgentIDFromCtx(ctx context.Context) string {
 	if v, ok := ctx.Value(ctxAgentID).(string); ok { return v }
+	return ""
+}
+
+// WithRoomID tags the context with the originating room (set when an agent is
+// woken to act in a room, so room-aware tools like delegate_work know where they are).
+func WithRoomID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ctxRoomID, id)
+}
+
+// RoomIDFromCtx returns the originating room id, or "" if not in a room.
+func RoomIDFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxRoomID).(string); ok {
+		return v
+	}
 	return ""
 }
 func WithSessionID(ctx context.Context, key string) context.Context {

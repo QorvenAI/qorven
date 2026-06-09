@@ -20,6 +20,7 @@ import (
 	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/rooms"
 	"github.com/qorvenai/qorven/internal/session"
+	"github.com/qorvenai/qorven/internal/tools"
 )
 
 func (gw *Gateway) handleListRooms(w http.ResponseWriter, r *http.Request) {
@@ -602,6 +603,28 @@ Respond with JSON: {"route_to": ["agent_key"], "reasoning": "brief reason"}`, ag
 							gw.db.Pool.Exec(context.Background(),
 								`INSERT INTO room_messages (room_id, sender_id, sender_type, content) VALUES ($1, $2, 'soul', $3)`, roomID, ag.AgentKey, result.Content)
 							gw.rtHub.Broadcast(realtime.Event{Type: "room_message", Data: map[string]string{"room_id": roomID, "sender": ag.AgentKey, "content": result.Content}})
+						}
+						break
+					}
+
+					// Heads (l1/l2) run with the delegate_work tool so they can assign
+					// work to their team. The room id rides on the tool context so
+					// delegate_work knows where to report back. Non-heads use the
+					// streaming chat path below (unchanged).
+					if (ag.OrgLevel == "l1" || ag.OrgLevel == "l2") && gw.delegation != nil {
+						runCtx := tools.WithRoomID(context.Background(), roomID)
+						headRes, _ := gw.agentLoop.Run(runCtx, agent.RunRequest{
+							AgentID: ag.ID, UserMessage: prompt, Channel: "room", TenantID: defaultTenant,
+							ExtraTools: []tools.Tool{tools.NewDelegateWorkTool()},
+						}, nil)
+						headOut := ""
+						if headRes != nil {
+							headOut = headRes.Content
+						}
+						if headOut != "" {
+							gw.db.Pool.Exec(context.Background(),
+								`INSERT INTO room_messages (room_id, sender_id, sender_type, content) VALUES ($1, $2, 'soul', $3)`, roomID, ag.AgentKey, headOut)
+							gw.rtHub.Broadcast(realtime.Event{Type: "room_message", Data: map[string]string{"room_id": roomID, "sender": ag.AgentKey, "content": headOut}})
 						}
 						break
 					}
