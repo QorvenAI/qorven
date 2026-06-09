@@ -3,11 +3,13 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState, useCallback } from 'react';
-import { Loader2, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
-import { providers as providersApi } from '@/lib/api';
+import { providers as providersApi, budgets as budgetsApi } from '@/lib/api';
 import { Button } from '@/components/qor/button';
+import { Input } from '@/components/qor/input';
 import { ProviderIcon } from '@/components/provider-icon';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -72,6 +74,134 @@ function fmtTokens(v: number) {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000)     return `${(v / 1_000).toFixed(1)}k`;
   return v.toLocaleString();
+}
+
+// ─── Effective available ────────────────────────────────────────────────────────
+
+interface Effective {
+  declared_remaining_uusd: number;
+  provider_remaining_uusd: number;
+  effective_uusd: number;
+  binding: 'declared' | 'providers';
+  warnings: string[];
+}
+
+const uusdToUsd = (v: number) => v / 1_000_000;
+
+function EffectiveCard({ eff }: { eff: Effective | null }) {
+  if (!eff) return null;
+
+  const declared = uusdToUsd(eff.declared_remaining_uusd);
+  const provider = uusdToUsd(eff.provider_remaining_uusd);
+  const effective = uusdToUsd(eff.effective_uusd);
+  const noBudget = eff.effective_uusd === 0 && eff.declared_remaining_uusd === 0;
+
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Effective available</p>
+          {noBudget ? (
+            <p className="text-2xl font-bold tabular-nums mt-0.5 text-muted-foreground">No overall budget set</p>
+          ) : (
+            <p className="text-2xl font-bold tabular-nums mt-0.5">{fmtUSD(effective)}</p>
+          )}
+        </div>
+        {!noBudget && (
+          <span className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground shrink-0">
+            Limited by: {eff.binding === 'declared' ? 'declared' : 'provider keys'}
+          </span>
+        )}
+      </div>
+
+      {!noBudget && (
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+          <span>Declared remaining: <span className="tabular-nums text-foreground">{fmtUSD(declared)}</span></span>
+          <span>Provider ceiling: <span className="tabular-nums text-foreground">{fmtUSD(provider)}</span></span>
+        </div>
+      )}
+
+      {eff.warnings.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {eff.warnings.map((w, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-md bg-amber-400/10 px-3 py-2 text-xs text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Overall budget setter ──────────────────────────────────────────────────────
+
+function OverallBudgetSetter({ onSaved }: { onSaved: () => void }) {
+  const [amount, setAmount] = useState('');
+  const [mode, setMode] = useState<'prepaid_fixed' | 'monthly_recurring'>('prepaid_fixed');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const n = parseFloat(amount);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error('Enter a valid non-negative amount');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (mode === 'prepaid_fixed') {
+        await budgetsApi.setOverall({ funding_mode: 'prepaid_fixed', lifetime_usd: n });
+      } else {
+        await budgetsApi.setOverall({ funding_mode: 'monthly_recurring', monthly_usd: n });
+      }
+      toast.success('Overall budget saved');
+      onSaved();
+    } catch {
+      toast.error('Failed to save budget');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-4">
+      <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Set overall budget</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-md border border-border p-0.5">
+          {([
+            ['prepaid_fixed', 'Prepaid fixed-cap'],
+            ['monthly_recurring', 'Monthly recurring'],
+          ] as const).map(([val, label]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setMode(val)}
+              className={cn(
+                'rounded px-3 py-1 text-xs font-medium transition-colors',
+                mode === val ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <Input
+          type="number"
+          min={0}
+          step="0.01"
+          value={amount}
+          onChange={e => setAmount(e.target.value)}
+          placeholder={mode === 'prepaid_fixed' ? 'Lifetime cap ($)' : 'Monthly cap ($)'}
+          className="w-44"
+        />
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Save
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 // ─── Provider spend card ────────────────────────────────────────────────────────
@@ -155,18 +285,26 @@ function ProviderSpendCard({ p }: { p: ProviderSpend }) {
 
 export default function SpendPage() {
   const [data, setData]         = useState<SpendSummary | null>(null);
+  const [eff, setEff]           = useState<Effective | null>(null);
   const [loading, setLoading]   = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+
+  const loadEffective = useCallback(async () => {
+    try {
+      const e = await budgetsApi.effective();
+      setEff(e as Effective);
+    } catch { /* silently fail — budget may not be set */ }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const d = await providersApi.getSpendSummary();
+      const [d] = await Promise.all([providersApi.getSpendSummary(), loadEffective()]);
       setData(d as SpendSummary);
       setLastRefresh(new Date());
     } catch { /* silently fail — no data yet */ }
     finally { setLoading(false); }
-  }, []);
+  }, [loadEffective]);
 
   useEffect(() => {
     load();
@@ -187,6 +325,10 @@ export default function SpendPage() {
           </Button>
         }
       />
+
+      {/* Overall budget reconciliation + setter — always visible */}
+      <EffectiveCard eff={eff} />
+      <OverallBudgetSetter onSaved={loadEffective} />
 
       {loading && !data ? (
         <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
