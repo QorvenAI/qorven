@@ -145,6 +145,41 @@ export const budgets = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // CFO budget proposals awaiting human decision.
+  listProposals: () =>
+    request<{
+      proposals: Array<{
+        id: string;
+        reason: string;
+        status: string;
+        lines: Array<{
+          id: string;
+          scope: string;
+          scope_id: string;
+          proposed_monthly_usd: number;
+          allocation_mode: string;
+          status: string;
+        }>;
+      }>;
+    }>('/budgets/proposals'),
+
+  // Approve/reject individual proposal lines.
+  decideProposal: (id: string, decisions: Array<{ line_id: string; approve: boolean }>) =>
+    request<{ status: string }>(`/budgets/proposals/${id}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ decisions }),
+    }),
+
+  // CFO authority + auto-approval threshold.
+  getFinanceSettings: () =>
+    request<{ cfo_authority: string; cfo_threshold_usd: number }>('/budgets/finance-settings'),
+
+  setFinanceSettings: (body: { cfo_authority: string; cfo_threshold_usd: number }) =>
+    request<{ status: string }>('/budgets/finance-settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 };
 
 export interface RankedModel {
