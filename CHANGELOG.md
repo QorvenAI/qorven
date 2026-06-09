@@ -4,6 +4,23 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.8.0-alpha — 2026-06-09
+
+The **Operations Fabric** — the layer that makes your agents work together like a real company, and reach you like a colleague would.
+
+### Added
+- **Agents reach you the way a person would.** When an agent needs your approval or wants to notify you, it starts in the app — and if you're away, it follows up on Telegram or WhatsApp, then by email, until you respond. Reply on any channel and the rest stop chasing you. Nothing waits silently, and nothing blocks work that can carry on. ([4ed5227](https://github.com/QorvenAI/qorven/commit/4ed5227))
+- **One approvals inbox for the whole company.** Every decision that needs you — a budget allocation, and more to come — flows through a single approval object with a clear summary, amount, and context. Approve or reject, and the work that was waiting picks up automatically. Pending approvals never stall the rest of the org. ([569fce3](https://github.com/QorvenAI/qorven/commit/569fce3))
+- **Trackable work items.** Work is now durable and visible: who owns it, what it's waiting on, and a full history of every step — so a piece of work survives restarts and you can always see where it stands. ([569fce3](https://github.com/QorvenAI/qorven/commit/569fce3))
+- **Departments run themselves — within the limits you set.** Each department has an autonomy policy: proceed automatically within budget, always ask you, or a mix (small things proceed, big ones ask). For a substantial plan, your CFO **projects** whether it fits — reserving room for ongoing daily spend and work already committed — before it proceeds or comes to you. IT/engineering starts cautious (big builds ask); other departments run automatically within budget. ([2afa835](https://github.com/QorvenAI/qorven/commit/2afa835))
+- **Instruct any leader by role in a room.** In a room you can now address `@COO`, `@CTO`, `@CFO` and reach the officer holding that role directly. Rooms are also kept calm: there's a cap on automated replies so a conversation can never loop or run up cost. ([0a31880](https://github.com/QorvenAI/qorven/commit/0a31880))
+- **Every agent starts knowledgeable.** New leadership roles (CTO, Chief Knowledge Officer, Chief Information Security Officer, Chief Communications Officer) ship with full personas, and a Knowledge Officer now curates the company's knowledge into role-specific briefs that are delivered into each agent's context — filtered to what that agent is cleared to see. New hires are provisioned with their clearance and knowledge access from their first run. ([d793a4e](https://github.com/QorvenAI/qorven/commit/d793a4e))
+
+### Changed
+- Pending budget proposals from your CFO now reach you through the same follow-up flow (app → messaging → email) and stop chasing you the moment you decide. ([8c669af](https://github.com/QorvenAI/qorven/commit/8c669af))
+
+---
+
 ## v0.7.0-alpha — 2026-06-09
 
 ### Added
