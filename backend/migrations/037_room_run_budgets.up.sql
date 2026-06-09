@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS room_run_budgets (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id  UUID NOT NULL,
     room_id    UUID NOT NULL,
-    agent_id   TEXT NOT NULL DEFAULT '',
+    agent_id   UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_room_run_budgets_window
