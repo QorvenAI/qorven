@@ -523,6 +523,21 @@ func (l *CostLedger) flush(e spendEntry) {
 		}
 	}
 
+	// Count this call against the key's declared usage window (if any). When the
+	// window has passed its reset time, roll it forward and restart the count so
+	// the next window enforces correctly. Best-effort — never blocks the ledger.
+	if e.keyID != "" {
+		_, werr := l.db.Exec(ctx, `
+			UPDATE provider_usage_windows
+			SET used_count = CASE WHEN window_resets_at IS NOT NULL AND window_resets_at <= now() THEN 1 ELSE used_count + 1 END,
+			    updated_at = now()
+			WHERE key_id = $1
+		`, e.keyID)
+		if werr != nil {
+			slog.Warn("gateway.cost_ledger: usage window update failed", "key_id", e.keyID, "error", werr)
+		}
+	}
+
 	// 4. Upsert a trace row (one per session) and append a span (one per LLM call).
 	// Traces aggregate token + cost totals; spans are the individual call records.
 	if e.sessionID != "" && e.agentID != "" {

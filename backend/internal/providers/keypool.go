@@ -239,6 +239,13 @@ func (p *KeyPool) RecordUsage(keyID string, tokensIn, tokensOut int) {
 			k.TotalTokensIn += int64(tokensIn)
 			k.TotalTokensOut += int64(tokensOut)
 			k.LastUsedAt = &now
+			if k.Window != nil {
+				if k.Window.ResetsAt != nil && now.After(*k.Window.ResetsAt) {
+					k.Window.UsedCount = 1
+				} else {
+					k.Window.UsedCount++
+				}
+			}
 			return
 		}
 	}
