@@ -152,6 +152,20 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, userMessage
 	return msgs
 }
 
+// budgetMutatingTools change real budgets. Only the CFO (or COO) may be offered
+// them — otherwise any full-profile agent could set budgets.
+var budgetMutatingTools = map[string]bool{
+	"set_budget":            true,
+	"propose_allocation":    true,
+	"decide_budget_request": true,
+}
+
+func isBudgetMutatingTool(name string) bool { return budgetMutatingTools[name] }
+
+func canUseBudgetTools(orgRole string) bool {
+	return orgRole == "cfo" || orgRole == "coo"
+}
+
 // BuildToolDefs returns the tool definitions allowed for this agent.
 func (cb *ContextBuilder) BuildToolDefs() []providers.ToolDefinition {
 	if cb.toolReg == nil && len(cb.extraTools) == 0 {
@@ -171,6 +185,16 @@ func (cb *ContextBuilder) BuildToolDefs() []providers.ToolDefinition {
 	var provDefs []providers.ToolDefinition
 	if cb.toolReg != nil {
 		filtered := tools.FilterTools(cb.toolReg, allow, deny, cb.agent.ToolProfile, false)
+		if !canUseBudgetTools(cb.agent.OrgRole) {
+			kept := filtered[:0]
+			for _, td := range filtered {
+				if isBudgetMutatingTool(td.Function.Name) {
+					continue
+				}
+				kept = append(kept, td)
+			}
+			filtered = kept
+		}
 		provDefs = make([]providers.ToolDefinition, len(filtered))
 		for i, td := range filtered {
 			provDefs[i] = providers.ToolDefinition{
