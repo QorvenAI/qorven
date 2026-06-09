@@ -6,6 +6,8 @@ package rooms
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 
 	"github.com/qorvenai/qorven/internal/agent"
 )
@@ -50,4 +52,105 @@ type RunMeta struct {
 // keeps the whole orchestrator unit-testable without an LLM.
 type AgentRunner interface {
 	Run(ctx context.Context, agentID, task string) (result string, err error)
+}
+
+// Orchestrator drives the head→L3 delegation loop. All side effects are injected
+// as function fields so the whole loop is unit-testable with fakes + no LLM. The
+// gateway wires these to the real stores and agent loop.
+type Orchestrator struct {
+	Runner AgentRunner
+
+	Subordinates       func(ctx context.Context, headID string) ([]*agent.Agent, error)
+	CreateWorkItem     func(ctx context.Context, ownerID, origin, requestedBy, title string) (string, error)
+	TransitionWorkItem func(ctx context.Context, id, to, actor, detail string) error
+	PostRoom           func(ctx context.Context, roomID, senderID, senderType, content string)
+	PostHub            func(ctx context.Context, content string) bool
+	RunHeadRollup      func(ctx context.Context, headID, prompt string) (string, error)
+	BudgetOK           func(ctx context.Context, roomID string) bool
+	RecordTurn         func(ctx context.Context, roomID, agentID string)
+}
+
+// DelegateInput is one delegation request from a head's delegate_work tool call.
+type DelegateInput struct {
+	HeadID string
+	Worker string
+	Task   string
+	RoomID string
+	Depth  int
+}
+
+// DelegateResult is returned synchronously to the head's tool call.
+type DelegateResult struct {
+	WorkItemID string
+	WorkerKey  string
+	Error      string
+}
+
+// DelegateWork validates and runs a delegation: resolve+guard the worker, gate on
+// depth+budget, create the work item, post the hand-off note, run the L3, post its
+// report, close the work item, and roll a summary up to the hub. Synchronous.
+func (o *Orchestrator) DelegateWork(ctx context.Context, in DelegateInput) DelegateResult {
+	subs, err := o.Subordinates(ctx, in.HeadID)
+	if err != nil {
+		return DelegateResult{Error: "could not load your team"}
+	}
+	worker := ResolveMention(in.Worker, subs)
+	if worker == nil || !IsSubordinate(worker.ID, subs) {
+		return DelegateResult{Error: fmt.Sprintf("%q is not on your team — you can only delegate to your direct reports", in.Worker)}
+	}
+	budgetOK := o.BudgetOK(ctx, in.RoomID)
+	if !CanDelegate(in.Depth, MaxDelegationDepth, budgetOK) {
+		if !budgetOK {
+			return DelegateResult{Error: "this room has hit its activity limit for now — try again shortly"}
+		}
+		return DelegateResult{Error: "delegation depth limit reached — cannot delegate further from here"}
+	}
+
+	wiID, err := o.CreateWorkItem(ctx, worker.ID, "room:"+in.RoomID, in.HeadID, in.Task)
+	if err != nil {
+		return DelegateResult{Error: "could not create the work item"}
+	}
+	o.RecordTurn(ctx, in.RoomID, worker.ID)
+	o.PostRoom(ctx, in.RoomID, "system", "system", fmt.Sprintf("→ assigned to @%s: %s", worker.AgentKey, in.Task))
+
+	// Detach from the request context so a client disconnect can't strand the
+	// work item mid-chain — the L3 run + transitions must always complete.
+	o.runWorkerAndReport(context.WithoutCancel(ctx), RunMeta{RoomID: in.RoomID, WorkItemID: wiID, Depth: in.Depth + 1, HeadID: in.HeadID}, worker, in.Task)
+
+	return DelegateResult{WorkItemID: wiID, WorkerKey: worker.AgentKey}
+}
+
+// runWorkerAndReport runs the L3, posts its result in the room, closes the work
+// item (assigned→in_progress→done), and wakes the head once for the roll-up.
+func (o *Orchestrator) runWorkerAndReport(ctx context.Context, meta RunMeta, worker *agent.Agent, task string) {
+	result, err := o.Runner.Run(ctx, worker.ID, task)
+	if err != nil || result == "" {
+		o.PostRoom(ctx, meta.RoomID, worker.AgentKey, "soul", "I couldn't complete that — flagging it for review.")
+		if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "in_progress", worker.ID, "started"); terr != nil {
+			slog.Warn("rooms.delegation.transition_inprogress_failed", "work_item", meta.WorkItemID, "err", terr)
+		} else {
+			_ = o.TransitionWorkItem(ctx, meta.WorkItemID, "blocked", worker.ID, "run failed")
+		}
+		slog.Warn("rooms.delegation.worker_failed", "work_item", meta.WorkItemID, "err", err)
+		return
+	}
+	o.PostRoom(ctx, meta.RoomID, worker.AgentKey, "soul", result)
+	if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "in_progress", worker.ID, "started"); terr != nil {
+		slog.Warn("rooms.delegation.transition_inprogress_failed", "work_item", meta.WorkItemID, "err", terr)
+	} else if terr := o.TransitionWorkItem(ctx, meta.WorkItemID, "done", worker.ID, "reported"); terr != nil {
+		slog.Warn("rooms.delegation.transition_done_failed", "work_item", meta.WorkItemID, "err", terr)
+	}
+	o.rollUp(ctx, meta, worker, task)
+}
+
+// rollUp wakes the head summary-only and posts its one-line summary to the hub.
+func (o *Orchestrator) rollUp(ctx context.Context, meta RunMeta, worker *agent.Agent, task string) {
+	prompt := fmt.Sprintf("Your team member @%s just completed: %q. Post a single one-line completion summary for company leadership. No tools, just the summary line.", worker.AgentKey, task)
+	summary, err := o.RunHeadRollup(ctx, meta.HeadID, prompt)
+	if err != nil || summary == "" {
+		summary = fmt.Sprintf("✅ %s — completed by @%s", task, worker.AgentKey)
+	}
+	if !o.PostHub(ctx, summary) {
+		slog.Info("rooms.delegation.no_hub", "work_item", meta.WorkItemID)
+	}
 }
