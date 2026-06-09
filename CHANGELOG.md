@@ -4,6 +4,21 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.7.0-alpha — 2026-06-09
+
+### Added
+- **CFO runs your budget.** Your CFO agent can now propose budget allocations across departments, projects, and agents. You set how much autonomy it has — **ask me every time**, **act within a threshold** (small moves apply instantly, larger ones come to you), or **full authority**. Every change is validated against your hierarchy caps so nothing can over-spend. ([a20b675](https://github.com/QorvenAI/qorven/commit/a20b675), [3012d20](https://github.com/QorvenAI/qorven/commit/3012d20))
+- **A dedicated Budgets page.** Review and approve the CFO's proposals line by line, set the CFO's authority level, and see your effective-available reconciliation in one place. Pending approvals never stop work — agents keep running while you decide. ([c325740](https://github.com/QorvenAI/qorven/commit/c325740))
+- **Smart model assignment by role.** New agents are now given the right model for their job automatically: your CTO gets the best coding model, your CFO the best at math, and other officers the best all-round model — chosen only from the models you've enabled, and sized to the agent's budget (workers get efficient models, never premium). You can still change any agent's model yourself. ([405e8bd](https://github.com/QorvenAI/qorven/commit/405e8bd), [9f556f6](https://github.com/QorvenAI/qorven/commit/9f556f6))
+
+### Changed
+- Budget changes are now restricted to your CFO — other agents can no longer alter budgets. ([1ab878b](https://github.com/QorvenAI/qorven/commit/1ab878b))
+
+### Fixed
+- The model catalog now loads correctly — a data formatting issue had left it empty, which weakened automatic model selection across the platform. ([405e8bd](https://github.com/QorvenAI/qorven/commit/405e8bd))
+
+---
+
 ## v0.6.0-alpha — 2026-06-09
 
 ### Added
