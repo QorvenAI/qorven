@@ -226,6 +226,10 @@ func (gw *Gateway) handleDecideProposal(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 		return
 	}
+	// Stop the escalation ladder now that the user has decided.
+	if gw.reach != nil {
+		_ = gw.reach.Ack(r.Context(), "budget_proposal", proposalID)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "decided"})
 }
 
