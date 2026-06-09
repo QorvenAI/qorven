@@ -15,6 +15,10 @@ type fakeBudgetRepo struct {
 	tenantCapUUSD   int64
 	tenantSpentUUSD int64
 	warnPercent     int
+
+	projectCapUUSD, projectSpentUUSD int64
+	deptCapUUSD, deptSpentUUSD       int64
+	taskCapUUSD, taskSpentUUSD       int64
 }
 
 func (f *fakeBudgetRepo) AgentBudget(ctx context.Context, tenantID, agentID string) (int64, int64, int, bool) {
@@ -98,6 +102,65 @@ func TestEnforcer_WarnDedupedWithinTTL(t *testing.T) {
 	_ = e.Check(context.Background(), scope)
 	if warned != 1 {
 		t.Fatalf("expected exactly 1 warn within TTL window, got %d", warned)
+	}
+}
+
+func (f *fakeBudgetRepo) ProjectBudget(ctx context.Context, tenantID, projectID string) (int64, int64, int, bool) {
+	if f.projectCapUUSD == 0 && f.projectSpentUUSD == 0 {
+		return 0, 0, 0, false
+	}
+	return f.projectCapUUSD, f.projectSpentUUSD, f.warnPercent, true
+}
+func (f *fakeBudgetRepo) DepartmentBudget(ctx context.Context, tenantID, deptID string) (int64, int64, int, bool) {
+	if f.deptCapUUSD == 0 && f.deptSpentUUSD == 0 {
+		return 0, 0, 0, false
+	}
+	return f.deptCapUUSD, f.deptSpentUUSD, f.warnPercent, true
+}
+func (f *fakeBudgetRepo) TaskBudget(ctx context.Context, tenantID, taskID string) (int64, int64, int, bool) {
+	if f.taskCapUUSD == 0 && f.taskSpentUUSD == 0 {
+		return 0, 0, 0, false
+	}
+	return f.taskCapUUSD, f.taskSpentUUSD, f.warnPercent, true
+}
+
+func TestEnforcer_ProjectCapBlocks(t *testing.T) {
+	e := newTestEnforcer(&fakeBudgetRepo{projectCapUUSD: 5_000_000, projectSpentUUSD: 5_000_000})
+	if err := e.Check(context.Background(), providers.MeterScope{TenantID: "t", AgentID: "a", ProjectID: "p"}); err != ErrBudgetExceeded {
+		t.Fatalf("project at cap must block, got %v", err)
+	}
+}
+func TestEnforcer_DepartmentCapBlocks(t *testing.T) {
+	e := newTestEnforcer(&fakeBudgetRepo{deptCapUUSD: 5_000_000, deptSpentUUSD: 5_000_000})
+	if err := e.Check(context.Background(), providers.MeterScope{TenantID: "t", AgentID: "a", DepartmentID: "d"}); err != ErrBudgetExceeded {
+		t.Fatalf("department at cap must block, got %v", err)
+	}
+}
+func TestEnforcer_TaskCapBlocks(t *testing.T) {
+	e := newTestEnforcer(&fakeBudgetRepo{taskCapUUSD: 1_000_000, taskSpentUUSD: 1_000_000})
+	if err := e.Check(context.Background(), providers.MeterScope{TenantID: "t", AgentID: "a", TaskID: "k"}); err != ErrBudgetExceeded {
+		t.Fatalf("task at cap must block, got %v", err)
+	}
+}
+func TestEnforcer_AllScopesUnderCap_Passes(t *testing.T) {
+	e := newTestEnforcer(&fakeBudgetRepo{
+		agentCapUUSD: 10_000_000, agentSpentUUSD: 1_000_000,
+		projectCapUUSD: 10_000_000, projectSpentUUSD: 1_000_000,
+		deptCapUUSD: 10_000_000, deptSpentUUSD: 1_000_000,
+		taskCapUUSD: 10_000_000, taskSpentUUSD: 1_000_000,
+		tenantCapUUSD: 10_000_000, tenantSpentUUSD: 1_000_000,
+	})
+	s := providers.MeterScope{TenantID: "t", AgentID: "a", ProjectID: "p", DepartmentID: "d", TaskID: "k"}
+	if err := e.Check(context.Background(), s); err != nil {
+		t.Fatalf("all under cap must pass, got %v", err)
+	}
+}
+func TestEnforcer_NoHierarchyIDs_OnlyAgentTenantChecked(t *testing.T) {
+	e := newTestEnforcer(&fakeBudgetRepo{
+		projectCapUUSD: 1, projectSpentUUSD: 1, deptCapUUSD: 1, deptSpentUUSD: 1, taskCapUUSD: 1, taskSpentUUSD: 1,
+	})
+	if err := e.Check(context.Background(), providers.MeterScope{TenantID: "t", AgentID: "a"}); err != nil {
+		t.Fatalf("with no hierarchy ids on scope, hierarchy caps must not apply, got %v", err)
 	}
 }
 
