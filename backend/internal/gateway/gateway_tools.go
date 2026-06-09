@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -27,6 +28,7 @@ import (
 	"github.com/qorvenai/qorven/internal/providers"
 	"github.com/qorvenai/qorven/internal/qor/browser"
 	"github.com/qorvenai/qorven/internal/realtime"
+	"github.com/qorvenai/qorven/internal/rooms"
 	"github.com/qorvenai/qorven/internal/sandbox"
 	"github.com/qorvenai/qorven/internal/scraper"
 	"github.com/qorvenai/qorven/internal/search"
@@ -1115,6 +1117,25 @@ func (gw *Gateway) registerTools() {
 				return sb.String(), fmt.Errorf("one or more allocations could not be applied")
 			}
 			return sb.String(), nil
+		}
+
+		// delegate_work: a head assigns a piece of work to a subordinate, who does
+		// it and reports back in the room; a summary rolls up to the company hub.
+		tools.OnDelegateWork = func(ctx context.Context, headID, worker, task string) (string, error) {
+			if gw.delegation == nil {
+				return "", fmt.Errorf("delegation not available")
+			}
+			roomID := tools.RoomIDFromCtx(ctx)
+			if roomID == "" {
+				return "", fmt.Errorf("delegate_work can only be used inside a room")
+			}
+			res := gw.delegation.DelegateWork(ctx, rooms.DelegateInput{
+				HeadID: headID, Worker: worker, Task: task, RoomID: roomID, Depth: 0,
+			})
+			if res.Error != "" {
+				return "", errors.New(res.Error)
+			}
+			return fmt.Sprintf("Assigned to @%s — they'll report back here. (work item %s)", res.WorkerKey, res.WorkItemID), nil
 		}
 
 		// Forecast: project month-end spend + anomaly detection
