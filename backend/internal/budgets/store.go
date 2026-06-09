@@ -127,6 +127,8 @@ type BudgetScope struct {
 	AllocationMode string  `json:"allocation_mode"` // "carved" | "fresh"
 	ParentScope    string  `json:"parent_scope"`    // for carved: the scope this draws from
 	ParentScopeID  string  `json:"parent_scope_id"`
+	FundingMode    string  `json:"funding_mode"`    // tenant only: prepaid_fixed | monthly_recurring
+	LifetimeUSD    float64 `json:"lifetime_usd"`    // tenant prepaid_fixed cap
 }
 
 // scopeColumn maps a scope to its id column on gateway_budgets ("" for tenant).
@@ -170,14 +172,16 @@ func (s *Store) SetBudget(ctx context.Context, tenantID string, b BudgetScope) e
 			tenantID).Scan(&existing)
 		if existing != "" {
 			_, err := s.db.Exec(ctx,
-				`UPDATE gateway_budgets SET monthly_usd = $2, allocation_mode = $3 WHERE id = $1::uuid`,
-				existing, b.MonthlyUSD, mode)
+				`UPDATE gateway_budgets
+				 SET monthly_usd = $2, allocation_mode = $3, funding_mode = NULLIF($4,''), lifetime_usd = $5
+				 WHERE id = $1::uuid`,
+				existing, b.MonthlyUSD, mode, b.FundingMode, b.LifetimeUSD)
 			return err
 		}
 		_, err := s.db.Exec(ctx,
-			`INSERT INTO gateway_budgets (tenant_id, scope, monthly_usd, allocation_mode, parent_scope, parent_scope_id)
-			 VALUES ($1, 'tenant', $2, $3, NULLIF($4,''), NULLIF($5,'')::uuid)`,
-			tenantID, b.MonthlyUSD, mode, b.ParentScope, b.ParentScopeID)
+			`INSERT INTO gateway_budgets (tenant_id, scope, monthly_usd, allocation_mode, funding_mode, lifetime_usd)
+			 VALUES ($1, 'tenant', $2, $3, NULLIF($4,''), $5)`,
+			tenantID, b.MonthlyUSD, mode, b.FundingMode, b.LifetimeUSD)
 		return err
 	}
 	// department/project/agent row — find existing by (tenant, scope, id col)
