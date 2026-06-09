@@ -43,6 +43,9 @@ type KeyRecord struct {
 	BalanceUSD          *float64   `json:"balance_usd,omitempty"`       // prepaid: loaded balance
 	TokenQuotaMonthly   *int64     `json:"token_quota_monthly,omitempty"` // quota: monthly token cap
 
+	// Window is a user-declared usage window (OAuth/subscription). nil = none.
+	Window *UsageWindow `json:"-"`
+
 	encryptedKey []byte
 }
 
@@ -129,6 +132,9 @@ func (p *KeyPool) isAvailable(k *KeyRecord, now time.Time) bool {
 		return false
 	}
 	if k.RateLimitedUntil != nil && now.Before(*k.RateLimitedUntil) {
+		return false
+	}
+	if !k.Window.Available(now) {
 		return false
 	}
 
@@ -297,7 +303,38 @@ func (s *KeyPoolStore) ListKeys(ctx context.Context, tenantID, providerID string
 		)
 		keys = append(keys, k)
 	}
+	s.loadWindows(ctx, tenantID, keys)
 	return keys, nil
+}
+
+// loadWindows attaches any declared usage window to each key in the slice.
+func (s *KeyPoolStore) loadWindows(ctx context.Context, tenantID string, keys []*KeyRecord) {
+	if len(keys) == 0 {
+		return
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT key_id::text, window_kind, limit_count, used_count, window_resets_at
+		FROM provider_usage_windows WHERE tenant_id = $1 AND key_id IS NOT NULL
+	`, tenantID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	byKey := map[string]*UsageWindow{}
+	for rows.Next() {
+		var keyID, kind string
+		var limit, used int64
+		var resetsAt *time.Time
+		if rows.Scan(&keyID, &kind, &limit, &used, &resetsAt) != nil {
+			continue
+		}
+		byKey[keyID] = &UsageWindow{LimitCount: limit, UsedCount: used, ResetsAt: resetsAt, WindowKind: kind}
+	}
+	for _, k := range keys {
+		if w, ok := byKey[k.ID]; ok {
+			k.Window = w
+		}
+	}
 }
 
 // VerifyKey marks a key as verified.
