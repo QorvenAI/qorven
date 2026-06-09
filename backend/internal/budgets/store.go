@@ -118,3 +118,115 @@ func (s *Store) ListProjects(ctx context.Context, tenantID string) ([]Project, e
 	}
 	return out, rows.Err()
 }
+
+// BudgetScope identifies a node in the hierarchy a cap applies to.
+type BudgetScope struct {
+	Scope          string  `json:"scope"`           // "tenant" | "department" | "project" | "agent"
+	ScopeID        string  `json:"scope_id"`        // department/project/agent id; "" for tenant
+	MonthlyUSD     float64 `json:"monthly_usd"`
+	AllocationMode string  `json:"allocation_mode"` // "carved" | "fresh"
+	ParentScope    string  `json:"parent_scope"`    // for carved: the scope this draws from
+	ParentScopeID  string  `json:"parent_scope_id"`
+}
+
+// scopeColumn maps a scope to its id column on gateway_budgets ("" for tenant).
+func scopeColumn(scope string) string {
+	switch scope {
+	case "agent":
+		return "agent_id"
+	case "department":
+		return "department_id"
+	case "project":
+		return "project_id"
+	default:
+		return ""
+	}
+}
+
+// SetBudget upserts a cap for a scope. For carved allocations it validates that
+// the sum of carved sibling caps under the same parent plus this cap does not
+// exceed the parent cap. Returns ErrOverAllocated on violation.
+func (s *Store) SetBudget(ctx context.Context, tenantID string, b BudgetScope) error {
+	mode := b.AllocationMode
+	if mode == "" {
+		mode = "carved"
+	}
+	if mode == "carved" && b.ParentScope != "" {
+		parentCap, _ := s.scopeCapUSD(ctx, tenantID, b.ParentScope, b.ParentScopeID)
+		existing, _ := s.carvedChildrenSumUSD(ctx, tenantID, b.ParentScope, b.ParentScopeID, b.Scope, b.ScopeID)
+		if err := validateCarved(parentCap, existing, b.MonthlyUSD); err != nil {
+			return err
+		}
+	}
+	col := scopeColumn(b.Scope)
+	if col == "" {
+		// tenant-level row
+		var existing string
+		_ = s.db.QueryRow(ctx,
+			`SELECT id::text FROM gateway_budgets WHERE tenant_id = $1 AND scope = 'tenant' LIMIT 1`,
+			tenantID).Scan(&existing)
+		if existing != "" {
+			_, err := s.db.Exec(ctx,
+				`UPDATE gateway_budgets SET monthly_usd = $2, allocation_mode = $3 WHERE id = $1::uuid`,
+				existing, b.MonthlyUSD, mode)
+			return err
+		}
+		_, err := s.db.Exec(ctx,
+			`INSERT INTO gateway_budgets (tenant_id, scope, monthly_usd, allocation_mode, parent_scope, parent_scope_id)
+			 VALUES ($1, 'tenant', $2, $3, NULLIF($4,''), NULLIF($5,'')::uuid)`,
+			tenantID, b.MonthlyUSD, mode, b.ParentScope, b.ParentScopeID)
+		return err
+	}
+	// department/project/agent row — find existing by (tenant, scope, id col)
+	var existing string
+	_ = s.db.QueryRow(ctx, fmt.Sprintf(
+		`SELECT id::text FROM gateway_budgets WHERE tenant_id = $1 AND scope = $2 AND %s = $3::uuid LIMIT 1`, col),
+		tenantID, b.Scope, b.ScopeID).Scan(&existing)
+	if existing != "" {
+		_, err := s.db.Exec(ctx,
+			`UPDATE gateway_budgets SET monthly_usd = $2, allocation_mode = $3, parent_scope = NULLIF($4,''), parent_scope_id = NULLIF($5,'')::uuid WHERE id = $1::uuid`,
+			existing, b.MonthlyUSD, mode, b.ParentScope, b.ParentScopeID)
+		return err
+	}
+	_, err := s.db.Exec(ctx, fmt.Sprintf(
+		`INSERT INTO gateway_budgets (tenant_id, scope, %s, monthly_usd, allocation_mode, parent_scope, parent_scope_id)
+		 VALUES ($1, $2, $3::uuid, $4, $5, NULLIF($6,''), NULLIF($7,'')::uuid)`, col),
+		tenantID, b.Scope, b.ScopeID, b.MonthlyUSD, mode, b.ParentScope, b.ParentScopeID)
+	return err
+}
+
+// scopeCapUSD returns the monthly cap (USD) for a scope node, 0 if none.
+func (s *Store) scopeCapUSD(ctx context.Context, tenantID, scope, scopeID string) (float64, error) {
+	col := scopeColumn(scope)
+	var cap *float64
+	var err error
+	if col == "" {
+		err = s.db.QueryRow(ctx,
+			`SELECT monthly_usd FROM gateway_budgets WHERE tenant_id=$1 AND scope='tenant' LIMIT 1`,
+			tenantID).Scan(&cap)
+	} else {
+		err = s.db.QueryRow(ctx, fmt.Sprintf(
+			`SELECT monthly_usd FROM gateway_budgets WHERE tenant_id=$1 AND scope=$2 AND %s=$3::uuid LIMIT 1`, col),
+			tenantID, scope, scopeID).Scan(&cap)
+	}
+	if err != nil || cap == nil {
+		return 0, nil
+	}
+	return *cap, nil
+}
+
+// carvedChildrenSumUSD sums existing carved children caps under a parent,
+// EXCLUDING the row being updated (so re-setting a child isn't double-counted).
+func (s *Store) carvedChildrenSumUSD(ctx context.Context, tenantID, parentScope, parentScopeID, selfScope, selfScopeID string) (float64, error) {
+	var sum *float64
+	err := s.db.QueryRow(ctx, `
+		SELECT SUM(monthly_usd) FROM gateway_budgets
+		WHERE tenant_id = $1 AND allocation_mode = 'carved'
+		  AND parent_scope = $2 AND parent_scope_id = NULLIF($3,'')::uuid
+		  AND NOT (scope = $4 AND COALESCE(department_id::text, project_id::text, agent_id::text, '') = $5)
+	`, tenantID, parentScope, parentScopeID, selfScope, selfScopeID).Scan(&sum)
+	if err != nil || sum == nil {
+		return 0, nil
+	}
+	return *sum, nil
+}
