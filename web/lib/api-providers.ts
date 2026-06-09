@@ -117,6 +117,36 @@ export const providers = {
     request<void>(`/models/discovered/${id}/${action}`, { method: 'POST' }),
 };
 
+export const budgets = {
+  // Reconciliation: declared overall budget vs Σ provider-key allowances.
+  effective: () =>
+    request<{
+      declared_remaining_uusd: number;
+      provider_remaining_uusd: number;
+      effective_uusd: number;
+      binding: 'declared' | 'providers';
+      warnings: string[];
+    }>('/budgets/effective'),
+
+  // Set the overall (tenant) budget + funding mode.
+  setOverall: (body: {
+    funding_mode: 'prepaid_fixed' | 'monthly_recurring';
+    monthly_usd?: number;
+    lifetime_usd?: number;
+  }) =>
+    request<{ status: string }>('/budgets/scope', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'tenant', ...body }),
+    }),
+
+  // Declare a provider key's funding type + prepaid balance.
+  setKeyFunding: (keyId: string, body: { budget_type: string; balance_usd?: number }) =>
+    request<{ status: string }>(`/providers/keys/${keyId}/funding`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+};
+
 export interface RankedModel {
   rank: number;
   id: string;
