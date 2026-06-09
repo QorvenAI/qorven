@@ -501,6 +501,35 @@ func (gw *Gateway) registerTools() {
 				`INSERT INTO org_roster (tenant_id, agent_id, org_level, org_role, display_name, status, hired_by)
 				 VALUES ($1,$2,$3,$4,$5,'active',$6) ON CONFLICT DO NOTHING`,
 				defaultTenant, a.ID, orgLevel, orgRole, name, managerAgentID)
+			// Department wiring (S2 budget hierarchy):
+			//  - an L2 C-officer heads a department (auto-created once per org_role)
+			//  - an L3 worker inherits its manager's department
+			if gw.db != nil {
+				switch {
+				case orgLevel == "l2" && orgRole != "":
+					var deptID string
+					derr := gw.db.Pool.QueryRow(ctx,
+						`SELECT id::text FROM departments WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
+						defaultTenant, orgRole).Scan(&deptID)
+					if derr != nil || deptID == "" {
+						_ = gw.db.Pool.QueryRow(ctx,
+							`INSERT INTO departments (tenant_id, name, head_agent_id) VALUES ($1, $2, $3::uuid) RETURNING id::text`,
+							defaultTenant, orgRole, a.ID).Scan(&deptID)
+					} else {
+						gw.db.Pool.Exec(ctx, `UPDATE departments SET head_agent_id = $1 WHERE id = $2`, a.ID, deptID)
+					}
+					if deptID != "" {
+						gw.db.Pool.Exec(ctx, `UPDATE agents SET department_id = $1 WHERE id = $2`, deptID, a.ID)
+					}
+				case managerAgentID != "":
+					var mgrDept *string
+					gw.db.Pool.QueryRow(ctx,
+						`SELECT department_id::text FROM agents WHERE id = $1`, managerAgentID).Scan(&mgrDept)
+					if mgrDept != nil && *mgrDept != "" {
+						gw.db.Pool.Exec(ctx, `UPDATE agents SET department_id = $1 WHERE id = $2`, *mgrDept, a.ID)
+					}
+				}
+			}
 			// Activate runtime
 			if gw.runtimeMgr != nil {
 				gw.runtimeMgr.EnsureRuntime(a.ID, defaultTenant)
