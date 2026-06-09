@@ -4,6 +4,22 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.6.0-alpha — 2026-06-09
+
+### Added
+- **Budget governance — keep your AI spend under control.** A complete, corporate-style budget system runs across your whole workspace. Set an **overall budget** for the company, allocate it down to **departments, projects, and individual agents**, and even cap a single **task**. Every level enforces its limit, and spend rolls up the chain. ([d8…](https://github.com/QorvenAI/qorven/commit/c002b69))
+- **Every model call is now metered and capped.** All AI usage — your agents, their background work, memory upkeep, research, everything — is recorded to a precise, bank-grade ledger and checked against budgets before it runs. When a budget is hit, work pauses cleanly instead of running up a surprise bill. ([205c591](https://github.com/QorvenAI/qorven/commit/205c591), [25a9225](https://github.com/QorvenAI/qorven/commit/25a9225))
+- **Fund your budget your way.** Declare a **prepaid fixed amount** that depletes as you spend (the default — matches how most people top up provider credits) or a **monthly recurring** budget that resets each cycle. ([f246962](https://github.com/QorvenAI/qorven/commit/f246962))
+- **Effective-available reconciliation.** Qorven reconciles the budget you declared against what your connected provider keys actually allow, and shows your true spendable amount — with a clear warning when your declared budget is bigger than your keys can fund. View it on the **Provider Spend** page. ([4f5818a](https://github.com/QorvenAI/qorven/commit/4f5818a), [4e04c26](https://github.com/QorvenAI/qorven/commit/4e04c26))
+- **Departments and projects.** Each C-officer heads a department; workers inherit their manager's. Budgets can be **carved** from a parent pool (drawing it down) or granted as a **fresh** additive pool for a specific project. ([bbe7a55](https://github.com/QorvenAI/qorven/commit/bbe7a55), [e369a6c](https://github.com/QorvenAI/qorven/commit/e369a6c))
+- **Per-key funding controls.** Declare each provider key as prepaid (with a loaded balance), postpaid, quota, or free — and set a usage window (e.g. "N requests per 5 hours") for subscription/OAuth keys. ([25973f0](https://github.com/QorvenAI/qorven/commit/25973f0), [722acb2](https://github.com/QorvenAI/qorven/commit/722acb2))
+- **No more stalling on rate limits.** When a provider key hits its declared window or returns a rate-limit error, Qorven automatically routes around it to another key so your agents keep working. ([5247fd3](https://github.com/QorvenAI/qorven/commit/5247fd3), [dcee0f9](https://github.com/QorvenAI/qorven/commit/dcee0f9))
+
+### Changed
+- Spend is now tracked in exact micro-dollar precision across every usage path, so cost reporting and budget enforcement always agree. ([205c591](https://github.com/QorvenAI/qorven/commit/205c591))
+
+---
+
 ## v0.5.6-alpha — 2026-06-08
 
 ### Fixed
