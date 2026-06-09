@@ -41,6 +41,7 @@ func TestDelegateWorkTool_Execute_CallsCallback(t *testing.T) {
 
 func TestDelegateWorkTool_Execute_NoCallback(t *testing.T) {
 	OnDelegateWork = nil
+	defer func() { OnDelegateWork = nil }()
 	tl := NewDelegateWorkTool()
 	res := tl.Execute(context.Background(), map[string]any{"worker": "eng", "task": "x"})
 	if res == nil || !res.IsError {
