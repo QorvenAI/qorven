@@ -56,26 +56,32 @@ func (l ProposalLine) ToBudgetScope() BudgetScope {
 
 // CreateProposal inserts a proposal + its lines and returns the proposal id.
 func (s *Store) CreateProposal(ctx context.Context, tenantID, proposedBy, reason string, lines []ProposalLine) (string, error) {
-	var id string
-	err := s.db.QueryRow(ctx,
-		`INSERT INTO budget_allocation_proposals (tenant_id, proposed_by, reason)
-		 VALUES ($1, NULLIF($2,'')::uuid, $3) RETURNING id::text`,
-		tenantID, proposedBy, reason).Scan(&id)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
+	defer tx.Rollback(ctx) // no-op after commit
+	var id string
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO budget_allocation_proposals (tenant_id, proposed_by, reason)
+		 VALUES ($1, NULLIF($2,'')::uuid, $3) RETURNING id::text`,
+		tenantID, proposedBy, reason).Scan(&id); err != nil {
+		return "", err
+	}
 	for _, l := range lines {
-		_, e := s.db.Exec(ctx, `
+		if _, e := tx.Exec(ctx, `
 			INSERT INTO budget_allocation_lines
 			  (proposal_id, scope, scope_id, proposed_monthly_usd, proposed_lifetime_usd, proposed_pct,
 			   allocation_mode, parent_scope, parent_scope_id, funding_mode)
 			VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, $4, $5, NULLIF($6,0),
 			        $7, NULLIF($8,''), NULLIF($9,'')::uuid, NULLIF($10,''))
 		`, id, l.Scope, l.ScopeID, l.ProposedMonthlyUSD, l.ProposedLifetimeUSD, l.ProposedPct,
-			l.AllocationMode, l.ParentScope, l.ParentScopeID, l.FundingMode)
-		if e != nil {
-			return id, e
+			l.AllocationMode, l.ParentScope, l.ParentScopeID, l.FundingMode); e != nil {
+			return "", e
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
 	}
 	return id, nil
 }
@@ -139,6 +145,7 @@ func (s *Store) proposalLines(ctx context.Context, proposalID string) ([]Proposa
 // DecideProposal applies per-line decisions: approved lines are written through
 // the validated SetBudget (carved over-allocation marks that line rejected with
 // a note and continues). Sets the proposal's final status.
+// A line whose ID is not present in decisions is treated as rejected.
 func (s *Store) DecideProposal(ctx context.Context, tenantID, proposalID, decidedBy string, decisions []LineDecision) error {
 	lines, err := s.proposalLines(ctx, proposalID)
 	if err != nil {
@@ -158,9 +165,9 @@ func (s *Store) DecideProposal(ctx context.Context, tenantID, proposalID, decide
 		}
 		if applyErr := s.SetBudget(ctx, tenantID, l.ToBudgetScope()); applyErr != nil {
 			anyRejected = true
-			note := applyErr.Error()
+			note := "rejected: could not apply allocation"
 			if errors.Is(applyErr, ErrOverAllocated) {
-				note = "rejected: " + note
+				note = "rejected: " + applyErr.Error() // ErrOverAllocated is a safe, user-facing sentinel
 			}
 			_, _ = s.db.Exec(ctx, `UPDATE budget_allocation_lines SET status='rejected', decision_note=$2 WHERE id=$1::uuid`, l.ID, note)
 			continue
