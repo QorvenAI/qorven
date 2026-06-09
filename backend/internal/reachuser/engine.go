@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// deliveryRetryBackoff is how long Tick waits before retrying a rung whose
+// delivery failed, so a broken channel doesn't hot-loop the ticker.
+const deliveryRetryBackoff = 60 * time.Second
+
 // Deliverer performs the actual delivery for one rung and reports presence.
 // Implemented by the gateway (in-app notification, IM channel send, email).
 type Deliverer interface {
@@ -90,10 +94,13 @@ func (e *Engine) Tick(ctx context.Context) error {
 			continue
 		}
 		if derr := e.deliv.Deliver(ctx, esc, d.DeliverRung, d.Channel); derr != nil {
+			// Delivery failed: log it and retry this same rung after a short back-off,
+			// rather than hot-looping every tick against a broken channel.
 			e.store.LogStep(ctx, esc.ID, d.DeliverRung, d.Channel, "failed", derr.Error())
-		} else {
-			e.store.LogStep(ctx, esc.ID, d.DeliverRung, d.Channel, "delivered", "")
+			e.store.Advance(ctx, esc.ID, esc.CurrentRung, e.now().Add(deliveryRetryBackoff))
+			continue
 		}
+		e.store.LogStep(ctx, esc.ID, d.DeliverRung, d.Channel, "delivered", "")
 		next := nextAdvance(e.now(), esc.Urgency, d)
 		if next.IsZero() {
 			// Last rung delivered with no further advance → record final rung, then finish.

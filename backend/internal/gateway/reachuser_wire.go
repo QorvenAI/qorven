@@ -6,10 +6,13 @@ package gateway
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/smtp"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/qorvenai/qorven/internal/presence"
@@ -84,10 +87,55 @@ func (d *reachDeliverer) deliverEmail(ctx context.Context, e reachuser.Escalatio
 	if to == "" {
 		return fmt.Errorf("no email for user")
 	}
-	body := fmt.Sprintf("Subject: %s\r\nFrom: %s\r\nTo: %s\r\n\r\n%s\r\n", e.Title, from, to, e.Body)
+	// Strip CR/LF from the subject to prevent header injection.
+	subject := strings.ReplaceAll(strings.ReplaceAll(e.Title, "\r", ""), "\n", " ")
+	body := fmt.Sprintf("Subject: %s\r\nFrom: %s\r\nTo: %s\r\n\r\n%s\r\n", subject, from, to, e.Body)
 	addr := fmt.Sprintf("%s:%d", host, port)
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("smtp dial: %w", err)
+	}
+	// Port 465 is implicit TLS (SMTPS); STARTTLS ports negotiate after greeting.
+	if port == 465 {
+		conn = tls.Client(conn, &tls.Config{ServerName: host})
+	}
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("smtp client: %w", err)
+	}
+	defer client.Close()
+	if port != 465 {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err := client.StartTLS(&tls.Config{ServerName: host}); err != nil {
+				return fmt.Errorf("smtp starttls: %w", err)
+			}
+		}
+	}
 	auth := smtp.PlainAuth("", user, pass, host)
-	return smtp.SendMail(addr, auth, from, []string{to}, []byte(body))
+	if ok, _ := client.Extension("AUTH"); ok {
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("smtp mail: %w", err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("smtp rcpt: %w", err)
+	}
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("smtp data: %w", err)
+	}
+	if _, err := w.Write([]byte(body)); err != nil {
+		return fmt.Errorf("smtp write: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("smtp close: %w", err)
+	}
+	return client.Quit()
 }
 
 // smtpSettings returns SMTP host/port/user/pass/from from config or env.

@@ -81,6 +81,45 @@ func TestEngine_Tick_AdvancesDueToIMThenEmailThenExhausts(t *testing.T) {
 	}
 }
 
+func TestEngine_Tick_FailedDeliveryRetriesSameRung(t *testing.T) {
+	pool := storeTestPool(t)
+	ctx := context.Background()
+	st := NewStore(pool)
+	tenant := "00000000-0000-0000-0000-0000000000cf"
+	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM escalations WHERE tenant_id=$1", tenant) })
+
+	fd := &fakeDeliverer{online: false, failIM: true}
+	now := time.Now()
+	clock := now
+	eng := NewEngine(st, fd, func() time.Time { return clock })
+	id, _ := eng.Open(ctx, Escalation{TenantID: tenant, UserID: "u1", Kind: "notification", RefID: "nf", Urgency: "normal"})
+
+	// climb to IM (which fails)
+	clock = now.Add(6 * time.Minute)
+	fd.delivered = nil
+	eng.Tick(ctx)
+	if len(fd.delivered) != 1 || fd.delivered[0] != ChannelIM {
+		t.Fatalf("expected IM attempt, got %v", fd.delivered)
+	}
+	got, _ := st.get(ctx, id)
+	if got.Status != "pending" || got.CurrentRung != 1 {
+		t.Fatalf("after failed IM want pending rung1 (retry same step), got status %s rung %d", got.Status, got.CurrentRung)
+	}
+	// not due yet (backed off 60s); a tick now does nothing
+	fd.delivered = nil
+	eng.Tick(ctx)
+	if len(fd.delivered) != 0 {
+		t.Errorf("should not retry before back-off elapses, got %v", fd.delivered)
+	}
+	// after back-off, IM retried
+	clock = clock.Add(61 * time.Second)
+	fd.failIM = false
+	eng.Tick(ctx)
+	if len(fd.delivered) != 1 || fd.delivered[0] != ChannelIM {
+		t.Errorf("expected IM retry after back-off, got %v", fd.delivered)
+	}
+}
+
 func TestEngine_Ack_StopsClimb(t *testing.T) {
 	pool := storeTestPool(t)
 	ctx := context.Background()
