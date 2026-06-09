@@ -72,6 +72,10 @@ func (e *Engine) Open(ctx context.Context, esc Escalation) (string, error) {
 		return "", err
 	}
 	esc.ID = id
+	// NOTE: the row is persisted before rung-1 delivery, so if delivery fails the
+	// ticker still picks it up. For urgent escalations (next_advance_at=now) that means
+	// the climb to IM can begin without a successful in-app delivery — an accepted
+	// best-effort trade-off (the escalation is never silently lost).
 	// Deliver rung 1 now (best-effort; a delivery failure still records the escalation).
 	if derr := e.deliv.Deliver(ctx, esc, d.DeliverRung, d.Channel); derr != nil {
 		e.store.LogStep(ctx, id, d.DeliverRung, d.Channel, "failed", derr.Error())

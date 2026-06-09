@@ -72,6 +72,10 @@ func (d *reachDeliverer) deliverIM(ctx context.Context, e reachuser.Escalation) 
 	if e.Body != "" {
 		msg += "\n\n" + e.Body
 	}
+	// NOTE: SendToChannel returns nil if the named channel isn't currently running,
+	// so a "delivered" outcome here means "handed to the channel manager", not a
+	// guaranteed receipt. Mirrors task_coordinator.escalateIfOffline. (Phase B may add
+	// real delivery receipts.)
 	return d.gw.chanMgr.SendToChannel(ctx, channel, chatID, msg)
 }
 

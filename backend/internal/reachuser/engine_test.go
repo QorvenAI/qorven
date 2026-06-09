@@ -143,3 +143,33 @@ func TestEngine_Ack_StopsClimb(t *testing.T) {
 		t.Errorf("acked escalation must not deliver further, got %v", fd.delivered)
 	}
 }
+
+func TestEngine_Urgent_ClimbsImmediatelyOnTick(t *testing.T) {
+	pool := storeTestPool(t)
+	ctx := context.Background()
+	st := NewStore(pool)
+	tenant := "00000000-0000-0000-0000-0000000000d0"
+	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM escalations WHERE tenant_id=$1", tenant) })
+
+	fd := &fakeDeliverer{online: false}
+	now := time.Now()
+	eng := NewEngine(st, fd, func() time.Time { return now }) // clock does NOT advance
+
+	// Urgent open delivers in-app and stores next_advance_at=now (immediately due).
+	eng.Open(ctx, Escalation{TenantID: tenant, UserID: "u1", Kind: "notification", RefID: "ug", Urgency: "urgent"})
+	if len(fd.delivered) != 1 || fd.delivered[0] != ChannelInApp {
+		t.Fatalf("urgent open: want in-app, got %v", fd.delivered)
+	}
+	// First tick (same clock) → IM fires immediately (no wait).
+	fd.delivered = nil
+	eng.Tick(ctx)
+	if len(fd.delivered) != 1 || fd.delivered[0] != ChannelIM {
+		t.Fatalf("urgent tick1: want IM immediately, got %v", fd.delivered)
+	}
+	// Next tick (same clock) → email fires immediately, then exhausted.
+	fd.delivered = nil
+	eng.Tick(ctx)
+	if len(fd.delivered) != 1 || fd.delivered[0] != ChannelEmail {
+		t.Fatalf("urgent tick2: want email immediately, got %v", fd.delivered)
+	}
+}

@@ -253,6 +253,21 @@ func (gw *Gateway) handleMarkAllNotificationsRead(w http.ResponseWriter, r *http
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 		return
 	}
+	// Ack any escalations whose notifications are being cleared, so "mark all read"
+	// honors "one acknowledgement cancels all" and stops further IM/email climbs.
+	if gw.reach != nil && gw.db != nil {
+		rows, err := gw.db.Pool.Query(r.Context(),
+			`SELECT COALESCE(source,''), COALESCE(source_id,'') FROM notifications WHERE read = false AND source_id <> ''`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var src, srcID string
+				if rows.Scan(&src, &srcID) == nil && srcID != "" {
+					gw.reach.Ack(r.Context(), src, srcID)
+				}
+			}
+		}
+	}
 	gw.notifStore.MarkAllRead(r.Context())
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
