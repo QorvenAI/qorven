@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp, ShieldCheck, Key, Zap, BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { providers as providersApi } from '@/lib/api';
+import { providers as providersApi, budgets } from '@/lib/api';
 import { extractErrorMessage } from '@/lib/api-core';
 import { toast } from 'sonner';
 
@@ -207,6 +207,8 @@ function ProviderCard({ provider, selectedModels, onVerify, onDelete, onSelectio
   const [savingPool, setSavingPool] = useState(false);
   const [budgetKey, setBudgetKey] = useState<string | null>(null);
   const [budgetForm, setBudgetForm] = useState<{ usd: string; tokens: string }>({ usd: '', tokens: '' });
+  const [fundingForm, setFundingForm] = useState<{ type: 'prepaid' | 'postpaid' | 'quota' | 'free'; balance: string }>({ type: 'prepaid', balance: '' });
+  const [savingFunding, setSavingFunding] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [liveModels, setLiveModels] = useState<LiveModel[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -265,6 +267,20 @@ function ProviderCard({ provider, selectedModels, onVerify, onDelete, onSelectio
       setBudgetKey(null);
       loadKeys();
     } catch { toast.error('Could not save budget. Please try again.'); }
+  };
+
+  const saveFunding = async (keyId: string) => {
+    setSavingFunding(true);
+    try {
+      const body: { budget_type: string; balance_usd?: number } = { budget_type: fundingForm.type };
+      if (fundingForm.type === 'prepaid' && fundingForm.balance) {
+        body.balance_usd = parseFloat(fundingForm.balance);
+      }
+      await budgets.setKeyFunding(keyId, body);
+      toast.success('Funding saved');
+      loadKeys();
+    } catch { toast.error('Could not save funding. Please try again.'); }
+    finally { setSavingFunding(false); }
   };
 
   const saveKey = async () => {
@@ -463,7 +479,7 @@ function ProviderCard({ provider, selectedModels, onVerify, onDelete, onSelectio
                         className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors disabled:opacity-40">
                         {testingKey === k.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
                       </button>
-                      <button onClick={() => { setBudgetKey(budgetKey === k.id ? null : k.id); setBudgetForm({ usd: (k as any).budget_usd_monthly?.toString() ?? '', tokens: (k as any).budget_tokens_monthly?.toString() ?? '' }); }}
+                      <button onClick={() => { setBudgetKey(budgetKey === k.id ? null : k.id); setBudgetForm({ usd: (k as any).budget_usd_monthly?.toString() ?? '', tokens: (k as any).budget_tokens_monthly?.toString() ?? '' }); setFundingForm({ type: ((k as any).budget_type as 'prepaid' | 'postpaid' | 'quota' | 'free') || 'prepaid', balance: (k as any).balance_usd?.toString() ?? '' }); }}
                         title="Set budget" className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-amber-400 hover:bg-accent cursor-pointer transition-colors">
                         <BarChart3 className="h-3 w-3" />
                       </button>
@@ -500,6 +516,35 @@ function ProviderCard({ provider, selectedModels, onVerify, onDelete, onSelectio
                           </button>
                           <button onClick={() => setBudgetKey(null)}
                             className="rounded-md border border-border px-3 py-1 text-xs hover:bg-accent cursor-pointer">Cancel</button>
+                        </div>
+
+                        <div className="pt-2 mt-1 border-t border-amber-400/20 space-y-2">
+                          <p className="text-xs font-semibold text-amber-400">Funding</p>
+                          <div className={cn('grid gap-2', fundingForm.type === 'prepaid' ? 'grid-cols-2' : 'grid-cols-1')}>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Type</label>
+                              <select value={fundingForm.type}
+                                onChange={e => setFundingForm(p => ({ ...p, type: e.target.value as 'prepaid' | 'postpaid' | 'quota' | 'free' }))}
+                                className="qr-select text-xs">
+                                <option value="prepaid">Prepaid (loaded balance)</option>
+                                <option value="postpaid">Postpaid (pay as you go)</option>
+                                <option value="quota">Quota (token allowance)</option>
+                                <option value="free">Free tier</option>
+                              </select>
+                            </div>
+                            {fundingForm.type === 'prepaid' && (
+                              <div>
+                                <label className="text-xs text-muted-foreground">Balance (USD)</label>
+                                <input value={fundingForm.balance} onChange={e => setFundingForm(p => ({ ...p, balance: e.target.value }))}
+                                  placeholder="e.g. 25.00" type="number" min="0" step="0.01"
+                                  className="qr-input text-xs" />
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => saveFunding(k.id)} disabled={savingFunding}
+                            className="flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+                            {savingFunding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Save Funding
+                          </button>
                         </div>
                       </div>
                     )}
