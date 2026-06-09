@@ -232,7 +232,19 @@ func (gw *Gateway) handleMarkNotificationRead(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 		return
 	}
-	gw.notifStore.MarkRead(r.Context(), chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	gw.notifStore.MarkRead(r.Context(), id)
+	// Ack any matching reach-the-user escalation so its ladder climb stops.
+	// deliverInApp stores e.Kind as the notification source and e.RefID as
+	// the source_id, which is exactly the engine's ack key (kind, refID).
+	if gw.reach != nil && gw.db != nil {
+		var source, sourceID string
+		if err := gw.db.Pool.QueryRow(r.Context(),
+			`SELECT COALESCE(source,''), COALESCE(source_id,'') FROM notifications WHERE id=$1`, id,
+		).Scan(&source, &sourceID); err == nil && sourceID != "" {
+			gw.reach.Ack(r.Context(), source, sourceID)
+		}
+	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
