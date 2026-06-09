@@ -28,3 +28,30 @@ func TestCarvedAllocation_ZeroParentMeansUnlimited(t *testing.T) {
 		t.Fatalf("unlimited parent must allow any carved child, got %v", err)
 	}
 }
+
+func TestReconcile_DeclaredIsBinding(t *testing.T) {
+	r := reconcile(50_000_000, 200_000_000) // declared 50, providers 200
+	if r.EffectiveUUSD != 50_000_000 || r.Binding != "declared" {
+		t.Fatalf("declared should bind: %+v", r)
+	}
+	if len(r.Warnings) != 0 {
+		t.Fatalf("no warning when declared <= providers, got %v", r.Warnings)
+	}
+}
+
+func TestReconcile_ProvidersAreBinding_Warns(t *testing.T) {
+	r := reconcile(200_000_000, 50_000_000) // declared 200, providers only 50
+	if r.EffectiveUUSD != 50_000_000 || r.Binding != "providers" {
+		t.Fatalf("providers should bind: %+v", r)
+	}
+	if len(r.Warnings) == 0 {
+		t.Fatalf("expected a warning when declared exceeds provider allowance")
+	}
+}
+
+func TestReconcile_EqualPrefersDeclared(t *testing.T) {
+	r := reconcile(50_000_000, 50_000_000)
+	if r.EffectiveUUSD != 50_000_000 || r.Binding != "declared" {
+		t.Fatalf("equal should report declared binding: %+v", r)
+	}
+}

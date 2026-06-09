@@ -237,3 +237,35 @@ func (s *Store) carvedChildrenSumUSD(ctx context.Context, tenantID, parentScope,
 	}
 	return *sum, nil
 }
+
+// EffectiveAvailableResult is the reconciliation of the declared overall
+// budget against what the connected provider keys actually allow. All money
+// is integer µUSD.
+type EffectiveAvailableResult struct {
+	DeclaredRemainingUUSD int64    `json:"declared_remaining_uusd"`
+	ProviderRemainingUUSD int64    `json:"provider_remaining_uusd"`
+	EffectiveUUSD         int64    `json:"effective_uusd"`
+	Binding               string   `json:"binding"` // "declared" | "providers"
+	Warnings              []string `json:"warnings"`
+}
+
+// reconcile computes effective-available = min(declared, providers) and the
+// binding constraint. On ties, declared binds. Warns when the declared budget
+// exceeds the provider allowance (the keys can't actually fund it).
+func reconcile(declaredRemainingUUSD, providerRemainingUUSD int64) EffectiveAvailableResult {
+	res := EffectiveAvailableResult{
+		DeclaredRemainingUUSD: declaredRemainingUUSD,
+		ProviderRemainingUUSD: providerRemainingUUSD,
+		Warnings:              []string{},
+	}
+	if providerRemainingUUSD < declaredRemainingUUSD {
+		res.EffectiveUUSD = providerRemainingUUSD
+		res.Binding = "providers"
+		res.Warnings = append(res.Warnings,
+			"declared budget exceeds the available provider-key allowance; effective budget is limited by your provider keys")
+	} else {
+		res.EffectiveUUSD = declaredRemainingUUSD
+		res.Binding = "declared"
+	}
+	return res
+}
