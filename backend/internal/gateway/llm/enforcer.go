@@ -157,31 +157,62 @@ func (r *pgBudgetRepo) AgentBudget(ctx context.Context, tenantID, agentID string
 }
 
 func (r *pgBudgetRepo) TenantBudget(ctx context.Context, tenantID string) (int64, int64, int, bool) {
-	var monthlyUSD *float64
+	var monthlyUSD, lifetimeUSD *float64
+	var fundingMode *string
 	var warnPct *int
 	err := r.db.QueryRow(ctx, `
-		SELECT monthly_usd, warn_percent
+		SELECT monthly_usd, lifetime_usd, funding_mode, warn_percent
 		FROM gateway_budgets
 		WHERE tenant_id = $1 AND scope = 'tenant'
 		LIMIT 1
-	`, tenantID).Scan(&monthlyUSD, &warnPct)
-	if err != nil || monthlyUSD == nil {
+	`, tenantID).Scan(&monthlyUSD, &lifetimeUSD, &fundingMode, &warnPct)
+	if err != nil {
 		return 0, 0, 0, false
 	}
-	capUUSD := int64(*monthlyUSD * float64(uusdPerUSD))
-	var spent *int64
+	mode := ""
+	if fundingMode != nil {
+		mode = *fundingMode
+	}
+	var mUSD, lUSD float64
+	if monthlyUSD != nil {
+		mUSD = *monthlyUSD
+	}
+	if lifetimeUSD != nil {
+		lUSD = *lifetimeUSD
+	}
+	// If the cap for the active mode is unset, treat as uncapped.
+	if (mode == "prepaid_fixed" && lUSD <= 0) || (mode != "prepaid_fixed" && mUSD <= 0) {
+		return 0, 0, 0, false
+	}
+
+	// Month-to-date spend.
+	var mtd *int64
 	_ = r.db.QueryRow(ctx, `
 		SELECT SUM(cost_total_uusd) FILTER (WHERE period >= date_trunc('month', CURRENT_DATE))
 		FROM gateway_spend WHERE tenant_id = $1
-	`, tenantID).Scan(&spent)
+	`, tenantID).Scan(&mtd)
+	// All-time spend (for prepaid_fixed deplete).
+	var allTime *int64
+	_ = r.db.QueryRow(ctx, `
+		SELECT SUM(cost_total_uusd) FROM gateway_spend WHERE tenant_id = $1
+	`, tenantID).Scan(&allTime)
+
+	var mtdU, allU int64
+	if mtd != nil {
+		mtdU = *mtd
+	}
+	if allTime != nil {
+		allU = *allTime
+	}
+	capUUSD, spentUUSD := tenantCapAndSpent(mode, mUSD, lUSD, mtdU, allU)
 	wp := 80
 	if warnPct != nil {
 		wp = *warnPct
 	}
-	if spent == nil {
-		return capUUSD, 0, wp, true
+	if capUUSD <= 0 {
+		return 0, 0, 0, false
 	}
-	return capUUSD, *spent, wp, true
+	return capUUSD, spentUUSD, wp, true
 }
 
 func (r *pgBudgetRepo) ProjectBudget(ctx context.Context, tenantID, projectID string) (int64, int64, int, bool) {
