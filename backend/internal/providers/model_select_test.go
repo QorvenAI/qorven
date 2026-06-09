@@ -48,3 +48,31 @@ func TestBestForTierByIndex_NoneEnabledReturnsNil(t *testing.T) {
 		t.Fatalf("no enabled candidate should return nil, got %v", m)
 	}
 }
+
+func TestIndexForRole(t *testing.T) {
+	cases := map[string]string{
+		"cto": "coding_index", "cfo": "math_index",
+		"coo": "intelligence_index", "cmo": "intelligence_index", "": "intelligence_index",
+	}
+	for role, want := range cases {
+		if got := IndexForRole(role); got != want {
+			t.Fatalf("IndexForRole(%q)=%q want %q", role, got, want)
+		}
+	}
+}
+
+func TestSelectModelForHire_CLevelUsesIndex(t *testing.T) {
+	c := makeTestCatalog()
+	got := SelectModelForHire(c, "cto", "complex", []string{"p1"}, map[string]bool{})
+	if got != "code-king" {
+		t.Fatalf("CTO should get the top coding model, got %q", got)
+	}
+}
+
+func TestSelectModelForHire_NothingEnabledReturnsEmpty(t *testing.T) {
+	c := makeTestCatalog()
+	got := SelectModelForHire(c, "cto", "complex", []string{"p1"}, map[string]bool{"none": true})
+	if got != "" {
+		t.Fatalf("no enabled model should return empty (caller stores auto), got %q", got)
+	}
+}
