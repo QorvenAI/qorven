@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { IconBadge } from '@/components/ui/badge';
 import {
   PanelLeftClose, PanelLeft, Bell, MessageSquare, Activity,
-  SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio, Package, Menu,
+  SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio, Package, Menu, Search,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { SoulActivity } from '@/types';
@@ -184,7 +184,27 @@ export function Header() {
           )}
         </div>
 
-        {/* CENTER: pinned topbar apps */}
+        {/* CENTER: global search trigger */}
+        <div className="flex flex-1 items-center justify-center px-2 min-w-0">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('qorven:command-palette'))}
+            title="Search agents, hubs, files… (⌘K)"
+            className="hidden md:flex h-8.5 w-full max-w-md items-center gap-2 rounded-md border border-border bg-muted/40 px-3 text-2sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <Search className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1 text-left truncate">Search agents, hubs, anything…</span>
+            <kbd className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-2xs font-medium">⌘K</kbd>
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('qorven:command-palette'))}
+            title="Search (⌘K)"
+            className="md:hidden flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <Search className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+
+        {/* pinned topbar apps */}
         {pinnedTopbarApps.length > 0 && (
           <TooltipProvider delayDuration={200}>
             <nav className="flex items-center gap-1 shrink-0">

@@ -93,8 +93,14 @@ export function CommandPalette() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setOpen(o => !o); }
       if (e.key === 'Escape') setOpen(false);
     };
+    // Lets non-keyboard triggers (e.g. the canvas search button) open the palette.
+    const openHandler = () => setOpen(true);
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('qorven:command-palette', openHandler);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener('qorven:command-palette', openHandler);
+    };
   }, []);
 
   useEffect(() => {
