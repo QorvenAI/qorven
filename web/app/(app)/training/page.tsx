@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader2, AlertCircle } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { agents, training, BASE, getToken } from '@/lib/api';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -58,9 +58,8 @@ export default function TrainingPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load training page">
-      <div className="space-y-6">
-        <CanvasHeader title="Training Data" description="Export conversations to improve your AI models." />
-
+      <PageShell title="Training Data" description="Export conversations to improve your AI models.">
+        <div className="space-y-6">
         {/* Format picker */}
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
           <span className="text-xs font-medium text-muted-foreground">Export format:</span>
@@ -135,7 +134,8 @@ export default function TrainingPage() {
             </table>
           </div>
         )}
-      </div>
+        </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }
