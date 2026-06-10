@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, User, Bot, Settings, Zap,
   AlertTriangle, Plus, Trash2, Edit3, RefreshCw, Search, Filter,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { request } from '@/lib/api-core';
 import { relativeTime } from '@/lib/relative-time';
@@ -128,72 +128,69 @@ export default function AuditPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="p-6 pb-0">
-        <CanvasHeader
-          title="Work Log"
-          description="Every action tracked — agent tool calls, user changes, system events"
-        />
-      </div>
-
-      {/* Filters */}
-      <div className="px-6 py-3 flex flex-wrap gap-2 items-center border-b border-border">
-        {/* Actor type filter */}
-        <select
-          value={actorType}
-          onChange={e => { setActorType(e.target.value); setPage(0); }}
-          className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
-        >
-          <option value="">Anyone</option>
-          <option value="user">You</option>
-          <option value="agent">Agent</option>
-          <option value="system">System</option>
-        </select>
-
-        {/* Resource filter */}
-        <select
-          value={resource}
-          onChange={e => { setResource(e.target.value); setPage(0); }}
-          className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
-        >
-          <option value="">All areas</option>
-          {['agents','sessions','tasks','connections','connectors','workflows','credentials','providers','tool'].map(r =>
-            <option key={r} value={r}>{RESOURCE_LABELS[r] ?? r}</option>
-          )}
-        </select>
-
-        {/* Action filter */}
-        <select
-          value={action}
-          onChange={e => { setAction(e.target.value); setPage(0); }}
-          className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
-        >
-          <option value="">All activity</option>
-          {['create','update','delete','tool_exec','tool_error'].map(a =>
-            <option key={a} value={a}>{ACTION_META[a]?.label ?? a}</option>
-          )}
-        </select>
-
-        {/* Search by actor ID / agent key */}
-        <div className="flex items-center gap-1 ml-auto">
-          <input
-            value={searchInput}
-            onChange={e => setSearchInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && applySearch()}
-            placeholder="Filter by agent or user…"
-            className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm w-48"
-          />
-          <button
-            onClick={applySearch}
-            className="rounded-lg border border-input px-2 py-1.5 hover:bg-accent transition-colors"
+    <PageShell
+      title="Work Log"
+      description="Every action tracked — agent tool calls, user changes, system events"
+      contentClassName="flex flex-col overflow-hidden px-0 py-0 sm:px-0"
+      toolbar={
+        <>
+          {/* Actor type filter */}
+          <select
+            value={actorType}
+            onChange={e => { setActorType(e.target.value); setPage(0); }}
+            className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
           >
-            <Search className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-        </div>
+            <option value="">Anyone</option>
+            <option value="user">You</option>
+            <option value="agent">Agent</option>
+            <option value="system">System</option>
+          </select>
 
-        <span className="text-xs text-muted-foreground pl-2">{total.toLocaleString()} events</span>
-      </div>
+          {/* Resource filter */}
+          <select
+            value={resource}
+            onChange={e => { setResource(e.target.value); setPage(0); }}
+            className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
+          >
+            <option value="">All areas</option>
+            {['agents','sessions','tasks','connections','connectors','workflows','credentials','providers','tool'].map(r =>
+              <option key={r} value={r}>{RESOURCE_LABELS[r] ?? r}</option>
+            )}
+          </select>
 
+          {/* Action filter */}
+          <select
+            value={action}
+            onChange={e => { setAction(e.target.value); setPage(0); }}
+            className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm"
+          >
+            <option value="">All activity</option>
+            {['create','update','delete','tool_exec','tool_error'].map(a =>
+              <option key={a} value={a}>{ACTION_META[a]?.label ?? a}</option>
+            )}
+          </select>
+
+          {/* Search by actor ID / agent key */}
+          <div className="flex items-center gap-1 ml-auto">
+            <input
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && applySearch()}
+              placeholder="Filter by agent or user…"
+              className="rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm w-48"
+            />
+            <button
+              onClick={applySearch}
+              className="rounded-lg border border-input px-2 py-1.5 hover:bg-accent transition-colors"
+            >
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          </div>
+
+          <span className="text-xs text-muted-foreground pl-2">{total.toLocaleString()} events</span>
+        </>
+      }
+    >
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {entries.length === 0 ? (
@@ -286,6 +283,6 @@ export default function AuditPage() {
           Next<ChevronRight className="h-3 w-3" />
         </button>
       </div>
-    </div>
+    </PageShell>
   );
 }
