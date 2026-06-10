@@ -15,7 +15,7 @@ import { listApps, installApp, patchApp, uninstallApp, reloadApp } from '@/lib/a
 import type { QorvenApp } from '@/lib/api-apps';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { cn } from '@/lib/utils';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import SkillsPage from '../skills/page';
 import MarketplacePage from '../marketplace/page';
 
@@ -383,18 +383,16 @@ export default function AppsPage() {
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-full min-h-0">
-        <CanvasHeader
-          title={title}
-          description={description}
-          actions={section === 'apps' ? <InstallButton /> : undefined}
-        />
-        <div className="flex-1 min-w-0 overflow-y-auto px-6 pb-6">
-          {section === 'apps'       && <AppsContent />}
-          {section === 'skills'     && <SkillsPage />}
-          {section === 'blueprints' && <MarketplacePage />}
-        </div>
-      </div>
+      <PageShell
+        title={title}
+        description={description}
+        actions={section === 'apps' ? <InstallButton /> : undefined}
+        contentClassName="min-w-0 px-6 py-0 pb-6 sm:px-6"
+      >
+        {section === 'apps'       && <AppsContent />}
+        {section === 'skills'     && <SkillsPage />}
+        {section === 'blueprints' && <MarketplacePage />}
+      </PageShell>
     </ErrorBoundary>
   );
 }
