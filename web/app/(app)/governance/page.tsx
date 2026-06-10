@@ -8,7 +8,7 @@ import {
   Shield, Users, BookOpen, AlertTriangle, Scale, CheckCircle, XCircle, Clock,
   ChevronRight, Layers, Briefcase,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import {
   governanceApi,
@@ -394,26 +394,22 @@ export default function GovernancePage() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <CanvasHeader
-        title="Governance"
-        description="Designation catalog, approval matrix, policy engine, and exception tracking"
-        actions={
-          <div className="flex items-center gap-1 bg-muted/30 rounded-lg p-1">
-            <TabButton id="designations" label="Designations" icon={Users} active={tab === 'designations'} onClick={() => setTab('designations')} />
-            <TabButton id="approvals" label="Approval Matrix" icon={Scale} active={tab === 'approvals'} onClick={() => setTab('approvals')} />
-            <TabButton id="policies" label="Policies" icon={Shield} active={tab === 'policies'} onClick={() => setTab('policies')} />
-            <TabButton id="exceptions" label="Exceptions" icon={AlertTriangle} active={tab === 'exceptions'} onClick={() => setTab('exceptions')} />
-          </div>
-        }
-      />
-
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        {tab === 'designations' && <DesignationsTab />}
-        {tab === 'approvals' && <ApprovalsTab />}
-        {tab === 'policies' && <PoliciesTab />}
-        {tab === 'exceptions' && <ExceptionsTab />}
-      </div>
-    </div>
+    <PageShell
+      title="Governance"
+      description="Designation catalog, approval matrix, policy engine, and exception tracking"
+      toolbar={
+        <div className="flex items-center gap-1 bg-muted/30 rounded-lg p-1">
+          <TabButton id="designations" label="Designations" icon={Users} active={tab === 'designations'} onClick={() => setTab('designations')} />
+          <TabButton id="approvals" label="Approval Matrix" icon={Scale} active={tab === 'approvals'} onClick={() => setTab('approvals')} />
+          <TabButton id="policies" label="Policies" icon={Shield} active={tab === 'policies'} onClick={() => setTab('policies')} />
+          <TabButton id="exceptions" label="Exceptions" icon={AlertTriangle} active={tab === 'exceptions'} onClick={() => setTab('exceptions')} />
+        </div>
+      }
+    >
+      {tab === 'designations' && <DesignationsTab />}
+      {tab === 'approvals' && <ApprovalsTab />}
+      {tab === 'policies' && <PoliciesTab />}
+      {tab === 'exceptions' && <ExceptionsTab />}
+    </PageShell>
   );
 }
