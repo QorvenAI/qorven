@@ -58,7 +58,7 @@ export function Sidebar() {
       className="sidebar fixed top-0 bottom-0 z-20 flex flex-col overflow-hidden border-e border-border bg-muted"
       style={{ left: 'var(--rail-width)' }}
     >
-      <div className="w-(--sidebar-default-width) flex flex-col h-full overflow-hidden">
+      <div className="w-(--sidebar-default-width) flex flex-col h-full overflow-hidden lg:pb-[var(--agent-pill-height)]">
         <SidebarHeader />
         <div className="flex-1 overflow-y-auto">
           {contextual}
