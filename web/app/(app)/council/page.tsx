@@ -21,7 +21,7 @@ import {
   Brain, Sparkles, Crown, Send, Loader2, AlertCircle, ChevronDown,
   Zap, Scale, Layers, Infinity as InfinityIcon, Users, Trophy, CircleDot,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import {
   council,
   type CouncilConfig,
@@ -103,23 +103,23 @@ export default function CouncilPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-4 lg:p-6">
-      <CanvasHeader
-        title="Council"
-        description="Ask something hard. Multiple models draft in parallel, rank each other, and a chairman synthesizes the verdict."
-        actions={
-          cfg ? (
-            <div className="hidden min-w-[220px] flex-col gap-0.5 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-2xs text-muted-foreground lg:flex">
-              <span className="font-medium text-foreground/80">Default roster</span>
-              <span className="font-mono">{cfg.default.members.join(' · ')}</span>
-              <span className="mt-0.5">
-                Chairman <span className="font-mono text-foreground/80">{cfg.default.chairman}</span>
-              </span>
-            </div>
-          ) : undefined
-        }
-      />
-
+    <PageShell
+      title="Council"
+      description="Ask something hard. Multiple models draft in parallel, rank each other, and a chairman synthesizes the verdict."
+      actions={
+        cfg ? (
+          <div className="hidden min-w-[220px] flex-col gap-0.5 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-2xs text-muted-foreground lg:flex">
+            <span className="font-medium text-foreground/80">Default roster</span>
+            <span className="font-mono">{cfg.default.members.join(' · ')}</span>
+            <span className="mt-0.5">
+              Chairman <span className="font-mono text-foreground/80">{cfg.default.chairman}</span>
+            </span>
+          </div>
+        ) : undefined
+      }
+      contentClassName="px-0 py-0 sm:px-0"
+    >
+      <div className="mx-auto max-w-5xl space-y-5 p-4 lg:p-6">
       <DepthSelector value={depth} onChange={setDepth} disabled={running} />
 
       <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 focus-within:border-primary/60">
@@ -172,7 +172,8 @@ export default function CouncilPage() {
       {result && <Verdict result={result} depth={depth} />}
 
       {!running && !result && !error && <EmptyHero onSeed={seed} />}
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
