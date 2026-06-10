@@ -224,11 +224,13 @@ function StatCard({ icon: Icon, label, value, accent, loading }: {
 function TimelineChart({ data }: { data: TimelineDay[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
 
-  const maxTotal = Math.max(...data.map(d => d.produced + d.published + d.rejected), 1);
+  const rows = Array.isArray(data) ? data : [];
+
+  const maxTotal = Math.max(...rows.map(d => d.produced + d.published + d.rejected), 1);
   const chartWidth = 800;
   const chartHeight = 180;
   const barGap = 2;
-  const barWidth = Math.max((chartWidth - barGap * data.length) / data.length, 4);
+  const barWidth = Math.max((chartWidth - barGap * rows.length) / rows.length, 4);
 
   return (
     <div className="relative">
@@ -237,7 +239,7 @@ function TimelineChart({ data }: { data: TimelineDay[] }) {
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
       >
-        {data.map((d, i) => {
+        {rows.map((d, i) => {
           const x = i * (barWidth + barGap);
           const producedH = (d.produced / maxTotal) * chartHeight;
           const publishedH = (d.published / maxTotal) * chartHeight;
@@ -298,19 +300,19 @@ function TimelineChart({ data }: { data: TimelineDay[] }) {
       </svg>
 
       {/* Tooltip */}
-      {hovered !== null && data[hovered] && (
+      {hovered !== null && rows[hovered] && (
         <div
           className="absolute top-0 pointer-events-none bg-popover border border-border rounded-lg px-3 py-2 text-xs shadow-lg z-10"
           style={{
-            left: `${(hovered / data.length) * 100}%`,
+            left: `${(hovered / rows.length) * 100}%`,
             transform: 'translateX(-50%)',
           }}
         >
-          <p className="font-medium text-foreground mb-1">{formatDateLabel(data[hovered].date)}</p>
+          <p className="font-medium text-foreground mb-1">{formatDateLabel(rows[hovered].date)}</p>
           <div className="space-y-0.5">
-            <p><span className="inline-block w-2 h-2 rounded-sm bg-blue-500 mr-1.5" />Produced: {data[hovered].produced}</p>
-            <p><span className="inline-block w-2 h-2 rounded-sm bg-emerald-500 mr-1.5" />Published: {data[hovered].published}</p>
-            <p><span className="inline-block w-2 h-2 rounded-sm bg-red-500 mr-1.5" />Rejected: {data[hovered].rejected}</p>
+            <p><span className="inline-block w-2 h-2 rounded-sm bg-blue-500 mr-1.5" />Produced: {rows[hovered].produced}</p>
+            <p><span className="inline-block w-2 h-2 rounded-sm bg-emerald-500 mr-1.5" />Published: {rows[hovered].published}</p>
+            <p><span className="inline-block w-2 h-2 rounded-sm bg-red-500 mr-1.5" />Rejected: {rows[hovered].rejected}</p>
           </div>
         </div>
       )}
