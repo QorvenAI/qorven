@@ -12,7 +12,19 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/qor/dropdown-menu';
 import { SidebarNav } from './sidebar-nav';
-import { SidebarRooms } from './sidebar-rooms';
+import { useActiveRail } from '@/hooks/use-active-rail';
+import { SidebarPinned } from './sidebar-pinned';
+import { CodeSidebar } from './sidebar-code';
+import { MailSidebar } from '@/components/sidebar/mail-sidebar';
+import { ChannelsSidebar } from '@/components/sidebar/channels-sidebar';
+import { SocialSidebar } from '@/components/sidebar/social-sidebar';
+import { DriveSidebar } from '@/components/sidebar/drive-sidebar';
+import { TeamsSidebar } from '@/components/sidebar/teams-sidebar';
+import { McpSidebar } from '@/components/sidebar/mcp-sidebar';
+import { KnowledgeSidebar } from '@/components/sidebar/knowledge-sidebar';
+import { ModelsSidebar } from '@/components/sidebar/models-sidebar';
+import { SettingsSidebar } from '@/components/sidebar/settings-sidebar';
+import { AppsSidebar } from '@/components/sidebar/apps-sidebar';
 
 export const statusColor: Record<string, string> = {
   idle: 'bg-emerald-500', thinking: 'bg-amber-400 animate-pulse',
@@ -21,6 +33,26 @@ export const statusColor: Record<string, string> = {
 
 /* ─── Main Sidebar ─────────────────────────────────────────────────────────── */
 export function Sidebar() {
+  const activeRail = useActiveRail();
+
+  const contextual = (() => {
+    switch (activeRail as string) {
+      case 'code':       return <CodeSidebar />;
+      case 'sessions':   return <MailSidebar />;
+      case 'connectors': return <ChannelsSidebar />;
+      case 'social':     return <SocialSidebar />;
+      case 'drive':      return <DriveSidebar />;
+      case 'org-chart':
+      case 'teams':      return <TeamsSidebar />;
+      case 'mcp':        return <McpSidebar />;
+      case 'kg':         return <KnowledgeSidebar />;
+      case 'models':     return <ModelsSidebar />;
+      case 'settings':   return <SettingsSidebar />;
+      case 'apps':       return <AppsSidebar />;
+      default:           return <SidebarNav />;   // dashboard, rooms, souls, more, unknown
+    }
+  })();
+
   return (
     <div
       className="sidebar fixed top-0 bottom-0 z-20 flex flex-col overflow-hidden border-e border-border bg-muted"
@@ -28,10 +60,10 @@ export function Sidebar() {
     >
       <div className="w-(--sidebar-default-width) flex flex-col h-full overflow-hidden">
         <SidebarHeader />
-        <SidebarRooms />
-        <div className="flex-1 overflow-y-auto pb-0 lg:pb-14">
-          <SidebarNav />
+        <div className="flex-1 overflow-y-auto">
+          {contextual}
         </div>
+        <SidebarPinned />
       </div>
     </div>
   );

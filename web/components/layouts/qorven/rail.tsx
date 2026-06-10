@@ -10,7 +10,7 @@ import type { RailSection } from '@/types';
 import {
   LayoutDashboard, MessageSquare, Code, Mail,
   Megaphone, HardDrive, Link2,
-  Share2, GitFork, Beaker,
+  MoreHorizontal,
   Settings, Brain, Package, Hash,
 } from 'lucide-react';
 import { useActiveRail } from '@/hooks/use-active-rail';
@@ -21,23 +21,20 @@ import { usePathname } from 'next/navigation';
 type NavItem = { id: RailSection; icon: typeof MessageSquare; label: string; href: string };
 
 const primary: NavItem[] = [
-  { id: 'dashboard',  icon: LayoutDashboard, label: 'Dashboard',  href: '/' },
-  { id: 'souls',      icon: MessageSquare,   label: 'Chat',        href: '/qors' },
-  { id: 'code',       icon: Code,            label: 'Code',        href: '/code' },
-  { id: 'sessions',   icon: Mail,            label: 'Email',       href: '/mail' },
-  { id: 'social',     icon: Megaphone,       label: 'Social',      href: '/social' },
-  { id: 'drive',      icon: HardDrive,       label: 'Drive',       href: '/drive' },
-  { id: 'connectors', icon: Link2,           label: 'Channels',    href: '/channels' },
-  { id: 'rooms',      icon: Hash,            label: 'Hubs',        href: '/rooms' },
-  { id: 'org-chart',  icon: GitFork,         label: 'Org Chart',   href: '/org-chart' },
-  { id: 'kg',         icon: Share2,          label: 'Knowledge',   href: '/knowledge-graph' },
-  { id: 'apps',       icon: Package,         label: 'Apps',        href: '/apps' },
+  { id: 'dashboard',  icon: LayoutDashboard, label: 'Dashboard', href: '/' },
+  { id: 'souls',      icon: MessageSquare,   label: 'Chat',      href: '/qors' },
+  { id: 'rooms',      icon: Hash,            label: 'Hubs',      href: '/rooms' },
+  { id: 'code',       icon: Code,            label: 'Code',      href: '/code' },
+  { id: 'sessions',   icon: Mail,            label: 'Email',     href: '/mail' },
+  { id: 'connectors', icon: Link2,           label: 'Channels',  href: '/channels' },
+  { id: 'social',     icon: Megaphone,       label: 'Social',    href: '/social' },
+  { id: 'drive',      icon: HardDrive,       label: 'Drive',     href: '/drive' },
 ];
 
 const bottom: NavItem[] = [
-  { id: 'labs',     icon: Beaker,   label: 'Labs',     href: '/labs' },
-  { id: 'models',   icon: Brain,    label: 'Models',   href: '/models-hub' },
-  { id: 'settings', icon: Settings, label: 'Settings', href: '/settings' },
+  { id: 'home' as RailSection, icon: MoreHorizontal, label: 'More',     href: '/goals' },
+  { id: 'models',              icon: Brain,           label: 'Models',   href: '/models-hub' },
+  { id: 'settings',            icon: Settings,        label: 'Settings', href: '/settings' },
 ];
 
 export const SIDEBAR_SECTIONS = new Set<RailSection>([

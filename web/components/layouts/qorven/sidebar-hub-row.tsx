@@ -44,8 +44,7 @@ export function SidebarHubRow({
   onClick,
 }: SidebarHubRowProps) {
   const label = displayName || name;
-  const shown = members.slice(0, 3); // show max 3 avatars stacked
-  const overflow = members.length - 3;
+  const shown = members.slice(0, 3); // small pile shows max 3 avatars
 
   return (
     <button
@@ -57,19 +56,27 @@ export function SidebarHubRow({
           : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
       )}
     >
-      {/* Hub icon OR member stack */}
-      {shown.length === 0 ? (
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <Hash className="h-3.5 w-3.5" />
-        </div>
-      ) : (
-        // Stacked avatar pile
-        <div className="relative flex h-7 shrink-0 items-center" style={{ width: Math.min(shown.length, 3) * 16 + 8 }}>
+      {/* Hub icon — always on the left */}
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <Hash className="h-3.5 w-3.5" />
+      </div>
+
+      {/* Hub name */}
+      <span className="flex-1 truncate text-2sm font-medium leading-tight">{label}</span>
+
+      {/* Compact member indicator — right side, never a wide pile */}
+      {members.length > 3 ? (
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+          {members.length}
+        </span>
+      ) : shown.length > 0 ? (
+        // Small overlapping avatar pile (1..3, no +N)
+        <div className="relative flex h-6 shrink-0 items-center" style={{ width: shown.length * 14 + 10 }}>
           {shown.map((m, i) => (
             <div
               key={m.id}
               className={cn(
-                'absolute flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-muted bg-gradient-to-br text-[9px] font-bold text-white overflow-hidden',
+                'absolute flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-muted bg-gradient-to-br text-2xs font-bold text-white overflow-hidden',
                 gradientFor(m.id),
               )}
               style={{ left: i * 14, zIndex: i + 1 }}
@@ -81,23 +88,12 @@ export function SidebarHubRow({
               )}
             </div>
           ))}
-          {overflow > 0 && (
-            <div
-              className="absolute flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-muted bg-muted text-[9px] font-medium text-muted-foreground"
-              style={{ left: 3 * 14, zIndex: shown.length + 1 }}
-            >
-              +{overflow}
-            </div>
-          )}
         </div>
-      )}
-
-      {/* Hub name */}
-      <span className="flex-1 truncate text-[13px] font-medium leading-tight">{label}</span>
+      ) : null}
 
       {/* Message count badge */}
       {messageCount != null && messageCount > 0 && (
-        <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+        <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-2xs font-medium text-primary">
           {messageCount > 99 ? '99+' : messageCount}
         </span>
       )}

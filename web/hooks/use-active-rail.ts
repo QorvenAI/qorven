@@ -56,7 +56,7 @@ const routes: [string, RailSection][] = [
   ['/models-hub', 'models'],
   ['/provider-keys', 'models'],
   ['/budgets', 'models'],
-  ['/mcp', 'settings'],
+  ['/mcp', 'mcp'],
   ['/settings', 'settings'],
   ['/system', 'settings'],
   ['/billing', 'settings'],
@@ -73,5 +73,6 @@ export function useActiveRail(): RailSection {
   const pathname = usePathname();
   if (!pathname || pathname === '/') return 'dashboard';
   const match = routes.find(([p]) => pathname === p || pathname.startsWith(p + '/'));
-  return match ? match[1] : 'dashboard';
+  // Unmapped routes live under the "More" menu, so highlight that rail icon.
+  return match ? match[1] : 'home';
 }
