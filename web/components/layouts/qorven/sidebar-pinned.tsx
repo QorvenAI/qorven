@@ -91,65 +91,31 @@ export function SidebarPinned() {
     return q ? souls.filter((s) => chatLabel(s).toLowerCase().includes(q)) : souls;
   }, [souls, chatQuery]);
 
-  // Resolve pinned entries to live hub/chat records, preserving pin order.
-  const pinnedRows = useMemo(() => {
-    const rows: { key: string; node: ReactNode }[] = [];
-    for (const p of pinned) {
-      if (p.item_type === 'hub') {
-        const h = hubs.find((x) => x.id === p.item_id);
-        if (!h) continue;
-        rows.push({
-          key: keyOf('hub', h.id),
-          node: (
-            <HubRow
-              key={keyOf('hub', h.id)}
-              label={hubLabel(h)}
-              members={hubMembers[h.id] ?? 0}
-              active={currentHubId === h.id}
-              pinned
-              onOpen={() => router.push(`/rooms/${h.id}`)}
-              onTogglePin={() => togglePin('hub', h.id)}
-            />
-          ),
-        });
-      } else {
-        const s = souls.find((x) => x.id === p.item_id);
-        if (!s) continue;
-        rows.push({
-          key: keyOf('chat', s.id),
-          node: (
-            <ChatRow
-              key={keyOf('chat', s.id)}
-              label={chatLabel(s)}
-              active={currentChatId === s.id}
-              pinned
-              onOpen={() => router.push(`/qors/${s.id}`)}
-              onTogglePin={() => togglePin('chat', s.id)}
-            />
-          ),
-        });
-      }
-    }
-    return rows;
-  }, [pinned, hubs, souls, hubMembers, currentHubId, currentChatId]);
+  // Pin order: a pinned item's rank = its index in `pinned`; unpinned sort after.
+  const pinRank = useMemo(() => {
+    const m = new Map<string, number>();
+    pinned.forEach((p, i) => m.set(keyOf(p.item_type, p.item_id), i));
+    return m;
+  }, [pinned]);
+
+  // Stable sort that floats pinned items (in pin order) to the top of a list;
+  // unpinned items (rank Infinity) keep their original order after them.
+  const pinnedFirst = useCallback(<T,>(items: T[], type: 'hub' | 'chat', idOf: (x: T) => string): T[] =>
+    items
+      .map((item, i) => ({ item, i }))
+      .sort((a, b) => {
+        const ra = pinRank.get(keyOf(type, idOf(a.item))) ?? Infinity;
+        const rb = pinRank.get(keyOf(type, idOf(b.item))) ?? Infinity;
+        return ra === rb ? a.i - b.i : ra - rb;
+      })
+      .map((x) => x.item), [pinRank]);
+
+  const sortedHubs = useMemo(() => pinnedFirst(filteredHubs, 'hub', (h) => h.id), [filteredHubs, pinnedFirst]);
+  const sortedChats = useMemo(() => pinnedFirst(filteredChats, 'chat', (s) => s.id), [filteredChats, pinnedFirst]);
 
   return (
     <div className="shrink-0 border-t border-border bg-muted/30">
-      {/* ★ Pinned */}
-      {pinnedRows.length > 0 && (
-        <Group
-          title="Pinned"
-          icon={<Star className="h-3 w-3 fill-current text-amber-500" />}
-          collapsed={!!collapsed.pinned}
-          onToggle={() => setCollapsed((c) => ({ ...c, pinned: !c.pinned }))}
-        >
-          <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
-            {pinnedRows.map((r) => r.node)}
-          </div>
-        </Group>
-      )}
-
-      {/* Hubs */}
+      {/* Hubs — pinned hubs float to the top */}
       <Group
         title="Hubs"
         collapsed={!!collapsed.hubs}
@@ -158,7 +124,7 @@ export function SidebarPinned() {
       >
         {hubs.length > SEARCH_THRESHOLD && <SearchBox value={hubQuery} onChange={setHubQuery} placeholder="Search hubs" />}
         <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
-          {filteredHubs.map((h) => (
+          {sortedHubs.map((h) => (
             <HubRow
               key={h.id}
               label={hubLabel(h)}
@@ -170,11 +136,11 @@ export function SidebarPinned() {
             />
           ))}
           {hubs.length === 0 && <Empty>No hubs yet.</Empty>}
-          {hubs.length > 0 && filteredHubs.length === 0 && <Empty>No matching hubs.</Empty>}
+          {hubs.length > 0 && sortedHubs.length === 0 && <Empty>No matching hubs.</Empty>}
         </div>
       </Group>
 
-      {/* Recent chats */}
+      {/* Recent chats — pinned chats float to the top */}
       <Group
         title="Recent chats"
         collapsed={!!collapsed.chats}
@@ -182,7 +148,7 @@ export function SidebarPinned() {
       >
         {souls.length > SEARCH_THRESHOLD && <SearchBox value={chatQuery} onChange={setChatQuery} placeholder="Search chats" />}
         <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
-          {filteredChats.map((s) => (
+          {sortedChats.map((s) => (
             <ChatRow
               key={s.id}
               label={chatLabel(s)}
@@ -193,7 +159,7 @@ export function SidebarPinned() {
             />
           ))}
           {souls.length === 0 && <Empty>No chats yet.</Empty>}
-          {souls.length > 0 && filteredChats.length === 0 && <Empty>No matching chats.</Empty>}
+          {souls.length > 0 && sortedChats.length === 0 && <Empty>No matching chats.</Empty>}
         </div>
       </Group>
     </div>
