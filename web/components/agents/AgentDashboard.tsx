@@ -2,6 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store';
 import Link from 'next/link';
@@ -142,7 +143,11 @@ function DaemonCard({ agent, task }: { agent: DaemonAgent; task?: string }) {
 export function AgentDashboard() {
   const souls         = useStore((s) => s.souls);
   const soulStates    = useStore((s) => s.soulStates);
-  const daemonAgents  = useStore((s) => Object.values(s.daemonAgents));
+  // Select the raw Record (stable reference) and derive the array in useMemo —
+  // `Object.values(...)` inside the selector returns a new array every render,
+  // which trips useSyncExternalStore's infinite-loop guard.
+  const daemonAgentsMap = useStore((s) => s.daemonAgents);
+  const daemonAgents  = useMemo(() => Object.values(daemonAgentsMap), [daemonAgentsMap]);
   const daemonTasks   = useStore((s) => s.daemonTasks);
   const connected     = useStore((s) => s.daemonConnected);
 

@@ -2,7 +2,7 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useStore } from '@/store';
 import type { DaemonPlan } from '@/hooks/use-agents-stream';
 import { BASE, getToken } from '@/lib/api-core';
@@ -129,7 +129,11 @@ function PlanCard({ plan }: { plan: DaemonPlan }) {
 // ── Plan approval feed ────────────────────────────────────────────────────────
 
 export function PlanApproval() {
-  const plans = useStore(s => Object.values(s.daemonPlans));
+  // Select the raw Record (stable ref) and derive the array in useMemo —
+  // `Object.values(...)` in the selector returns a new array each render and
+  // trips useSyncExternalStore's infinite-loop guard.
+  const plansMap = useStore(s => s.daemonPlans);
+  const plans = useMemo(() => Object.values(plansMap), [plansMap]);
 
   // Pending first, then by status
   const sorted = [...plans].sort((a, b) => {
