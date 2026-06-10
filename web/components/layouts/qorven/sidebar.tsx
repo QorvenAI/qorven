@@ -4,7 +4,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CreateSoulSheet } from '@/components/forms/create-soul-sheet';
 import {
   ChevronDown, Key, Palette, LogOut, Lock, User,
 } from 'lucide-react';
@@ -22,8 +21,6 @@ export const statusColor: Record<string, string> = {
 
 /* ─── Main Sidebar ─────────────────────────────────────────────────────────── */
 export function Sidebar() {
-  const [showCreateSoul, setShowCreateSoul] = useState(false);
-
   return (
     <div
       className="sidebar fixed top-0 bottom-0 z-20 flex flex-col overflow-hidden border-e border-border bg-muted"
@@ -36,7 +33,6 @@ export function Sidebar() {
           <SidebarNav />
         </div>
       </div>
-      <CreateSoulSheet open={showCreateSoul} onClose={() => setShowCreateSoul(false)} />
     </div>
   );
 }
