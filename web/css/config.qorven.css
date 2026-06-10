@@ -26,7 +26,7 @@
   --border: oklch(94% 0.004 286.32);
   --input: var(--color-zinc-200);
   --ring: var(--color-violet-400);
-  --radius: 0.5rem; /* Metronic v9 base radius (8px). xl=+4, lg=base, md=-2, sm=-4 */
+  --radius: 0.5rem; /* base radius (8px). xl=+4, lg=base, md=-2, sm=-4 */
 
   /* Soul Status */
   --soul-idle: var(--color-emerald-500);
@@ -264,7 +264,7 @@ svg.lucide {
   stroke-width: 2.25;
 }
 
-/** Custom Font Sizes — Qorven type scale (mirrors Metronic v9) **/
+/** Custom Font Sizes — Qorven type scale **/
 @theme {
   --text-2sm: 0.8125rem;
   --text-2sm--line-height: calc(1.075 / 0.8125);
@@ -273,7 +273,7 @@ svg.lucide {
 
   /* Font family — Inter is loaded via next/font in app/layout.tsx
      as --font-inter. Tailwind's font-sans utility and every unstyled
-     element now inherit Inter with the Metronic fallback stack.
+     element now inherit Inter with the system fallback stack.
      DO NOT define font-family elsewhere. */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

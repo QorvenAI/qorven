@@ -284,7 +284,7 @@ function IconBadge({
             )}
           />
         ) : (
-          // Metronic pattern: absolute top-0.5 end-0.5 — sits at the inner
+          // Dot pattern: absolute top-0.5 end-0.5 — sits at the inner
           // corner of the button, never overflows the viewport edge.
           <span
             data-slot="icon-badge-count"

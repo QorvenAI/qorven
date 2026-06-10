@@ -59,7 +59,7 @@ function Text({ as: Tag = 'span', size, variant, weight, truncate, className, ..
   );
 }
 
-// Shorthand aliases matching the Metronic naming pattern used in the codebase.
+// Shorthand aliases matching the naming pattern used in the codebase.
 // Each is a Text with opinionated defaults so call-sites stay concise.
 
 function Caption({ className, ...props }: Omit<TextProps, 'size'>) {
