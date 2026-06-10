@@ -4,6 +4,24 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.9.0-alpha — 2026-06-10
+
+A top-to-bottom redesign of the workspace — one consistent, polished interface across every screen, in light and dark.
+
+### Added
+- **A consistent look on every page.** Every screen now shares the same page layout — a clear title, a tidy toolbar for filters and tabs, and a comfortable content area — so the whole app feels like one product instead of many. Colors, spacing, and font sizes are unified and crisp, and every page works on mobile. ([fe6513f](https://github.com/QorvenAI/qorven/commit/fe6513f), [751542e](https://github.com/QorvenAI/qorven/commit/751542e))
+- **A simpler, organized sidebar.** Navigation is now one clean sidebar: your rooms pinned at the top with your company room first, then the rest of the app grouped into collapsible sections — and a slim icon rail for quick jumps to the places you use most. The section you're on opens automatically. ([8c579fb](https://github.com/QorvenAI/qorven/commit/8c579fb))
+- **Theme presets.** Pick a color scheme for the whole workspace — Violet, Slate, Ocean, Forest, or Rose — from Settings → Appearance. Each restyles the entire UI in both light and dark, and you can still fine-tune the accent color, font, size, and density on top. ([82d7724](https://github.com/QorvenAI/qorven/commit/82d7724))
+- **See a room's work beside the chat.** Open any room and a side panel shows the work it's producing — who owns each item, its status, and the full history — updating live as your team makes progress. ([5f9448f](https://github.com/QorvenAI/qorven/commit/5f9448f))
+- **Your company room, ready from day one.** Every workspace now has a default company room named after your workspace, with your leadership team already in it — the home base where company-wide updates roll up. ([90c32a4](https://github.com/QorvenAI/qorven/commit/90c32a4))
+
+### Fixed
+- Dark mode is now first-class across the app, with no light colors bleeding through.
+- The Agents page no longer fails to load.
+- Settings sections (Profile, Appearance, and the rest) are reachable again from within the page.
+
+---
+
 ## v0.8.1-alpha — 2026-06-10
 
 ### Added
