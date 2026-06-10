@@ -29,11 +29,11 @@ type WorkItem struct {
 
 // Event is one audit record for a work item.
 type Event struct {
-	EventType  string
-	ActorID    string
-	FromStatus string
-	ToStatus   string
-	Detail     string
+	EventType  string `json:"event_type"`
+	ActorID    string `json:"actor_id"`
+	FromStatus string `json:"from_status"`
+	ToStatus   string `json:"to_status"`
+	Detail     string `json:"detail"`
 }
 
 // Store persists work items and their events.
