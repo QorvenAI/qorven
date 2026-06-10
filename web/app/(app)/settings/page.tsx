@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { useStore } from '@/store';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { useAppSettingTabs } from '@/components/apps/app-registry-context';
 import { request as apiRequest, getToken } from '@/lib/api-core';
@@ -26,9 +26,7 @@ export default function SettingsPage() {
 
   return (
     <ErrorBoundary>
-      <div>
-        <CanvasHeader title="Settings" description="Manage your account and workspace preferences" />
-
+      <PageShell title="Settings" description="Manage your account and workspace preferences">
         {activeTab === 'profile'       && <ProfileSettings />}
         {activeTab === 'appearance'    && <AppearanceSettings />}
         {activeTab === 'services'      && <ServicesSettings />}
@@ -52,7 +50,7 @@ export default function SettingsPage() {
             </ErrorBoundary>
           ) : null
         )}
-      </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }
