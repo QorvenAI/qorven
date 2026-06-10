@@ -124,6 +124,8 @@ export function SidebarPinned() {
         </div>
       </Group>
 
+      <div className="mx-3 h-px bg-border/60" />
+
       {/* Recent chats — pinned chats float to the top */}
       <Group
         title="Recent chats"
