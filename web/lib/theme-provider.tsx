@@ -18,11 +18,11 @@ export const COLOR_PRESETS = [
 // Full-palette theme presets (defined in css/config.qorven.css as [data-theme="id"]).
 // swatchBg / swatchPrimary are preview-only colors for the Settings swatches.
 export const THEME_PRESETS = [
-  { id: 'violet', name: 'Violet', swatchBg: '#ffffff', swatchPrimary: '#7c3aed' },
-  { id: 'slate',  name: 'Slate',  swatchBg: '#ffffff', swatchPrimary: '#334155' },
-  { id: 'ocean',  name: 'Ocean',  swatchBg: '#ffffff', swatchPrimary: '#0284c7' },
-  { id: 'forest', name: 'Forest', swatchBg: '#ffffff', swatchPrimary: '#059669' },
-  { id: 'rose',   name: 'Rose',   swatchBg: '#ffffff', swatchPrimary: '#e11d48' },
+  { id: 'violet', name: 'Violet', swatchBg: '#ffffff', swatchPrimary: '#7c3aed' }, // violet-600
+  { id: 'slate',  name: 'Slate',  swatchBg: '#ffffff', swatchPrimary: '#18181b' }, // zinc-900 (monochrome)
+  { id: 'ocean',  name: 'Ocean',  swatchBg: '#ffffff', swatchPrimary: '#2563eb' }, // blue-600
+  { id: 'forest', name: 'Forest', swatchBg: '#ffffff', swatchPrimary: '#059669' }, // emerald-600
+  { id: 'rose',   name: 'Rose',   swatchBg: '#ffffff', swatchPrimary: '#e11d48' }, // rose-600
 ];
 
 export const FONT_OPTIONS = [

@@ -91,138 +91,126 @@
     order. Per-token inline overrides (provider sets --primary inline) still win.
     The provider sets data-theme on <html>; .dark still toggles dark mode. **/
 
+/* Each preset keeps NEUTRAL surfaces (zinc ramp — bg/card/border/muted) and
+   only varies the ACCENT (--primary/--ring). Light surfaces use white + zinc;
+   dark surfaces use the zinc-950→800 ramp. This neutral-surface + vivid-accent
+   model is what keeps the UI crisp instead of washed-out / tinted. Values come
+   from Tailwind's --color-* ramp (no hand-mixed hex). */
+
+/* ── Violet (default) ── */
 [data-theme="violet"] {
   --primary: var(--color-violet-600);
   --primary-foreground: var(--color-white);
-  --ring: var(--color-violet-400);
+  --ring: var(--color-violet-500);
 }
 [data-theme="violet"].dark {
-  --primary: #5271ff;
-  --ring: #5271ff;
+  --primary: var(--color-violet-500);
+  --primary-foreground: var(--color-white);
+  --ring: var(--color-violet-500);
 }
 
+/* ── Slate (neutral accent — monochrome look) ── */
 [data-theme="slate"] {
-  --background: var(--color-white);
-  --foreground: var(--color-slate-950);
-  --card: var(--color-white);
-  --card-foreground: var(--color-slate-950);
-  --muted: var(--color-slate-100);
-  --muted-foreground: var(--color-slate-500);
-  --accent: var(--color-slate-100);
-  --accent-foreground: var(--color-slate-900);
-  --border: var(--color-slate-200);
-  --input: var(--color-slate-200);
-  --primary: var(--color-slate-800);
+  --primary: var(--color-zinc-900);
   --primary-foreground: var(--color-white);
-  --ring: var(--color-slate-400);
+  --ring: var(--color-zinc-400);
 }
 [data-theme="slate"].dark {
-  --background: #0b0f17;
-  --foreground: #e2e8f0;
-  --card: #131a26;
-  --card-foreground: #e2e8f0;
-  --muted: #0f1622;
-  --muted-foreground: #64748b;
-  --accent: #1e293b;
-  --accent-foreground: #e2e8f0;
-  --border: #1e293b;
-  --input: #1e293b;
-  --primary: #94a3b8;
-  --primary-foreground: #0b0f17;
-  --ring: #94a3b8;
+  --background: var(--color-zinc-950);
+  --foreground: var(--color-zinc-50);
+  --card: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-50);
+  --popover: var(--color-zinc-900);
+  --popover-foreground: var(--color-zinc-50);
+  --secondary: var(--color-zinc-800);
+  --secondary-foreground: var(--color-zinc-50);
+  --muted: var(--color-zinc-900);
+  --muted-foreground: var(--color-zinc-400);
+  --accent: var(--color-zinc-800);
+  --accent-foreground: var(--color-zinc-50);
+  --border: var(--color-zinc-800);
+  --input: var(--color-zinc-800);
+  --primary: var(--color-zinc-100);
+  --primary-foreground: var(--color-zinc-900);
+  --ring: var(--color-zinc-600);
 }
 
+/* ── Ocean (blue accent) ── */
 [data-theme="ocean"] {
-  --background: var(--color-white);
-  --foreground: var(--color-sky-950);
-  --card: var(--color-white);
-  --card-foreground: var(--color-sky-950);
-  --muted: var(--color-sky-50);
-  --muted-foreground: var(--color-sky-600);
-  --accent: var(--color-sky-100);
-  --accent-foreground: var(--color-sky-900);
-  --border: var(--color-sky-200);
-  --input: var(--color-sky-200);
-  --primary: var(--color-sky-600);
+  --primary: var(--color-blue-600);
   --primary-foreground: var(--color-white);
-  --ring: var(--color-sky-400);
+  --ring: var(--color-blue-500);
 }
 [data-theme="ocean"].dark {
-  --background: #07131c;
-  --foreground: #d6eef9;
-  --card: #0e1f2c;
-  --card-foreground: #d6eef9;
-  --muted: #0b1a25;
-  --muted-foreground: #5e8298;
-  --accent: #12303f;
-  --accent-foreground: #d6eef9;
-  --border: #173646;
-  --input: #143040;
-  --primary: #38bdf8;
-  --primary-foreground: #07131c;
-  --ring: #38bdf8;
+  --background: var(--color-slate-950);
+  --foreground: var(--color-slate-50);
+  --card: var(--color-slate-900);
+  --card-foreground: var(--color-slate-50);
+  --popover: var(--color-slate-900);
+  --popover-foreground: var(--color-slate-50);
+  --secondary: var(--color-slate-800);
+  --secondary-foreground: var(--color-slate-50);
+  --muted: var(--color-slate-900);
+  --muted-foreground: var(--color-slate-400);
+  --accent: var(--color-slate-800);
+  --accent-foreground: var(--color-slate-50);
+  --border: var(--color-slate-800);
+  --input: var(--color-slate-800);
+  --primary: var(--color-blue-500);
+  --primary-foreground: var(--color-white);
+  --ring: var(--color-blue-500);
 }
 
+/* ── Forest (emerald accent) ── */
 [data-theme="forest"] {
-  --background: var(--color-white);
-  --foreground: var(--color-emerald-950);
-  --card: var(--color-white);
-  --card-foreground: var(--color-emerald-950);
-  --muted: var(--color-emerald-50);
-  --muted-foreground: var(--color-emerald-600);
-  --accent: var(--color-emerald-100);
-  --accent-foreground: var(--color-emerald-900);
-  --border: var(--color-emerald-200);
-  --input: var(--color-emerald-200);
   --primary: var(--color-emerald-600);
   --primary-foreground: var(--color-white);
-  --ring: var(--color-emerald-400);
+  --ring: var(--color-emerald-500);
 }
 [data-theme="forest"].dark {
-  --background: #08140f;
-  --foreground: #d7f0e3;
-  --card: #0f2018;
-  --card-foreground: #d7f0e3;
-  --muted: #0c1a13;
-  --muted-foreground: #5d8772;
-  --accent: #143226;
-  --accent-foreground: #d7f0e3;
-  --border: #1a3a2b;
-  --input: #163424;
-  --primary: #34d399;
-  --primary-foreground: #08140f;
-  --ring: #34d399;
+  --background: var(--color-zinc-950);
+  --foreground: var(--color-zinc-50);
+  --card: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-50);
+  --popover: var(--color-zinc-900);
+  --popover-foreground: var(--color-zinc-50);
+  --secondary: var(--color-zinc-800);
+  --secondary-foreground: var(--color-zinc-50);
+  --muted: var(--color-zinc-900);
+  --muted-foreground: var(--color-zinc-400);
+  --accent: var(--color-zinc-800);
+  --accent-foreground: var(--color-zinc-50);
+  --border: var(--color-zinc-800);
+  --input: var(--color-zinc-800);
+  --primary: var(--color-emerald-500);
+  --primary-foreground: var(--color-zinc-950);
+  --ring: var(--color-emerald-500);
 }
 
+/* ── Rose (rose accent) ── */
 [data-theme="rose"] {
-  --background: var(--color-white);
-  --foreground: var(--color-rose-950);
-  --card: var(--color-white);
-  --card-foreground: var(--color-rose-950);
-  --muted: var(--color-rose-50);
-  --muted-foreground: var(--color-rose-500);
-  --accent: var(--color-rose-100);
-  --accent-foreground: var(--color-rose-900);
-  --border: var(--color-rose-200);
-  --input: var(--color-rose-200);
   --primary: var(--color-rose-600);
   --primary-foreground: var(--color-white);
-  --ring: var(--color-rose-400);
+  --ring: var(--color-rose-500);
 }
 [data-theme="rose"].dark {
-  --background: #160a0e;
-  --foreground: #f7dde4;
-  --card: #21121a;
-  --card-foreground: #f7dde4;
-  --muted: #1b0e14;
-  --muted-foreground: #a06b7a;
-  --accent: #3a1a28;
-  --accent-foreground: #f7dde4;
-  --border: #3a1c29;
-  --input: #341823;
-  --primary: #fb7185;
-  --primary-foreground: #160a0e;
-  --ring: #fb7185;
+  --background: var(--color-zinc-950);
+  --foreground: var(--color-zinc-50);
+  --card: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-50);
+  --popover: var(--color-zinc-900);
+  --popover-foreground: var(--color-zinc-50);
+  --secondary: var(--color-zinc-800);
+  --secondary-foreground: var(--color-zinc-50);
+  --muted: var(--color-zinc-900);
+  --muted-foreground: var(--color-zinc-400);
+  --accent: var(--color-zinc-800);
+  --accent-foreground: var(--color-zinc-50);
+  --border: var(--color-zinc-800);
+  --input: var(--color-zinc-800);
+  --primary: var(--color-rose-500);
+  --primary-foreground: var(--color-white);
+  --ring: var(--color-rose-500);
 }
 
 /** Theme Setup — maps CSS vars into Tailwind **/
