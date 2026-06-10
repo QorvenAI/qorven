@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Loader2, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { budgets as budgetsApi } from '@/lib/api';
 import { Button } from '@/components/qor/button';
 import { Input } from '@/components/qor/input';
@@ -319,17 +319,16 @@ export default function BudgetsPage() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="space-y-4">
-      <CanvasHeader
-        title="Budgets"
-        description="Set CFO authority, review pending budget proposals, and check effective spend."
-        actions={
-          <Button variant="ghost" mode="icon" size="sm" onClick={load} title="Refresh">
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          </Button>
-        }
-      />
-
+    <PageShell
+      title="Budgets"
+      description="Set CFO authority, review pending budget proposals, and check effective spend."
+      actions={
+        <Button variant="ghost" mode="icon" size="sm" onClick={load} title="Refresh">
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+        </Button>
+      }
+    >
+      <div className="space-y-4">
       {/* 1. CFO authority */}
       <CfoAuthorityCard />
 
@@ -351,6 +350,7 @@ export default function BudgetsPage() {
 
       {/* 3. Reports */}
       <ReportsCard eff={eff} />
-    </div>
+      </div>
+    </PageShell>
   );
 }
