@@ -56,7 +56,7 @@ const routes: [string, RailSection][] = [
   ['/models-hub', 'models'],
   ['/provider-keys', 'models'],
   ['/budgets', 'models'],
-  ['/mcp', 'settings'],
+  ['/mcp', 'mcp'],
   ['/settings', 'settings'],
   ['/system', 'settings'],
   ['/billing', 'settings'],
