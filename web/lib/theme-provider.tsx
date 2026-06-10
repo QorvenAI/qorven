@@ -49,8 +49,8 @@ export interface ThemeSettings {
 }
 
 const DEFAULT_SETTINGS: ThemeSettings = {
-  primaryColor: '#8b5cf6',
-  primaryOklch: 'oklch(0.541 0.281 293.009)',
+  primaryColor: '',   // empty = no custom accent override; the theme preset's primary is used
+  primaryOklch: '',
   fontFamily: 'system-ui, -apple-system, sans-serif', // ok — default theme value
   fontScale: 1,
   borderRadius: 10,
@@ -95,7 +95,9 @@ async function loadFromBackend(): Promise<ThemeSettings | null> {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    if (data && data.primaryColor) return { ...DEFAULT_SETTINGS, ...data };
+    // Accept saved prefs even when primaryColor is '' (a deliberately cleared
+    // override) — check the field exists as a string, not that it's truthy.
+    if (data && typeof data.primaryColor === 'string') return { ...DEFAULT_SETTINGS, ...data };
   } catch {}
   return null;
 }
@@ -110,7 +112,7 @@ function applyToDOM(settings: ThemeSettings) {
   // Primary color — only override inline when the user has CUSTOMIZED it away
   // from the default. Otherwise leave it unset so the selected theme preset's
   // own primary shows through (inline style would otherwise always win).
-  const customizedPrimary = settings.primaryColor !== DEFAULT_SETTINGS.primaryColor;
+  const customizedPrimary = !!settings.primaryColor;
   if (customizedPrimary) {
     root.style.setProperty('--primary', settings.primaryOklch);
     root.style.setProperty('--ring', settings.primaryOklch);

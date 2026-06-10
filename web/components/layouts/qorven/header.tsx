@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { IconBadge } from '@/components/ui/badge';
 import {
   PanelLeftClose, PanelLeft, Bell, MessageSquare, Activity,
-  SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio, Package,
+  SquareTerminal, PanelRight, PanelRightClose, ChevronDown, Radio, Package, Menu,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { SoulActivity } from '@/types';
@@ -79,6 +79,7 @@ function TopbarAppBtn({ app }: { app: QorvenApp }) {
 export function Header() {
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
+  const setMobileNavOpen = useStore((s) => s.setMobileNavOpen);
   const activeChatId = useStore((s) => s.activeChatId);
   const souls = useStore((s) => s.souls);
   const activeSessions = useStore((s) => s.activeSessions);
@@ -134,6 +135,11 @@ export function Header() {
 
         {/* LEFT */}
         <div className="flex items-stretch gap-2.5">
+          <button onClick={() => setMobileNavOpen(true)}
+            aria-label="Open navigation"
+            className="lg:hidden flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 self-center">
+            <Menu className="h-[18px] w-[18px]" />
+          </button>
           <button onClick={toggleSidebar}
             className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 self-center">
             {sidebarCollapsed ? <PanelLeft className="h-[18px] w-[18px]" /> : <PanelLeftClose className="h-[18px] w-[18px]" />}
@@ -146,12 +152,12 @@ export function Header() {
                 <span className="text-muted-foreground/50">/</span>
                 <span className="text-foreground font-medium truncate max-w-[140px]">{soul.display_name}</span>
                 {(soul as any).org_role && ORG_ROLE_COLORS[(soul as any).org_role] && (
-                  <span className={`inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide leading-none ${ORG_ROLE_COLORS[(soul as any).org_role]}`}>
+                  <span className={`inline-flex items-center rounded border px-1 py-0.5 text-2xs font-bold uppercase tracking-wide leading-none ${ORG_ROLE_COLORS[(soul as any).org_role]}`}>
                     {((soul as any).org_role as string).toUpperCase()}
                   </span>
                 )}
                 {(soul as any).org_level === 'l1' && (
-                  <span className="inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide leading-none bg-amber-500/10 text-amber-500 border-amber-500/20">
+                  <span className="inline-flex items-center rounded border px-1 py-0.5 text-2xs font-medium uppercase tracking-wide leading-none bg-amber-500/10 text-amber-500 border-amber-500/20">
                     Executive
                   </span>
                 )}

@@ -129,6 +129,8 @@ interface Store {
   setActiveRail: (section: RailSection) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  mobileNavOpen: boolean;
+  setMobileNavOpen: (open: boolean) => void;
   activeChatId: string | null;
   activeChatType: 'soul' | 'room' | null;
   setActiveChat: (id: string | null, type: 'soul' | 'room' | null) => void;
@@ -474,6 +476,8 @@ export const useStore = create<Store>((set) => ({
   setActiveRail: (section) => set({ activeRail: section }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  mobileNavOpen: false,
+  setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
   activeChatId: null,
   activeChatType: null,
   setActiveChat: (id, type) => set({ activeChatId: id, activeChatType: type }),

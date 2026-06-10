@@ -114,7 +114,7 @@ export function Rail() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="rail fixed top-0 bottom-0 left-0 z-30 flex flex-col items-center bg-muted border-e border-border">
+      <div className="rail fixed top-0 bottom-0 left-0 z-30 hidden lg:flex flex-col items-center bg-muted border-e border-border">
         {/* Logo — links to dashboard */}
         <div className="flex h-[var(--header-height)] w-full items-center justify-center shrink-0">
           <Link href="/" title="Dashboard" className="flex items-center justify-center rounded-md hover:opacity-80 transition-opacity">
