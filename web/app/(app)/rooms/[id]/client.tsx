@@ -337,6 +337,13 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
     }
   }, [storeIncoming, loadWork]);
 
+  useEffect(() => {
+    if (!selectedWork) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedWork(null); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selectedWork]);
+
   const handleSend = async () => {
     if (!input.trim() || sending) return;
     const text = input.trim();
