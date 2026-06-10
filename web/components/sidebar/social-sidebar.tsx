@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiBase } from '@/lib/api-url';
 import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon, BarChart2, BookOpen, Webhook } from 'lucide-react';
-import { SidebarMenuItem } from './sidebar-primitives';
+import { SidebarMenuItem, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
 export function SocialSidebar() {
@@ -22,39 +22,52 @@ export function SocialSidebar() {
     }).then(r => r.json()).then(d => setStats(d?.stats)).catch(() => {});
   }, []);
 
-  const views = [
-    { label: 'Compose', sub: '/social?tab=compose', icon: Megaphone },
-    { label: 'Calendar', sub: '/social?tab=calendar', icon: Bell },
-    { label: 'Scheduled', sub: '/social?tab=scheduled', icon: Clock },
-    { label: 'Published', sub: '/social?tab=published', icon: CheckCircle2 },
-    { label: 'Drafts', sub: '/social?tab=drafts', icon: FileEdit },
-    { label: 'Accounts', sub: '/social?tab=accounts', icon: Users },
-    { label: 'AutoPost', sub: '/social?tab=autopost', icon: Zap },
-    { label: 'Media', sub: '/social?tab=media', icon: ImageIcon },
-    { label: 'Analytics', sub: '/social?tab=analytics', icon: BarChart2 },
-    { label: 'Sets', sub: '/social?tab=sets', icon: BookOpen },
-    { label: 'Webhooks', sub: '/social?tab=webhooks', icon: Webhook },
+  const groups: { title: string; views: { label: string; sub: string; icon: typeof Megaphone }[] }[] = [
+    { title: 'Create', views: [
+      { label: 'Compose', sub: '/social?tab=compose', icon: Megaphone },
+      { label: 'Calendar', sub: '/social?tab=calendar', icon: Bell },
+    ] },
+    { title: 'Workflow', views: [
+      { label: 'Scheduled', sub: '/social?tab=scheduled', icon: Clock },
+      { label: 'Published', sub: '/social?tab=published', icon: CheckCircle2 },
+      { label: 'Drafts', sub: '/social?tab=drafts', icon: FileEdit },
+      { label: 'AutoPost', sub: '/social?tab=autopost', icon: Zap },
+    ] },
+    { title: 'Manage', views: [
+      { label: 'Accounts', sub: '/social?tab=accounts', icon: Users },
+      { label: 'Media', sub: '/social?tab=media', icon: ImageIcon },
+      { label: 'Analytics', sub: '/social?tab=analytics', icon: BarChart2 },
+      { label: 'Sets', sub: '/social?tab=sets', icon: BookOpen },
+      { label: 'Webhooks', sub: '/social?tab=webhooks', icon: Webhook },
+    ] },
   ];
 
   return (
     <SidebarLayout
       section3={
-        <ul className="flex flex-col gap-px px-2.5">
-          {views.map(v => {
-            const id = v.sub.split('?tab=')[1] ?? 'compose';
-            return (
-              <SidebarMenuItem
-                key={v.label}
-                icon={v.icon}
-                label={v.label}
-                active={tab === id}
-                badge={v.label === 'Scheduled' && stats?.scheduled ? String(stats.scheduled) : undefined}
-                badgeColor="bg-primary/10 text-primary"
-                onClick={() => router.push(v.sub)}
-              />
-            );
-          })}
-        </ul>
+        <>
+          {groups.map((g) => (
+            <div key={g.title}>
+              <SidebarGroupTitle>{g.title}</SidebarGroupTitle>
+              <ul className="flex flex-col gap-px px-2.5">
+                {g.views.map((v) => {
+                  const id = v.sub.split('?tab=')[1] ?? 'compose';
+                  return (
+                    <SidebarMenuItem
+                      key={v.label}
+                      icon={v.icon}
+                      label={v.label}
+                      active={tab === id}
+                      badge={v.label === 'Scheduled' && stats?.scheduled ? String(stats.scheduled) : undefined}
+                      badgeColor="bg-primary/10 text-primary"
+                      onClick={() => router.push(v.sub)}
+                    />
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </>
       }
     />
   );

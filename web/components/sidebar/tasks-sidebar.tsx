@@ -7,7 +7,7 @@ import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { soulGradient } from '@/components/soul-card';
 import { ListChecks, ListTodo, CircleDot, CheckCircle2, ChevronsUpDown, Users } from 'lucide-react';
-import { SidebarMenuItem } from './sidebar-primitives';
+import { SidebarMenuItem, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
 export function TasksSidebar() {
@@ -62,12 +62,15 @@ export function TasksSidebar() {
     <SidebarLayout
       section2={picker}
       section3={
-        <ul className="flex flex-col gap-px px-2.5">
-          <SidebarMenuItem icon={ListChecks} label="All Tasks" active />
-          <SidebarMenuItem icon={ListTodo} label="To Do" />
-          <SidebarMenuItem icon={CircleDot} label="In Progress" />
-          <SidebarMenuItem icon={CheckCircle2} label="Done" />
-        </ul>
+        <>
+          <SidebarGroupTitle>Tasks</SidebarGroupTitle>
+          <ul className="flex flex-col gap-px px-2.5">
+            <SidebarMenuItem icon={ListChecks} label="All Tasks" active />
+            <SidebarMenuItem icon={ListTodo} label="To Do" />
+            <SidebarMenuItem icon={CircleDot} label="In Progress" />
+            <SidebarMenuItem icon={CheckCircle2} label="Done" />
+          </ul>
+        </>
       }
     />
   );
