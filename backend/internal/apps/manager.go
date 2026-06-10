@@ -312,6 +312,58 @@ func (m *AppManager) BundlePath(slug string) (string, bool) {
 	return path, true
 }
 
+// IsToolPublic reports whether the loaded app exposes a tool with the given
+// name flagged Public — i.e. callable from the public bridge.
+func (m *AppManager) IsToolPublic(slug, toolName string) bool {
+	m.mu.RLock()
+	la, ok := m.loaded[slug]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	for i := range la.manifest.Tools {
+		if la.manifest.Tools[i].Name == toolName {
+			return la.manifest.Tools[i].Public
+		}
+	}
+	return false
+}
+
+// IsPagePublic reports whether the loaded app exposes a page with the given
+// path (or id) flagged Public — i.e. part of the external public surface.
+func (m *AppManager) IsPagePublic(slug, pagePath string) bool {
+	m.mu.RLock()
+	la, ok := m.loaded[slug]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	for i := range la.manifest.Frontend.Pages {
+		p := la.manifest.Frontend.Pages[i]
+		if (p.Path == pagePath || p.ID == pagePath) && p.Public {
+			return true
+		}
+	}
+	return false
+}
+
+// PublicPages returns the loaded app's public-flagged pages (may be empty).
+func (m *AppManager) PublicPages(slug string) []PageDef {
+	m.mu.RLock()
+	la, ok := m.loaded[slug]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	var pages []PageDef
+	for i := range la.manifest.Frontend.Pages {
+		if la.manifest.Frontend.Pages[i].Public {
+			pages = append(pages, la.manifest.Frontend.Pages[i])
+		}
+	}
+	return pages
+}
+
 // FrontendManifests returns the frontend manifest for every loaded enabled app.
 func (m *AppManager) FrontendManifests() []AppFrontendEntry {
 	m.mu.RLock()
@@ -673,7 +725,9 @@ type appTool struct {
 	run               func(ctx context.Context, args map[string]any) *tools.Result
 }
 
-func (t *appTool) Name() string                                            { return t.name }
-func (t *appTool) Description() string                                     { return t.description }
-func (t *appTool) Parameters() map[string]any                              { return t.parameters }
-func (t *appTool) Execute(ctx context.Context, args map[string]any) *tools.Result { return t.run(ctx, args) }
+func (t *appTool) Name() string               { return t.name }
+func (t *appTool) Description() string        { return t.description }
+func (t *appTool) Parameters() map[string]any { return t.parameters }
+func (t *appTool) Execute(ctx context.Context, args map[string]any) *tools.Result {
+	return t.run(ctx, args)
+}
