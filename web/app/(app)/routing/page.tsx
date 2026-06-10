@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { routing, providers as providersApi } from '@/lib/api';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { useSelectedModels } from '@/hooks/use-selected-models';
 import { cn } from '@/lib/utils';
 import { modelDisplayName } from '@/lib/model-names';
@@ -47,9 +47,8 @@ export default function RoutingPage() {
   // Empty state for fresh install
   // if (rules.length === 0) return <EmptyState {...emptyStates.routing} />;
   return (
-    <div className="space-y-8">
-      <CanvasHeader title="Smart Routing" description="Assign models to work categories. Every message is classified and routed automatically." />
-
+    <PageShell title="Smart Routing" description="Assign models to work categories. Every message is classified and routed automatically.">
+      <div className="space-y-8">
       {/* Test classifier */}
       <div className="qr-card p-4">
         <p className="text-sm font-medium mb-3">Test the Router</p>
@@ -146,6 +145,7 @@ export default function RoutingPage() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </PageShell>
   );
 }
