@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react'
 import { Plug, Trash2 } from 'lucide-react'
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { mcp } from '@/lib/api';
 
@@ -49,17 +49,16 @@ export default function McpPage() {
   // Empty state for fresh install
   // if (servers.length === 0) return <EmptyState {...emptyStates.mcp} />;
   return (
-    <div className="space-y-6">
-      <CanvasHeader
-        title="MCP Servers"
-        description={!loading ? `${connected}/${servers.length} connected` : undefined}
-        actions={
-          <button onClick={() => setShowForm(!showForm)} className="bg-primary hover:bg-primary/90 px-4 py-2 rounded-lg text-sm font-medium transition">
-            {showForm ? 'Cancel' : 'Add Server'}
-          </button>
-        }
-      />
-
+    <PageShell
+      title="MCP Servers"
+      description={!loading ? `${connected}/${servers.length} connected` : undefined}
+      actions={
+        <button onClick={() => setShowForm(!showForm)} className="bg-primary hover:bg-primary/90 px-4 py-2 rounded-lg text-sm font-medium transition">
+          {showForm ? 'Cancel' : 'Add Server'}
+        </button>
+      }
+    >
+      <div className="space-y-6">
       {showForm && (
         <div className="bg-card border border-border rounded-xl p-5">
           <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wider">New Server</h2>
@@ -110,6 +109,7 @@ export default function McpPage() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   )
 }
