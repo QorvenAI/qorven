@@ -278,7 +278,6 @@ export default function ConnectorsPage() {
             </button>
           </div>
         }
-        contentClassName="px-0 py-0 sm:px-0"
       >
        <div className="space-y-5">
         {view === 'oauth_apps' ? (
