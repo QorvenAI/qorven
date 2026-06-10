@@ -92,6 +92,10 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-muted text-muted-foreground',
 };
 
+// Shared stable empty array for store selectors that fall back when a room key
+// is absent — returning a fresh `[]` each call breaks useSyncExternalStore.
+const EMPTY_ARR: any[] = [];
+
 function ChatBubble({ msg, members, getMemberName }: {
   msg: RoomMsg;
   members: Member[];
@@ -202,8 +206,12 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
   // Consume live room state from the global WS hub (websocket.ts routes
   // room_message / room_typing_start/stop / stream_start / stream_delta /
   // stream_end into these store slices). No local WebSocket needed.
-  const storeIncoming = useStore((s) => s.roomIncomingMessages[roomId] ?? []);
-  const storeTyping = useStore((s) => s.roomTyping[roomId] ?? []);
+  // Fall back to a shared frozen empty array (not a new `[]` literal) so the
+  // selector returns a stable reference when the room has no entries —
+  // otherwise useSyncExternalStore re-renders forever ("getSnapshot should be
+  // cached to avoid an infinite loop").
+  const storeIncoming = useStore((s) => s.roomIncomingMessages[roomId] ?? EMPTY_ARR);
+  const storeTyping = useStore((s) => s.roomTyping[roomId] ?? EMPTY_ARR);
   const clearRoomIncoming = useStore((s) => s.clearRoomIncoming);
 
   const memberMap = new Map((room?.members || []).map(m => [m.agent_key, m]));
