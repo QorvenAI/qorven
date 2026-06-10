@@ -108,7 +108,7 @@ export function SidebarPinned() {
         onToggle={() => setCollapsed((c) => ({ ...c, hubs: !c.hubs }))}
         action={<button onClick={() => router.push('/rooms')} title="All hubs" className="text-muted-foreground/70 hover:text-foreground"><Plus className="h-3.5 w-3.5" /></button>}
       >
-        <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
+        <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2')}>
           {sortedHubs.map((h) => (
             <HubRow
               key={h.id}
@@ -124,7 +124,7 @@ export function SidebarPinned() {
         </div>
       </Group>
 
-      <div className="mx-3 h-px bg-border/60" />
+      <div className="mx-3 my-2 h-px bg-border/60" />
 
       {/* Recent chats — pinned chats float to the top */}
       <Group
@@ -132,7 +132,7 @@ export function SidebarPinned() {
         collapsed={!!collapsed.chats}
         onToggle={() => setCollapsed((c) => ({ ...c, chats: !c.chats }))}
       >
-        <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
+        <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2')}>
           {sortedChats.map((s) => (
             <ChatRow
               key={s.id}
