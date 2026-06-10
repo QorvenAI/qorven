@@ -41,6 +41,8 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   const router = useRouter();
   const activeRail = useActiveRail();
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
+  const mobileNavOpen = useStore((s) => s.mobileNavOpen);
+  const setMobileNavOpen = useStore((s) => s.setMobileNavOpen);
   const rightPanelOpen = useStore((s) => s.rightPanelOpen);
   const contextPanelOpen = useStore((s) => s.contextPanelOpen);
   const bottomDrawerOpen = useStore((s) => s.bottomDrawerOpen);
@@ -50,6 +52,14 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   const souls = useStore((s) => s.souls);
   const pathname = usePathname();
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Mobile nav drawer: close on route change and on Escape.
+  useEffect(() => { setMobileNavOpen(false); }, [pathname, setMobileNavOpen]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileNavOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setMobileNavOpen]);
 
   const fullBleedPage = false; // terminal no longer hides sidebar
   const noSidebarPage = false;
@@ -119,10 +129,11 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   }, [bottomDrawerOpen, bottomDrawerHeightPx, bottomDrawerTabs.length]);
 
   return (
-    <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '56px' } as React.CSSProperties}>
+    <div ref={rootRef} data-mobile-nav={mobileNavOpen ? 'open' : 'closed'} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '56px' } as React.CSSProperties}>
       <ReconnectBanner />
       <Rail />
       <Sidebar />
+      <div className="mobile-scrim" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
       <div className="wrapper flex min-h-screen flex-col">
         <Header />
         <Toolbar />
