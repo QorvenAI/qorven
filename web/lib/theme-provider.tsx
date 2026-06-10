@@ -15,6 +15,16 @@ export const COLOR_PRESETS = [
   { name: 'Cyan', value: 'oklch(0.715 0.143 215.221)', hex: '#06b6d4', tw: 'bg-cyan-500' },
 ];
 
+// Full-palette theme presets (defined in css/config.qorven.css as [data-theme="id"]).
+// swatchBg / swatchPrimary are preview-only colors for the Settings swatches.
+export const THEME_PRESETS = [
+  { id: 'violet', name: 'Violet', swatchBg: '#ffffff', swatchPrimary: '#7c3aed' },
+  { id: 'slate',  name: 'Slate',  swatchBg: '#ffffff', swatchPrimary: '#334155' },
+  { id: 'ocean',  name: 'Ocean',  swatchBg: '#ffffff', swatchPrimary: '#0284c7' },
+  { id: 'forest', name: 'Forest', swatchBg: '#ffffff', swatchPrimary: '#059669' },
+  { id: 'rose',   name: 'Rose',   swatchBg: '#ffffff', swatchPrimary: '#e11d48' },
+];
+
 export const FONT_OPTIONS = [
   { name: 'System Default', value: 'system-ui, -apple-system, sans-serif' },
   { name: 'Inter', value: '"Inter", sans-serif' },
@@ -33,6 +43,7 @@ export interface ThemeSettings {
   density: 'compact' | 'default' | 'comfortable';
   dateFormat: DateFormat;
   timezone: string;        // IANA timezone, e.g. "Asia/Kolkata"
+  themePreset: string;     // id of a THEME_PRESETS entry (full palette)
 }
 
 const DEFAULT_SETTINGS: ThemeSettings = {
@@ -44,6 +55,7 @@ const DEFAULT_SETTINGS: ThemeSettings = {
   density: 'default',
   dateFormat: 'relative',
   timezone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'Asia/Kolkata',
+  themePreset: 'violet',
 };
 
 const STORAGE_KEY = 'qorven-theme';
@@ -89,6 +101,9 @@ async function loadFromBackend(): Promise<ThemeSettings | null> {
 function applyToDOM(settings: ThemeSettings) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
+
+  // Theme preset (full palette) — the CSS [data-theme] cascade handles light/dark.
+  root.dataset.theme = settings.themePreset || 'violet';
 
   // Primary color
   root.style.setProperty('--primary', settings.primaryOklch);
