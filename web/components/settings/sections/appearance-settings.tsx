@@ -4,7 +4,7 @@
 
 import { CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useThemeSettings, COLOR_PRESETS, FONT_OPTIONS, type DateFormat } from '@/lib/theme-provider';
+import { useThemeSettings, COLOR_PRESETS, FONT_OPTIONS, THEME_PRESETS, type DateFormat } from '@/lib/theme-provider';
 import { Card, Row, Input } from './primitives';
 import { formatDate } from '@/lib/format-date';
 
@@ -42,6 +42,34 @@ export function AppearanceSettings() {
 
   return (
     <div className="space-y-4">
+      <Card id="app_theme" title="Theme" description="Pick a color scheme for the whole workspace. Fine-tune the accent, font, and density below.">
+        <Row label="Theme Preset">
+          <div className="flex items-center gap-2 flex-wrap">
+            {THEME_PRESETS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => updateSettings({ themePreset: t.id })}
+                title={t.name}
+                className={cn(
+                  'flex items-center gap-2 rounded-lg border px-3 py-2 transition-all cursor-pointer',
+                  settings.themePreset === t.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-foreground/30',
+                )}
+              >
+                <span className="relative h-5 w-5 shrink-0 rounded-full border border-border overflow-hidden"
+                  style={{ backgroundColor: t.swatchBg }}>
+                  <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full"
+                    style={{ backgroundColor: t.swatchPrimary }} />
+                </span>
+                <span className="text-xs font-medium">{t.name}</span>
+                {settings.themePreset === t.id && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+              </button>
+            ))}
+          </div>
+        </Row>
+      </Card>
+
       <Card id="app_color" title="Brand Color" description="The primary accent color used across buttons, highlights, and active states.">
         <Row label="Color Preset">
           <div className="space-y-3">
