@@ -56,14 +56,22 @@ func TestSyncCompanyHub(t *testing.T) {
 
 	// l1 + l2 are members; l3 is not; no duplicates.
 	members := map[string]int{}
-	rows, _ := pool.Query(ctx, `SELECT agent_id::text, count(*) FROM room_members WHERE room_id=$1 GROUP BY agent_id`, roomID)
+	rows, err := pool.Query(ctx, `SELECT agent_id::text, count(*) FROM room_members WHERE room_id=$1 GROUP BY agent_id`, roomID)
+	if err != nil {
+		t.Fatalf("query members: %v", err)
+	}
+	defer rows.Close()
 	for rows.Next() {
 		var aid string
 		var n int
-		rows.Scan(&aid, &n)
+		if err := rows.Scan(&aid, &n); err != nil {
+			t.Fatalf("scan member: %v", err)
+		}
 		members[aid] = n
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
 	if members[l1] != 1 {
 		t.Errorf("l1 should be a single member, got %d", members[l1])
 	}
