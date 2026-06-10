@@ -1,7 +1,7 @@
 @layer components {
   /* Layout Variables */
   .qorven {
-    --rail-width: 60px;
+    --rail-width: 0px;
     --sidebar-width: 280px;
     --sidebar-width-collapse: 0px;
     --sidebar-default-width: 280px;

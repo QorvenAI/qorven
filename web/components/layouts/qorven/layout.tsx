@@ -7,7 +7,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useStore } from '@/store';
 import { agents } from '@/lib/api';
 import { toast } from 'sonner';
-import { Rail } from './rail';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { ToolbarProvider, Toolbar, useToolbar } from './toolbar';
@@ -121,7 +120,6 @@ function QorvenLayoutInner({ children }: { children: ReactNode }) {
   return (
     <div ref={rootRef} style={{ width: '100%', minHeight: '100vh', position: 'relative', '--status-bar-height': '24px', '--agent-pill-height': '56px' } as React.CSSProperties}>
       <ReconnectBanner />
-      <Rail />
       <Sidebar />
       <div className="wrapper flex min-h-screen flex-col">
         <Header />
