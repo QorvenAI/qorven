@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Zap, BarChart3 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request } from '@/lib/api-core';
@@ -17,16 +17,20 @@ export default function BillingPage() {
 
   useEffect(() => { request<any>('/billing/costs').then(setData).catch(() => {}); }, []);
 
-  if (!data) return <div className="p-6 text-muted-foreground">Loading...</div>;
-
-  const totalDollars = (data.total_cents / 100).toFixed(2);
+  const totalDollars = data ? (data.total_cents / 100).toFixed(2) : '0.00';
 
   // Empty state for fresh install
   // if (data.length === 0) return <EmptyState {...emptyStates.billing} />;
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <CanvasHeader title="Billing & Costs" description="Per-agent cost tracking and budget management" />
-
+    <PageShell
+      title="Billing & Costs"
+      description="Per-agent cost tracking and budget management"
+      contentClassName="px-6 py-6 sm:px-6"
+    >
+      {!data ? (
+        <div className="text-muted-foreground">Loading...</div>
+      ) : (
+      <div className="mx-auto max-w-6xl space-y-6">
       <div className="grid grid-cols-3 gap-4">
         <div className="qr-card p-4">
           <p className="text-xs text-muted-foreground">Total Cost (30d)</p>
@@ -129,6 +133,8 @@ export default function BillingPage() {
           ))}
         </div>
       </div>
-    </div>
+      </div>
+      )}
+    </PageShell>
   );
 }
