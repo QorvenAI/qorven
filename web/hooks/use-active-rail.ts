@@ -19,7 +19,7 @@ const routes: [string, RailSection][] = [
   ['/connectors', 'connectors'],
   ['/pairing', 'connectors'],
   ['/routing', 'connectors'],
-  ['/rooms', 'rooms'],
+  ['/hubs', 'rooms'],
   ['/org-chart', 'org-chart'],
   ['/teams', 'org-chart'],
   ['/skills', 'apps'],

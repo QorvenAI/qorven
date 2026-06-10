@@ -42,7 +42,7 @@ const allPages: Result[] = [
   { label: 'Provider Keys', sub: 'Page', href: '/provider-keys', icon: Database },
   { label: 'Memories', sub: 'Page', href: '/memories', icon: BookOpen },
   { label: 'Research', sub: 'Page', href: '/research', icon: Wand2 },
-  { label: 'Hubs', sub: 'Chat', href: '/qors', icon: MessageSquare },
+  { label: 'Hubs', sub: 'Page', href: '/hubs', icon: MessageSquare },
   { label: 'Voice', sub: 'Page', href: '/voice', icon: Mic },
   { label: 'Tasks (Global)', sub: 'Page', href: '/tasks', icon: ListTodo },
   { label: 'Sandbox', sub: 'Page', href: '/sandbox', icon: FlaskConical },

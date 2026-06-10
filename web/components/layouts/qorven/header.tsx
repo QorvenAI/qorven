@@ -36,7 +36,7 @@ const pageLabels: Record<string, string> = {
   '/': 'Dashboard', '/qors': 'Qors', '/code': 'Code', '/terminal': 'Terminal',
   '/channels': 'Channels', '/connectors': 'Connectors', '/cron': 'Schedules',
   '/workflows': 'Flows', '/skills': 'Skills', '/analytics': 'Analytics',
-  '/settings': 'Settings', '/rooms': 'Hubs', '/sessions': 'Chats',
+  '/settings': 'Settings', '/hubs': 'Hubs', '/sessions': 'Chats',
   '/mail': 'Chat', '/drive': 'Drive', '/tasks': 'Tasks', '/schedule': 'Calendar',
   '/teams': 'Teams', '/mcp': 'MCP', '/knowledge-graph': 'Knowledge',
   '/heartbeat': 'Health', '/supervisor': 'Supervisor', '/models-hub': 'Models',
