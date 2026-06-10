@@ -105,10 +105,19 @@ function applyToDOM(settings: ThemeSettings) {
   // Theme preset (full palette) — the CSS [data-theme] cascade handles light/dark.
   root.dataset.theme = settings.themePreset || 'violet';
 
-  // Primary color
-  root.style.setProperty('--primary', settings.primaryOklch);
-  root.style.setProperty('--ring', settings.primaryOklch);
-  root.style.setProperty('--chart-1', settings.primaryOklch);
+  // Primary color — only override inline when the user has CUSTOMIZED it away
+  // from the default. Otherwise leave it unset so the selected theme preset's
+  // own primary shows through (inline style would otherwise always win).
+  const customizedPrimary = settings.primaryColor !== DEFAULT_SETTINGS.primaryColor;
+  if (customizedPrimary) {
+    root.style.setProperty('--primary', settings.primaryOklch);
+    root.style.setProperty('--ring', settings.primaryOklch);
+    root.style.setProperty('--chart-1', settings.primaryOklch);
+  } else {
+    root.style.removeProperty('--primary');
+    root.style.removeProperty('--ring');
+    root.style.removeProperty('--chart-1');
+  }
 
   // Font
   root.style.setProperty('--font-sans', settings.fontFamily);
