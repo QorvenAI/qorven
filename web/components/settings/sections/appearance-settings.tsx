@@ -40,6 +40,12 @@ const DATE_FORMAT_OPTIONS: { value: DateFormat; label: string }[] = [
 export function AppearanceSettings() {
   const { settings, updateSettings, resetSettings } = useThemeSettings();
 
+  // Brand color shows the active preset's accent until the user sets a custom
+  // override. An empty primaryColor means "no override — use the theme's color".
+  const presetSwatch = THEME_PRESETS.find(t => t.id === settings.themePreset)?.swatch ?? '#7c3aed';
+  const hasOverride = !!settings.primaryColor;
+  const shownColor = hasOverride ? settings.primaryColor : presetSwatch;
+
   return (
     <div className="space-y-4">
       <Card id="app_theme" title="Theme" description="Pick a color scheme for the whole workspace. Fine-tune the accent, font, and density below.">
@@ -83,12 +89,20 @@ export function AppearanceSettings() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground shrink-0">Custom:</span>
-              <input type="color" value={settings.primaryColor}
+              <input type="color" value={shownColor}
                 onChange={e => updateSettings({ primaryColor: e.target.value, primaryOklch: e.target.value })}
                 className="h-8 w-10 rounded border border-border cursor-pointer p-0.5 bg-background" />
-              <Input value={settings.primaryColor}
+              <Input value={shownColor}
                 onChange={v => updateSettings({ primaryColor: v, primaryOklch: v })}
                 className="w-28 font-mono text-xs" />
+              {hasOverride && (
+                <button
+                  onClick={() => updateSettings({ primaryColor: '', primaryOklch: '' })}
+                  className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline cursor-pointer"
+                >
+                  Use theme color
+                </button>
+              )}
             </div>
           </div>
         </Row>
