@@ -5,12 +5,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { rooms as roomsApi } from '@/lib/api';
+import { rooms as roomsApi, workItems as workItemsApi, type WorkItem, type WorkItemEvent } from '@/lib/api';
 import { useStore } from '@/store';
 import {
   ArrowLeft, Send, Pin, CheckSquare, FileText, Users, MessageSquare,
   Loader2, Sparkles, Circle, Crown, ShieldCheck, Clock, UserPlus, UserMinus,
-  RefreshCw,
+  RefreshCw, Briefcase, ChevronRight, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -81,6 +81,16 @@ function gradientForId(id: string): string {
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
   return BUBBLE_GRADIENTS[Math.abs(hash) % BUBBLE_GRADIENTS.length]!;
 }
+
+const STATUS_COLOR: Record<string, string> = {
+  open: 'bg-slate-500/15 text-slate-400',
+  assigned: 'bg-slate-500/15 text-slate-300',
+  in_progress: 'bg-blue-500/15 text-blue-400',
+  in_review: 'bg-amber-500/15 text-amber-400',
+  done: 'bg-green-500/15 text-green-400',
+  blocked: 'bg-red-500/15 text-red-400',
+  cancelled: 'bg-muted text-muted-foreground',
+};
 
 function ChatBubble({ msg, members, getMemberName }: {
   msg: RoomMsg;
@@ -183,6 +193,10 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
   const [sending, setSending] = useState(false);
   const [generatingMinutes, setGeneratingMinutes] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [workOpen, setWorkOpen] = useState(true);
+  const [work, setWork] = useState<WorkItem[]>([]);
+  const [selectedWork, setSelectedWork] = useState<{ item: WorkItem; events: WorkItemEvent[] } | null>(null);
+  const [workError, setWorkError] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Consume live room state from the global WS hub (websocket.ts routes
@@ -233,6 +247,25 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
       if (!cancelled.current) setLoadError(true);
     }
   }, [roomId, clearRoomIncoming]);
+
+  const loadWork = useCallback(async () => {
+    try {
+      const r = await workItemsApi.listForRoom(roomId);
+      setWork(r.work_items || []);
+      setWorkError(false);
+    } catch {
+      setWorkError(true);
+    }
+  }, [roomId]);
+
+  const openWork = useCallback(async (id: string) => {
+    try {
+      const r = await workItemsApi.get(id);
+      setSelectedWork({ item: r.work_item, events: r.events || [] });
+    } catch {
+      /* non-fatal: drawer just won't open */
+    }
+  }, []);
 
   const loadDecisions = useCallback(async (cancelled: { current: boolean }) => {
     try {
@@ -290,6 +323,19 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
       return () => clearTimeout(t);
     }
   }, [storeIncoming, load]);
+
+  // Load the room's work items on mount / room change
+  useEffect(() => { loadWork(); }, [loadWork]);
+
+  // Work status changes are always accompanied by a system room message —
+  // refetch shortly after one arrives so the panel stays live.
+  useEffect(() => {
+    const hasSystem = storeIncoming.some((m: any) => m.sender_id === 'system' || m.sender === 'system');
+    if (hasSystem) {
+      const t = setTimeout(() => loadWork(), 750);
+      return () => clearTimeout(t);
+    }
+  }, [storeIncoming, loadWork]);
 
   const handleSend = async () => {
     if (!input.trim() || sending) return;
@@ -662,7 +708,98 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
             )}
           </div>
         )}
+
+        {/* ── Work panel ── */}
+        {workOpen ? (
+          <aside className="hidden lg:flex w-[300px] shrink-0 flex-col border-l border-border overflow-hidden">
+            <div className="flex items-center gap-2 border-b border-border px-3 py-2 shrink-0">
+              <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-semibold flex-1">Work</span>
+              <span className="text-[10px] text-muted-foreground">{work.length}</span>
+              <button onClick={() => setWorkOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              {workError && (
+                <button onClick={loadWork} className="w-full rounded-md border border-border px-2 py-3 text-xs text-muted-foreground hover:bg-accent">
+                  Couldn’t load work · Retry
+                </button>
+              )}
+              {!workError && work.length === 0 && (
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">No work yet — delegate something to your team.</p>
+              )}
+              {work.map(wi => (
+                <button
+                  key={wi.id}
+                  onClick={() => openWork(wi.id)}
+                  className="w-full rounded-md border border-border p-2 text-left hover:bg-accent"
+                >
+                  <p className="text-xs font-medium line-clamp-2">{wi.title}</p>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', STATUS_COLOR[wi.status] ?? 'bg-muted text-muted-foreground')}>
+                      {wi.status.replace('_', ' ')}
+                    </span>
+                    {(wi.owner_key || wi.owner_name) && (
+                      <span className="text-[10px] text-muted-foreground truncate">@{wi.owner_key || wi.owner_name}</span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </aside>
+        ) : (
+          <button
+            onClick={() => setWorkOpen(true)}
+            title="Show work"
+            className="hidden lg:flex w-9 shrink-0 flex-col items-center gap-1 border-l border-border py-2 text-muted-foreground hover:text-foreground"
+          >
+            <Briefcase className="h-4 w-4" />
+            <span className="text-[10px]">{work.length}</span>
+          </button>
+        )}
       </div>
+
+      {/* ── Work detail drawer ── */}
+      {selectedWork && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setSelectedWork(null)}>
+          <div className="h-full w-[380px] bg-background border-l border-border flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-2 border-b border-border px-4 py-3 shrink-0">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">{selectedWork.item.title}</p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', STATUS_COLOR[selectedWork.item.status] ?? 'bg-muted text-muted-foreground')}>
+                    {selectedWork.item.status.replace('_', ' ')}
+                  </span>
+                  {(selectedWork.item.owner_key || selectedWork.item.owner_name) && (
+                    <span className="text-[10px] text-muted-foreground">@{selectedWork.item.owner_key || selectedWork.item.owner_name}</span>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setSelectedWork(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <p className="text-xs font-medium text-muted-foreground mb-2">History</p>
+              <ol className="space-y-2">
+                {selectedWork.events.map((ev, i) => (
+                  <li key={i} className="text-xs">
+                    <span className="text-muted-foreground">{ev.from_status || '—'}</span>
+                    <span className="mx-1">→</span>
+                    <span className="font-medium">{ev.to_status || ev.event_type}</span>
+                    {ev.actor_id && <span className="text-muted-foreground"> · {ev.actor_id}</span>}
+                    {ev.detail && <p className="text-muted-foreground mt-0.5">{ev.detail}</p>}
+                  </li>
+                ))}
+                {selectedWork.events.length === 0 && (
+                  <li className="text-xs text-muted-foreground">No history yet.</li>
+                )}
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
