@@ -30,6 +30,17 @@ type Config struct {
 	SelfBuild SelfBuildConfig   `toml:"self_build"`
 	LLMStats            LLMStatsConfig            `toml:"llm_stats"`
 	ArtificialAnalysis  ArtificialAnalysisConfig  `toml:"artificial_analysis"`
+	Tunnel    TunnelConfig      `toml:"tunnel"`
+}
+
+// TunnelConfig controls internet exposure via a tunnel. The tunnel points at a
+// SEPARATE restricted public listener (PublicPort), never the admin API port —
+// so the admin backend is unreachable through the tunnel by construction.
+type TunnelConfig struct {
+	Enabled    bool   `toml:"enabled"`     // start the public listener + tunnel on boot
+	Provider   string `toml:"provider"`    // "cloudflare" | "tailscale"
+	PublicPort int    `toml:"public_port"` // port for the restricted public mux; default 8487
+	Token      string `toml:"token"`       // named-tunnel credential (encrypted at rest in DB)
 }
 
 // ArtificialAnalysisConfig controls the optional Artificial Analysis
