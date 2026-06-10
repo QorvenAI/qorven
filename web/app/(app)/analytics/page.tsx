@@ -10,7 +10,7 @@ import {
   BarChart3, TrendingUp, CheckCircle2, Users, Lock,
   RefreshCw, Search, Globe, FileText,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 
 // --- Types ---
 
@@ -91,44 +91,43 @@ export default function AnalyticsPage() {
   const activeAgents = overview?.posts_by_agent?.length ?? 0;
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
-      <CanvasHeader
-        title="Analytics"
-        actions={
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-              <button
-                onClick={() => setPeriod('7d')}
-                className={cn(
-                  'px-3 py-1.5 transition-colors',
-                  period === '7d' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
-                )}
-              >
-                7d
-              </button>
-              <button
-                onClick={() => setPeriod('30d')}
-                className={cn(
-                  'px-3 py-1.5 transition-colors',
-                  period === '30d' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
-                )}
-              >
-                30d
-              </button>
-            </div>
+    <PageShell
+      title="Analytics"
+      contentClassName="px-0 py-0 sm:px-0"
+      actions={
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             <button
-              onClick={load}
-              disabled={loading}
-              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+              onClick={() => setPeriod('7d')}
+              className={cn(
+                'px-3 py-1.5 transition-colors',
+                period === '7d' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
+              )}
             >
-              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-              Refresh
+              7d
+            </button>
+            <button
+              onClick={() => setPeriod('30d')}
+              className={cn(
+                'px-3 py-1.5 transition-colors',
+                period === '30d' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-accent'
+              )}
+            >
+              30d
             </button>
           </div>
-        }
-      />
-
-      <div className="space-y-6 px-6 pb-8">
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+            Refresh
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-6 px-6 pb-8 pt-4">
         {/* Row 1: Stat cards */}
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
           <StatCard
@@ -187,7 +186,7 @@ export default function AnalyticsPage() {
           <AgentCard data={overview?.posts_by_agent ?? []} loading={loading} />
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -288,7 +287,7 @@ function TimelineChart({ data }: { data: TimelineDay[] }) {
                   x={x + barWidth / 2}
                   y={chartHeight + 16}
                   textAnchor="middle"
-                  className="fill-muted-foreground text-[9px]"
+                  className="fill-muted-foreground text-2xs"
                 >
                   {formatDateLabel(d.date)}
                 </text>
