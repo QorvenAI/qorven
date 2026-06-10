@@ -3,22 +3,27 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 // SidebarPinned — the always-present zone pinned above the COO dock on every
-// page: Hubs (company room first) + Recent chats. Each section shows ~3 rows by
-// default and grows with screen height; longer lists scroll within the section
-// and expose a search box, so the zone never pushes the contextual content off
-// screen or runs under the dock.
+// page. Three collapsible groups, top→bottom: ★ Pinned (the user's pinned hubs
+// + chats, shown only when non-empty), Hubs, and Recent chats. Built from the
+// same primitives as the contextual sidebars so it reads as one design: muted
+// group headers, a subtle inline search on long lists, dense rows with a
+// glyph/avatar + name + a right-aligned indicator, and a hover star to pin.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useStore } from '@/store';
-import { rooms as roomsApi } from '@/lib/api';
-import { SidebarHubRow, type HubMember } from './sidebar-hub-row';
-import { Plus, MessageSquare, Search } from 'lucide-react';
+import { rooms as roomsApi, pins as pinsApi, type SidebarPin } from '@/lib/api';
+import { soulGradient } from '@/components/soul-card';
+import { cn } from '@/lib/utils';
+import { Plus, Search, Hash, MessageSquare, Star, ChevronDown } from 'lucide-react';
 
-// A list longer than this gets its own search box and a scroll area.
-const SEARCH_THRESHOLD = 3;
-// Each section's scroll area: ~3 rows on short screens, more when tall.
-const LIST_MAX_H = 'max-h-[clamp(108px,16vh,260px)]';
+// A list longer than this gets its own inline search box.
+const SEARCH_THRESHOLD = 5;
+// Each group's scroll area: ~3 rows on short screens, more when tall.
+const LIST_MAX_H = 'max-h-[clamp(108px,18vh,280px)]';
+
+type PinKey = string; // `${type}:${id}`
+const keyOf = (type: 'hub' | 'chat', id: string): PinKey => `${type}:${id}`;
 
 export function SidebarPinned() {
   const router = useRouter();
@@ -26,9 +31,11 @@ export function SidebarPinned() {
   const souls = useStore((s) => s.souls);
 
   const [hubs, setHubs] = useState<any[]>([]);
-  const [hubMembers, setHubMembers] = useState<Record<string, HubMember[]>>({});
+  const [hubMembers, setHubMembers] = useState<Record<string, number>>({});
+  const [pinned, setPinned] = useState<SidebarPin[]>([]);
   const [hubQuery, setHubQuery] = useState('');
   const [chatQuery, setChatQuery] = useState('');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -39,19 +46,37 @@ export function SidebarPinned() {
       list.forEach((h: any) => {
         roomsApi.org(h.id).then((org: any) => {
           if (cancelled) return;
-          const members: HubMember[] = (org?.members ?? []).map((m: any) => ({
-            id: m.id ?? m.agent_id,
-            display_name: m.display_name ?? m.agent_key ?? 'Agent',
-            avatar: m.avatar,
-          }));
-          setHubMembers((prev) => ({ ...prev, [h.id]: members }));
+          setHubMembers((prev) => ({ ...prev, [h.id]: (org?.members ?? []).length }));
         }).catch(() => {});
       });
     }).catch(() => {});
+    pinsApi.list().then((p) => { if (!cancelled) setPinned(Array.isArray(p) ? p : []); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
   const currentHubId = pathname?.match(/^\/rooms\/([^/]+)/)?.[1] ?? null;
+  const currentChatId = pathname?.match(/^\/qors\/([^/]+)/)?.[1] ?? null;
+
+  const pinnedKeys = useMemo(() => new Set(pinned.map((p) => keyOf(p.item_type, p.item_id))), [pinned]);
+  const isPinned = (type: 'hub' | 'chat', id: string) => pinnedKeys.has(keyOf(type, id));
+
+  const togglePin = useCallback((type: 'hub' | 'chat', id: string) => {
+    const k = keyOf(type, id);
+    // Read live state inside the updater so this stays correct regardless of
+    // where the row that triggered it was memoised.
+    setPinned((prev) => {
+      if (prev.some((p) => keyOf(p.item_type, p.item_id) === k)) {
+        pinsApi.unpin(type, id).catch(() => {});
+        return prev.filter((p) => keyOf(p.item_type, p.item_id) !== k);
+      }
+      // Optimistic: append a provisional pin; reconcile from server response.
+      const provisional: SidebarPin = { id: k, item_type: type, item_id: id, order_index: 999, created_at: '' };
+      pinsApi.pin(type, id)
+        .then((saved) => setPinned((cur) => cur.map((p) => (p.id === k ? saved : p))))
+        .catch(() => setPinned((cur) => cur.filter((p) => p.id !== k)));
+      return [...prev, provisional];
+    });
+  }, []);
 
   const hubLabel = (h: any) => String(h.display_name || h.name || '');
   const chatLabel = (s: any) => String(s.display_name || s.agent_key || '');
@@ -66,74 +91,205 @@ export function SidebarPinned() {
     return q ? souls.filter((s) => chatLabel(s).toLowerCase().includes(q)) : souls;
   }, [souls, chatQuery]);
 
+  // Resolve pinned entries to live hub/chat records, preserving pin order.
+  const pinnedRows = useMemo(() => {
+    const rows: { key: string; node: ReactNode }[] = [];
+    for (const p of pinned) {
+      if (p.item_type === 'hub') {
+        const h = hubs.find((x) => x.id === p.item_id);
+        if (!h) continue;
+        rows.push({
+          key: keyOf('hub', h.id),
+          node: (
+            <HubRow
+              key={keyOf('hub', h.id)}
+              label={hubLabel(h)}
+              members={hubMembers[h.id] ?? 0}
+              active={currentHubId === h.id}
+              pinned
+              onOpen={() => router.push(`/rooms/${h.id}`)}
+              onTogglePin={() => togglePin('hub', h.id)}
+            />
+          ),
+        });
+      } else {
+        const s = souls.find((x) => x.id === p.item_id);
+        if (!s) continue;
+        rows.push({
+          key: keyOf('chat', s.id),
+          node: (
+            <ChatRow
+              key={keyOf('chat', s.id)}
+              label={chatLabel(s)}
+              active={currentChatId === s.id}
+              pinned
+              onOpen={() => router.push(`/qors/${s.id}`)}
+              onTogglePin={() => togglePin('chat', s.id)}
+            />
+          ),
+        });
+      }
+    }
+    return rows;
+  }, [pinned, hubs, souls, hubMembers, currentHubId, currentChatId]);
+
   return (
-    <div className="shrink-0 border-t border-border bg-muted/40 px-2 py-2">
-      {/* Hubs */}
-      <div className="flex items-center justify-between px-1 pb-1">
-        <span className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">Hubs</span>
-        <button onClick={() => router.push('/rooms')} title="All hubs" className="text-muted-foreground hover:text-foreground">
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      {hubs.length > SEARCH_THRESHOLD && (
-        <SearchBox value={hubQuery} onChange={setHubQuery} placeholder="Search hubs" />
+    <div className="shrink-0 border-t border-border bg-muted/30">
+      {/* ★ Pinned */}
+      {pinnedRows.length > 0 && (
+        <Group
+          title="Pinned"
+          icon={<Star className="h-3 w-3 fill-current text-amber-500" />}
+          collapsed={!!collapsed.pinned}
+          onToggle={() => setCollapsed((c) => ({ ...c, pinned: !c.pinned }))}
+        >
+          <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
+            {pinnedRows.map((r) => r.node)}
+          </div>
+        </Group>
       )}
-      <div className={`${LIST_MAX_H} overflow-y-auto scrollbar-thin flex flex-col gap-px`}>
-        {filteredHubs.map((h) => (
-          <SidebarHubRow
-            key={h.id}
-            id={h.id}
-            name={h.name}
-            displayName={h.display_name}
-            members={hubMembers[h.id] ?? []}
-            isActive={currentHubId === h.id}
-            onClick={() => router.push(`/rooms/${h.id}`)}
-          />
-        ))}
-        {hubs.length === 0 && <p className="px-1 py-1 text-2xs text-muted-foreground">No hubs yet.</p>}
-        {hubs.length > 0 && filteredHubs.length === 0 && (
-          <p className="px-1 py-1 text-2xs text-muted-foreground">No matching hubs.</p>
-        )}
-      </div>
+
+      {/* Hubs */}
+      <Group
+        title="Hubs"
+        collapsed={!!collapsed.hubs}
+        onToggle={() => setCollapsed((c) => ({ ...c, hubs: !c.hubs }))}
+        action={<button onClick={() => router.push('/rooms')} title="All hubs" className="text-muted-foreground/70 hover:text-foreground"><Plus className="h-3.5 w-3.5" /></button>}
+      >
+        {hubs.length > SEARCH_THRESHOLD && <SearchBox value={hubQuery} onChange={setHubQuery} placeholder="Search hubs" />}
+        <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
+          {filteredHubs.map((h) => (
+            <HubRow
+              key={h.id}
+              label={hubLabel(h)}
+              members={hubMembers[h.id] ?? 0}
+              active={currentHubId === h.id}
+              pinned={isPinned('hub', h.id)}
+              onOpen={() => router.push(`/rooms/${h.id}`)}
+              onTogglePin={() => togglePin('hub', h.id)}
+            />
+          ))}
+          {hubs.length === 0 && <Empty>No hubs yet.</Empty>}
+          {hubs.length > 0 && filteredHubs.length === 0 && <Empty>No matching hubs.</Empty>}
+        </div>
+      </Group>
 
       {/* Recent chats */}
-      <div className="px-1 pt-3 pb-1">
-        <span className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">Recent chats</span>
-      </div>
-      {souls.length > SEARCH_THRESHOLD && (
-        <SearchBox value={chatQuery} onChange={setChatQuery} placeholder="Search chats" />
-      )}
-      <div className={`${LIST_MAX_H} overflow-y-auto scrollbar-thin flex flex-col gap-px`}>
-        {filteredChats.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => router.push(`/qors/${s.id}`)}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-2sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
-          >
-            <MessageSquare className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1 truncate">{chatLabel(s)}</span>
-          </button>
-        ))}
-        {souls.length === 0 && <p className="px-1 py-1 text-2xs text-muted-foreground">No chats yet.</p>}
-        {souls.length > 0 && filteredChats.length === 0 && (
-          <p className="px-1 py-1 text-2xs text-muted-foreground">No matching chats.</p>
-        )}
-      </div>
+      <Group
+        title="Recent chats"
+        collapsed={!!collapsed.chats}
+        onToggle={() => setCollapsed((c) => ({ ...c, chats: !c.chats }))}
+      >
+        {souls.length > SEARCH_THRESHOLD && <SearchBox value={chatQuery} onChange={setChatQuery} placeholder="Search chats" />}
+        <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
+          {filteredChats.map((s) => (
+            <ChatRow
+              key={s.id}
+              label={chatLabel(s)}
+              active={currentChatId === s.id}
+              pinned={isPinned('chat', s.id)}
+              onOpen={() => router.push(`/qors/${s.id}`)}
+              onTogglePin={() => togglePin('chat', s.id)}
+            />
+          ))}
+          {souls.length === 0 && <Empty>No chats yet.</Empty>}
+          {souls.length > 0 && filteredChats.length === 0 && <Empty>No matching chats.</Empty>}
+        </div>
+      </Group>
     </div>
   );
 }
 
+/* ─── Group (collapsible header + body) ─────────────────────────────────────── */
+function Group({ title, icon, action, collapsed, onToggle, children }: {
+  title: string; icon?: ReactNode; action?: ReactNode; collapsed: boolean; onToggle: () => void; children: ReactNode;
+}) {
+  return (
+    <div className="pt-2">
+      <div className="flex items-center gap-1.5 px-3 pb-1">
+        <button onClick={onToggle} className="flex flex-1 items-center gap-1.5 text-2xs font-medium uppercase tracking-wider text-muted-foreground/60 hover:text-muted-foreground">
+          <ChevronDown className={cn('h-3 w-3 transition-transform', collapsed && '-rotate-90')} />
+          {icon}
+          <span>{title}</span>
+        </button>
+        {action}
+      </div>
+      {!collapsed && children}
+    </div>
+  );
+}
+
+/* ─── Rows ──────────────────────────────────────────────────────────────────── */
+function RowShell({ active, onOpen, pinned, onTogglePin, children }: {
+  active: boolean; onOpen: () => void; pinned: boolean; onTogglePin: () => void; children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        'group/row flex w-full items-center gap-2.5 h-8.5 px-2.5 rounded-md transition-colors cursor-pointer',
+        active ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+      )}
+      onClick={onOpen}
+    >
+      {children}
+      <button
+        onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+        title={pinned ? 'Unpin' : 'Pin'}
+        className={cn(
+          'shrink-0 -mr-1 flex h-5 w-5 items-center justify-center rounded transition-opacity hover:bg-background/60',
+          pinned ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100',
+        )}
+      >
+        <Star className={cn('h-3.5 w-3.5', pinned ? 'fill-amber-500 text-amber-500' : 'text-muted-foreground')} />
+      </button>
+    </div>
+  );
+}
+
+function HubRow({ label, members, active, pinned, onOpen, onTogglePin }: {
+  label: string; members: number; active: boolean; pinned: boolean; onOpen: () => void; onTogglePin: () => void;
+}) {
+  return (
+    <RowShell active={active} onOpen={onOpen} pinned={pinned} onTogglePin={onTogglePin}>
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <Hash className="h-3 w-3" />
+      </div>
+      <span className="flex-1 truncate text-2sm">{label}</span>
+      {members > 0 && <span className="shrink-0 text-2xs tabular-nums text-muted-foreground/70">{members}</span>}
+    </RowShell>
+  );
+}
+
+function ChatRow({ label, active, pinned, onOpen, onTogglePin }: {
+  label: string; active: boolean; pinned: boolean; onOpen: () => void; onTogglePin: () => void;
+}) {
+  return (
+    <RowShell active={active} onOpen={onOpen} pinned={pinned} onTogglePin={onTogglePin}>
+      <div className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-2xs font-semibold text-white', soulGradient(label || '?'))}>
+        {(label?.[0] ?? '?').toUpperCase()}
+      </div>
+      <span className="flex-1 truncate text-2sm">{label}</span>
+      <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground/40 opacity-0 group-hover/row:opacity-100" />
+    </RowShell>
+  );
+}
+
+/* ─── Bits ──────────────────────────────────────────────────────────────────── */
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
-    <div className="relative mb-1 px-1">
-      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" />
+    <div className="relative mb-1 px-2">
+      <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-background py-1 pl-7 pr-2 text-2xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+        className="qr-input !h-7 !text-xs !pl-7"
       />
     </div>
   );
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="px-2.5 py-1 text-2xs text-muted-foreground/70">{children}</p>;
 }

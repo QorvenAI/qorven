@@ -163,6 +163,23 @@ export const rooms = {
   org: (id: string) => request<any>(`/rooms/${id}/org`),
 };
 
+// Sidebar pins — per-user pinned hubs/chats shown at the top of the sidebar.
+export type SidebarPin = {
+  id: string;
+  item_type: 'hub' | 'chat';
+  item_id: string;
+  order_index: number;
+  created_at: string;
+};
+
+export const pins = {
+  list: () => request<SidebarPin[]>('/pins'),
+  pin: (itemType: 'hub' | 'chat', itemId: string) =>
+    request<SidebarPin>('/pins', { method: 'POST', body: JSON.stringify({ item_type: itemType, item_id: itemId }) }),
+  unpin: (itemType: 'hub' | 'chat', itemId: string) =>
+    request<void>(`/pins/${itemType}/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
+};
+
 // Work Items
 export type WorkItem = {
   id: string;
