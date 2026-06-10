@@ -32,7 +32,7 @@ func (gw *Gateway) handleListRooms(w http.ResponseWriter, r *http.Request) {
 		`SELECT r.id, r.name, r.display_name, r.description, r.is_dm, r.created_at,
 		        (SELECT COUNT(*) FROM room_members WHERE room_id = r.id) as member_count,
 		        (SELECT COUNT(*) FROM room_messages WHERE room_id = r.id) as message_count
-		 FROM rooms r WHERE r.tenant_id = $1 ORDER BY r.created_at DESC`, defaultTenant)
+		 FROM rooms r WHERE r.tenant_id = $1 ORDER BY (r.name = 'company-hub') DESC, r.created_at DESC`, defaultTenant)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

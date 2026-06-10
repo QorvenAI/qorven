@@ -741,6 +741,11 @@ When delegating: "I'll have [Agent] handle that — I'll report back when it's d
 		)
 	}
 
+	// 7. Seed the default company room — name it from the instance and add the
+	// C-suite as members so a freshly-onboarded install has a populated company
+	// room immediately (not only after the first delegation). Best-effort.
+	gw.ensureCompanyHub(ctx)
+
 	writeJSON(w, 200, map[string]string{"status": "ok", "message": "Setup complete"})
 }
 
