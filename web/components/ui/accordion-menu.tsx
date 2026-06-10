@@ -104,6 +104,22 @@ function AccordionMenu({
   }, [children, matchPath, selectedValue, props.type]);
 
   const [nestedStates, setNestedStates] = React.useState<Record<string, string | string[]>>(initialNestedStates);
+  React.useEffect(() => {
+    setNestedStates((prev) => {
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(initialNestedStates)) {
+        if (Array.isArray(v)) {
+          const prevArr = Array.isArray(next[k]) ? (next[k] as string[]) : [];
+          next[k] = Array.from(new Set([...prevArr, ...v]));
+        } else if (v) {
+          next[k] = v;
+        }
+      }
+      return next;
+    });
+    // Open the active group on route changes; merge so user-opened groups stay open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedValue]);
   const multipleValue = (
     Array.isArray(nestedStates['root'])
       ? nestedStates['root']
