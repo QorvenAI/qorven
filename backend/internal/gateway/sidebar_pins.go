@@ -35,7 +35,8 @@ func (gw *Gateway) handleListSidebarPins(w http.ResponseWriter, r *http.Request)
 	}
 	rows, err := gw.db.Pool.Query(r.Context(),
 		`SELECT id, item_type, item_id, order_index, created_at
-		 FROM sidebar_pins WHERE user_id = $1 ORDER BY order_index, created_at`, u.ID)
+		 FROM sidebar_pins WHERE tenant_id = $1 AND user_id = $2 ORDER BY order_index, created_at`,
+		defaultTenant, u.ID)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
@@ -76,9 +77,11 @@ func (gw *Gateway) handleCreateSidebarPin(w http.ResponseWriter, r *http.Request
 	}
 	var p SidebarPin
 	err := gw.db.Pool.QueryRow(r.Context(),
+		// Idempotent: re-pinning resets order_index and returns the existing row.
+		// The DO UPDATE (rather than DO NOTHING) guarantees RETURNING always fires.
 		`INSERT INTO sidebar_pins (tenant_id, user_id, item_type, item_id)
 		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT (user_id, item_type, item_id) DO UPDATE SET item_id = EXCLUDED.item_id
+		 ON CONFLICT (tenant_id, user_id, item_type, item_id) DO UPDATE SET order_index = 0
 		 RETURNING id, item_type, item_id, order_index, created_at`,
 		defaultTenant, u.ID, body.ItemType, body.ItemID).
 		Scan(&p.ID, &p.ItemType, &p.ItemID, &p.OrderIndex, &p.CreatedAt)
@@ -102,8 +105,8 @@ func (gw *Gateway) handleDeleteSidebarPin(w http.ResponseWriter, r *http.Request
 	itemType := chi.URLParam(r, "type")
 	itemID := chi.URLParam(r, "id")
 	if _, err := gw.db.Pool.Exec(r.Context(),
-		`DELETE FROM sidebar_pins WHERE user_id = $1 AND item_type = $2 AND item_id = $3`,
-		u.ID, itemType, itemID); err != nil {
+		`DELETE FROM sidebar_pins WHERE tenant_id = $1 AND user_id = $2 AND item_type = $3 AND item_id = $4`,
+		defaultTenant, u.ID, itemType, itemID); err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}

@@ -9,6 +9,6 @@ CREATE TABLE IF NOT EXISTS sidebar_pins (
     item_id     UUID NOT NULL,
     order_index INT  NOT NULL DEFAULT 0,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (user_id, item_type, item_id)
+    UNIQUE (tenant_id, user_id, item_type, item_id)
 );
 CREATE INDEX IF NOT EXISTS idx_sidebar_pins_user ON sidebar_pins (user_id, order_index, created_at);

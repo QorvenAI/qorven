@@ -9,7 +9,7 @@
 // group headers, a subtle inline search on long lists, dense rows with a
 // glyph/avatar + name + a right-aligned indicator, and a hover star to pin.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useStore } from '@/store';
 import { rooms as roomsApi, pins as pinsApi, type SidebarPin } from '@/lib/api';
@@ -60,19 +60,23 @@ export function SidebarPinned() {
   const pinnedKeys = useMemo(() => new Set(pinned.map((p) => keyOf(p.item_type, p.item_id))), [pinned]);
   const isPinned = (type: 'hub' | 'chat', id: string) => pinnedKeys.has(keyOf(type, id));
 
-  const togglePin = (type: 'hub' | 'chat', id: string) => {
-    if (isPinned(type, id)) {
-      setPinned((prev) => prev.filter((p) => keyOf(p.item_type, p.item_id) !== keyOf(type, id)));
-      pinsApi.unpin(type, id).catch(() => {});
-    } else {
+  const togglePin = useCallback((type: 'hub' | 'chat', id: string) => {
+    const k = keyOf(type, id);
+    // Read live state inside the updater so this stays correct regardless of
+    // where the row that triggered it was memoised.
+    setPinned((prev) => {
+      if (prev.some((p) => keyOf(p.item_type, p.item_id) === k)) {
+        pinsApi.unpin(type, id).catch(() => {});
+        return prev.filter((p) => keyOf(p.item_type, p.item_id) !== k);
+      }
       // Optimistic: append a provisional pin; reconcile from server response.
-      const provisional: SidebarPin = { id: keyOf(type, id), item_type: type, item_id: id, order_index: 999, created_at: '' };
-      setPinned((prev) => [...prev, provisional]);
+      const provisional: SidebarPin = { id: k, item_type: type, item_id: id, order_index: 999, created_at: '' };
       pinsApi.pin(type, id)
-        .then((saved) => setPinned((prev) => prev.map((p) => (p.id === provisional.id ? saved : p))))
-        .catch(() => setPinned((prev) => prev.filter((p) => p.id !== provisional.id)));
-    }
-  };
+        .then((saved) => setPinned((cur) => cur.map((p) => (p.id === k ? saved : p))))
+        .catch(() => setPinned((cur) => cur.filter((p) => p.id !== k)));
+      return [...prev, provisional];
+    });
+  }, []);
 
   const hubLabel = (h: any) => String(h.display_name || h.name || '');
   const chatLabel = (s: any) => String(s.display_name || s.agent_key || '');
