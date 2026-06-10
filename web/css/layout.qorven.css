@@ -19,10 +19,11 @@
       --sidebar-width: 0px;
       --rail-width: 0px;            /* rail gone on mobile — content/header shift to 0 */
     }
-    .qorven .rail { display: none; }
-    /* Sidebar becomes an off-canvas drawer (overlays content, doesn't push it) */
+    /* Sidebar becomes an off-canvas drawer (overlays content, doesn't push it).
+       width !important overrides the base `.sidebar { width: var(--sidebar-width) }`
+       which is 0 on mobile (kept 0 so the content wrapper stays full-width). */
     .qorven .sidebar {
-      width: var(--sidebar-default-width);
+      width: var(--sidebar-default-width) !important;
       transform: translateX(-100%);
       transition: transform 0.25s ease;
       z-index: 50;
