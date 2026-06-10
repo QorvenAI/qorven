@@ -80,6 +80,8 @@ export function Header() {
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
   const setMobileNavOpen = useStore((s) => s.setMobileNavOpen);
+  const setCommandPaletteOpen = useStore((s) => s.setCommandPaletteOpen);
+  const openCommandPalette = () => setCommandPaletteOpen(true);
   const activeChatId = useStore((s) => s.activeChatId);
   const souls = useStore((s) => s.souls);
   const activeSessions = useStore((s) => s.activeSessions);
@@ -187,7 +189,7 @@ export function Header() {
         {/* CENTER: global search trigger */}
         <div className="flex flex-1 items-center justify-center px-2 min-w-0">
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent('qorven:command-palette'))}
+            onClick={openCommandPalette}
             title="Search agents, hubs, files… (⌘K)"
             className="hidden md:flex h-8.5 w-full max-w-md items-center gap-2 rounded-md border border-border bg-muted/40 px-3 text-2sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
@@ -196,7 +198,7 @@ export function Header() {
             <kbd className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-2xs font-medium">⌘K</kbd>
           </button>
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent('qorven:command-palette'))}
+            onClick={openCommandPalette}
             title="Search (⌘K)"
             className="md:hidden flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >

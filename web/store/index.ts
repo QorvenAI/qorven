@@ -131,6 +131,8 @@ interface Store {
   toggleSidebar: () => void;
   mobileNavOpen: boolean;
   setMobileNavOpen: (open: boolean) => void;
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (open: boolean) => void;
   activeChatId: string | null;
   activeChatType: 'soul' | 'room' | null;
   setActiveChat: (id: string | null, type: 'soul' | 'room' | null) => void;
@@ -478,6 +480,8 @@ export const useStore = create<Store>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   mobileNavOpen: false,
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
+  commandPaletteOpen: false,
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   activeChatId: null,
   activeChatType: null,
   setActiveChat: (id, type) => set({ activeChatId: id, activeChatType: type }),
