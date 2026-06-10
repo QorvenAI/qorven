@@ -57,11 +57,8 @@ export function AppearanceSettings() {
                     : 'border-border hover:border-foreground/30',
                 )}
               >
-                <span className="relative h-5 w-5 shrink-0 rounded-full border border-border overflow-hidden"
-                  style={{ backgroundColor: t.swatchBg }}>
-                  <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full"
-                    style={{ backgroundColor: t.swatchPrimary }} />
-                </span>
+                <span className="h-4 w-4 shrink-0 rounded-[5px] ring-1 ring-black/10"
+                  style={{ backgroundColor: t.swatch }} />
                 <span className="text-xs font-medium">{t.name}</span>
                 {settings.themePreset === t.id && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
               </button>

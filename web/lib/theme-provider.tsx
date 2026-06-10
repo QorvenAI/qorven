@@ -17,12 +17,14 @@ export const COLOR_PRESETS = [
 
 // Full-palette theme presets (defined in css/config.qorven.css as [data-theme="id"]).
 // swatchBg / swatchPrimary are preview-only colors for the Settings swatches.
+// `swatch` is the accent color shown as a solid square in the picker.
 export const THEME_PRESETS = [
-  { id: 'violet', name: 'Violet', swatchBg: '#ffffff', swatchPrimary: '#7c3aed' }, // violet-600
-  { id: 'slate',  name: 'Slate',  swatchBg: '#ffffff', swatchPrimary: '#18181b' }, // zinc-900 (monochrome)
-  { id: 'ocean',  name: 'Ocean',  swatchBg: '#ffffff', swatchPrimary: '#2563eb' }, // blue-600
-  { id: 'forest', name: 'Forest', swatchBg: '#ffffff', swatchPrimary: '#059669' }, // emerald-600
-  { id: 'rose',   name: 'Rose',   swatchBg: '#ffffff', swatchPrimary: '#e11d48' }, // rose-600
+  { id: 'violet',   name: 'Violet',   swatch: '#7c3aed' }, // violet-600
+  { id: 'slate',    name: 'Slate',    swatch: '#18181b' }, // zinc-900 (monochrome)
+  { id: 'ocean',    name: 'Ocean',    swatch: '#2563eb' }, // blue-600
+  { id: 'sand',     name: 'Sand',     swatch: '#d97706' }, // amber-600 (warm surfaces)
+  { id: 'midnight', name: 'Midnight', swatch: '#4f46e5' }, // indigo-600 (true-black dark)
+  { id: 'graphite', name: 'Graphite', swatch: '#0d9488' }, // teal-600 (neutral gray)
 ];
 
 export const FONT_OPTIONS = [
