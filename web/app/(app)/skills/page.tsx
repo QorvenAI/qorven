@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { skills as skillsApi, agents } from '@/lib/api';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -196,36 +196,37 @@ export default function SkillsPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load skills">
-      <div className="space-y-5">
-        <CanvasHeader title="Skills" description="Add new capabilities to your agents." />
-
-        {/* Tab bar */}
-        <div className="flex gap-1 border-b border-border">
-          {([
-            { id: 'installed',   icon: Package, label: 'Installed' },
-            { id: 'marketplace', icon: Store,   label: 'Marketplace' },
-          ] as const).map(({ id, icon: Icon, label }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-                tab === id
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-              {id === 'installed' && !installedLoading && (
-                <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-mono">
-                  {installed.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
+      <PageShell
+        title="Skills"
+        description="Add new capabilities to your agents."
+        toolbar={
+          <div className="-my-2.5 flex gap-1">
+            {([
+              { id: 'installed',   icon: Package, label: 'Installed' },
+              { id: 'marketplace', icon: Store,   label: 'Marketplace' },
+            ] as const).map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+                  tab === id
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+                {id === 'installed' && !installedLoading && (
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-mono">
+                    {installed.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        }
+      >
         {/* ── Installed tab ── */}
         {tab === 'installed' && (
           <div className="space-y-4">
@@ -441,7 +442,7 @@ export default function SkillsPage() {
             )}
           </div>
         )}
-      </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

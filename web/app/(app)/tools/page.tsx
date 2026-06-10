@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Search, BarChart3, Loader2, AlertCircle, RefreshCw, Wrench } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { toolMetrics, type ToolMetric, type ToolMetricsSummary } from '@/lib/api';
 
@@ -73,34 +73,37 @@ export default function ToolsPage() {
   const q = search.toLowerCase();
 
   return (
-    <div className="space-y-5">
-      <CanvasHeader title="Tools" description="Browse and monitor all registered agent tools." />
-
-      {/* Tab bar */}
-      <div className="flex items-center gap-0 border-b border-border">
-        {(['catalog', 'metrics'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              'flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors -mb-px',
-              tab === t
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t === 'catalog' ? <Wrench className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
-            {t === 'catalog' ? 'Catalog' : 'Metrics'}
-          </button>
-        ))}
+    <PageShell
+      title="Tools"
+      description="Browse and monitor all registered agent tools."
+      toolbar={
+        <div className="-my-2.5 flex items-center gap-0">
+          {(['catalog', 'metrics'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                'flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors -mb-px',
+                tab === t
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t === 'catalog' ? <Wrench className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
+              {t === 'catalog' ? 'Catalog' : 'Metrics'}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        {tab === 'catalog' ? (
+          <CatalogTab search={search} setSearch={setSearch} q={q} />
+        ) : (
+          <MetricsTab />
+        )}
       </div>
-
-      {tab === 'catalog' ? (
-        <CatalogTab search={search} setSearch={setSearch} q={q} />
-      ) : (
-        <MetricsTab />
-      )}
-    </div>
+    </PageShell>
   );
 }
 

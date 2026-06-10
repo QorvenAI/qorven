@@ -4,9 +4,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Activity, RefreshCw, Crown } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { EmptyState, emptyStates } from '@/components/empty-state';
-import SupervisorPage from '@/app/(app)/supervisor/page';
+import { SupervisorContent } from '@/app/(app)/supervisor/page';
 import { cn } from '@/lib/utils';
 
 type Health = {
@@ -66,45 +66,44 @@ export default function HealthPage() {
   ] : [];
 
   return (
-    <div className="space-y-5">
-      <CanvasHeader
-        title="Health"
-        actions={
-          tab === 'health' ? (
-            <button
-              onClick={() => fetchHealth(true)}
-              disabled={refreshing}
-              className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground transition disabled:opacity-50"
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-              Refresh
-            </button>
-          ) : undefined
-        }
-      />
-
-      {/* Tab bar */}
-      <div className="flex items-center gap-0 border-b border-border">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                '-mb-px flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
-                tab === t.id
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
+    <PageShell
+      title="Health"
+      actions={
+        tab === 'health' ? (
+          <button
+            onClick={() => fetchHealth(true)}
+            disabled={refreshing}
+            className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground transition disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+            Refresh
+          </button>
+        ) : undefined
+      }
+      toolbar={
+        <div className="-my-2.5 flex items-center gap-0">
+          {TABS.map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  '-mb-px flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                  tab === t.id
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      }
+    >
+      <div className="space-y-5">
       {/* System Health tab */}
       {tab === 'health' && (
         <>
@@ -156,7 +155,8 @@ export default function HealthPage() {
       )}
 
       {/* Supervisor tab */}
-      {tab === 'supervisor' && <SupervisorPage />}
-    </div>
+      {tab === 'supervisor' && <SupervisorContent />}
+      </div>
+    </PageShell>
   );
 }

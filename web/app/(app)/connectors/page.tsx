@@ -26,7 +26,7 @@ import {
   Loader2, X, RefreshCw, Package, Trash2, Bot, Bell,
   Clock, Activity, ToggleLeft, ToggleRight, Truck, KeyRound,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { toast } from 'sonner';
 import {
   connectors,
@@ -204,83 +204,82 @@ export default function ConnectorsPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load connectors">
-      <div className="space-y-5">
-        <CanvasHeader
-          title="Connectors"
-          description={
-            view === 'catalog'
-              ? `Plug your agents into the services you already use. ${entries.length} platforms available.`
-              : view === 'installed'
-                ? 'Connectors your agents built and installed at runtime. Each one is a compiled Go binary the agent generated from API docs.'
-                : view === 'rules'
-                  ? 'Automation rules your agents created via set_rule. Toggle or delete rules here.'
-                  : 'Register OAuth apps on each provider\u2019s developer console and paste credentials here. The same credentials serve every user on this Qorven install.'
-          }
-          actions={
-            (view === 'catalog' || view === 'installed') ? (
-              <div className="flex items-center gap-2">
-                {view === 'installed' && (
-                  <button
-                    onClick={() => setShowAddCarrier(true)}
-                    className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    <Truck className="h-3.5 w-3.5" />
-                    Add Carrier
-                  </button>
-                )}
+      <PageShell
+        title="Connectors"
+        description={
+          view === 'catalog'
+            ? `Plug your agents into the services you already use. ${entries.length} platforms available.`
+            : view === 'installed'
+              ? 'Connectors your agents built and installed at runtime. Each one is a compiled Go binary the agent generated from API docs.'
+              : view === 'rules'
+                ? 'Automation rules your agents created via set_rule. Toggle or delete rules here.'
+                : 'Register OAuth apps on each provider\u2019s developer console and paste credentials here. The same credentials serve every user on this Qorven install.'
+        }
+        actions={
+          (view === 'catalog' || view === 'installed') ? (
+            <div className="flex items-center gap-2">
+              {view === 'installed' && (
                 <button
-                  onClick={load}
-                  disabled={loading}
-                  className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+                  onClick={() => setShowAddCarrier(true)}
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                 >
-                  <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-                  Refresh
+                  <Truck className="h-3.5 w-3.5" />
+                  Add Carrier
                 </button>
-              </div>
-            ) : undefined
-          }
-        />
-
-        {/* Tab toggle */}
-        <div className="inline-flex rounded-lg border border-border bg-card p-0.5 text-xs">
-          <button
-            onClick={() => setView('catalog')}
-            className={cn(
-              'rounded-md px-3 py-1 font-medium transition-colors',
-              view === 'catalog' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            Catalog
-          </button>
-          <button
-            onClick={() => setView('oauth_apps')}
-            className={cn(
-              'rounded-md px-3 py-1 font-medium transition-colors',
-              view === 'oauth_apps' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            OAuth apps
-          </button>
-          <button
-            onClick={() => setView('installed')}
-            className={cn(
-              'rounded-md px-3 py-1 font-medium transition-colors',
-              view === 'installed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            Installed
-          </button>
-          <button
-            onClick={() => setView('rules')}
-            className={cn(
-              'rounded-md px-3 py-1 font-medium transition-colors',
-              view === 'rules' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            Rules
-          </button>
-        </div>
-
+              )}
+              <button
+                onClick={load}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+                Refresh
+              </button>
+            </div>
+          ) : undefined
+        }
+        toolbar={
+          <div className="inline-flex rounded-lg border border-border bg-card p-0.5 text-xs">
+            <button
+              onClick={() => setView('catalog')}
+              className={cn(
+                'rounded-md px-3 py-1 font-medium transition-colors',
+                view === 'catalog' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Catalog
+            </button>
+            <button
+              onClick={() => setView('oauth_apps')}
+              className={cn(
+                'rounded-md px-3 py-1 font-medium transition-colors',
+                view === 'oauth_apps' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              OAuth apps
+            </button>
+            <button
+              onClick={() => setView('installed')}
+              className={cn(
+                'rounded-md px-3 py-1 font-medium transition-colors',
+                view === 'installed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Installed
+            </button>
+            <button
+              onClick={() => setView('rules')}
+              className={cn(
+                'rounded-md px-3 py-1 font-medium transition-colors',
+                view === 'rules' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Rules
+            </button>
+          </div>
+        }
+      >
+       <div className="space-y-5">
         {view === 'oauth_apps' ? (
           <OAuthAppsSettings />
         ) : view === 'installed' ? (
@@ -419,7 +418,8 @@ export default function ConnectorsPage() {
             }}
           />
         )}
-      </div>
+       </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

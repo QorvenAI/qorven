@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Loader2, Save, Settings } from 'lucide-react';
 import { getApp, patchApp } from '@/lib/api-apps';
 import type { QorvenApp, SettingDef } from '@/lib/api-apps';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 
 export default function AppSettingsClient() {
@@ -96,32 +96,32 @@ export default function AppSettingsClient() {
   const schema = app.settings_schema ?? [];
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <CanvasHeader
-        title={`${app.display_name} — Settings`}
-        description={`Configure settings for ${app.display_name}`}
-        actions={
-          <div className="flex items-center gap-2">
+    <PageShell
+      title={`${app.display_name} — Settings`}
+      description={`Configure settings for ${app.display_name}`}
+      contentClassName="px-0 py-0 sm:px-0"
+      actions={
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push(`/apps/${app.slug}`)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+          {schema.length > 0 && (
             <button
-              onClick={() => router.push(`/apps/${app.slug}`)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              <ArrowLeft className="h-4 w-4" />
-              Back
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save
             </button>
-            {schema.length > 0 && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                Save
-              </button>
-            )}
-          </div>
-        }
-      />
+          )}
+        </div>
+      }
+    >
       <div className="flex-1 min-w-0 overflow-y-auto px-6 pb-6">
         <div className="max-w-2xl">
           {schema.length === 0 ? (
@@ -148,7 +148,7 @@ export default function AppSettingsClient() {
           )}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

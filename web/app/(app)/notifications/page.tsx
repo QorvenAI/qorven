@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Check, CheckCheck, Filter, AlertCircle } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/page-skeleton';
@@ -44,37 +44,35 @@ export default function NotificationsPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load notifications">
-      <div className="space-y-6">
-        <CanvasHeader
-          title="Notifications"
-          description={loading ? 'Loading…' : `${unreadCount} unread`}
-          actions={
-            !loading && !error ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setFilter((f) => (f === 'all' ? 'unread' : 'all'))}
-                  className={cn(
-                    'flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors',
-                    filter === 'unread' && 'bg-accent',
-                  )}
-                >
-                  <Filter className="h-3.5 w-3.5" />
-                  {filter === 'all' ? 'All' : 'Unread'}
-                </button>
-                {unreadCount > 0 && (
-                  <button
-                    onClick={markAllRead}
-                    className="flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors hover:bg-accent"
-                  >
-                    <CheckCheck className="h-3.5 w-3.5" />
-                    Mark all read
-                  </button>
+      <PageShell
+        title="Notifications"
+        description={loading ? 'Loading…' : `${unreadCount} unread`}
+        actions={
+          !loading && !error ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFilter((f) => (f === 'all' ? 'unread' : 'all'))}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors',
+                  filter === 'unread' && 'bg-accent',
                 )}
-              </div>
-            ) : undefined
-          }
-        />
-
+              >
+                <Filter className="h-3.5 w-3.5" />
+                {filter === 'all' ? 'All' : 'Unread'}
+              </button>
+              {unreadCount > 0 && (
+                <button
+                  onClick={markAllRead}
+                  className="flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" />
+                  Mark all read
+                </button>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
         {loading ? (
           <TableSkeleton rows={5} />
         ) : error ? (
@@ -135,7 +133,7 @@ export default function NotificationsPage() {
             ))}
           </div>
         )}
-      </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

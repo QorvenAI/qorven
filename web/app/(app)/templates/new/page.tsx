@@ -8,7 +8,7 @@ import {
   Plus, Trash2, ArrowLeft, Loader2, Sparkles, Users,
   BarChart3, Save, Check, Bot, Layout,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { workspaces } from '@/lib/api';
 import { request } from '@/lib/api-core';
 import { cn } from '@/lib/utils';
@@ -125,18 +125,17 @@ export default function NewWorkspacePage() {
   ];
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <CanvasHeader
-        title="Custom Workspace Builder"
-        description="Design your own AI team and dashboard"
-        actions={
-          <button onClick={() => router.back()}
-            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-accent cursor-pointer">
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-        }
-      />
-
+    <PageShell
+      title="Custom Workspace Builder"
+      description="Design your own AI team and dashboard"
+      actions={
+        <button onClick={() => router.back()}
+          className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-accent cursor-pointer">
+          <ArrowLeft className="h-4 w-4" />
+        </button>
+      }
+    >
+      <div className="max-w-3xl mx-auto space-y-6">
       {/* Step progress */}
       <div className="flex items-center gap-0">
         {steps.map((s, i) => (
@@ -399,6 +398,7 @@ export default function NewWorkspacePage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }

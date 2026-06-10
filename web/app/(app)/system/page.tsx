@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Cpu, Wrench, RefreshCw } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { request } from '@/lib/api-core';
 
@@ -23,11 +23,10 @@ export default function SystemPage() {
   }, [tick]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <CanvasHeader title="System Knowledge" description="Auto-generated from codebase · refreshes every 30s"
-        actions={<button onClick={() => setTick(t => t + 1)} className="text-muted-foreground hover:text-foreground/90 cursor-pointer"><RefreshCw className="h-4 w-4" /></button>}
-      />
-
+    <PageShell title="System Knowledge" description="Auto-generated from codebase · refreshes every 30s"
+      actions={<button onClick={() => setTick(t => t + 1)} className="text-muted-foreground hover:text-foreground/90 cursor-pointer"><RefreshCw className="h-4 w-4" /></button>}
+    >
+      <div className="max-w-6xl mx-auto space-y-6">
       {/* Supervisor stats */}
       {supervisor && (
         <div className="grid grid-cols-4 gap-4">
@@ -103,6 +102,7 @@ export default function SystemPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }

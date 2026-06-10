@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { Key, Plus, Trash2, CheckCircle, Eye, EyeOff, Loader2, GitBranch, ExternalLink } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { providers as providersApi, connections } from '@/lib/api';
 import { toast } from 'sonner';
@@ -385,12 +385,11 @@ function ProviderKeysSection() {
 export default function ProviderKeysPage() {
   return (
     <ErrorBoundary fallbackTitle="Failed to load API keys">
-      <div className="space-y-8">
-        <CanvasHeader
-          title="API Keys & Integrations"
-          description="Connect external services so agents can take autonomous actions"
-        />
-
+      <PageShell
+        title="API Keys & Integrations"
+        description="Connect external services so agents can take autonomous actions"
+      >
+        <div className="space-y-8">
         {/* GitHub — most important for autonomous dev loop */}
         <section className="space-y-3">
           <div>
@@ -412,7 +411,8 @@ export default function ProviderKeysPage() {
           </div>
           <ProviderKeysSection />
         </section>
-      </div>
+        </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

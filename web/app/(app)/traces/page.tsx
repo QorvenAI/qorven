@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, Loader2, RefreshCw,
   AlertCircle, CheckCircle2, XCircle, Clock, Activity,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { traces as tracesApi, type TraceRow, type SpanRow, type TraceSummary } from '@/lib/api';
 import { useStore } from '@/store';
@@ -66,25 +66,27 @@ export default function TracesPage() {
   const totalOut   = summary.reduce((a, s) => a + s.output_tokens, 0);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
-      <CanvasHeader title="Traces" description="LLM call traces with token + cost breakdown"
-        actions={
-          <>
-            <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="qr-select text-xs">
-              <option value="">All agents</option>
-              {souls.map((s) => (
-                <option key={s.id} value={s.id}>{s.display_name || s.agent_key}</option>
-              ))}
-            </select>
-            <button onClick={refresh} disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60">
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Refresh
-            </button>
-          </>
-        }
-      />
-
+    <PageShell
+      title="Traces"
+      description="LLM call traces with token + cost breakdown"
+      contentClassName="px-0 py-0 sm:px-0"
+      actions={
+        <>
+          <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="qr-select text-xs">
+            <option value="">All agents</option>
+            {souls.map((s) => (
+              <option key={s.id} value={s.id}>{s.display_name || s.agent_key}</option>
+            ))}
+          </select>
+          <button onClick={refresh} disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Refresh
+          </button>
+        </>
+      }
+    >
+      <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
       {/* Summary strip */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
         {[
@@ -122,7 +124,8 @@ export default function TracesPage() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

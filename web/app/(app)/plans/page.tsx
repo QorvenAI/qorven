@@ -11,7 +11,7 @@ import {
   ShieldCheck, ShieldAlert, ArrowRight, GitBranch, Wrench,
   ListChecks, Play, Ban, CircleDot, CheckCheck, AlertCircle,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import {
   plans as plansApi, approvals as approvalsApi, outbound,
@@ -19,7 +19,7 @@ import {
   type ApprovalItem, type OutboundAction, type OutboundActionKind, type MailApproval,
 } from '@/lib/api';
 import { useStore } from '@/store';
-import SupervisorPage from '@/app/(app)/supervisor/page';
+import { SupervisorContent } from '@/app/(app)/supervisor/page';
 
 // ─── helpers ────────────────────────────────────────────────────────
 
@@ -439,25 +439,26 @@ export default function PlansPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 lg:p-6">
-      <CanvasHeader
-        title="Plans"
-        description="Approval inbox, plan history, and team health monitoring."
-      />
-
-      <div className="flex gap-1 border-b border-border">
-        {PLAN_TABS.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={cn('px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-              tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
+    <PageShell
+      title="Plans"
+      description="Approval inbox, plan history, and team health monitoring."
+      toolbar={
+        <div className="flex gap-1">
+          {PLAN_TABS.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={cn('px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+                tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <div className="mx-auto max-w-6xl space-y-6">
       {tab === 'inbox'      && <InboxTab />}
       {tab === 'all'        && <AllPlansTab />}
-      {tab === 'supervisor' && <SupervisorPage />}
-    </div>
+      {tab === 'supervisor' && <SupervisorContent />}
+      </div>
+    </PageShell>
   );
 }

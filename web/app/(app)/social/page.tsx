@@ -13,7 +13,7 @@ import {
   CornerDownRight, CheckCheck,
   BookOpen, Edit3, Settings, Pause, Play, Webhook, PlayCircle,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { social as socialApi } from '@/lib/api';
 import { integrationsApi, RelayKeyRecord } from '@/lib/api-integrations';
@@ -412,43 +412,41 @@ export default function SocialPage() {
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-full min-h-0">
-        <CanvasHeader
-          title="Social Publishing"
-          description="Schedule and publish to 10+ platforms"
-          actions={
-            <>
-              <select
-                value={agentFilter}
-                onChange={e => setAgentFilter(e.target.value)}
-                className="qr-select"
-              >
-                <option value="">All Agents</option>
-                {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
-              </select>
-              <button
-                onClick={() => setTab('compose')}
-                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" /> New Post
-              </button>
-            </>
-          }
-        />
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
-          {tab === 'compose'   && <ComposeTab agentId={agentFilter} onScheduled={() => setTab('scheduled')} />}
-          {tab === 'calendar'  && <CalendarTab agentId={agentFilter} />}
-          {tab === 'scheduled' && <PostsTab agentId={agentFilter} status="scheduled" />}
-          {tab === 'published' && <PostsTab agentId={agentFilter} status="published" />}
-          {tab === 'drafts'    && <PostsTab agentId={agentFilter} status="draft" />}
-          {tab === 'accounts'  && <AccountsTab agentId={agentFilter} />}
-          {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
-          {tab === 'media'     && <MediaTab agentId={agentFilter} />}
-          {tab === 'analytics' && <AnalyticsTab agentId={agentFilter} />}
-          {tab === 'sets'      && <SetsTab agentId={agentFilter} />}
-          {tab === 'webhooks'  && <WebhooksTab agentId={agentFilter} />}
-        </div>
-      </div>
+      <PageShell
+        title="Social Publishing"
+        description="Schedule and publish to 10+ platforms"
+        actions={
+          <>
+            <select
+              value={agentFilter}
+              onChange={e => setAgentFilter(e.target.value)}
+              className="qr-select"
+            >
+              <option value="">All Agents</option>
+              {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+            </select>
+            <button
+              onClick={() => setTab('compose')}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer"
+            >
+              <Plus className="h-4 w-4" /> New Post
+            </button>
+          </>
+        }
+        contentClassName="px-6 py-0 pb-6 sm:px-6"
+      >
+        {tab === 'compose'   && <ComposeTab agentId={agentFilter} onScheduled={() => setTab('scheduled')} />}
+        {tab === 'calendar'  && <CalendarTab agentId={agentFilter} />}
+        {tab === 'scheduled' && <PostsTab agentId={agentFilter} status="scheduled" />}
+        {tab === 'published' && <PostsTab agentId={agentFilter} status="published" />}
+        {tab === 'drafts'    && <PostsTab agentId={agentFilter} status="draft" />}
+        {tab === 'accounts'  && <AccountsTab agentId={agentFilter} />}
+        {tab === 'autopost'  && <AutoPostTab agentId={agentFilter} />}
+        {tab === 'media'     && <MediaTab agentId={agentFilter} />}
+        {tab === 'analytics' && <AnalyticsTab agentId={agentFilter} />}
+        {tab === 'sets'      && <SetsTab agentId={agentFilter} />}
+        {tab === 'webhooks'  && <WebhooksTab agentId={agentFilter} />}
+      </PageShell>
     </ErrorBoundary>
   );
 }
@@ -610,7 +608,7 @@ function ComposeTab({ agentId, onScheduled }: { agentId: string; onScheduled: ()
                 )}>
                 <span>{p.icon}</span> {p.label}
                 {hints[p.id] && selectedPlatforms.includes(p.id) && (
-                  <span className="text-[10px] text-muted-foreground font-normal max-w-[120px] truncate">({hints[p.id]})</span>
+                  <span className="text-2xs text-muted-foreground font-normal max-w-[120px] truncate">({hints[p.id]})</span>
                 )}
                 {selectedPlatforms.includes(p.id) && <Check className="h-3 w-3" />}
               </button>
@@ -996,7 +994,7 @@ function CalendarTab({ agentId }: { agentId: string }) {
                         {/* Mini preview of first 2 posts */}
                         {dayPosts.slice(0, 2).map((post: any, pi: number) => (
                           <div key={pi} className={cn(
-                            'text-[10px] rounded px-1 py-0.5 truncate',
+                            'text-2xs rounded px-1 py-0.5 truncate',
                             post.status === 'scheduled' ? 'bg-blue-500/10 text-blue-500' :
                             post.status === 'published' ? 'bg-emerald-500/10 text-emerald-500' :
                             post.status === 'failed' ? 'bg-destructive/10 text-destructive' :
@@ -1006,7 +1004,7 @@ function CalendarTab({ agentId }: { agentId: string }) {
                           </div>
                         ))}
                         {dayPosts.length > 2 && (
-                          <div className="text-[10px] text-muted-foreground pl-1">+{dayPosts.length - 2}</div>
+                          <div className="text-2xs text-muted-foreground pl-1">+{dayPosts.length - 2}</div>
                         )}
                       </div>
                     )}
@@ -1041,13 +1039,13 @@ function CalendarTab({ agentId }: { agentId: string }) {
                         {(post.platforms || []).map((p: string) => {
                           const plat = PLATFORMS.find(pl => pl.id === p);
                           return (
-                            <span key={p} className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', plat?.color || 'bg-muted text-muted-foreground')}>
+                            <span key={p} className={cn('text-2xs px-1.5 py-0.5 rounded font-medium', plat?.color || 'bg-muted text-muted-foreground')}>
                               {plat?.icon || p}
                             </span>
                           );
                         })}
                         {post.scheduled_at && (
-                          <span className="text-[10px] text-muted-foreground ml-auto">
+                          <span className="text-2xs text-muted-foreground ml-auto">
                             {new Date(post.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
@@ -1056,11 +1054,11 @@ function CalendarTab({ agentId }: { agentId: string }) {
                       {post.id && (post.status === 'scheduled' || post.status === 'draft') && (
                         <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => publishPost(post.id)}
-                            className="h-6 px-2 text-[10px] font-medium rounded bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer flex items-center gap-1">
+                            className="h-6 px-2 text-2xs font-medium rounded bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer flex items-center gap-1">
                             <Send className="h-3 w-3" /> Publish
                           </button>
                           <button onClick={() => deletePost(post.id)}
-                            className="h-6 px-2 text-[10px] font-medium rounded bg-destructive/10 text-destructive hover:bg-destructive/20 cursor-pointer flex items-center gap-1">
+                            className="h-6 px-2 text-2xs font-medium rounded bg-destructive/10 text-destructive hover:bg-destructive/20 cursor-pointer flex items-center gap-1">
                             <Trash2 className="h-3 w-3" /> Delete
                           </button>
                         </div>
@@ -1107,7 +1105,7 @@ function CalendarTab({ agentId }: { agentId: string }) {
                 </div>
                 <div className="space-y-1.5">
                   {dayPosts.length === 0 && (
-                    <p className="text-[10px] text-muted-foreground/50 text-center mt-4">No posts</p>
+                    <p className="text-2xs text-muted-foreground/50 text-center mt-4">No posts</p>
                   )}
                   {dayPosts.map((post: any, pi: number) => (
                     <div key={pi} className={cn(
@@ -1120,19 +1118,19 @@ function CalendarTab({ agentId }: { agentId: string }) {
                       <div className="flex items-center gap-1 mb-1">
                         <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', statusDot[post.status] || statusDot.draft)} />
                         {post.scheduled_at && (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-2xs text-muted-foreground">
                             {new Date(post.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] line-clamp-2 text-foreground/80 leading-relaxed">
+                      <p className="text-2xs line-clamp-2 text-foreground/80 leading-relaxed">
                         {post.content?.slice(0, 60) || 'Untitled'}
                       </p>
                       <div className="flex items-center gap-0.5 mt-1">
                         {(post.platforms || []).slice(0, 3).map((p: string) => {
                           const plat = PLATFORMS.find(pl => pl.id === p);
                           return (
-                            <span key={p} className={cn('text-[9px] px-1 py-0.5 rounded', plat?.color || 'bg-muted text-muted-foreground')}>
+                            <span key={p} className={cn('text-2xs px-1 py-0.5 rounded', plat?.color || 'bg-muted text-muted-foreground')}>
                               {plat?.icon || p}
                             </span>
                           );
@@ -2203,7 +2201,7 @@ function AccountsTab({ agentId }: { agentId: string }) {
                       )}
                       {i.relay_provider && i.relay_provider !== 'direct' && (
                         <span className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                          "text-2xs px-1.5 py-0.5 rounded font-medium",
                           i.relay_provider === 'outstand' && "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
                           i.relay_provider === 'postforme' && "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
                           i.relay_provider === 'buffer' && "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",

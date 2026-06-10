@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { request } from '@/lib/api-core';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { Route, Play, ArrowRight, Trash2, Shield, DollarSign, BarChart3, Workflow } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/qor/tabs';
 
@@ -211,9 +211,11 @@ function WorkflowRunsTab() {
 
 export default function OrchestrationPage() {
   return (
-    <div className="flex flex-col h-full">
-      <CanvasHeader title="Orchestration" description="ERP-grade agent routing, subagent tracking, and multi-agent workflow execution" />
-
+    <PageShell
+      title="Orchestration"
+      description="ERP-grade agent routing, subagent tracking, and multi-agent workflow execution"
+      contentClassName="flex flex-col overflow-hidden px-0 py-0 sm:px-0"
+    >
       <Tabs defaultValue="routing" className="flex flex-col flex-1 overflow-hidden">
         <div className="px-6 py-3 border-b border-border">
           <TabsList variant="default" size="sm">
@@ -234,6 +236,6 @@ export default function OrchestrationPage() {
           <TabsContent value="workflows" className="mt-0"><WorkflowRunsTab /></TabsContent>
         </div>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }

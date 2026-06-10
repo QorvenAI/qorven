@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, CheckCircle, ArrowRight, Sparkles, Search, Users, Zap } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request } from '@/lib/api-core';
@@ -48,12 +48,12 @@ export default function MarketplacePage() {
   const filtered = templates.filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.description.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <CanvasHeader
-        title="Blueprints"
-        description="Pick a Blueprint and deploy a full AI team with dashboard in 30 seconds. Or describe what you need and let AI build it for you."
-      />
-
+    <PageShell
+      title="Blueprints"
+      description="Pick a Blueprint and deploy a full AI team with dashboard in 30 seconds. Or describe what you need and let AI build it for you."
+      contentClassName="px-6 py-6 sm:px-6"
+    >
+      <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex gap-3 justify-center">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -106,7 +106,8 @@ export default function MarketplacePage() {
       </div>
 
       {showSelfBuild && <SelfBuildModal onClose={() => setShowSelfBuild(false)} />}
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

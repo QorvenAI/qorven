@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   Bot, Tag, Globe, ExternalLink, Loader2, RefreshCw, Copy, Check,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { BASE } from '@/lib/api-core';
 
@@ -63,22 +63,21 @@ export default function A2APage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <CanvasHeader
-        title="Agent-to-Agent (A2A)"
-        description="Qorven exposes an A2A endpoint for external agents to discover and delegate tasks."
-        actions={
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </button>
-        }
-      />
-
+    <PageShell
+      title="Agent-to-Agent (A2A)"
+      description="Qorven exposes an A2A endpoint for external agents to discover and delegate tasks."
+      actions={
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
+        >
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          Refresh
+        </button>
+      }
+    >
+      <div className="mx-auto max-w-4xl space-y-5">
       {/* Discovery URL */}
       <div className="rounded-xl border border-border bg-card p-4">
         <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
@@ -230,6 +229,7 @@ export default function A2APage() {
           <p>4. Results are polled via <code className="font-mono bg-muted px-1 rounded">GET /api/a2a/tasks/&#123;id&#125;</code></p>
         </div>
       </section>
-    </div>
+      </div>
+    </PageShell>
   );
 }

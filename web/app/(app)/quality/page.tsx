@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { request } from '@/lib/api-core';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { Shield, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 interface QualityStats {
@@ -49,10 +49,13 @@ export default function QualityPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-full">
-        <CanvasHeader title="Output Quality" description="Automated validation scores and compliance monitoring" />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
-      </div>
+      <PageShell
+        title="Output Quality"
+        description="Automated validation scores and compliance monitoring"
+        contentClassName="flex items-center justify-center"
+      >
+        <span className="text-muted-foreground text-sm">Loading...</span>
+      </PageShell>
     );
   }
 
@@ -63,10 +66,12 @@ export default function QualityPage() {
   const issues = stats?.top_issues || [];
 
   return (
-    <div className="flex flex-col h-full">
-      <CanvasHeader title="Output Quality" description="Automated validation scores and compliance monitoring" />
-
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+    <PageShell
+      title="Output Quality"
+      description="Automated validation scores and compliance monitoring"
+      contentClassName="px-6 py-5"
+    >
+      <div className="space-y-6">
         {/* Stats row */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={Shield} label="Total Outputs" value={total.toString()} color="text-blue-400" />
@@ -133,6 +138,6 @@ export default function QualityPage() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

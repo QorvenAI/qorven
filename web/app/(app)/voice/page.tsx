@@ -7,7 +7,7 @@ import {
   Mic, MicOff, Volume2, Play, Loader2, AlertCircle,
   Save, Settings, Plus, Trash2, Star, Radio,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import {
   voice,
@@ -49,9 +49,8 @@ export default function VoicePage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <CanvasHeader title="Voice" description="Manage TTS + STT providers. Recording requires microphone permission." />
-
+    <PageShell title="Voice" description="Manage TTS + STT providers. Recording requires microphone permission.">
+      <div className="mx-auto max-w-4xl space-y-5">
       {!voiceLoading && !voiceEnabled && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-300">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -84,7 +83,8 @@ export default function VoicePage() {
       <SttTester onError={setErr} />
 
       <ConfigEditor cfg={cfg} onSave={setCfg} onError={setErr} />
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { request } from '@/lib/api-core';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { DollarSign, TrendingUp, AlertTriangle, BarChart3 } from 'lucide-react';
 
 interface AgentCost {
@@ -78,10 +78,13 @@ export default function FinancePage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-full">
-        <CanvasHeader title="Finance" description="CFO-grade cost visibility across the agent workforce" />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
-      </div>
+      <PageShell
+        title="Finance"
+        description="CFO-grade cost visibility across the agent workforce"
+        contentClassName="flex items-center justify-center"
+      >
+        <div className="text-muted-foreground text-sm">Loading...</div>
+      </PageShell>
     );
   }
 
@@ -93,10 +96,11 @@ export default function FinancePage() {
   const maxAgentCost = agents.length > 0 ? (agents[0]?.cost_usd ?? 1) : 1;
 
   return (
-    <div className="flex flex-col h-full">
-      <CanvasHeader title="Finance" description="CFO-grade cost visibility across the agent workforce" />
-
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+    <PageShell
+      title="Finance"
+      description="CFO-grade cost visibility across the agent workforce"
+      contentClassName="px-6 py-5 space-y-6 sm:px-6"
+    >
         {/* Summary stats */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={DollarSign} label="Month-to-Date" value={`$${totalCost.toFixed(2)}`} />
@@ -158,7 +162,6 @@ export default function FinancePage() {
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

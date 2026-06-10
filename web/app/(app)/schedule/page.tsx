@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays, Clock, Play, Pause, Plus, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { cron as cronApi, calendarApi } from '@/lib/api';
 import { useStore } from '@/store';
@@ -99,23 +99,22 @@ export default function SchedulePage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load schedule">
-      <div className="space-y-5">
-        <CanvasHeader
-          title="Schedule"
-          description={agentFilter ? `Showing events for ${agentLabel}` : 'All agents · events and cron jobs'}
-          actions={
-            <div className="flex gap-1">
-              {(['calendar', 'cron'] as const).map(t => (
-                <button key={t} onClick={() => setTab(t)}
-                  className={cn('px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer capitalize',
-                    tab === t ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground hover:text-foreground hover:bg-accent')}>
-                  {t === 'cron' ? `Cron (${jobs.length})` : 'Calendar'}
-                </button>
-              ))}
-            </div>
-          }
-        />
-
+      <PageShell
+        title="Schedule"
+        description={agentFilter ? `Showing events for ${agentLabel}` : 'All agents · events and cron jobs'}
+        actions={
+          <div className="flex gap-1">
+            {(['calendar', 'cron'] as const).map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className={cn('px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer capitalize',
+                  tab === t ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground hover:text-foreground hover:bg-accent')}>
+                {t === 'cron' ? `Cron (${jobs.length})` : 'Calendar'}
+              </button>
+            ))}
+          </div>
+        }
+        contentClassName="space-y-5"
+      >
         {tab === 'calendar' ? (
           <div className="flex gap-5">
             {/* Calendar grid */}
@@ -310,7 +309,7 @@ export default function SchedulePage() {
             })}
           </div>
         )}
-      </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

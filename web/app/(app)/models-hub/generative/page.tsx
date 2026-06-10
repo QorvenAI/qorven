@@ -9,7 +9,7 @@ import {
   ClipboardPaste, AlertCircle, ChevronRight, ExternalLink, Link2Off,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { providers as providersApi } from '@/lib/api';
 import type { ProviderAuthProfile, CatalogProvider } from '@/lib/api-providers';
 import { gatewayAdmin } from '@/lib/api-providers';
@@ -114,7 +114,7 @@ function StepBar({ step }: { step: 1 | 2 | 3 }) {
             {i > 0 && <div className={cn('h-px w-8 mx-1.5', done || current ? 'bg-primary/40' : 'bg-border')} />}
             <div className="flex items-center gap-1.5">
               <div className={cn(
-                'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold shrink-0 transition-colors',
+                'flex h-5 w-5 items-center justify-center rounded-full text-2xs font-semibold shrink-0 transition-colors',
                 done    ? 'bg-primary text-primary-foreground' :
                 current ? 'bg-primary text-primary-foreground ring-2 ring-primary/30' :
                           'bg-muted text-muted-foreground border border-border',
@@ -150,7 +150,7 @@ function KeyRow({
     )}>
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div className={cn(
-          'flex h-6 w-6 items-center justify-center rounded-md shrink-0 text-[10px] font-medium',
+          'flex h-6 w-6 items-center justify-center rounded-md shrink-0 text-2xs font-medium',
           entry.status === 'ok'        ? 'bg-emerald-500/10 text-emerald-400' :
           entry.status === 'error'     ? 'bg-destructive/10 text-destructive' :
           entry.status === 'verifying' ? 'bg-primary/10 text-primary' :
@@ -223,7 +223,7 @@ function StrategyPicker({ strategy, failover, onChange }: {
             className={cn('rounded-lg border px-3 py-2.5 text-left text-xs transition-colors',
               strategy === s.value ? 'border-primary bg-primary/8 text-primary' : 'border-border hover:bg-accent')}>
             <p className="font-medium">{s.label}</p>
-            <p className={cn('mt-0.5 font-normal text-[11px]', strategy === s.value ? 'text-primary/70' : 'text-muted-foreground')}>{s.desc}</p>
+            <p className={cn('mt-0.5 font-normal text-2xs', strategy === s.value ? 'text-primary/70' : 'text-muted-foreground')}>{s.desc}</p>
           </button>
         ))}
       </div>
@@ -1839,9 +1839,8 @@ export default function GenerativePage() {
 
   return (
     <>
-      <div className="space-y-4">
-        <CanvasHeader title="Generative AI" description="LLM providers, key pools, budgets and model routing" />
-
+      <PageShell title="Generative AI" description="LLM providers, key pools, budgets and model routing">
+        <div className="space-y-4">
         <SCard
           title="Providers"
           description={loading ? undefined : providerList.length === 0
@@ -1900,7 +1899,8 @@ export default function GenerativePage() {
         <OAuthConnectionsCard />
 
         <AliasLookupCard />
-      </div>
+        </div>
+      </PageShell>
 
       <AddProviderSheet open={showAdd} onOpenChange={setShowAdd} onAdded={load} authProfiles={authProfiles} catalog={catalog} />
       <KeyPoolSheet provider={keysProvider} open={!!keysProvider} onOpenChange={o => { if (!o) setKeysProvider(null); }} authProfiles={authProfiles} />

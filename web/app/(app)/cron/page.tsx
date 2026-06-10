@@ -11,7 +11,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { TableRowSkeleton } from '@/components/skeletons';
 import { cn } from '@/lib/utils';
 import { Clock, Play, Pause, Trash2, Plus, ChevronDown, ChevronRight } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import type { CronJob } from '@/types';
 
 export default function CronPage() {
@@ -43,18 +43,17 @@ export default function CronPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load cron jobs">
-      <div className="space-y-6">
-        <CanvasHeader
-          title="Cron Jobs"
-          description={`${jobs.length} scheduled job${jobs.length !== 1 ? 's' : ''}`}
-          actions={
-            <button className="qr-btn-primary">
-              <Plus className="h-4 w-4" />
-              New Schedule
-            </button>
-          }
-        />
-
+      <PageShell
+        title="Cron Jobs"
+        description={`${jobs.length} scheduled job${jobs.length !== 1 ? 's' : ''}`}
+        actions={
+          <button className="qr-btn-primary">
+            <Plus className="h-4 w-4" />
+            New Schedule
+          </button>
+        }
+        contentClassName="space-y-6"
+      >
         {loading ? (
           <div className="space-y-1">{Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={5} />)}</div>
         ) : jobs.length === 0 ? (
@@ -120,7 +119,7 @@ export default function CronPage() {
             })}
           </div>
         )}
-      </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

@@ -8,7 +8,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { ChannelConnectForm } from '@/components/channels/channel-connect-form';
 import { channelFormSchemas, CHANNEL_TYPES } from '@/components/channels/channel-schemas';
 import { AlertCircle, Plus, Power, Pencil, Trash2, Loader2, Zap, ChevronRight, Search, Info } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import type { Channel, ChannelType, Soul } from '@/types';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -107,21 +107,21 @@ export default function ChannelsPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load channels">
-      <div className="space-y-4">
-        <CanvasHeader
-          title="Channels"
-          description={loading ? 'Loading…' : `${list.length} channel${list.length !== 1 ? 's' : ''} configured`}
-          actions={
-            <button
-              onClick={() => { setShowAddPicker(true); setPickerSearch(''); }}
-              className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" />
-              Add Channel
-            </button>
-          }
-        />
-
+      <PageShell
+        title="Channels"
+        description={loading ? 'Loading…' : `${list.length} channel${list.length !== 1 ? 's' : ''} configured`}
+        actions={
+          <button
+            onClick={() => { setShowAddPicker(true); setPickerSearch(''); }}
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Add Channel
+          </button>
+        }
+        contentClassName="px-0 py-0 sm:px-0"
+      >
+       <div className="space-y-4">
         {/* Agent tab strip */}
         {!loading && agentList.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -151,7 +151,7 @@ export default function ChannelsPage() {
                 )}
               >
                 {a.display_name}
-                {!isExecutive(a) && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-amber-400">L3</span>}
+                {!isExecutive(a) && <span className="ml-1.5 text-2xs uppercase tracking-wide text-amber-400">L3</span>}
                 {countByAgent(a.id) > 0 && (
                   <span className="ml-1.5 text-xs opacity-70">{countByAgent(a.id)}</span>
                 )}
@@ -198,7 +198,7 @@ export default function ChannelsPage() {
                   <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', !collapsed[agent.id] && 'rotate-90')} />
                   {agent.display_name}
                   {!isExecutive(agent) && (
-                    <span className="ml-2 inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                    <span className="ml-2 inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-2xs font-medium text-amber-400">
                       Not a C-officer — promote or move this channel
                     </span>
                   )}
@@ -327,7 +327,8 @@ export default function ChannelsPage() {
             onConnected={() => { setDrawer(null); load(); toast.success('Channel updated'); }}
           />
         )}
-      </div>
+       </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }

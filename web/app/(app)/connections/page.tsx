@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Plug, Unplug, ExternalLink, Check, Search, Key, Shield, ChevronDown, ChevronUp } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE } from '@/lib/api-core';
@@ -87,31 +87,36 @@ export default function ConnectionsPage() {
   const availablePlatforms = filtered.filter(p => !p.connected && !connectedIds.has(p.id));
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <PageShell
+      title="Links"
+      description="Link external services. Your agents will use these to interact with apps on your behalf."
+      toolbar={
+        <>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input placeholder="Search platforms..." value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full rounded-lg border border-input bg-transparent pl-9 pr-3 py-2 text-sm" />
+          </div>
+          <div className="flex gap-1 overflow-x-auto">
+            {CATEGORIES.map(c => (
+              <button key={c} onClick={() => setCategory(c)}
+                className={cn('px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors cursor-pointer',
+                  category === c ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground')}>
+                {c === 'all' ? 'All' : c.charAt(0).toUpperCase() + c.slice(1)}
+              </button>
+            ))}
+          </div>
+        </>
+      }
+      contentClassName="p-6 sm:p-6"
+    >
+      <div className="max-w-5xl mx-auto space-y-6">
       {error && (
         <div className="rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="ml-4 text-destructive/60 hover:text-destructive">✕</button>
         </div>
       )}
-      <CanvasHeader title="Links" description="Link external services. Your agents will use these to interact with apps on your behalf." />
-
-      <div className="flex gap-3 items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input placeholder="Search platforms..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-input bg-transparent pl-9 pr-3 py-2 text-sm" />
-        </div>
-        <div className="flex gap-1 overflow-x-auto">
-          {CATEGORIES.map(c => (
-            <button key={c} onClick={() => setCategory(c)}
-              className={cn('px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors cursor-pointer',
-                category === c ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground')}>
-              {c === 'all' ? 'All' : c.charAt(0).toUpperCase() + c.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {connectedPlatforms.length > 0 && (
         <div>
@@ -170,7 +175,8 @@ export default function ConnectionsPage() {
           ))}
         </div>
       </div>
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

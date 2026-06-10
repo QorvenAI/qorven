@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, DollarSign, Cpu, Zap, TrendingUp } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { usage as usageApi, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -90,9 +90,12 @@ export default function UsagePage() {
   const budgetMap = Object.fromEntries((budgets ?? []).map(b => [b.agent_id, b]));
 
   return (
-    <div className="space-y-6 p-4 lg:p-6 max-w-5xl">
-      <CanvasHeader title="Usage & Costs" description="Token usage and API costs across all agents this month." />
-
+    <PageShell
+      title="Usage & Costs"
+      description="Token usage and API costs across all agents this month."
+      contentClassName="px-0 py-0 sm:px-0"
+    >
+      <div className="space-y-6 p-4 lg:p-6 max-w-5xl">
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard icon={DollarSign} label="Cost this month" value={`$${data.total_cost_this_month.toFixed(4)}`} />
@@ -136,7 +139,8 @@ export default function UsagePage() {
         </table>
         {!data.souls.length && <p className="text-muted-foreground text-center py-8 text-sm">No usage data yet.</p>}
       </div>
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

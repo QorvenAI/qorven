@@ -10,7 +10,7 @@ import { OrgChart } from '@/components/agents/OrgChart';
 import { useStore } from '@/store';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/qor/tabs';
 import { Bot, ListChecks, ClipboardCheck, Network } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 
 export default function AgentsPage() {
   useAgentsStream();
@@ -19,10 +19,12 @@ export default function AgentsPage() {
   );
 
   return (
-    <div className="flex flex-col h-full">
-      <CanvasHeader title="Agents" description="Monitor connected agents, track tasks, and approve plans" />
-
-      <Tabs defaultValue="agents" className="flex flex-col flex-1 overflow-hidden">
+    <PageShell
+      title="Agents"
+      description="Monitor connected agents, track tasks, and approve plans"
+      contentClassName="flex flex-col overflow-hidden px-0 py-0 sm:px-0"
+    >
+      <Tabs defaultValue="agents" className="flex flex-col h-full overflow-hidden">
         {/* Tab bar */}
         <div className="px-6 py-3 border-b border-border">
           <TabsList variant="default" size="sm">
@@ -58,6 +60,6 @@ export default function AgentsPage() {
           <TabsContent value="org-chart" className="mt-0"><OrgChart /></TabsContent>
         </div>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }

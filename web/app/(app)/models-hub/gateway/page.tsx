@@ -8,7 +8,7 @@ import {
   Activity, Cpu, Database, DollarSign, Zap, Server, Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { Button } from '@/components/qor/button';
 import { Badge } from '@/components/qor/badge';
 import { gatewayAdmin, type PricingGap, type GatewayMetrics } from '@/lib/api-providers';
@@ -632,17 +632,16 @@ export default function GatewayPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <CanvasHeader
-        title="AI Gateway"
-        description="Pipeline status, circuit breakers, priority queues, model aliases, budgets and cache"
-        actions={
-          <Button variant="ghost" mode="icon" size="sm" onClick={load} title="Refresh">
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          </Button>
-        }
-      />
-
+    <PageShell
+      title="AI Gateway"
+      description="Pipeline status, circuit breakers, priority queues, model aliases, budgets and cache"
+      actions={
+        <Button variant="ghost" mode="icon" size="sm" onClick={load} title="Refresh">
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+        </Button>
+      }
+    >
+      <div className="space-y-4">
       {/* Row 0: Live Throughput */}
       <Card
         title="Live Throughput"
@@ -728,6 +727,7 @@ export default function GatewayPage() {
           />
         )}
       </Card>
-    </div>
+      </div>
+    </PageShell>
   );
 }

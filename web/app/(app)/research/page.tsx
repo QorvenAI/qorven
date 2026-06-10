@@ -20,7 +20,7 @@ import {
   Search, Send, Loader2, Zap, Scale, Layers, ExternalLink, AlertCircle,
   CheckCircle2, XCircle, BookOpen, RotateCw,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { research, type ResearchJob, type ResearchMode } from '@/lib/api';
 
@@ -88,8 +88,8 @@ export default function ResearchPage() {
   const failed = job?.status === 'failed';
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-      <CanvasHeader title="Research" description="Decompose a question into sub-queries, search the web in parallel, extract + cite, synthesize." />
+    <PageShell title="Research" description="Decompose a question into sub-queries, search the web in parallel, extract + cite, synthesize.">
+      <div className="mx-auto max-w-4xl space-y-5">
 
       {/* Mode picker */}
       <div className="grid grid-cols-3 gap-2">
@@ -174,7 +174,8 @@ export default function ResearchPage() {
 
       {/* Report */}
       {completed && job?.report && <ReportCard job={job} />}
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

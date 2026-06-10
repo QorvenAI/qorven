@@ -7,7 +7,7 @@ import { request } from '@/lib/api-core';
 import { agents } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import {
   Check, X, Pencil, RefreshCw, Clock, FileText,
   CheckCircle2, XCircle, Inbox, ChevronDown, LayoutList, LayoutGrid,
@@ -173,7 +173,7 @@ function ContentCard({ item, onApprove, onReject, onSave }: {
           <span className="text-xs text-muted-foreground text-center max-w-[64px] truncate">
             {item.agent_name}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {timeAgo(item.requested_at)}
           </span>
         </div>
@@ -465,33 +465,21 @@ export default function ContentFeedPage() {
   };
 
   return (
-    <div className="full-bleed h-[calc(100vh-var(--header-height))] flex flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-        <CanvasHeader
-          title="Content Approval"
-          description="Review, edit, and approve agent-produced content before publishing"
-          actions={
-            <button
-              onClick={() => { setLoading(true); fetchData(); }}
-              disabled={loading}
-              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
-            >
-              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-              Refresh
-            </button>
-          }
-        />
-
-        {/* Stats row */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={Clock} label="Pending" value={stats.pending} loading={loading} />
-          <StatCard icon={CheckCircle2} label="Approved today" value={stats.approved_today} loading={loading} />
-          <StatCard icon={XCircle} label="Rejected today" value={stats.rejected_today} loading={loading} />
-          <StatCard icon={FileText} label="Total (30 days)" value={stats.total_30d} loading={loading} />
-        </div>
-
-        {/* Filter row */}
-        <div className="flex flex-wrap items-center gap-3">
+    <PageShell
+      title="Content Approval"
+      description="Review, edit, and approve agent-produced content before publishing"
+      actions={
+        <button
+          onClick={() => { setLoading(true); fetchData(); }}
+          disabled={loading}
+          className="flex h-9 items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+        >
+          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+          Refresh
+        </button>
+      }
+      toolbar={
+        <>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -544,6 +532,16 @@ export default function ContentFeedPage() {
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
           </div>
+        </>
+      }
+      contentClassName="px-6 py-5 space-y-5 sm:px-6"
+    >
+        {/* Stats row */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard icon={Clock} label="Pending" value={stats.pending} loading={loading} />
+          <StatCard icon={CheckCircle2} label="Approved today" value={stats.approved_today} loading={loading} />
+          <StatCard icon={XCircle} label="Rejected today" value={stats.rejected_today} loading={loading} />
+          <StatCard icon={FileText} label="Total (30 days)" value={stats.total_30d} loading={loading} />
         </div>
 
         {/* Feed */}
@@ -592,7 +590,6 @@ export default function ContentFeedPage() {
             ))}
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }
