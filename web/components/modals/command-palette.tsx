@@ -78,7 +78,10 @@ interface MultiResults {
 const EMPTY_MULTI: MultiResults = { sessions: [], tickets: [], tasks: [], memories: [], drive: [] };
 
 export function CommandPalette() {
-  const [open, setOpen] = useState(false);
+  // Open state lives in the store so any trigger (the ⌘K shortcut here, or the
+  // header search button) drives the same source of truth.
+  const open = useStore((s) => s.commandPaletteOpen);
+  const setOpen = useStore((s) => s.setCommandPaletteOpen);
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const [multi, setMulti] = useState<MultiResults>(EMPTY_MULTI);
@@ -90,18 +93,12 @@ export function CommandPalette() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setOpen(o => !o); }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setOpen(!useStore.getState().commandPaletteOpen); }
       if (e.key === 'Escape') setOpen(false);
     };
-    // Lets non-keyboard triggers (e.g. the canvas search button) open the palette.
-    const openHandler = () => setOpen(true);
     window.addEventListener('keydown', handler);
-    window.addEventListener('qorven:command-palette', openHandler);
-    return () => {
-      window.removeEventListener('keydown', handler);
-      window.removeEventListener('qorven:command-palette', openHandler);
-    };
-  }, []);
+    return () => window.removeEventListener('keydown', handler);
+  }, [setOpen]);
 
   useEffect(() => {
     if (open) { setTimeout(() => inputRef.current?.focus(), 50); setQuery(''); setActiveIdx(0); setMulti(EMPTY_MULTI); }

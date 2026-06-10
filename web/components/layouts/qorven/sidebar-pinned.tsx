@@ -15,10 +15,8 @@ import { useStore } from '@/store';
 import { rooms as roomsApi, pins as pinsApi, type SidebarPin } from '@/lib/api';
 import { soulGradient } from '@/components/soul-card';
 import { cn } from '@/lib/utils';
-import { Plus, Search, Hash, MessageSquare, Star, ChevronDown } from 'lucide-react';
+import { Plus, Hash, MessageSquare, Star, ChevronDown } from 'lucide-react';
 
-// A list longer than this gets its own inline search box.
-const SEARCH_THRESHOLD = 5;
 // Each group's scroll area: ~3 rows on short screens, more when tall.
 const LIST_MAX_H = 'max-h-[clamp(108px,18vh,280px)]';
 
@@ -33,8 +31,6 @@ export function SidebarPinned() {
   const [hubs, setHubs] = useState<any[]>([]);
   const [hubMembers, setHubMembers] = useState<Record<string, number>>({});
   const [pinned, setPinned] = useState<SidebarPin[]>([]);
-  const [hubQuery, setHubQuery] = useState('');
-  const [chatQuery, setChatQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -81,16 +77,6 @@ export function SidebarPinned() {
   const hubLabel = (h: any) => String(h.display_name || h.name || '');
   const chatLabel = (s: any) => String(s.display_name || s.agent_key || '');
 
-  const filteredHubs = useMemo(() => {
-    const q = hubQuery.trim().toLowerCase();
-    return q ? hubs.filter((h) => hubLabel(h).toLowerCase().includes(q)) : hubs;
-  }, [hubs, hubQuery]);
-
-  const filteredChats = useMemo(() => {
-    const q = chatQuery.trim().toLowerCase();
-    return q ? souls.filter((s) => chatLabel(s).toLowerCase().includes(q)) : souls;
-  }, [souls, chatQuery]);
-
   // Pin order: a pinned item's rank = its index in `pinned`; unpinned sort after.
   const pinRank = useMemo(() => {
     const m = new Map<string, number>();
@@ -110,8 +96,8 @@ export function SidebarPinned() {
       })
       .map((x) => x.item), [pinRank]);
 
-  const sortedHubs = useMemo(() => pinnedFirst(filteredHubs, 'hub', (h) => h.id), [filteredHubs, pinnedFirst]);
-  const sortedChats = useMemo(() => pinnedFirst(filteredChats, 'chat', (s) => s.id), [filteredChats, pinnedFirst]);
+  const sortedHubs = useMemo(() => pinnedFirst(hubs, 'hub', (h) => h.id), [hubs, pinnedFirst]);
+  const sortedChats = useMemo(() => pinnedFirst(souls, 'chat', (s) => s.id), [souls, pinnedFirst]);
 
   return (
     <div className="shrink-0 border-t border-border bg-muted/30">
@@ -122,7 +108,6 @@ export function SidebarPinned() {
         onToggle={() => setCollapsed((c) => ({ ...c, hubs: !c.hubs }))}
         action={<button onClick={() => router.push('/rooms')} title="All hubs" className="text-muted-foreground/70 hover:text-foreground"><Plus className="h-3.5 w-3.5" /></button>}
       >
-        {hubs.length > SEARCH_THRESHOLD && <SearchBox value={hubQuery} onChange={setHubQuery} placeholder="Search hubs" />}
         <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
           {sortedHubs.map((h) => (
             <HubRow
@@ -136,7 +121,6 @@ export function SidebarPinned() {
             />
           ))}
           {hubs.length === 0 && <Empty>No hubs yet.</Empty>}
-          {hubs.length > 0 && sortedHubs.length === 0 && <Empty>No matching hubs.</Empty>}
         </div>
       </Group>
 
@@ -146,7 +130,6 @@ export function SidebarPinned() {
         collapsed={!!collapsed.chats}
         onToggle={() => setCollapsed((c) => ({ ...c, chats: !c.chats }))}
       >
-        {souls.length > SEARCH_THRESHOLD && <SearchBox value={chatQuery} onChange={setChatQuery} placeholder="Search chats" />}
         <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2 pb-1')}>
           {sortedChats.map((s) => (
             <ChatRow
@@ -159,7 +142,6 @@ export function SidebarPinned() {
             />
           ))}
           {souls.length === 0 && <Empty>No chats yet.</Empty>}
-          {souls.length > 0 && sortedChats.length === 0 && <Empty>No matching chats.</Empty>}
         </div>
       </Group>
     </div>
@@ -241,21 +223,6 @@ function ChatRow({ label, active, pinned, onOpen, onTogglePin }: {
 }
 
 /* ─── Bits ──────────────────────────────────────────────────────────────────── */
-function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  return (
-    <div className="relative mb-1 px-2">
-      <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="qr-input !h-7 !text-xs !pl-7"
-      />
-    </div>
-  );
-}
-
 function Empty({ children }: { children: ReactNode }) {
   return <p className="px-2.5 py-1 text-2xs text-muted-foreground/70">{children}</p>;
 }
