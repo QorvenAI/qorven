@@ -95,7 +95,9 @@ async function loadFromBackend(): Promise<ThemeSettings | null> {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    if (data && data.primaryColor) return { ...DEFAULT_SETTINGS, ...data };
+    // Accept saved prefs even when primaryColor is '' (a deliberately cleared
+    // override) — check the field exists as a string, not that it's truthy.
+    if (data && typeof data.primaryColor === 'string') return { ...DEFAULT_SETTINGS, ...data };
   } catch {}
   return null;
 }

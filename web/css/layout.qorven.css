@@ -26,7 +26,7 @@
       width: var(--sidebar-default-width) !important;
       transform: translateX(-100%);
       transition: transform 0.25s ease;
-      z-index: 50;
+      z-index: 50 !important;   /* above the scrim (40); base .sidebar sets z-20 later in the file */
     }
     .qorven [data-mobile-nav='open'] .sidebar {
       transform: translateX(0);
@@ -283,23 +283,6 @@
       margin: -1.5rem;
       margin-bottom: calc(-1.5rem - var(--status-bar-height, 0px) - var(--bottom-drawer-height, 0px));
       width: calc(100% + 3rem);
-    }
-  }
-
-  /* Mobile: sidebar as overlay sheet */
-  @media (max-width: theme(--breakpoint-lg)) {
-    .qorven .sidebar {
-      position: fixed;
-      z-index: 40;
-      transform: translateX(-100%);
-      transition: transform var(--sidebar-transition-duration) var(--sidebar-transition-timing);
-    }
-    .qorven.sidebar-mobile-open .sidebar {
-      transform: translateX(0);
-    }
-    .qorven .wrapper {
-      margin-left: var(--rail-width);
-      width: calc(100% - var(--rail-width));
     }
   }
 
