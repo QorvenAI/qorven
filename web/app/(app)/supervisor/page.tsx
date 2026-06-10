@@ -50,6 +50,18 @@ const AGENT_STATE_STYLE: Record<SupervisorAgentStatus, { dot: string; label: str
 };
 
 export default function SupervisorPage() {
+  return (
+    <PageShell
+      title="Supervisor"
+      description="Prime's view of the team — health, escalations, and auto-fixes."
+      contentClassName="px-0 py-0 sm:px-0"
+    >
+      <SupervisorContent />
+    </PageShell>
+  );
+}
+
+export function SupervisorContent() {
   const [status, setStatus] = useState<SupervisorStatus | null>(null);
   const [health, setHealth] = useState<SupervisorAgentHealth[]>([]);
   const [escalations, setEscalations] = useState<SupervisorMessage[]>([]);
@@ -86,19 +98,14 @@ export default function SupervisorPage() {
   const notInitialized = status?.status === 'not_initialized';
 
   return (
-    <PageShell
-      title="Supervisor"
-      description="Prime's view of the team — health, escalations, and auto-fixes."
-      contentClassName="px-0 py-0 sm:px-0"
-      actions={
+    <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
+      <div className="flex justify-end">
         <button onClick={refresh} disabled={loading}
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           Refresh
         </button>
-      }
-    >
-      <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
+      </div>
       {loadError && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -132,8 +139,7 @@ export default function SupervisorPage() {
       <HealthTable items={health} onUnsuspend={refresh} />
 
       <FixesSection available={fixes} history={fixHistory} />
-      </div>
-    </PageShell>
+    </div>
   );
 }
 

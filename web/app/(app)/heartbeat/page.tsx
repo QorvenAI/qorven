@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Activity, RefreshCw, Crown } from 'lucide-react';
 import { PageShell } from '@/components/layouts/page-shell';
 import { EmptyState, emptyStates } from '@/components/empty-state';
-import SupervisorPage from '@/app/(app)/supervisor/page';
+import { SupervisorContent } from '@/app/(app)/supervisor/page';
 import { cn } from '@/lib/utils';
 
 type Health = {
@@ -155,7 +155,7 @@ export default function HealthPage() {
       )}
 
       {/* Supervisor tab */}
-      {tab === 'supervisor' && <SupervisorPage />}
+      {tab === 'supervisor' && <SupervisorContent />}
       </div>
     </PageShell>
   );

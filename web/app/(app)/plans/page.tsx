@@ -19,7 +19,7 @@ import {
   type ApprovalItem, type OutboundAction, type OutboundActionKind, type MailApproval,
 } from '@/lib/api';
 import { useStore } from '@/store';
-import SupervisorPage from '@/app/(app)/supervisor/page';
+import { SupervisorContent } from '@/app/(app)/supervisor/page';
 
 // ─── helpers ────────────────────────────────────────────────────────
 
@@ -457,7 +457,7 @@ export default function PlansPage() {
       <div className="mx-auto max-w-6xl space-y-6">
       {tab === 'inbox'      && <InboxTab />}
       {tab === 'all'        && <AllPlansTab />}
-      {tab === 'supervisor' && <SupervisorPage />}
+      {tab === 'supervisor' && <SupervisorContent />}
       </div>
     </PageShell>
   );
