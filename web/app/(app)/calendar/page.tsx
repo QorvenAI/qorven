@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Calendar as CalIcon, Plus, Clock, Megaphone, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { calendarApi, social as socialApi } from '@/lib/api';
 import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -113,30 +113,29 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <CanvasHeader
-        title="Calendar"
-        description={`${calFilter ? souls.find(s => s.id === calFilter)?.display_name ?? 'Agent' : 'All Agents'} · events and social posts`}
-        actions={
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              <button onClick={() => setView('month')}
-                className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
-                Month
-              </button>
-              <button onClick={() => setView('list')}
-                className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
-                List
-              </button>
-            </div>
-            <button onClick={() => setShowCreate(v => !v)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
-              <Plus className="h-4 w-4" /> New Event
+    <PageShell
+      title="Calendar"
+      description={`${calFilter ? souls.find(s => s.id === calFilter)?.display_name ?? 'Agent' : 'All Agents'} · events and social posts`}
+      actions={
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button onClick={() => setView('month')}
+              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+              Month
+            </button>
+            <button onClick={() => setView('list')}
+              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+              List
             </button>
           </div>
-        }
-      />
-
+          <button onClick={() => setShowCreate(v => !v)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
+            <Plus className="h-4 w-4" /> New Event
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-5">
       {/* Create form */}
       {showCreate && (
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -366,6 +365,7 @@ export default function CalendarPage() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }
