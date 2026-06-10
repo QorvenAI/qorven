@@ -4,6 +4,13 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.8.1-alpha — 2026-06-10
+
+### Added
+- **Leaders delegate to their team — and report back.** Address a leader in a room (e.g. `@COO`) and ask for something, and they can now hand the work to the right person on their team — by name or by role. That teammate does the work, posts the result back in the room, and the leader rolls a short completion summary up to the **Company Hub**, so leadership always sees what got done. Delegation stays in bounds: a leader can only assign to their own direct reports, work can't be re-delegated in circles, and each room keeps its activity cap. ([000ab82](https://github.com/QorvenAI/qorven/commit/000ab82))
+
+---
+
 ## v0.8.0-alpha — 2026-06-09
 
 The **Operations Fabric** — the layer that makes your agents work together like a real company, and reach you like a colleague would.
