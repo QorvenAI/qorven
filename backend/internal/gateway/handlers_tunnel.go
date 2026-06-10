@@ -43,11 +43,14 @@ func (gw *Gateway) buildPublicMux() chi.Router {
 		_, _ = w.Write([]byte(`{"status":"ok","surface":"public"}`))
 	})
 
-	// Placeholder landing until item 5 mounts real external app surfaces.
+	// Placeholder landing.
 	r.Get("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("Qorven public surface. No app is published here yet."))
 	})
+
+	// External-facing app surfaces (default-deny; only published + public).
+	gw.mountPublicApps(r)
 
 	return r
 }

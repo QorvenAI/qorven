@@ -484,6 +484,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 			r.Delete("/{id}", gw.handleUninstallApp)
 			r.Post("/{id}/reload", gw.handleReloadApp)
 			r.Post("/{slug}/tools/{name}", gw.handleRunAppTool)
+			r.Post("/{id}/publish", gw.handlePublishApp)
 		})
 		// === Council API ===
 		r.Post("/council", func(w http.ResponseWriter, r *http.Request) {

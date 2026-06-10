@@ -38,6 +38,7 @@ export interface QorvenApp {
   pinned_topbar: boolean;
   topbar_order: number;
   settings_schema: SettingDef[];
+  external_enabled?: boolean;
 }
 
 export interface AppPageDef {
@@ -121,6 +122,14 @@ export const uninstallApp = (id: string, dropTables = false) =>
 
 export const reloadApp = (id: string) =>
   request<QorvenApp>(`/apps/${id}/reload`, { method: 'POST' });
+
+// Publish/unpublish an app's external (public) surface. Admin-only on the
+// backend; reachable on the public mux only while a tunnel is running.
+export const publishApp = (id: string, externalEnabled: boolean) =>
+  request<{ external_enabled: boolean }>(`/apps/${id}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ external_enabled: externalEnabled }),
+  });
 
 export const runTool = (
   slug: string,

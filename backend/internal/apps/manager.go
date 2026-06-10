@@ -364,6 +364,33 @@ func (m *AppManager) PublicPages(slug string) []PageDef {
 	return pages
 }
 
+// IsExternalEnabled reports whether the loaded app has been published
+// externally (admin toggle). Public pages/tools are reachable on the public
+// mux ONLY when this is true.
+func (m *AppManager) IsExternalEnabled(slug string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	la, ok := m.loaded[slug]
+	return ok && la.app.ExternalEnabled
+}
+
+// SetExternalEnabled persists the publish flag and updates the in-memory app
+// so IsExternalEnabled reflects it immediately (no reload needed).
+func (m *AppManager) SetExternalEnabled(ctx context.Context, id string, enabled bool) error {
+	if err := m.store.SetExternalEnabled(ctx, m.tenantID, id, enabled); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	for _, la := range m.loaded {
+		if la.app.ID == id {
+			la.app.ExternalEnabled = enabled
+			break
+		}
+	}
+	m.mu.Unlock()
+	return nil
+}
+
 // FrontendManifests returns the frontend manifest for every loaded enabled app.
 func (m *AppManager) FrontendManifests() []AppFrontendEntry {
 	m.mu.RLock()
