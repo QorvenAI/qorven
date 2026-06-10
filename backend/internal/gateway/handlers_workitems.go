@@ -7,6 +7,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -65,6 +66,8 @@ func (gw *Gateway) handleListWorkItems(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
 		return
 	}
+	// Intentional: a missing store yields an empty list (200), not 503 — the
+	// room work panel degrades to "no work yet" rather than breaking the view.
 	if gw.workItems == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"work_items": []any{}})
 		return
@@ -185,6 +188,8 @@ func (gw *Gateway) enrichWorkItems(ctx context.Context, items []workitems.WorkIt
 			for _, a := range ags {
 				byID[a.ID] = a
 			}
+		} else {
+			slog.Warn("workitems.enrich.getbyids_failed", "err", err)
 		}
 	}
 	out := make([]workItemDTO, 0, len(items))
