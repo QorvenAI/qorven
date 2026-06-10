@@ -98,7 +98,7 @@ func TestStore_ListForRoom(t *testing.T) {
 	pool := wiTestPool(t)
 	ctx := context.Background()
 	s := NewStore(pool)
-	tenant := "00000000-0000-0000-0000-0000000000e2"
+	tenant := "00000000-0000-0000-0000-0000000000e4"
 	t.Cleanup(func() {
 		pool.Exec(ctx, "DELETE FROM work_item_events WHERE work_item_id IN (SELECT id FROM work_items WHERE tenant_id=$1)", tenant)
 		pool.Exec(ctx, "DELETE FROM work_items WHERE tenant_id=$1", tenant)
@@ -123,6 +123,9 @@ func TestStore_ListForRoom(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("R1: want 2 items, got %d", len(got))
+	}
+	if got[0].Title != "second" || got[1].Title != "first" {
+		t.Errorf("order: want [second first], got %v %v", got[0].Title, got[1].Title)
 	}
 
 	// Status filter narrows: move id1 to assigned, filter by 'assigned' → 1.
