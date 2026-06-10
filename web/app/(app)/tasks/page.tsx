@@ -7,7 +7,7 @@ import {
   Plus, Loader2, Filter, X,
   Circle, CircleDot, CircleCheck, CircleDashed, GitCommit, File, Ticket,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { tasks as tasksApi } from '@/lib/api';
 import { useStore } from '@/store';
@@ -270,33 +270,30 @@ export default function TasksPage() {
   }));
 
   return (
-    <div className="flex flex-col h-full">
-      <CanvasHeader title="Tasks" description="Track work across all your agents" />
-      {/* Toolbar */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
-        <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
-        <select
-          value={stateFilter} onChange={e => setStateFilter(e.target.value)}
-          className="bg-transparent text-sm text-muted-foreground outline-none cursor-pointer"
+    <PageShell
+      title="Tasks"
+      description="Track work across all your agents"
+      actions={
+        <button
+          onClick={() => setShowCreate(!showCreate)}
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
         >
-          {STATE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <select
-          value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}
-          className="bg-transparent text-sm text-muted-foreground outline-none cursor-pointer"
-        >
-          {PRIORITY_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <div className="ml-auto">
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />New task
-          </button>
-        </div>
-      </div>
-
+          <Plus className="h-3.5 w-3.5" />New task
+        </button>
+      }
+      toolbar={
+        <>
+          <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+          <select value={stateFilter} onChange={e => setStateFilter(e.target.value)} className="bg-transparent text-sm text-muted-foreground outline-none cursor-pointer">
+            {STATE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} className="bg-transparent text-sm text-muted-foreground outline-none cursor-pointer">
+            {PRIORITY_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </>
+      }
+      contentClassName="px-0 py-0 sm:px-0"
+    >
       {/* Inline create form */}
       {showCreate && (
         <div className="shrink-0 border-b border-border bg-muted/20 px-4 py-3 space-y-2">
@@ -327,7 +324,7 @@ export default function TasksPage() {
       )}
 
       {/* Issues list */}
-      <div className="flex-1 overflow-auto">
+      <div>
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -351,7 +348,7 @@ export default function TasksPage() {
                     <Dot className={cn('h-3 w-3', cls)} />
                     {c.label}
                     {c.count > 0 && (
-                      <span className="ml-0.5 rounded-full bg-muted px-1.5 py-px text-muted-foreground text-[10px]">{c.count}</span>
+                      <span className="ml-0.5 rounded-full bg-muted px-1.5 py-px text-muted-foreground text-2xs">{c.count}</span>
                     )}
                   </button>
                 );
@@ -377,7 +374,7 @@ export default function TasksPage() {
                           {task.title}
                         </span>
                         {task.priority && task.priority !== 'medium' && (
-                          <span className={cn('rounded-full px-1.5 py-px text-[10px] font-medium capitalize shrink-0', PRIORITY_CLS[task.priority] ?? PRIORITY_CLS.low)}>
+                          <span className={cn('rounded-full px-1.5 py-px text-2xs font-medium capitalize shrink-0', PRIORITY_CLS[task.priority] ?? PRIORITY_CLS.low)}>
                             {task.priority}
                           </span>
                         )}
@@ -421,6 +418,6 @@ export default function TasksPage() {
           <TaskDrawer task={selected} souls={souls} onClose={() => setSelected(null)} />
         </>
       )}
-    </div>
+    </PageShell>
   );
 }
