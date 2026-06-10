@@ -1122,6 +1122,11 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Put("/work-goals/{id}", gw.handleUpdateWorkGoal)
 		r.Delete("/work-goals/{id}", gw.handleDeleteWorkGoal)
 
+		// Internet exposure (tunnel)
+		r.Get("/tunnel/status", gw.handleTunnelStatus)
+		r.Post("/tunnel/enable", gw.handleTunnelEnable)
+		r.Post("/tunnel/disable", gw.handleTunnelDisable)
+
 		// Sidebar pins
 		r.Get("/pins", gw.handleListSidebarPins)
 		r.Post("/pins", gw.handleCreateSidebarPin)

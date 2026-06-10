@@ -461,3 +461,20 @@ export const networkApi = {
       { method: 'POST', body: JSON.stringify({ action, auth_key: auth_key ?? '' }) }
     ),
 };
+
+// Internet exposure (tunnel) — points a Cloudflare/Tailscale-Funnel tunnel at
+// the restricted public listener, never the admin API.
+export interface TunnelStatus {
+  provider: string;                                  // "cloudflare" | "tailscale" | ""
+  state: 'off' | 'starting' | 'connected' | 'error';
+  public_url: string;
+  error?: string;
+  since?: string;
+}
+
+export const tunnelApi = {
+  status: () => request<{ status: TunnelStatus; public_port: number }>('/tunnel/status'),
+  enable: (provider: 'cloudflare' | 'tailscale') =>
+    request<{ status: TunnelStatus }>('/tunnel/enable', { method: 'POST', body: JSON.stringify({ provider }) }),
+  disable: () => request<{ status: TunnelStatus }>('/tunnel/disable', { method: 'POST' }),
+};

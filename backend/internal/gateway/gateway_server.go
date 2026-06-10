@@ -597,6 +597,16 @@ func (gw *Gateway) Start() error {
 	// sees a broken response.
 	gw.installShutdownHandler()
 
+	// Internet exposure: if a tunnel is enabled in config, bring up the
+	// restricted public listener + provider on boot (best-effort, async).
+	if gw.cfg.Tunnel.Enabled {
+		go func() {
+			if err := gw.enableTunnel(gw.cfg.Tunnel.Provider); err != nil {
+				slog.Warn("tunnel.boot_enable_failed", "error", err)
+			}
+		}()
+	}
+
 	if err := gw.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 		return err
 	}

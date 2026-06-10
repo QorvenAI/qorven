@@ -3,10 +3,10 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Network, Zap, Lock, X, Globe } from 'lucide-react';
+import { Loader2, Network, Zap, Lock, X, Globe, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { networkApi, type NetworkStatus } from '@/lib/api';
+import { networkApi, tunnelApi, type NetworkStatus, type TunnelStatus } from '@/lib/api';
 import { request } from '@/lib/api-core';
 import { Card, Row, Input, Btn } from './primitives';
 
@@ -26,11 +26,47 @@ export function NetworkSettings() {
   const [savingBaseURL, setSavingBaseURL] = useState(false);
   const baseURLLoaded = useRef(false);
 
+  // Tunnel (internet exposure) state
+  const [tunnel, setTunnel] = useState<TunnelStatus | null>(null);
+  const [tunnelProvider, setTunnelProvider] = useState<'cloudflare' | 'tailscale'>('cloudflare');
+  const [tunnelBusy, setTunnelBusy] = useState(false);
+
+  const reloadTunnel = () => {
+    tunnelApi.status().then(r => setTunnel(r.status)).catch(() => setTunnel(null));
+  };
+
   const reload = () => {
     setLoading(true);
     networkApi.status().then(setNet).catch(() => setNet(null)).finally(() => setLoading(false));
+    reloadTunnel();
   };
   useEffect(reload, []);
+
+  const toggleTunnel = async () => {
+    setTunnelBusy(true);
+    try {
+      const connected = tunnel?.state === 'connected' || tunnel?.state === 'starting';
+      const r = connected ? await tunnelApi.disable() : await tunnelApi.enable(tunnelProvider);
+      setTunnel(r.status);
+      if (!connected) {
+        toast.success('Tunnel starting — the public URL appears in a few seconds');
+        // poll until connected/error (cloudflared download + connect can take a moment)
+        let tries = 0;
+        const poll = setInterval(() => {
+          tunnelApi.status().then(s => {
+            setTunnel(s.status);
+            if (s.status.state === 'connected' || s.status.state === 'error' || ++tries > 20) clearInterval(poll);
+          }).catch(() => clearInterval(poll));
+        }, 1500);
+      } else {
+        toast.success('Tunnel stopped');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'tunnel action failed');
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (baseURLLoaded.current) return;
@@ -100,8 +136,61 @@ export function NetworkSettings() {
     }
   };
 
+  const tunnelConnected = tunnel?.state === 'connected';
+  const tunnelStarting = tunnel?.state === 'starting';
+
   return (
     <div className="space-y-4">
+      <Card id="network_tunnel" title="Internet exposure (Tunnel)"
+        description="Expose a public surface to the internet via a tunnel. Only published external app surfaces are reachable — your admin API and UI stay private.">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Public tunnel</p>
+              <p className="text-xs text-muted-foreground">
+                {tunnelConnected ? `Live via ${tunnel?.provider}` :
+                 tunnelStarting ? 'Starting…' :
+                 tunnel?.state === 'error' ? (tunnel.error || 'Error') : 'Off'}
+              </p>
+            </div>
+            <span className={cn(
+              'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
+              tunnelConnected ? 'bg-emerald-500/10 text-emerald-500' :
+              tunnelStarting ? 'bg-amber-500/10 text-amber-400' :
+              tunnel?.state === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
+            )}>
+              {tunnelConnected && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />}
+              {tunnel?.state ?? 'off'}
+            </span>
+          </div>
+
+          {tunnelConnected && tunnel?.public_url && (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              <Globe className="h-4 w-4 shrink-0 text-emerald-500" />
+              <a href={tunnel.public_url} target="_blank" rel="noreferrer" className="font-mono text-2sm text-foreground break-all hover:underline flex-1">
+                {tunnel.public_url}
+              </a>
+              <button onClick={() => { navigator.clipboard.writeText(tunnel.public_url); toast.success('Copied'); }}
+                className="text-muted-foreground hover:text-foreground shrink-0">
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          <Row label="Provider" hint="Cloudflare needs no account for a quick tunnel. Tailscale Funnel needs Tailscale set up.">
+            <select value={tunnelProvider} onChange={e => setTunnelProvider(e.target.value as 'cloudflare' | 'tailscale')}
+              disabled={tunnelConnected || tunnelStarting} className="qr-select max-w-xs">
+              <option value="cloudflare">Cloudflare (quick tunnel)</option>
+              <option value="tailscale">Tailscale Funnel</option>
+            </select>
+          </Row>
+
+          <Btn variant={tunnelConnected ? 'ghost' : 'primary'} onClick={toggleTunnel} loading={tunnelBusy || tunnelStarting}>
+            {tunnelConnected ? 'Stop tunnel' : 'Start tunnel'}
+          </Btn>
+        </div>
+      </Card>
+
       <Card id="network_tailscale" title="Tailscale VPN binding"
         description="Restrict access to devices on your Tailscale network. No firewall rules required."
         headerRight={

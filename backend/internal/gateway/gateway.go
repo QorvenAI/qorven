@@ -81,6 +81,7 @@ import (
 	"github.com/qorvenai/qorven/internal/store"
 	"github.com/qorvenai/qorven/internal/tasks"
 	"github.com/qorvenai/qorven/internal/tools"
+	"github.com/qorvenai/qorven/internal/tunnel"
 	"github.com/qorvenai/qorven/internal/voice"
 	"github.com/qorvenai/qorven/internal/webintel"
 	"github.com/qorvenai/qorven/internal/governance"
@@ -135,6 +136,9 @@ type Gateway struct {
 	router           chi.Router
 	startTime        time.Time
 	server           *http.Server
+	publicServer     *http.Server   // restricted public listener the tunnel points at (nil when disabled)
+	publicServerMu   sync.Mutex     // guards publicServer start/stop
+	tunnelMgr        *tunnel.Manager
 	shutdownOnce     sync.Once                    // Guards installShutdownHandler — Serve() may be called more than once in tests.
 	sqlRegistry      *tools.SQLConnectionRegistry // registered user DBs for sql_query tool
 	screenShare      *ScreenShareStore            // per-tenant latest user-shared screen frame
@@ -417,6 +421,7 @@ func New(cfg *config.Config) (*Gateway, error) {
 		previewMgr:    NewPreviewManager(),
 		commandCenter: NewCommandCenter(),
 		deployMgr:     NewDeployManager(),
+		tunnelMgr:     tunnel.NewManager(),
 		daemonReg:     daemon.New(), // fallback; daemonSvc overrides if repo root known
 		// API server — historically the only listener. Now bound to
 		// APIListen when the config uses the split schema. If the
