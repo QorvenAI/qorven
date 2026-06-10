@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { Users, Plus, X, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { cn } from '@/lib/utils';
@@ -66,18 +66,17 @@ export default function TeamsPage() {
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load teams">
-      <div className="space-y-6">
-        <CanvasHeader
-          title="Teams"
-          description={`${teams.length} team${teams.length !== 1 ? 's' : ''}`}
-          actions={
-            <button onClick={() => setShowForm(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer">
-              <Plus className="h-4 w-4" /> Create Team
-            </button>
-          }
-        />
-
+      <PageShell
+        title="Teams"
+        description={`${teams.length} team${teams.length !== 1 ? 's' : ''}`}
+        actions={
+          <button onClick={() => setShowForm(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer">
+            <Plus className="h-4 w-4" /> Create Team
+          </button>
+        }
+      >
+        <div className="space-y-6">
         {showForm && (
           <div className="rounded-xl border border-border bg-card p-4 flex gap-3 items-center">
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Team name"
@@ -158,7 +157,8 @@ export default function TeamsPage() {
             ))}
           </div>
         )}
-      </div>
+        </div>
+      </PageShell>
     </ErrorBoundary>
   );
 }
