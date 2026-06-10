@@ -1,13 +1,12 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-// Legacy redirect: /rooms/[id] moved to /hubs/[id].
+import Client from './client';
+
 export const dynamic = 'force-static';
 export function generateStaticParams() {
   return [{ id: '__dynamic__' }];
 }
 
-import Redirect from './client';
-
 export default function Page() {
-  return <Redirect />;
+  return <Client />;
 }

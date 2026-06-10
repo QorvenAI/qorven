@@ -29,7 +29,7 @@ export function TeamsSidebar() {
           <SidebarDivider />
           <SidebarGroupTitle>Navigation</SidebarGroupTitle>
           <ul className="flex flex-col gap-px px-2.5">
-            <SidebarMenuItem icon={Users} label="Rooms" onClick={() => router.push('/rooms')} />
+            <SidebarMenuItem icon={Users} label="Hubs" onClick={() => router.push('/hubs')} />
             <SidebarMenuItem icon={GitBranch} label="Org Chart" onClick={() => router.push('/org-chart')} />
             <SidebarMenuItem icon={Shield} label="Supervisor" onClick={() => router.push('/supervisor')} />
             <SidebarMenuItem icon={Scale} label="Governance" onClick={() => router.push('/governance')} />

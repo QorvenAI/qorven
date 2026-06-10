@@ -23,7 +23,7 @@ type NavItem = { id: RailSection; icon: typeof MessageSquare; label: string; hre
 const primary: NavItem[] = [
   { id: 'dashboard',  icon: LayoutDashboard, label: 'Dashboard', href: '/' },
   { id: 'souls',      icon: MessageSquare,   label: 'Chat',      href: '/qors' },
-  { id: 'rooms',      icon: Hash,            label: 'Hubs',      href: '/rooms' },
+  { id: 'rooms',      icon: Hash,            label: 'Hubs',      href: '/hubs' },
   { id: 'code',       icon: Code,            label: 'Code',      href: '/code' },
   { id: 'sessions',   icon: Mail,            label: 'Email',     href: '/mail' },
   { id: 'connectors', icon: Link2,           label: 'Channels',  href: '/channels' },

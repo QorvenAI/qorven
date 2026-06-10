@@ -50,7 +50,7 @@ export function SidebarPinned() {
     return () => { cancelled = true; };
   }, []);
 
-  const currentHubId = pathname?.match(/^\/rooms\/([^/]+)/)?.[1] ?? null;
+  const currentHubId = pathname?.match(/^\/hubs\/([^/]+)/)?.[1] ?? null;
   const currentChatId = pathname?.match(/^\/qors\/([^/]+)/)?.[1] ?? null;
 
   const pinnedKeys = useMemo(() => new Set(pinned.map((p) => keyOf(p.item_type, p.item_id))), [pinned]);
@@ -106,7 +106,7 @@ export function SidebarPinned() {
         title="Hubs"
         collapsed={!!collapsed.hubs}
         onToggle={() => setCollapsed((c) => ({ ...c, hubs: !c.hubs }))}
-        action={<button onClick={() => router.push('/rooms')} title="All hubs" className="text-muted-foreground/70 hover:text-foreground"><Plus className="h-3.5 w-3.5" /></button>}
+        action={<button onClick={() => router.push('/hubs')} title="All hubs" className="text-muted-foreground/70 hover:text-foreground"><Plus className="h-3.5 w-3.5" /></button>}
       >
         <div className={cn(LIST_MAX_H, 'overflow-y-auto scrollbar-thin flex flex-col gap-px px-2')}>
           {sortedHubs.map((h) => (
@@ -116,7 +116,7 @@ export function SidebarPinned() {
               members={hubMembers[h.id] ?? 0}
               active={currentHubId === h.id}
               pinned={isPinned('hub', h.id)}
-              onOpen={() => router.push(`/rooms/${h.id}`)}
+              onOpen={() => router.push(`/hubs/${h.id}`)}
               onTogglePin={() => togglePin('hub', h.id)}
             />
           ))}
