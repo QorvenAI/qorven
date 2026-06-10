@@ -4,6 +4,20 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.9.1-alpha — 2026-06-10
+
+Polish for the new workspace design.
+
+### Changed
+- **Better theme presets.** Refreshed the color schemes to a cleaner look — crisp neutral surfaces with one vivid accent, instead of washed-out tints. Six themes now differ by feel: Violet, Slate (monochrome), Ocean (blue), Sand (warm), Midnight (true-black), and Graphite (neutral) — each with its own default accent you can still re-tint under Brand Color.
+- **Theme swatches** in Settings → Appearance are now clean accent squares.
+
+### Fixed
+- **Brand Color matches your theme.** The Brand Color picker now shows the active theme's accent until you set a custom one, with a "Use theme color" link to revert — no more mismatched color.
+- **Mobile navigation.** On phones, the icon rail is gone; a three-line menu in the header now opens the full sidebar as a slide-in drawer, closing when you pick a destination or tap away.
+
+---
+
 ## v0.9.0-alpha — 2026-06-10
 
 A top-to-bottom redesign of the workspace — one consistent, polished interface across every screen, in light and dark.
