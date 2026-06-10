@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Smartphone, CheckCircle2, Loader2, AlertCircle, Monitor, RefreshCw, ShieldCheck,
 } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { pairing, type PairingDevice, type PairingRequest } from '@/lib/api';
 
@@ -41,20 +41,19 @@ export default function PairingPage() {
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 p-4 lg:p-6">
-      <CanvasHeader title="Pairing" description="Authorize new chat endpoints before agents can reach them."
-        actions={
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-          >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </button>
-        }
-      />
-
+    <PageShell title="Pairing" description="Authorize new chat endpoints before agents can reach them."
+      actions={
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+        >
+        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          Refresh
+        </button>
+      }
+    >
+      <div className="mx-auto max-w-3xl space-y-5">
       {err && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
           <AlertCircle className="h-4 w-4" />
@@ -111,7 +110,8 @@ export default function PairingPage() {
           </ul>
         )}
       </section>
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
