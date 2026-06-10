@@ -29,7 +29,7 @@ export function Sidebar() {
       <div className="w-(--sidebar-default-width) flex flex-col h-full overflow-hidden">
         <SidebarHeader />
         <SidebarRooms />
-        <div className="flex-1 overflow-y-auto pb-[56px]">
+        <div className="flex-1 overflow-y-auto pb-0 lg:pb-14">
           <SidebarNav />
         </div>
       </div>
