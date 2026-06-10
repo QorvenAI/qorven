@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Loader2, RefreshCw, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { providers as providersApi, budgets as budgetsApi } from '@/lib/api';
 import { Button } from '@/components/qor/button';
 import { Input } from '@/components/qor/input';
@@ -315,17 +315,16 @@ export default function SpendPage() {
   const total = data?.providers.reduce((s, p) => s + p.spent_usd_month, 0) ?? 0;
 
   return (
-    <div className="space-y-4">
-      <CanvasHeader
-        title="Provider Spend"
-        description={data ? `${data.month} · refreshes every 60s` : 'Monthly spend summary across all providers'}
-        actions={
-          <Button variant="ghost" mode="icon" size="sm" onClick={load} title="Refresh">
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          </Button>
-        }
-      />
-
+    <PageShell
+      title="Provider Spend"
+      description={data ? `${data.month} · refreshes every 60s` : 'Monthly spend summary across all providers'}
+      actions={
+        <Button variant="ghost" mode="icon" size="sm" onClick={load} title="Refresh">
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+        </Button>
+      }
+    >
+      <div className="space-y-4">
       {/* Overall budget reconciliation + setter — always visible */}
       <EffectiveCard eff={eff} />
       <OverallBudgetSetter onSaved={loadEffective} />
@@ -360,6 +359,7 @@ export default function SpendPage() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }
