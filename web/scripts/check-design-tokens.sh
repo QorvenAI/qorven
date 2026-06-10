@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Design-token guard: fails if staged web TSX/TS files introduce arbitrary
 # font sizes (text-[Npx]) or raw hex colors. Tokens belong in css/*.css.
-# Allowlist: the CSS token-definition files and the *.css brand-color defs.
+# Allowlist: the CSS token-definition files, plus the theme-system files
+# (theme-provider, appearance-settings) which define the color system by design.
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 
 # Staged web .tsx/.ts files (exclude css, which legitimately defines colors).
 files=$(git diff --cached --name-only --diff-filter=ACM \
   | grep -E '^web/.*\.(tsx|ts)$' \
-  | grep -vE '^web/css/' || true)
+  | grep -vE '^web/css/|^web/lib/theme-provider\.tsx$|^web/components/settings/sections/appearance-settings\.tsx$' || true)
 
 [ -z "$files" ] && exit 0
 
