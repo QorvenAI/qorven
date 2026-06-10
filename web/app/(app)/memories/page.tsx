@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Search, Building2, User, Loader2, Filter, Brain } from 'lucide-react';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { useStore } from '@/store';
@@ -112,11 +112,11 @@ export default function MemoriesPage() {
   }, [tab, selectedAgent, loadAgentMems]);
 
   return (
-    <div className="space-y-6">
-      <CanvasHeader title="Memory" description="Company-wide knowledge + per-agent vector memories" />
-
-      <div className="flex gap-1 border-b border-border">
-        {[
+    <PageShell
+      title="Memory"
+      description="Company-wide knowledge + per-agent vector memories"
+      toolbar={
+        [
           { key: 'company' as const, label: 'Company', icon: Building2 },
           { key: 'agent'   as const, label: 'Agent',   icon: User },
         ].map((t) => (
@@ -124,7 +124,7 @@ export default function MemoriesPage() {
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              'flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors',
+              'flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
               tab === t.key
                 ? 'border-primary text-primary'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
@@ -133,9 +133,10 @@ export default function MemoriesPage() {
             <t.icon className="h-3.5 w-3.5" />
             {t.label}
           </button>
-        ))}
-      </div>
-
+        ))
+      }
+    >
+      <div className="space-y-4">
       {/* ── Company tab ── */}
       {tab === 'company' && (
         <div className="space-y-4">
@@ -243,7 +244,8 @@ export default function MemoriesPage() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
