@@ -350,7 +350,14 @@ func isTrustedProxy(remoteAddr string) bool {
 func (rl *IPRateLimit) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Key on the host only — r.RemoteAddr includes an ephemeral port,
+			// which would make every connection a unique bucket (per-connection,
+			// not per-IP) and defeat the limit. This matters most behind a proxy
+			// (e.g. the tunnel's cloudflared) where each request is a fresh port.
 			ip := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(ip); err == nil {
+				ip = host
+			}
 			// Only trust X-Forwarded-For when the connection comes from a
 			// loopback or private-range address (nginx, local Docker, etc.).
 			// Direct internet connections can forge this header arbitrarily.

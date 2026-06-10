@@ -17,6 +17,23 @@ import (
 // maxPublicBodyBytes caps the size of a public bridge request body.
 const maxPublicBodyBytes = 64 << 10 // 64 KB
 
+// publicSecurityHeaders locks down responses on the internet-facing public mux.
+// Tighter than the admin CSP (no unsafe-inline/eval scripts): everything loads
+// same-origin (React + bundle are served from /a/_vendor and /a/{slug}), so a
+// compromised app bundle can't pull external scripts or be framed for phishing.
+func publicSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // mountPublicApps registers the external-facing app surfaces on the public mux.
 // Reached only via the tunnel (item 6); the admin API is not on this mux.
 //
@@ -98,6 +115,7 @@ func (gw *Gateway) handlePublishApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	r.Body = http.MaxBytesReader(w, r.Body, 512)
 	var req struct {
 		ExternalEnabled bool `json:"external_enabled"`
 	}
@@ -167,7 +185,9 @@ func (gw *Gateway) handlePublicAppTool(w http.ResponseWriter, r *http.Request) {
 		req.Args = map[string]any{}
 	}
 
-	result, err := gw.appMgr.RunTool(r.Context(), slug, name, req.Args)
+	// Public bridge: secrets withheld from the subprocess (no connector keys;
+	// DB DSN only if the app declared db_write).
+	result, err := gw.appMgr.RunToolPublic(r.Context(), slug, name, req.Args)
 	if err != nil {
 		if errors.Is(err, apps.ErrAppNotLoaded) || errors.Is(err, apps.ErrToolNotFound) {
 			http.NotFound(w, r)

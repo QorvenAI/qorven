@@ -649,7 +649,20 @@ func (m *AppManager) dropAppTables(ctx context.Context, a App) {
 
 // RunTool executes a named tool for a loaded app and returns its Result.
 // Returns an error if the app is not loaded/enabled or the tool is not found.
+// RunTool runs an app tool with full internal context (DB DSN + connector
+// credentials in the subprocess env). Use for authenticated/internal callers.
 func (m *AppManager) RunTool(ctx context.Context, slug, toolName string, args map[string]any) (*tools.Result, error) {
+	return m.runTool(ctx, slug, toolName, args, false)
+}
+
+// RunToolPublic runs an app tool invoked from the UNAUTHENTICATED public bridge.
+// It withholds all secrets from the subprocess env (no QORVEN_DB_DSN, no
+// connector key) so an untrusted public tool cannot read or exfiltrate them.
+func (m *AppManager) RunToolPublic(ctx context.Context, slug, toolName string, args map[string]any) (*tools.Result, error) {
+	return m.runTool(ctx, slug, toolName, args, true)
+}
+
+func (m *AppManager) runTool(ctx context.Context, slug, toolName string, args map[string]any, public bool) (*tools.Result, error) {
 	m.mu.RLock()
 	la, ok := m.loaded[slug]
 	m.mu.RUnlock()
@@ -691,14 +704,19 @@ func (m *AppManager) RunTool(ctx context.Context, slug, toolName string, args ma
 		"QORVEN_TENANT_ID=" + la.app.TenantID,
 		"QORVEN_APP_ID=" + la.app.ID,
 		"QORVEN_AGENT_ID=" + tools.AgentIDFromCtx(ctx),
-		"QORVEN_DB_DSN=" + m.dsn,
+	}
+	// Public-bridge tools get the DB DSN ONLY if the app explicitly declared the
+	// db_write permission (opt-in by the author). Connector credentials are
+	// NEVER given to public tools. Internal callers always get the DSN.
+	if !public || HasPermission(la.manifest, "db_write") {
+		baseEnv = append(baseEnv, "QORVEN_DB_DSN="+m.dsn)
 	}
 	for k, v := range la.app.Config {
 		envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
 		baseEnv = append(baseEnv, envKey+"="+fmt.Sprintf("%v", v))
 	}
 	c.Env = appToolEnv(la.app.InstallPath, baseEnv...)
-	if m.credLookup != nil {
+	if !public && m.credLookup != nil {
 		if key := m.credLookup(la.app.TenantID, la.manifest.Slug); key != "" {
 			c.Env = append(c.Env, "CONNECTOR_"+strings.ToUpper(strings.ReplaceAll(la.manifest.Slug, "-", "_"))+"_KEY="+key)
 		}
