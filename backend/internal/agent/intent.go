@@ -106,8 +106,8 @@ var intentTools = map[ChatIntent]map[string]bool{
 		"list_files": true, "glob": true, "grep": true, "diagnostics": true,
 		"apply_patch": true, "undo": true, "lsp": true, "project": true,
 		"prime_coder": true, "project_manager": true,
-		// Qorven app platform — install apps (scaffold_app creates Go Wasm, not shell-script apps)
-		"install_app": true,
+		// Qorven app platform — build/install apps + retrieve builder knowledge
+		"install_app": true, "get_builder_knowledge": true,
 		// Web: only fetch (have URL), not search (no web browsing during coding)
 		"web_fetch": true,
 		// Self-improvement tools
@@ -150,7 +150,7 @@ var intentTools = map[ChatIntent]map[string]bool{
 		// Project / workspace builder — "build me a CRM" is chat-intent
 		"project": true, "project_manager": true, "workspace_builder": true,
 		// Qorven app platform — "build an app" can be chat-intent
-		"scaffold_app": true, "install_app": true,
+		"scaffold_app": true, "install_app": true, "get_builder_knowledge": true,
 		// Connector tools — users often ask agents to do things via integrations
 		"execute_action": true,
 		// JIT discovery (always available)
