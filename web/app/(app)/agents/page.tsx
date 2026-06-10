@@ -22,7 +22,7 @@ export default function AgentsPage() {
     <PageShell
       title="Agents"
       description="Monitor connected agents, track tasks, and approve plans"
-      contentClassName="px-0 py-0 sm:px-0"
+      contentClassName="flex flex-col overflow-hidden px-0 py-0 sm:px-0"
     >
       <Tabs defaultValue="agents" className="flex flex-col h-full overflow-hidden">
         {/* Tab bar */}
