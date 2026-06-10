@@ -168,6 +168,33 @@ func (s *Store) ListForOwner(ctx context.Context, tenantID, ownerAgentID, status
 	return out, rows.Err()
 }
 
+// ListForRoom returns the work items that belong to a room, newest first.
+// Room membership is encoded in origin as 'room:<roomID>' (how delegation
+// writes it); the room_id column is not populated by that path.
+func (s *Store) ListForRoom(ctx context.Context, tenantID, roomID, status string) ([]WorkItem, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, tenant_id, title, origin, owner_agent_id, requested_by, status,
+		        blocked_on_kind, blocked_on_id, COALESCE(parent_id::text,''), COALESCE(budget_plan_id::text,'')
+		 FROM work_items
+		 WHERE tenant_id=$1 AND origin='room:' || $2 AND ($3='' OR status=$3)
+		 ORDER BY created_at DESC`, tenantID, roomID, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkItem{}
+	for rows.Next() {
+		var w WorkItem
+		if err := rows.Scan(&w.ID, &w.TenantID, &w.Title, &w.Origin, &w.OwnerAgentID, &w.RequestedBy, &w.Status,
+			&w.BlockedOnKind, &w.BlockedOnID, &w.ParentID, &w.BudgetPlanID); err != nil {
+			slog.Warn("workitems.listforroom.scan_failed", "err", err)
+			continue
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // Events returns the audit log for a work item, oldest first.
 func (s *Store) Events(ctx context.Context, id string) ([]Event, error) {
 	rows, err := s.pool.Query(ctx,
