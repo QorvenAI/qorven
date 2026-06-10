@@ -1184,6 +1184,8 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			if err := os.MkdirAll(appsDir, 0755); err != nil {
 				slog.Warn("apps.dir_create_failed", "path", appsDir, "err", err)
 			}
+			// get_builder_knowledge — embedded "how to build apps on Qorven" docs.
+			gw.toolReg.Register(tools.NewGetBuilderKnowledgeTool())
 			gw.toolReg.Register(tools.NewScaffoldAppTool(appsDir))
 			appMgr := gw.appMgr
 			gw.toolReg.Register(tools.NewInstallAppTool(

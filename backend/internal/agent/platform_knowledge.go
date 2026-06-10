@@ -4,11 +4,13 @@
 
 package agent
 
+import "github.com/qorvenai/qorven/internal/builderkb"
+
 // buildPlatformKnowledge returns the Qorven platform knowledge section.
 // This gives every agent deep understanding of the platform they run on,
-// enabling self-building features (dashboards, agents, workflows).
+// enabling self-building features (dashboards, agents, workflows, apps).
 func buildPlatformKnowledge() []string {
-	return []string{
+	lines := []string{
 		"## Qorven Platform Knowledge",
 		"",
 		"Qorven is an open-source multi-agent AI workspace. Single Go binary, self-hosted.",
@@ -243,4 +245,8 @@ func buildPlatformKnowledge() []string {
 		"qorven init, doctor, research, graph, vault, costs, scan, read, tasks, update",
 		"",
 	}
+	// Platform extensibility — how to build apps/plugins on Qorven (always-on
+	// summary; agents pull deep detail via the get_builder_knowledge tool).
+	lines = append(lines, builderkb.Summary()...)
+	return lines
 }
