@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { PageShell } from '@/components/layouts/page-shell';
 import {
   agents, sessions, providers, approvals as approvalsApi,
   outbound, supervisor,
@@ -285,29 +285,28 @@ export default function DashboardPage() {
   return (
     <ErrorBoundary>
       <DashboardDataProvider>
+        <PageShell
+          title="Command Center"
+          description="Fleet operations, spend, and activity at a glance"
+          actions={
+            <>
+              <button onClick={load} disabled={loading || refreshing}
+                className="qr-btn-outline qr-btn-sm flex items-center gap-2">
+                <RefreshCw className={cn('h-4 w-4', (loading || refreshing) && 'animate-spin')} />
+                Refresh
+              </button>
+              <button onClick={() => router.push('/qors')}
+                className="qr-btn-primary qr-btn-sm flex items-center gap-2">
+                <Send className="h-4 w-4" />
+                New Chat
+              </button>
+            </>
+          }
+        >
         <div className="flex flex-col gap-4 pb-8">
 
-          <CanvasHeader
-            title="Command Center"
-            description="Fleet operations, spend, and activity at a glance"
-            actions={
-              <>
-                <button onClick={load} disabled={loading || refreshing}
-                  className="qr-btn-outline qr-btn-sm flex items-center gap-2">
-                  <RefreshCw className={cn('h-4 w-4', (loading || refreshing) && 'animate-spin')} />
-                  Refresh
-                </button>
-                <button onClick={() => router.push('/qors')}
-                  className="qr-btn-primary qr-btn-sm flex items-center gap-2">
-                  <Send className="h-4 w-4" />
-                  New Chat
-                </button>
-              </>
-            }
-          />
-
           {error && (
-            <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 mx-6">
+            <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
               <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
               <p className="text-sm text-destructive flex-1">{error}</p>
               <button onClick={load} className="text-sm font-medium text-destructive hover:underline">Retry</button>
@@ -357,6 +356,7 @@ export default function DashboardPage() {
           </div>
 
         </div>
+        </PageShell>
 
         {/* Widget picker sheet */}
         <WidgetPicker
