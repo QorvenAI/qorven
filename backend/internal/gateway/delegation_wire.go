@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/realtime"
@@ -95,6 +96,7 @@ func (gw *Gateway) ensureCompanyHub(ctx context.Context) string {
 	var id string
 	if err := gw.db.Pool.QueryRow(ctx,
 		`SELECT id FROM rooms WHERE tenant_id=$1 AND name='company-hub' LIMIT 1`, defaultTenant).Scan(&id); err == nil && id != "" {
+		gw.syncCompanyHub(ctx, defaultTenant, id)
 		return id
 	}
 	// Slow path: lock, re-check, create.
@@ -110,6 +112,7 @@ func (gw *Gateway) ensureCompanyHub(ctx context.Context) string {
 	if err := tx.QueryRow(ctx,
 		`SELECT id FROM rooms WHERE tenant_id=$1 AND name='company-hub' LIMIT 1`, defaultTenant).Scan(&id); err == nil && id != "" {
 		_ = tx.Commit(ctx)
+		gw.syncCompanyHub(ctx, defaultTenant, id)
 		return id
 	}
 	if err := tx.QueryRow(ctx,
@@ -121,5 +124,37 @@ func (gw *Gateway) ensureCompanyHub(ctx context.Context) string {
 	if err := tx.Commit(ctx); err != nil {
 		return ""
 	}
+	gw.syncCompanyHub(ctx, defaultTenant, id)
 	return id
+}
+
+// syncCompanyHub makes the company-hub room reflect the company: it sets the
+// room's display name from the tenant name (when meaningful) and adds every
+// C-level agent (org_level l1/l2) as a member. Idempotent — every statement is
+// conflict-tolerant, so it is safe to call on every ensureCompanyHub and under
+// concurrency. Best-effort: failures are logged, never fatal.
+func (gw *Gateway) syncCompanyHub(ctx context.Context, tenantID, roomID string) {
+	if roomID == "" {
+		return
+	}
+	// Name the room from the tenant, but only when the name is meaningful
+	// (non-empty and not the bootstrap placeholder) and actually differs.
+	var tenantName string
+	if err := gw.db.Pool.QueryRow(ctx, `SELECT COALESCE(name,'') FROM tenants WHERE id=$1`, tenantID).Scan(&tenantName); err == nil {
+		if tenantName != "" && tenantName != "Default" {
+			if _, err := gw.db.Pool.Exec(ctx,
+				`UPDATE rooms SET display_name=$1 WHERE id=$2 AND display_name IS DISTINCT FROM $1`,
+				tenantName, roomID); err != nil {
+				slog.Warn("rooms.company_hub.rename_failed", "room", roomID, "err", err)
+			}
+		}
+	}
+	// Add all C-level agents (l1/l2) as members; ON CONFLICT keeps it idempotent.
+	if _, err := gw.db.Pool.Exec(ctx,
+		`INSERT INTO room_members (room_id, agent_id)
+		 SELECT $1, id FROM agents
+		 WHERE tenant_id=$2 AND deleted_at IS NULL AND org_level IN ('l1','l2')
+		 ON CONFLICT DO NOTHING`, roomID, tenantID); err != nil {
+		slog.Warn("rooms.company_hub.member_sync_failed", "room", roomID, "err", err)
+	}
 }
