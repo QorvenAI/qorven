@@ -53,15 +53,15 @@ function AppRailIcon({ app }: { app: QorvenApp }) {
   const router = useRouter();
 
   const iconContent = (() => {
-    if (!app.icon && !app.icon_url) return <Package className="h-[18px] w-[18px]" strokeWidth={2.5} />;
+    if (!app.icon && !app.icon_url) return <Package className="size-4.5" strokeWidth={2.5} />;
     // Emoji detection: single grapheme cluster starting with high codepoint
     if (app.icon && /^\p{Emoji}/u.test(app.icon) && app.icon.length <= 4) {
       return <span className="text-base leading-none">{app.icon}</span>;
     }
     if (app.icon_url) {
-      return <img src={app.icon_url} alt={app.display_name} className="h-[18px] w-[18px] rounded object-cover" />;
+      return <img src={app.icon_url} alt={app.display_name} className="size-4.5 rounded object-cover" />;
     }
-    return <Package className="h-[18px] w-[18px]" strokeWidth={2.5} />;
+    return <Package className="size-4.5" strokeWidth={2.5} />;
   })();
 
   return (
@@ -105,7 +105,7 @@ export function Rail() {
               : 'text-muted-foreground hover:text-foreground hover:bg-accent',
           )}
         >
-          <Icon className="h-[18px] w-[18px]" strokeWidth={2.5} />
+          <Icon className="size-4.5" strokeWidth={2.5} />
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={8}>{label}</TooltipContent>
