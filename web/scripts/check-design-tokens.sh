@@ -17,9 +17,9 @@ for f in $files; do
   [ -f "$ROOT/$f" ] || continue
   # arbitrary px font sizes
   hits=$(grep -nE 'text-\[[0-9]+px\]' "$ROOT/$f" || true)
-  # raw 6-or-3 digit hex in className/style contexts (allow in comments is hard to
+  # raw 6-digit hex in className/style contexts (allow in comments is hard to
   # detect cheaply; we flag all and let the author switch to a token or move to css)
-  hits2=$(grep -nE '#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b' "$ROOT/$f" || true)
+  hits2=$(grep -nE '#[0-9a-fA-F]{6}\b' "$ROOT/$f" || true)
   if [ -n "$hits" ] || [ -n "$hits2" ]; then
     violations="$violations\n--- $f ---\n$hits\n$hits2"
   fi

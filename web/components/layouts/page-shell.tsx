@@ -14,6 +14,7 @@
 
 import type { ReactNode } from 'react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
+import { cn } from '@/lib/utils';
 
 export function PageShell({
   title,
@@ -39,7 +40,7 @@ export function PageShell({
           {toolbar}
         </div>
       )}
-      <div className={`flex-1 overflow-y-auto px-4 py-4 sm:px-6 ${contentClassName}`}>
+      <div className={cn('flex-1 overflow-y-auto px-4 py-4 sm:px-6', contentClassName)}>
         {children}
       </div>
     </div>
