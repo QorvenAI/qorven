@@ -98,19 +98,20 @@ export function SidebarPinned() {
     return m;
   }, [pinned]);
 
-  // Stable sort that floats pinned items (in pin order) to the top of a list.
-  const pinnedFirst = <T,>(items: T[], type: 'hub' | 'chat', idOf: (x: T) => string): T[] =>
+  // Stable sort that floats pinned items (in pin order) to the top of a list;
+  // unpinned items (rank Infinity) keep their original order after them.
+  const pinnedFirst = useCallback(<T,>(items: T[], type: 'hub' | 'chat', idOf: (x: T) => string): T[] =>
     items
       .map((item, i) => ({ item, i }))
       .sort((a, b) => {
-        const ra = pinRank.has(keyOf(type, idOf(a.item))) ? pinRank.get(keyOf(type, idOf(a.item)))! : Infinity;
-        const rb = pinRank.has(keyOf(type, idOf(b.item))) ? pinRank.get(keyOf(type, idOf(b.item)))! : Infinity;
+        const ra = pinRank.get(keyOf(type, idOf(a.item))) ?? Infinity;
+        const rb = pinRank.get(keyOf(type, idOf(b.item))) ?? Infinity;
         return ra === rb ? a.i - b.i : ra - rb;
       })
-      .map((x) => x.item);
+      .map((x) => x.item), [pinRank]);
 
-  const sortedHubs = useMemo(() => pinnedFirst(filteredHubs, 'hub', (h) => h.id), [filteredHubs, pinRank]);
-  const sortedChats = useMemo(() => pinnedFirst(filteredChats, 'chat', (s) => s.id), [filteredChats, pinRank]);
+  const sortedHubs = useMemo(() => pinnedFirst(filteredHubs, 'hub', (h) => h.id), [filteredHubs, pinnedFirst]);
+  const sortedChats = useMemo(() => pinnedFirst(filteredChats, 'chat', (s) => s.id), [filteredChats, pinnedFirst]);
 
   return (
     <div className="shrink-0 border-t border-border bg-muted/30">

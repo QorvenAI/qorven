@@ -3,10 +3,9 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { rooms } from '@/lib/api';
 import { Loader2, MessageSquare, Plus, X } from 'lucide-react';
-import { RoomDetail } from './[id]/client';
 
 function HubsWelcome({ onCreateClick }: { onCreateClick: () => void }) {
   return (
@@ -33,11 +32,8 @@ function HubsWelcome({ onCreateClick }: { onCreateClick: () => void }) {
 
 export default function RoomsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  // Hub selection is driven by the URL (?hub=) so the sidebar Hubs list opens
-  // the detail here. The page itself no longer renders a hub list — that lives
-  // in the contextual sidebar.
-  const selectedId = searchParams.get('hub');
+  // The hub list lives in the contextual sidebar; selecting a hub there routes
+  // to /rooms/[id]. This index page is just the empty state + create flow.
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -63,10 +59,7 @@ export default function RoomsPage() {
 
   return (
     <div className="flex h-[calc(100vh-var(--header-height,56px)-1px)] flex-col overflow-hidden">
-      {selectedId
-        ? <RoomDetail roomId={selectedId} showBack={false} />
-        : <HubsWelcome onCreateClick={() => setShowCreate(true)} />
-      }
+      <HubsWelcome onCreateClick={() => setShowCreate(true)} />
 
       {/* Create-hub modal */}
       {showCreate && (
