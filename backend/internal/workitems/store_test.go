@@ -94,6 +94,53 @@ func TestStore_Unblock_RequiresBlocked(t *testing.T) {
 	}
 }
 
+func TestStore_ListForRoom(t *testing.T) {
+	pool := wiTestPool(t)
+	ctx := context.Background()
+	s := NewStore(pool)
+	tenant := "00000000-0000-0000-0000-0000000000e4"
+	t.Cleanup(func() {
+		pool.Exec(ctx, "DELETE FROM work_item_events WHERE work_item_id IN (SELECT id FROM work_items WHERE tenant_id=$1)", tenant)
+		pool.Exec(ctx, "DELETE FROM work_items WHERE tenant_id=$1", tenant)
+	})
+
+	// Two items in room R1, one in room R2.
+	id1, err := s.Create(ctx, WorkItem{TenantID: tenant, Title: "first", Origin: "room:R1", RequestedBy: "u1"})
+	if err != nil {
+		t.Fatalf("create id1: %v", err)
+	}
+	if _, err := s.Create(ctx, WorkItem{TenantID: tenant, Title: "second", Origin: "room:R1", RequestedBy: "u1"}); err != nil {
+		t.Fatalf("create id2: %v", err)
+	}
+	if _, err := s.Create(ctx, WorkItem{TenantID: tenant, Title: "other", Origin: "room:R2", RequestedBy: "u1"}); err != nil {
+		t.Fatalf("create id3: %v", err)
+	}
+
+	// R1 returns exactly the two R1 items.
+	got, err := s.ListForRoom(ctx, tenant, "R1", "")
+	if err != nil {
+		t.Fatalf("list R1: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("R1: want 2 items, got %d", len(got))
+	}
+	if got[0].Title != "second" || got[1].Title != "first" {
+		t.Errorf("order: want [second first], got %v %v", got[0].Title, got[1].Title)
+	}
+
+	// Status filter narrows: move id1 to assigned, filter by 'assigned' → 1.
+	if err := s.Transition(ctx, id1, StatusAssigned, "u1", "assigned"); err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	assigned, err := s.ListForRoom(ctx, tenant, "R1", StatusAssigned)
+	if err != nil {
+		t.Fatalf("list assigned: %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].Title != "first" {
+		t.Fatalf("assigned filter: want [first], got %+v", assigned)
+	}
+}
+
 func TestStore_SetBlockedOn_RejectsTerminal(t *testing.T) {
 	pool := wiTestPool(t)
 	ctx := context.Background()

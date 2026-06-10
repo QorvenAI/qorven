@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,15 +26,17 @@ type WorkItem struct {
 	BlockedOnID   string
 	ParentID      string // "" when none
 	BudgetPlanID  string // "" when none
+	UpdatedAt     time.Time
 }
 
 // Event is one audit record for a work item.
 type Event struct {
-	EventType  string
-	ActorID    string
-	FromStatus string
-	ToStatus   string
-	Detail     string
+	EventType  string    `json:"event_type"`
+	ActorID    string    `json:"actor_id"`
+	FromStatus string    `json:"from_status"`
+	ToStatus   string    `json:"to_status"`
+	Detail     string    `json:"detail"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Store persists work items and their events.
@@ -147,7 +150,7 @@ func (s *Store) Unblock(ctx context.Context, id, actorID string) error {
 func (s *Store) ListForOwner(ctx context.Context, tenantID, ownerAgentID, status string) ([]WorkItem, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, tenant_id, title, origin, owner_agent_id, requested_by, status,
-		        blocked_on_kind, blocked_on_id, COALESCE(parent_id::text,''), COALESCE(budget_plan_id::text,'')
+		        blocked_on_kind, blocked_on_id, COALESCE(parent_id::text,''), COALESCE(budget_plan_id::text,''), updated_at
 		 FROM work_items
 		 WHERE tenant_id=$1 AND owner_agent_id=$2 AND ($3='' OR status=$3)
 		 ORDER BY updated_at DESC`, tenantID, ownerAgentID, status)
@@ -159,8 +162,35 @@ func (s *Store) ListForOwner(ctx context.Context, tenantID, ownerAgentID, status
 	for rows.Next() {
 		var w WorkItem
 		if err := rows.Scan(&w.ID, &w.TenantID, &w.Title, &w.Origin, &w.OwnerAgentID, &w.RequestedBy, &w.Status,
-			&w.BlockedOnKind, &w.BlockedOnID, &w.ParentID, &w.BudgetPlanID); err != nil {
+			&w.BlockedOnKind, &w.BlockedOnID, &w.ParentID, &w.BudgetPlanID, &w.UpdatedAt); err != nil {
 			slog.Warn("workitems.list.scan_failed", "err", err)
+			continue
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// ListForRoom returns the work items that belong to a room, newest first.
+// Room membership is encoded in origin as 'room:<roomID>' (how delegation
+// writes it); the room_id column is not populated by that path.
+func (s *Store) ListForRoom(ctx context.Context, tenantID, roomID, status string) ([]WorkItem, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, tenant_id, title, origin, owner_agent_id, requested_by, status,
+		        blocked_on_kind, blocked_on_id, COALESCE(parent_id::text,''), COALESCE(budget_plan_id::text,''), updated_at
+		 FROM work_items
+		 WHERE tenant_id=$1 AND origin='room:' || $2 AND ($3='' OR status=$3)
+		 ORDER BY created_at DESC`, tenantID, roomID, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkItem{}
+	for rows.Next() {
+		var w WorkItem
+		if err := rows.Scan(&w.ID, &w.TenantID, &w.Title, &w.Origin, &w.OwnerAgentID, &w.RequestedBy, &w.Status,
+			&w.BlockedOnKind, &w.BlockedOnID, &w.ParentID, &w.BudgetPlanID, &w.UpdatedAt); err != nil {
+			slog.Warn("workitems.listforroom.scan_failed", "err", err)
 			continue
 		}
 		out = append(out, w)
@@ -171,7 +201,7 @@ func (s *Store) ListForOwner(ctx context.Context, tenantID, ownerAgentID, status
 // Events returns the audit log for a work item, oldest first.
 func (s *Store) Events(ctx context.Context, id string) ([]Event, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT event_type, actor_id, from_status, to_status, detail
+		`SELECT event_type, actor_id, from_status, to_status, detail, created_at
 		 FROM work_item_events WHERE work_item_id=$1 ORDER BY created_at`, id)
 	if err != nil {
 		return nil, err
@@ -180,7 +210,7 @@ func (s *Store) Events(ctx context.Context, id string) ([]Event, error) {
 	out := []Event{}
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.EventType, &e.ActorID, &e.FromStatus, &e.ToStatus, &e.Detail); err != nil {
+		if err := rows.Scan(&e.EventType, &e.ActorID, &e.FromStatus, &e.ToStatus, &e.Detail, &e.CreatedAt); err != nil {
 			slog.Warn("workitems.events.scan_failed", "work_item_id", id, "err", err)
 			continue
 		}

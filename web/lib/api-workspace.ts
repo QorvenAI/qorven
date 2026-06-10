@@ -162,3 +162,33 @@ export const rooms = {
     request<any>(`/rooms/${id}/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify({ status }) }),
   org: (id: string) => request<any>(`/rooms/${id}/org`),
 };
+
+// Work Items
+export type WorkItem = {
+  id: string;
+  title: string;
+  origin: string;
+  owner_agent_id: string;
+  owner_key: string;
+  owner_name: string;
+  status: string;
+  blocked_on_kind: string;
+  parent_id: string;
+  updated_at: string;
+};
+
+export type WorkItemEvent = {
+  event_type: string;
+  actor_id: string;
+  from_status: string;
+  to_status: string;
+  detail: string;
+  created_at: string;
+};
+
+export const workItems = {
+  listForRoom: (roomId: string) =>
+    request<{ work_items: WorkItem[] }>(`/work-items?room=${encodeURIComponent(roomId)}`),
+  get: (id: string) =>
+    request<{ work_item: WorkItem; events: WorkItemEvent[] }>(`/work-items/${id}`),
+};

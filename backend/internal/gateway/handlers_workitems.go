@@ -5,11 +5,15 @@
 package gateway
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/workitems"
 )
 
@@ -63,18 +67,27 @@ func (gw *Gateway) handleListWorkItems(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
 		return
 	}
+	// Intentional: a missing store yields an empty list (200), not 503 — the
+	// room work panel degrades to "no work yet" rather than breaking the view.
 	if gw.workItems == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"work_items": []any{}})
 		return
 	}
 	owner := r.URL.Query().Get("owner")
 	status := r.URL.Query().Get("status")
-	items, err := gw.workItems.ListForOwner(r.Context(), defaultTenant, owner, status)
+	room := r.URL.Query().Get("room")
+	var items []workitems.WorkItem
+	var err error
+	if room != "" {
+		items, err = gw.workItems.ListForRoom(r.Context(), defaultTenant, room, status)
+	} else {
+		items, err = gw.workItems.ListForOwner(r.Context(), defaultTenant, owner, status)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"work_items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"work_items": gw.enrichWorkItems(r.Context(), items)})
 }
 
 // handleGetWorkItem returns a work item + its events.
@@ -103,7 +116,8 @@ func (gw *Gateway) handleGetWorkItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events, _ := gw.workItems.Events(r.Context(), id)
-	writeJSON(w, http.StatusOK, map[string]any{"work_item": item, "events": events})
+	dto := gw.enrichWorkItems(r.Context(), []workitems.WorkItem{*item})
+	writeJSON(w, http.StatusOK, map[string]any{"work_item": dto[0], "events": events})
 }
 
 // handleTransitionWorkItem moves a work item. Body: {to, detail?}.
@@ -139,4 +153,59 @@ func (gw *Gateway) handleTransitionWorkItem(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// workItemDTO is the JSON shape returned to the frontend. WorkItem itself has
+// no json tags, so we project explicit lowercase keys and add the owner's key
+// and display name (resolved from owner_agent_id).
+type workItemDTO struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Origin    string    `json:"origin"`
+	OwnerID   string    `json:"owner_agent_id"`
+	OwnerKey  string    `json:"owner_key"`
+	OwnerName string    `json:"owner_name"`
+	Status    string    `json:"status"`
+	BlockedOn string    `json:"blocked_on_kind"`
+	ParentID  string    `json:"parent_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// enrichWorkItems resolves owner_agent_id → key/name in one batch query and
+// returns DTOs. On any resolution error it falls back to the raw owner id.
+func (gw *Gateway) enrichWorkItems(ctx context.Context, items []workitems.WorkItem) []workItemDTO {
+	idSet := map[string]struct{}{}
+	for _, it := range items {
+		if it.OwnerAgentID != "" {
+			idSet[it.OwnerAgentID] = struct{}{}
+		}
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	byID := map[string]*agent.Agent{}
+	if gw.agents != nil && len(ids) > 0 {
+		if ags, err := gw.agents.GetByIDs(ctx, ids); err == nil {
+			for _, a := range ags {
+				byID[a.ID] = a
+			}
+		} else {
+			slog.Warn("workitems.enrich.getbyids_failed", "err", err)
+		}
+	}
+	out := make([]workItemDTO, 0, len(items))
+	for _, it := range items {
+		d := workItemDTO{
+			ID: it.ID, Title: it.Title, Origin: it.Origin, OwnerID: it.OwnerAgentID,
+			OwnerKey: it.OwnerAgentID, Status: it.Status, BlockedOn: it.BlockedOnKind, ParentID: it.ParentID,
+			UpdatedAt: it.UpdatedAt,
+		}
+		if a, ok := byID[it.OwnerAgentID]; ok {
+			d.OwnerKey = a.AgentKey
+			d.OwnerName = a.DisplayName
+		}
+		out = append(out, d)
+	}
+	return out
 }
