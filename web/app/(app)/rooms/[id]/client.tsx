@@ -753,10 +753,13 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
                   <p className="text-xs font-medium line-clamp-2">{wi.title}</p>
                   <div className="mt-1 flex items-center gap-1.5">
                     <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', STATUS_COLOR[wi.status] ?? 'bg-muted text-muted-foreground')}>
-                      {wi.status.replace('_', ' ')}
+                      {wi.status.replaceAll('_', ' ')}
                     </span>
                     {(wi.owner_key || wi.owner_name) && (
                       <span className="text-[10px] text-muted-foreground truncate">@{wi.owner_key || wi.owner_name}</span>
+                    )}
+                    {wi.updated_at && (
+                      <span className="text-[10px] text-muted-foreground ml-auto">{new Date(wi.updated_at).toLocaleDateString()}</span>
                     )}
                   </div>
                 </button>
@@ -784,7 +787,7 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
                 <p className="text-sm font-semibold">{selectedWork.item.title}</p>
                 <div className="mt-1 flex items-center gap-1.5">
                   <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', STATUS_COLOR[selectedWork.item.status] ?? 'bg-muted text-muted-foreground')}>
-                    {selectedWork.item.status.replace('_', ' ')}
+                    {selectedWork.item.status.replaceAll('_', ' ')}
                   </span>
                   {(selectedWork.item.owner_key || selectedWork.item.owner_name) && (
                     <span className="text-[10px] text-muted-foreground">@{selectedWork.item.owner_key || selectedWork.item.owner_name}</span>
@@ -805,6 +808,7 @@ export function RoomDetail({ roomId, showBack = true }: { roomId: string; showBa
                     <span className="font-medium">{ev.to_status || ev.event_type}</span>
                     {ev.actor_id && <span className="text-muted-foreground"> · {ev.actor_id}</span>}
                     {ev.detail && <p className="text-muted-foreground mt-0.5">{ev.detail}</p>}
+                    {ev.created_at && <p className="text-muted-foreground/70 mt-0.5">{new Date(ev.created_at).toLocaleString()}</p>}
                   </li>
                 ))}
                 {selectedWork.events.length === 0 && (

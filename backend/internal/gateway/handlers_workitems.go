@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -158,15 +159,16 @@ func (gw *Gateway) handleTransitionWorkItem(w http.ResponseWriter, r *http.Reque
 // no json tags, so we project explicit lowercase keys and add the owner's key
 // and display name (resolved from owner_agent_id).
 type workItemDTO struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Origin    string `json:"origin"`
-	OwnerID   string `json:"owner_agent_id"`
-	OwnerKey  string `json:"owner_key"`
-	OwnerName string `json:"owner_name"`
-	Status    string `json:"status"`
-	BlockedOn string `json:"blocked_on_kind"`
-	ParentID  string `json:"parent_id"`
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Origin    string    `json:"origin"`
+	OwnerID   string    `json:"owner_agent_id"`
+	OwnerKey  string    `json:"owner_key"`
+	OwnerName string    `json:"owner_name"`
+	Status    string    `json:"status"`
+	BlockedOn string    `json:"blocked_on_kind"`
+	ParentID  string    `json:"parent_id"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // enrichWorkItems resolves owner_agent_id → key/name in one batch query and
@@ -197,6 +199,7 @@ func (gw *Gateway) enrichWorkItems(ctx context.Context, items []workitems.WorkIt
 		d := workItemDTO{
 			ID: it.ID, Title: it.Title, Origin: it.Origin, OwnerID: it.OwnerAgentID,
 			OwnerKey: it.OwnerAgentID, Status: it.Status, BlockedOn: it.BlockedOnKind, ParentID: it.ParentID,
+			UpdatedAt: it.UpdatedAt,
 		}
 		if a, ok := byID[it.OwnerAgentID]; ok {
 			d.OwnerKey = a.AgentKey

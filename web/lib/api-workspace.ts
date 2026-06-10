@@ -174,6 +174,7 @@ export type WorkItem = {
   status: string;
   blocked_on_kind: string;
   parent_id: string;
+  updated_at: string;
 };
 
 export type WorkItemEvent = {
@@ -182,6 +183,7 @@ export type WorkItemEvent = {
   from_status: string;
   to_status: string;
   detail: string;
+  created_at: string;
 };
 
 export const workItems = {
