@@ -137,6 +137,7 @@ type Gateway struct {
 	startTime        time.Time
 	server           *http.Server
 	publicServer     *http.Server   // restricted public listener the tunnel points at (nil when disabled)
+	publicServerMu   sync.Mutex     // guards publicServer start/stop
 	tunnelMgr        *tunnel.Manager
 	shutdownOnce     sync.Once                    // Guards installShutdownHandler — Serve() may be called more than once in tests.
 	sqlRegistry      *tools.SQLConnectionRegistry // registered user DBs for sql_query tool

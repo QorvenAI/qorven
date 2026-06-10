@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -52,19 +53,28 @@ func (gw *Gateway) buildPublicMux() chi.Router {
 }
 
 // startPublicListener brings up the restricted public listener (idempotent).
+// Binds 127.0.0.1 only — reachable from the tunnel process (localhost), never
+// directly from the LAN. Binds synchronously so the port is guaranteed ready
+// before the tunnel provider tries to connect to it.
 func (gw *Gateway) startPublicListener() error {
+	gw.publicServerMu.Lock()
+	defer gw.publicServerMu.Unlock()
 	if gw.publicServer != nil {
 		return nil // already running
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", gw.publicPort())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("bind public listener %s: %w", addr, err)
+	}
 	srv := &http.Server{
-		Addr: addr, Handler: gw.buildPublicMux(),
+		Handler:     gw.buildPublicMux(),
 		ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second,
 	}
 	gw.publicServer = srv
 	go func() {
 		slog.Info("tunnel.public_listener.start", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			slog.Warn("tunnel.public_listener.error", "error", err)
 		}
 	}()
@@ -72,13 +82,16 @@ func (gw *Gateway) startPublicListener() error {
 }
 
 func (gw *Gateway) stopPublicListener() {
-	if gw.publicServer == nil {
+	gw.publicServerMu.Lock()
+	srv := gw.publicServer
+	gw.publicServer = nil
+	gw.publicServerMu.Unlock()
+	if srv == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = gw.publicServer.Shutdown(ctx)
-	gw.publicServer = nil
+	_ = srv.Shutdown(ctx)
 }
 
 // enableTunnel starts the public listener and the chosen tunnel provider
@@ -113,10 +126,25 @@ func (gw *Gateway) disableTunnel() error {
 
 // ─── Admin API ──────────────────────────────────────────────────────────────
 
+// tunnelAdminOK enforces that the caller is an authenticated admin. Opening an
+// internet-facing tunnel is a privileged infra action — never allow a regular
+// user, service account, or agent session to do it.
+func (gw *Gateway) tunnelAdminOK(w http.ResponseWriter, r *http.Request) bool {
+	u := userFromContext(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return false
+	}
+	if u.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return false
+	}
+	return true
+}
+
 // GET /v1/tunnel/status
 func (gw *Gateway) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {
-	if u := userFromContext(r.Context()); u == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+	if !gw.tunnelAdminOK(w, r) {
 		return
 	}
 	st := gw.tunnelMgr.Status()
@@ -128,8 +156,7 @@ func (gw *Gateway) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {
 
 // POST /v1/tunnel/enable  {provider}
 func (gw *Gateway) handleTunnelEnable(w http.ResponseWriter, r *http.Request) {
-	if u := userFromContext(r.Context()); u == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+	if !gw.tunnelAdminOK(w, r) {
 		return
 	}
 	var body struct {
@@ -145,8 +172,7 @@ func (gw *Gateway) handleTunnelEnable(w http.ResponseWriter, r *http.Request) {
 
 // POST /v1/tunnel/disable
 func (gw *Gateway) handleTunnelDisable(w http.ResponseWriter, r *http.Request) {
-	if u := userFromContext(r.Context()); u == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+	if !gw.tunnelAdminOK(w, r) {
 		return
 	}
 	if err := gw.disableTunnel(); err != nil {

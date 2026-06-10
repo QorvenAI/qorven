@@ -19,6 +19,13 @@ import (
 )
 
 // cloudflaredReleaseBase is the GitHub "latest" download prefix for cloudflared.
+//
+// SECURITY NOTE: the binary is fetched over HTTPS from the official Cloudflare
+// repo (not attacker-controllable) but there is NO checksum/signature
+// verification and "latest" is a moving target. The fetched binary is made
+// executable and run as a subprocess. Accepted limitation for the quick-tunnel
+// stage; a future hardening step should pin a specific version + verify its
+// SHA-256 before exec. Do not widen the source URL to anything user-supplied.
 const cloudflaredReleaseBase = "https://github.com/cloudflare/cloudflared/releases/latest/download/"
 
 // cloudflaredAssetName maps a GOOS/GOARCH pair to the cloudflared release asset
