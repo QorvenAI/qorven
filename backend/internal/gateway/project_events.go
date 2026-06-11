@@ -60,6 +60,19 @@ func buildProjectEvent(briefID, typ, title string, payload map[string]any, taskI
 		realtime.Event{Type: realtimeTypeFor(typ), AgentID: agentID, Data: data}
 }
 
+// projectBriefForTask returns the project_brief_id for a task, or "" if the
+// task has no project link or the DB is unavailable. Best-effort: any error
+// is silently swallowed so the caller never stalls.
+func (gw *Gateway) projectBriefForTask(ctx context.Context, taskID string) string {
+	if gw.db == nil || gw.db.Pool == nil || taskID == "" {
+		return ""
+	}
+	var bid string
+	_ = gw.db.Pool.QueryRow(ctx,
+		`SELECT COALESCE(project_brief_id::text,'') FROM tasks WHERE id=$1`, taskID).Scan(&bid)
+	return bid
+}
+
 // emitProjectEvent durably records a project event and broadcasts it live.
 // Best-effort: a failure in either half is logged, never blocks the caller
 // (agents must not stall on telemetry). This is the contract 8C emits into.

@@ -93,6 +93,12 @@ func (t *taskContinueTool) Execute(ctx context.Context, args map[string]any) *to
 	broadcastTaskEvent(t.gw, t.taskID, t.agentID, realtime.EventTaskProgress, map[string]any{
 		"status": "continuing",
 	})
+	// Durable project-scoped event (best-effort).
+	if briefID := t.gw.projectBriefForTask(ctx, t.taskID); briefID != "" {
+		t.gw.emitProjectEvent(ctx, briefID, "task_progress", "Task progress", map[string]any{
+			"status": "continuing",
+		}, t.taskID, t.agentID)
+	}
 
 	// Signal the iteration loop
 	select {
@@ -148,6 +154,12 @@ func (t *taskDoneTool) Execute(ctx context.Context, args map[string]any) *tools.
 	broadcastTaskEvent(t.gw, t.taskID, t.agentID, realtime.EventTaskDone, map[string]any{
 		"result": result,
 	})
+	// Durable project-scoped event (best-effort).
+	if briefID := t.gw.projectBriefForTask(ctx, t.taskID); briefID != "" {
+		t.gw.emitProjectEvent(ctx, briefID, "done", "Task completed", map[string]any{
+			"status": "done",
+		}, t.taskID, t.agentID)
+	}
 
 	// Fire rule event so threshold/event rules can react to task completion.
 	t.gw.FireRuleEvent(ctx, "task.done", map[string]any{
@@ -210,6 +222,12 @@ func (t *taskBlockedTool) Execute(ctx context.Context, args map[string]any) *too
 	broadcastTaskEvent(t.gw, t.taskID, t.agentID, realtime.EventTaskBlocked, map[string]any{
 		"reason": reason,
 	})
+	// Durable project-scoped event (best-effort).
+	if briefID := t.gw.projectBriefForTask(ctx, t.taskID); briefID != "" {
+		t.gw.emitProjectEvent(ctx, briefID, "blocked", "Task blocked", map[string]any{
+			"reason": reason,
+		}, t.taskID, t.agentID)
+	}
 
 	// Signal the iteration loop
 	select {
