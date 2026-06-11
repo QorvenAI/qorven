@@ -98,6 +98,7 @@ import (
 	"github.com/qorvenai/qorven/internal/inbound"
 	"github.com/qorvenai/qorven/internal/gateway/deploy"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
+	"github.com/qorvenai/qorven/internal/gateway/lsp"
 	"github.com/qorvenai/qorven/internal/pricing"
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/rules"
@@ -298,6 +299,9 @@ type Gateway struct {
 	// In-process PTY terminal sessions (browser ↔ shell over WebSocket).
 	termStore *TerminalStore
 
+	// JSON-RPC LSP bridge (browser ↔ language server stdio).
+	lspMgr *lsp.Manager
+
 	// Live preview dev server manager (per-project HMR preview)
 	previewMgr *PreviewManager
 
@@ -420,6 +424,7 @@ func New(cfg *config.Config) (*Gateway, error) {
 		msgBus:      bus.New(),
 		screenShare: NewScreenShareStore(),
 		termStore:   newTerminalStore(),
+		lspMgr:      lsp.NewManager(),
 		previewMgr:    NewPreviewManager(),
 		commandCenter: NewCommandCenter(),
 		deployMgr:     NewDeployManager(),

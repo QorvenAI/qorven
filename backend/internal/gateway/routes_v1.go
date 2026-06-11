@@ -1128,6 +1128,12 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Delete("/terminal/sessions/{id}", gw.handleDeleteTerminalSession)
 		r.Get("/terminal/sessions/{id}/ws", gw.wsAuth(gw.handleTerminalWS))
 
+		// LSP bridge — relays JSON-RPC between browser (monaco-languageclient)
+		// and a language server process over stdio (Content-Length framed).
+		// Route: GET /v1/lsp/{projectId}?lang=go|typescript|javascript|python
+		r.Get("/lsp/{projectId}", gw.wsAuth(gw.handleLSPWS))
+		r.Get("/lsp/lang", gw.handleLSPLanguage)
+
 		// Work goals
 		r.Get("/work-goals", gw.handleListWorkGoals)
 		r.Get("/work-goals/tree", gw.handleGetWorkGoalTree)
