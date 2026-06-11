@@ -3,7 +3,14 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/qorvenai/qorven/internal/agent"
 )
 
 // ProjectArtifact is a typed, versioned, gated pipeline document.
@@ -87,4 +94,83 @@ func (gw *Gateway) upsertArtifactRevision(ctx context.Context, briefID, typ, con
 			&a.RepoCommitted, &a.CreatedBy, &a.ApprovedBy, &a.ApprovedAt, &a.CreatedAt)
 	if err != nil { return nil, err }
 	return &a, nil
+}
+
+// handleClarify runs one CTO (system-architect) clarification turn. The CTO asks
+// targeted questions until it has enough to draft the PRD; it never drafts here.
+// POST /v1/project-briefs/{id}/clarify  {message, history}
+func (gw *Gateway) handleClarify(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Message string                            `json:"message"`
+		History []struct{ Role, Content string } `json:"history"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	brief, err := gw.readBrief(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "brief not found"})
+		return
+	}
+
+	prompt := buildClarifyPrompt(brief, body.History, body.Message)
+	var collected strings.Builder
+	if gw.agentLoop != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		_, _ = gw.agentLoop.Run(ctx, agent.RunRequest{
+			AgentID: "prime", SessionID: "clarify-" + id, UserMessage: prompt,
+			Channel: "plan_graph", Stream: true, NoPersist: true, TenantID: defaultTenant,
+		}, func(ev agent.StreamEvent) {
+			if ev.Type == "text_delta" && ev.Delta != "" {
+				collected.WriteString(ev.Delta)
+			}
+		})
+	}
+	reply := strings.TrimSpace(collected.String())
+	if reply == "" {
+		reply = "Could you share more detail on the core feature, the users, and any must-have integrations?"
+	}
+	if brief.Stage == "intake" {
+		_, _ = gw.db.Pool.Exec(r.Context(),
+			`UPDATE project_briefs SET stage='clarify', updated_at=now() WHERE id=$1`, id)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"reply": reply})
+}
+
+func buildClarifyPrompt(b *ProjectBrief, history []struct{ Role, Content string }, msg string) string {
+	var sb strings.Builder
+	sb.WriteString("You are the CTO of a software org, acting as a senior system architect. ")
+	sb.WriteString("You are clarifying requirements with the user BEFORE writing a PRD. ")
+	sb.WriteString("Ask focused, high-signal questions (scope, users, must-have features, integrations, constraints). ")
+	sb.WriteString("Do NOT write the PRD yet. Ask at most 2-3 questions per turn. When you have enough, say: 'I have enough to draft the PRD.'\n\n")
+	fmt.Fprintf(&sb, "Project: %s\nIdea: %s\nStack: %s\nQuality: %s\n\n", b.Title, b.Idea, b.Stack, b.Quality)
+	for _, h := range history {
+		fmt.Fprintf(&sb, "%s: %s\n", h.Role, h.Content)
+	}
+	if msg != "" {
+		fmt.Fprintf(&sb, "user: %s\n", msg)
+	}
+	sb.WriteString("\ncto:")
+	return sb.String()
+}
+
+// readBrief loads a single brief (incl. stage/mode) for handlers.
+func (gw *Gateway) readBrief(ctx context.Context, id string) (*ProjectBrief, error) {
+	var b ProjectBrief
+	var proposalJSON []byte
+	err := gw.db.Pool.QueryRow(ctx,
+		`SELECT id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
+		        status, proposal, goal_id, created_at, updated_at, stage, mode
+		 FROM project_briefs WHERE id=$1 AND tenant_id=$2`, id, defaultTenant).
+		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack, &b.BudgetCents, &b.Timeline,
+			&b.Quality, &b.Status, &proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
 }
