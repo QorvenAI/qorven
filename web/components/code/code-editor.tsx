@@ -8,6 +8,10 @@ import { Loader2 } from 'lucide-react';
 import { detectLang } from './code-utils';
 import { request } from '@/lib/api-core';
 import { setMonaco } from '@/lib/monaco-models';
+import type { LspDisposer } from '@/lib/lsp-client';
+
+// LSP-capable language ids (must match lsp-client.ts LSP_LANGS)
+const LSP_LANG_IDS = new Set(['go', 'typescript', 'javascript', 'python']);
 
 const MonacoEditor = dynamic(
   () => import('@monaco-editor/react').then(m => m.default),
@@ -27,6 +31,8 @@ export function CodeEditor({ content, path, onChange, projectId }: {
   const [isDark, setIsDark] = useState(true);
   const completionDisposable = useRef<{ dispose: () => void } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // LSP disposer — cleaned up on unmount or when (projectId, lang) changes
+  const lspDisposerRef = useRef<LspDisposer | null>(null);
 
   useEffect(() => {
     const update = () => setIsDark(document.documentElement.classList.contains('dark'));
@@ -39,6 +45,23 @@ export function CodeEditor({ content, path, onChange, projectId }: {
   const handleEditorMount = useCallback((editor: any, monaco: any) => {
     // Seed the registry so syncModelContent / modelIsDirtyVsDisk work
     setMonaco(monaco);
+
+    // ── LSP client (hover / goto-definition / popup-completion / diagnostics) ──
+    // connectLSP is lazy-loaded and resolves gracefully if no server is available.
+    // AI inline ghost-text (registerInlineCompletionsProvider below) coexists —
+    // they use different Monaco APIs: popup completions vs inline suggestions.
+    if (projectId) {
+      const lang = detectLang(path);
+      if (LSP_LANG_IDS.has(lang)) {
+        // Dynamic import keeps lsp-client.ts out of the main bundle for non-IDE pages.
+        import('@/lib/lsp-client').then(({ connectLSP }) => {
+          connectLSP(projectId, lang, monaco)
+            .then(disposer => { lspDisposerRef.current = disposer; })
+            .catch(() => {}); // never let an LSP error break the editor
+        }).catch(() => {});
+      }
+    }
+
     // Register inline completion provider for AI ghost text
     completionDisposable.current?.dispose();
     completionDisposable.current = monaco.languages.registerInlineCompletionsProvider('*', {
@@ -110,6 +133,8 @@ export function CodeEditor({ content, path, onChange, projectId }: {
     return () => {
       completionDisposable.current?.dispose();
       abortRef.current?.abort();
+      lspDisposerRef.current?.();
+      lspDisposerRef.current = null;
     };
   }, []);
 
