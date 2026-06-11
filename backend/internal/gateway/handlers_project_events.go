@@ -9,6 +9,21 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// GET /v1/projects/{id}/hub — returns the project's coordination room id (creates it if needed).
+func (gw *Gateway) handleProjectHub(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	roomID := gw.ensureProjectHub(r.Context(), id)
+	if roomID == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"room_id": ""})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"room_id": roomID})
+}
+
 // GET /v1/projects/{id}/events?limit=100 — newest-first structured timeline.
 func (gw *Gateway) handleProjectEvents(w http.ResponseWriter, r *http.Request) {
 	if gw.db == nil {

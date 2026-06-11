@@ -138,6 +138,8 @@ export const projectBriefs = {
     request<{ events: ProjectEvent[] }>(`/projects/${encodeURIComponent(id)}/events`),
   analytics: (id: string) =>
     request<ProjectAnalytics>(`/projects/${encodeURIComponent(id)}/analytics`),
+  hub: (id: string) =>
+    request<{ room_id: string }>(`/projects/${encodeURIComponent(id)}/hub`),
 };
 
 // Workspaces / Templates

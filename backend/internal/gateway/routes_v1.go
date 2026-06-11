@@ -165,6 +165,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/projects/{id}/burn", gw.handleProjectBurn)
 		r.Get("/projects/{id}/analytics", gw.handleProjectAnalytics)
 		r.Get("/projects/{id}/events", gw.handleProjectEvents)
+		r.Get("/projects/{id}/hub", gw.handleProjectHub)
 		r.Post("/projects/{id}/pause", gw.handleProjectPause)
 		r.Post("/projects/{id}/resume", gw.handleProjectResume)
 
