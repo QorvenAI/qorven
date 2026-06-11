@@ -140,6 +140,12 @@ func (gw *Gateway) handleSaveConnection(w http.ResponseWriter, r *http.Request) 
 			if v == "" {
 				continue
 			}
+			// Host config must be a bare host[:port] — no path, userinfo, query,
+			// or scheme — so it can't rewrite the URL authority or inject a path.
+			if strings.ContainsAny(v, "/@?#") {
+				writeJSON(w, 400, map[string]string{"error": "config value must be a hostname only (no scheme, path, or '@')"})
+				return
+			}
 			// If the platform's BaseURL embeds this placeholder as the host,
 			// validate the would-be URL is external.
 			if probe := strings.ReplaceAll(platform.BaseURL, "{"+k+"}", v); probe != platform.BaseURL {

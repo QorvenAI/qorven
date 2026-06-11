@@ -90,6 +90,10 @@ func (t *BrowserGotoTool) Execute(ctx context.Context, args map[string]any) *too
 	if url == "" {
 		return tools.ErrorResult("url is required")
 	}
+	// SSRF guard — same DNS-resolving check as the browse agents.
+	if err := tools.SafeNavigateURL(url); err != nil {
+		return tools.ErrorResult(err.Error())
+	}
 	if err := t.ensureStarted(ctx); err != nil {
 		return tools.ErrorResult(fmt.Sprintf("start browser: %v", err))
 	}

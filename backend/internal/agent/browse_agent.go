@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"strings"
 	"time"
 
@@ -84,19 +83,10 @@ Rules:
 - Always complete within 15 steps.`
 
 // BrowseAndAct autonomously browses the web to achieve a goal.
-// safeNavigateURL rejects internal/private/metadata targets and non-http(s)
-// schemes so a goal/start URL or an LLM-chosen navigate can't pivot the browser
-// into the internal network (e.g. localhost:4200, cloud metadata).
-func safeNavigateURL(raw string) error {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("blocked: only http(s) URLs allowed")
-	}
-	if blocked, reason := tools.IsInternalURL(raw); blocked {
-		return fmt.Errorf("blocked: %s", reason)
-	}
-	return nil
-}
+// safeNavigateURL is the shared SSRF guard (DNS-resolving) for every browser
+// navigation entry point. Defined in internal/tools so the browser primitive
+// tool uses the exact same check.
+func safeNavigateURL(raw string) error { return tools.SafeNavigateURL(raw) }
 
 func (ba *BrowseAgent) BrowseAndAct(ctx context.Context, goal, startURL string) (string, []AgentStep, error) {
 	if err := safeNavigateURL(startURL); err != nil {

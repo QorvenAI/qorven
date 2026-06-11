@@ -180,15 +180,15 @@ func (e *Executor) executeDirect(ctx context.Context, platform *Platform, action
 	}
 
 	if action.Method == "GET" && len(params) > 0 {
-		parts := make([]string, 0, len(params))
+		q := url.Values{}
 		for k, v := range params {
-			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+			q.Set(k, fmt.Sprintf("%v", v))
 		}
 		sep := "?"
 		if strings.Contains(fullURL, "?") {
 			sep = "&"
 		}
-		fullURL += sep + strings.Join(parts, "&")
+		fullURL += sep + q.Encode() // URL-encode to prevent query/param injection
 	}
 
 	// SSRF guard: a connector's host can come from a {site}/{instance}
