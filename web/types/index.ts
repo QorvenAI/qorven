@@ -380,3 +380,69 @@ export interface ProjectBurn {
   pct: number;
   warn_pct: number;
 }
+
+// ─── Phase 8D — Project Hub & Analytics ──────────────────────────────────────
+
+export interface ProjectEvent {
+  id: string;
+  type: string;
+  title: string;
+  payload: Record<string, unknown>;
+  task_id: string;
+  agent_id: string;
+  created_at: string;
+}
+
+export interface BurnTrendPoint {
+  day: string;
+  uusd: number;
+}
+
+export interface ProjectAgentRow {
+  agent_id: string;
+  name: string;
+  role: string;
+  status: string;
+  health?: {
+    status?: string;
+    consecutive_errors?: number;
+    suspended_from_ack?: boolean;
+    last_heartbeat?: string;
+  } | null;
+}
+
+export interface ProjectAnalytics {
+  burn_trend: BurnTrendPoint[];
+  agents: ProjectAgentRow[];
+  task_counts: Record<string, number>;
+  pr: { connected: boolean; owner?: string; repo?: string };
+}
+
+export interface PRDiffLine {
+  type: 'add' | 'del' | 'eq';
+  content: string;
+  old_line: number;
+  new_line: number;
+}
+
+export interface PRFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  lines: PRDiffLine[];
+  binary: boolean;
+}
+
+export interface PRReviewComment {
+  path: string;
+  line: number;
+  side: 'LEFT' | 'RIGHT';
+  body: string;
+}
+
+export interface PRReviewSubmit {
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+  body: string;
+  comments: PRReviewComment[];
+}
