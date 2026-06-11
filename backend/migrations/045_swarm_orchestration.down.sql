@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS release_gates;
+DROP TABLE IF EXISTS merge_queue;
+DROP INDEX IF EXISTS idx_tasks_lease;
+ALTER TABLE tasks DROP COLUMN IF EXISTS phase;
+ALTER TABLE tasks DROP COLUMN IF EXISTS lease_expires;
+ALTER TABLE tasks DROP COLUMN IF EXISTS max_iterations;
+ALTER TABLE tasks DROP COLUMN IF EXISTS cancelled;
