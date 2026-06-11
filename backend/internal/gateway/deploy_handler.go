@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -20,6 +21,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qorvenai/qorven/internal/gateway/deploy"
+	"github.com/qorvenai/qorven/internal/tools"
 )
 
 // DeployStatus tracks the state of a deployment.
@@ -177,7 +180,14 @@ func (dm *DeployManager) loadFromDB() {
 	}
 }
 
-// handleDeploy starts a deployment for a project.
+// deployRequest is the optional JSON body for POST /v1/projects/:id/deploy.
+type deployRequest struct {
+	Target     string `json:"target"`      // "local" | "hosted" (default) | "cloud:vercel" | "cloud:netlify"
+	ReleaseTag string `json:"release_tag"` // git ref to deploy (cloud targets); empty → "main"
+}
+
+// handleDeploy starts a deployment for a project, dispatching to the chosen
+// deploy target via the registry.
 func (gw *Gateway) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "id")
 	if projectID == "" {
@@ -196,19 +206,44 @@ func (gw *Gateway) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional body — tolerate missing/empty body.
+	var req deployRequest
+	json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
+	target := req.Target
+	if target == "" {
+		target = "hosted"
+	}
+
+	if gw.deployReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "deploy registry not initialised (database required)"})
+		return
+	}
+
 	projectPath := project.Path
 	projectName := project.Name
 
-	// Detect framework and generate Dockerfile
+	// Detect framework (used as a hint by targets that write their own Dockerfile).
 	framework, _ := detectFramework(projectPath)
 	if framework == "" {
 		framework = "static"
 	}
 
 	dockerfile := generateDockerfile(framework, projectPath)
+	slug := sanitizeSlug(projectName)
 
-	// Create deployment record
-	deploy := &Deployment{
+	// Build the deploy spec from project metadata.
+	spec := deploy.Spec{
+		ProjectID:   projectID,
+		ProjectPath: projectPath,
+		Slug:        slug,
+		Framework:   framework,
+		ReleaseTag:  req.ReleaseTag,
+		RepoOwner:   project.GitHubOwner,
+		RepoName:    project.GitHubRepo,
+	}
+
+	// Create deployment record — status building from the start.
+	rec := &Deployment{
 		ID:          uuid.New().String(),
 		ProjectID:   projectID,
 		ProjectName: projectName,
@@ -219,32 +254,89 @@ func (gw *Gateway) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   time.Now(),
 	}
 
-	gw.deployMgr.Create(deploy)
+	gw.deployMgr.Create(rec)
 
-	// Write the Dockerfile to the project
-	dockerfilePath := filepath.Join(projectPath, "Dockerfile")
-	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
-		slog.Error("deploy.write_dockerfile", "err", err)
-	}
-
-	// Track as a Command Center job
+	// Track as a Command Center job.
 	if gw.commandCenter != nil {
 		now := time.Now()
 		gw.commandCenter.AddJob(&AgentJob{
-			ID:        deploy.ID,
+			ID:        rec.ID,
 			ProjectID: projectID,
 			AgentID:   "deploy",
 			AgentName: "Deploy Agent",
-			Title:     fmt.Sprintf("Deploy %s to qorven.run", projectName),
+			Title:     fmt.Sprintf("Deploy %s (%s)", projectName, target),
 			Status:    JobStatusRunning,
 			StartedAt: &now,
 		})
 	}
 
-	// Simulate deploy process (in production this would trigger actual container build)
-	go gw.runDeploy(deploy, projectPath)
+	// Resolve briefID once for project events (best-effort).
+	briefID := project.InceptionBriefID
 
-	writeJSON(w, http.StatusAccepted, deploy)
+	// Launch the deploy asynchronously — use a detached context so the
+	// goroutine is not cancelled when the HTTP request returns.
+	go func() {
+		gw.emitProjectEvent(context.Background(), briefID, "deploy_started",
+			fmt.Sprintf("Deploy %s started (%s)", projectName, target),
+			map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID},
+			"", "")
+
+		res, err := gw.deployReg.Deploy(context.Background(), target, spec)
+		if err != nil {
+			errMsg := err.Error()
+			gw.deployMgr.Update(rec.ID, func(d *Deployment) {
+				d.Status = DeployFailed
+				d.Error = errMsg
+			})
+			if gw.commandCenter != nil {
+				now := time.Now()
+				gw.commandCenter.UpdateJob(rec.ID, func(j *AgentJob) {
+					j.Status = JobStatusFailed
+					j.Error = errMsg
+					j.CompletedAt = &now
+				})
+			}
+			gw.emitProjectEvent(context.Background(), briefID, "deploy_failed",
+				fmt.Sprintf("Deploy %s failed: %s", projectName, errMsg),
+				map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID, "error": errMsg},
+				"", "")
+			// TODO(Task 9): gw.triggerFixLoop on failure
+			slog.Error("deploy.failed", "project", projectID, "target", target, "err", err)
+			return
+		}
+
+		// Success — mark live with the REAL url from the target.
+		gw.deployMgr.Update(rec.ID, func(d *Deployment) {
+			d.Status = DeployLive
+			d.URL = res.URL
+		})
+		if gw.commandCenter != nil {
+			now := time.Now()
+			gw.commandCenter.UpdateJob(rec.ID, func(j *AgentJob) {
+				j.Status = JobStatusCompleted
+				j.Progress = 100
+				j.CompletedAt = &now
+				if j.StartedAt != nil {
+					j.DurationMs = now.Sub(*j.StartedAt).Milliseconds()
+				}
+			})
+		}
+
+		// Reflect deployed URL on the project's PreviewURL (best-effort).
+		if gw.projectReg != nil && res.URL != "" {
+			gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
+				p.PreviewURL = res.URL
+			})
+		}
+
+		gw.emitProjectEvent(context.Background(), briefID, "deploy_live",
+			fmt.Sprintf("Deploy %s live at %s", projectName, res.URL),
+			map[string]any{"project_id": projectID, "target": res.Target, "deploy_id": rec.ID, "url": res.URL},
+			"", "")
+		slog.Info("deploy.complete", "project", projectID, "target", res.Target, "url", res.URL)
+	}()
+
+	writeJSON(w, http.StatusAccepted, rec)
 }
 
 // handleDeployStatus returns the status of the latest deployment for a project.
@@ -261,26 +353,40 @@ func (gw *Gateway) handleDeployStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeployStop stops a running deployment.
+// For local and hosted targets both use a Docker container named after the
+// project slug (local: <slug>, hosted: qorven-hosted-<slug>). We stop both
+// possible container names so the caller does not need to track which target
+// was used. Status is set to stopped regardless of docker exit code.
 func (gw *Gateway) handleDeployStop(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "id")
-	deploy := gw.deployMgr.GetByProject(projectID)
-	if deploy == nil {
+	dep := gw.deployMgr.GetByProject(projectID)
+	if dep == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no deployment found"})
 		return
 	}
 
-	gw.deployMgr.Update(deploy.ID, func(d *Deployment) {
+	// Derive the container name(s) from the project name.
+	slug := sanitizeSlug(dep.ProjectName)
+
+	// Stop and remove both the local-target container (<slug>) and the
+	// hosted-target container (qorven-hosted-<slug>). Both errors are ignored
+	// — the container may already be gone, or Docker may be absent entirely.
+	execCommand("docker", "rm", "-f", slug).Run()                          //nolint:errcheck
+	execCommand("docker", "rm", "-f", "qorven-hosted-"+slug).Run()         //nolint:errcheck
+
+	gw.deployMgr.Update(dep.ID, func(d *Deployment) {
 		d.Status = DeployStopped
 	})
 
 	if gw.commandCenter != nil {
 		now := time.Now()
-		gw.commandCenter.UpdateJob(deploy.ID, func(j *AgentJob) {
+		gw.commandCenter.UpdateJob(dep.ID, func(j *AgentJob) {
 			j.Status = JobStatusCancelled
 			j.CompletedAt = &now
 		})
 	}
 
+	slog.Info("deploy.stopped", "project", projectID, "slug", slug)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
@@ -313,149 +419,6 @@ func (gw *Gateway) handleDeployDockerfile(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// runDeploy executes the real container build/deploy pipeline.
-// Falls back to simulation if Docker is not available.
-func (gw *Gateway) runDeploy(deploy *Deployment, projectPath string) {
-	slug := sanitizeSlug(deploy.ProjectName)
-	imageName := fmt.Sprintf("qorven-deploy/%s", slug)
-	deployURL := fmt.Sprintf("https://%s.qorven.run", slug)
-
-	appendLog := func(msg string) {
-		gw.deployMgr.Update(deploy.ID, func(d *Deployment) {
-			d.BuildLog = append(d.BuildLog, msg)
-		})
-	}
-
-	setStatus := func(s DeployStatus) {
-		gw.deployMgr.Update(deploy.ID, func(d *Deployment) { d.Status = s })
-	}
-
-	markFailed := func(err string) {
-		gw.deployMgr.Update(deploy.ID, func(d *Deployment) {
-			d.Status = DeployFailed
-			d.Error = err
-		})
-		if gw.commandCenter != nil {
-			now := time.Now()
-			gw.commandCenter.UpdateJob(deploy.ID, func(j *AgentJob) {
-				j.Status = JobStatusFailed
-				j.Error = err
-				j.CompletedAt = &now
-			})
-		}
-	}
-
-	markLive := func() {
-		gw.deployMgr.Update(deploy.ID, func(d *Deployment) {
-			d.Status = DeployLive
-			d.URL = deployURL
-		})
-		if gw.commandCenter != nil {
-			now := time.Now()
-			gw.commandCenter.UpdateJob(deploy.ID, func(j *AgentJob) {
-				j.Status = JobStatusCompleted
-				j.Progress = 100
-				j.CompletedAt = &now
-				if j.StartedAt != nil {
-					j.DurationMs = now.Sub(*j.StartedAt).Milliseconds()
-				}
-			})
-		}
-		slog.Info("deploy.complete", "project", deploy.ProjectID, "url", deployURL)
-	}
-
-	// Stage 1: Check Docker availability
-	appendLog(fmt.Sprintf("Detected framework: %s", deploy.Framework))
-	appendLog("Generating Dockerfile...")
-
-	dockerCheck := execCommand("docker", "version", "--format", "{{.Server.Version}}")
-	dockerCheck.Dir = projectPath
-	if out, err := dockerCheck.Output(); err != nil {
-		// Docker not available — run simulated deploy for demo
-		appendLog("Docker not available — running simulated deploy")
-		gw.runSimulatedDeploy(deploy, slug, appendLog, setStatus, markLive)
-		return
-	} else {
-		appendLog(fmt.Sprintf("Docker %s available", strings.TrimSpace(string(out))))
-	}
-
-	// Stage 2: Build container image
-	setStatus(DeployBuilding)
-	appendLog(fmt.Sprintf("Building image: %s", imageName))
-
-	buildCmd := execCommand("docker", "build", "-t", imageName, "-f", "Dockerfile", ".")
-	buildCmd.Dir = projectPath
-	buildOutput, err := buildCmd.CombinedOutput()
-	if err != nil {
-		appendLog(fmt.Sprintf("Build output: %s", lastLines(string(buildOutput), 5)))
-		markFailed(fmt.Sprintf("docker build failed: %v", err))
-		return
-	}
-	appendLog("Image built successfully")
-
-	// Stage 3: Stop any existing container with same name
-	stopCmd := execCommand("docker", "rm", "-f", slug)
-	stopCmd.Run() // ignore errors — container may not exist
-
-	// Stage 4: Run the container
-	setStatus(DeployPushing)
-	appendLog("Starting container...")
-
-	port := allocateDeployPort(slug)
-	runCmd := execCommand("docker", "run", "-d",
-		"--name", slug,
-		"-p", fmt.Sprintf("127.0.0.1:%d:80", port),
-		"--restart", "unless-stopped",
-		imageName,
-	)
-	runOutput, err := runCmd.CombinedOutput()
-	if err != nil {
-		appendLog(fmt.Sprintf("Run output: %s", strings.TrimSpace(string(runOutput))))
-		markFailed(fmt.Sprintf("docker run failed: %v", err))
-		return
-	}
-	containerID := strings.TrimSpace(string(runOutput))[:12]
-	appendLog(fmt.Sprintf("Container %s running on port %d", containerID, port))
-
-	// Stage 5: Wait for healthy
-	appendLog("Waiting for container to be ready...")
-	if !waitForPort(port, 15*time.Second) {
-		appendLog("Container did not become ready in 15s")
-		markFailed("container health check timed out")
-		return
-	}
-
-	appendLog(fmt.Sprintf("Live at %s (local: http://127.0.0.1:%d)", deployURL, port))
-	markLive()
-}
-
-// runSimulatedDeploy provides a realistic-looking deploy sequence when Docker is unavailable.
-func (gw *Gateway) runSimulatedDeploy(deploy *Deployment, slug string,
-	appendLog func(string), setStatus func(DeployStatus), markLive func()) {
-
-	stages := []struct {
-		msg    string
-		status DeployStatus
-		delay  time.Duration
-	}{
-		{"Installing dependencies...", DeployBuilding, 800 * time.Millisecond},
-		{"Dependencies installed", DeployBuilding, 600 * time.Millisecond},
-		{"Building production bundle...", DeployBuilding, 1200 * time.Millisecond},
-		{"Build complete — 247 KB gzipped", DeployBuilding, 400 * time.Millisecond},
-		{"Pushing container image...", DeployPushing, 1000 * time.Millisecond},
-		{"Image pushed to registry", DeployPushing, 300 * time.Millisecond},
-		{"Deploying to edge network (3 regions)...", DeployPushing, 800 * time.Millisecond},
-		{fmt.Sprintf("Live at https://%s.qorven.run", slug), DeployPushing, 200 * time.Millisecond},
-	}
-
-	for _, s := range stages {
-		setStatus(s.status)
-		appendLog(s.msg)
-		time.Sleep(s.delay)
-	}
-
-	markLive()
-}
 
 func execCommand(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...)

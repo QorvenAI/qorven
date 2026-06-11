@@ -96,6 +96,7 @@ import (
 	"github.com/qorvenai/qorven/internal/discussion"
 	"github.com/qorvenai/qorven/internal/apps"
 	"github.com/qorvenai/qorven/internal/inbound"
+	"github.com/qorvenai/qorven/internal/gateway/deploy"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/pricing"
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
@@ -306,8 +307,9 @@ type Gateway struct {
 	// Background agent job tracking (Command Center)
 	commandCenter *CommandCenter
 
-	// One-click deploy manager
+	// One-click deploy manager + target registry
 	deployMgr *DeployManager
+	deployReg *deploy.Registry
 
 	// Pending manual-mode delegations: sessionID → pendingDelegation.
 	// Populated when a user triggers @soul task in manual delegation mode;
@@ -638,6 +640,12 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.rtHub.SetPresence(presence.NewStore(db.Pool))
 			gw.sandboxStore = sandbox.NewStore(db.Pool)
 			gw.appRunner = sandbox.NewAppRunner(db.Pool, cfg.Server.BaseURL)
+			// Build the deploy-target registry now that appRunner is ready.
+			gw.deployReg = deploy.NewRegistry()
+			gw.deployReg.Register("local", newLocalTarget(gw))
+			gw.deployReg.Register("hosted", newHostedTarget(gw))
+			gw.deployReg.Register("cloud:vercel", newCloudTarget(gw, "vercel"))
+			gw.deployReg.Register("cloud:netlify", newCloudTarget(gw, "netlify"))
 			gw.calendarStore = calendar.NewStore(db.Pool)
 			gw.connKB = connectors.NewKnowledgeStore(db.Pool)
 			gw.vault = vault.New(db.Pool, cfg.Auth.EncryptionKey)
