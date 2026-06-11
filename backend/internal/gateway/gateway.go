@@ -1427,6 +1427,11 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			}
 		}
 
+		// On-boot recovery: reclaim tasks whose worker died in a prior process.
+		go gw.recoverInflightTasks(context.Background())
+		// Watchdog: periodically reclaim tasks whose worker stops heartbeating.
+		gw.startTaskWatchdog()
+
 		// SoulDesk — multi-Soul orchestration
 		desk := souldesk.New(gw.agents, gw.sessions, gw.providerReg, gw.toolReg, gw.skillLoader, gw.memStore, defaultTenant)
 		gw.soulDesk = desk
