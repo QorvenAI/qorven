@@ -221,7 +221,9 @@ func (gw *Gateway) handleProjectPause(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleProjectResume resumes a paused project. An optional new_cap_usd in the
-// request body raises the project lifetime budget cap before resuming agents.
+// request body sets the new TOTAL lifetime budget cap (a replacement, not a
+// delta) before resuming agents. A new_cap_usd at or below the already-spent
+// amount will let the breaker re-trip on the next spend.
 //
 //	POST /v1/projects/{id}/resume
 func (gw *Gateway) handleProjectResume(w http.ResponseWriter, r *http.Request) {
