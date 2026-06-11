@@ -200,7 +200,22 @@ func (gw *Gateway) handleCheckRunEvent(ctx context.Context, payload map[string]a
 		case "failure", "timed_out", "cancelled", "action_required":
 			output := fmt.Sprintf("CI check %q failed with conclusion: %s", checkName, conclusion)
 			slog.Warn("github.check_run.failure", "task", t.ID, "check", checkName, "conclusion", conclusion)
-			agent.GlobalGitHubTaskQueue.RecordTestFailure(t.ID, output)
+			exhausted := !agent.GlobalGitHubTaskQueue.RecordTestFailure(t.ID, output)
+			if exhausted && gw.db != nil && gw.db.Pool != nil {
+				owner, repo, prNumber := t.Owner, t.Repo, t.PRNumber
+				if owner != "" && repo != "" {
+					var briefID string
+					_ = gw.db.Pool.QueryRow(ctx,
+						`SELECT id::text FROM project_briefs WHERE github_owner=$1 AND github_repo=$2 LIMIT 1`,
+						owner, repo).Scan(&briefID)
+					if briefID != "" {
+						go gw.triggerFixLoop(context.Background(), briefID,
+							"ci", fmt.Sprintf("pr-%d", prNumber),
+							fmt.Sprintf("CI failing on PR #%d", prNumber),
+							output)
+					}
+				}
+			}
 			if gw.rtHub != nil {
 				gw.rtHub.Broadcast(realtime.Event{
 					Type: string(apievents.TypeGitHubCIStatus),
