@@ -47,18 +47,19 @@ func DefaultAutonomousConfig() AutonomousConfig {
 
 // AutonomousState tracks the state of a long-running autonomous session.
 type AutonomousState struct {
-	SessionID      string          `json:"session_id"`
-	AgentID        string          `json:"agent_id"`
-	OriginalTask   string          `json:"original_task"`
-	Continuations  int             `json:"continuations"`
-	TotalTokens    int64           `json:"total_tokens"`
-	TotalDuration  time.Duration   `json:"total_duration"`
+	SessionID      string           `json:"session_id"`
+	AgentID        string           `json:"agent_id"`
+	OriginalTask   string           `json:"original_task"`
+	Continuations  int              `json:"continuations"`
+	TotalTokens    int64            `json:"total_tokens"`
+	TotalDuration  time.Duration    `json:"total_duration"`
 	Status         AutonomousStatus `json:"status"`
-	LastCheckpoint string          `json:"last_checkpoint"`
-	StartedAt      time.Time       `json:"started_at"`
-	LastActiveAt   time.Time       `json:"last_active_at"`
-	ToolsUsed      int             `json:"tools_used"`
-	Iterations     int             `json:"iterations"`
+	LastCheckpoint string           `json:"last_checkpoint"`
+	StartedAt      time.Time        `json:"started_at"`
+	LastActiveAt   time.Time        `json:"last_active_at"`
+	ToolsUsed      int              `json:"tools_used"`
+	Iterations     int              `json:"iterations"`
+	cancel         context.CancelFunc // cancels the running loop; unexported, not serialised
 }
 
 type AutonomousStatus string
@@ -128,11 +129,16 @@ func (ac *AutonomousController) RunAutonomous(
 		LastActiveAt: time.Now(),
 	}
 
+	// Wrap the caller's context so Cancel() can interrupt an in-flight LLM call.
+	ctx, cancelCtx := context.WithCancel(ctx)
+	state.cancel = cancelCtx
+
 	ac.mu.Lock()
 	ac.active[req.SessionID] = state
 	ac.mu.Unlock()
 
 	defer func() {
+		cancelCtx() // release resources if RunAutonomous returns normally
 		ac.mu.Lock()
 		delete(ac.active, req.SessionID)
 		ac.mu.Unlock()
@@ -260,6 +266,9 @@ func (ac *AutonomousController) Cancel(sessionID string) bool {
 		return false
 	}
 	state.Status = AutonomousCancelled
+	if state.cancel != nil {
+		state.cancel()
+	}
 	return true
 }
 
