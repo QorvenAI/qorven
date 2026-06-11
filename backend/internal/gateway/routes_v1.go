@@ -162,6 +162,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/projects/{id}/checkpoints", gw.handleProjectCheckpoints)
 		r.Post("/projects/{id}/restore", gw.handleProjectRestore)
 		r.Get("/projects/{id}/archive", gw.handleArchiveProject)
+		r.Get("/projects/{id}/burn", gw.handleProjectBurn)
 
 		// Live preview
 		r.Post("/projects/{id}/preview/start", gw.handlePreviewStart)

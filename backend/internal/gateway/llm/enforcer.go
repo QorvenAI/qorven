@@ -31,6 +31,13 @@ type DBEnforcer struct {
 	repo budgetRepo
 	warn func(scopeKey string)
 
+	// OnWarn is an optional hook called after the slog.Warn when a scope
+	// crosses its warn threshold. scopeKey has the form "scope:scopeID"
+	// (e.g. "project:abc123"). pct is the integer percentage of cap consumed.
+	// It is safe to set this field after NewDBEnforcer returns and before the
+	// first Check call.
+	OnWarn func(scopeKey string, pct int)
+
 	mu    sync.Mutex
 	cache map[string]cachedVerdict
 	ttl   time.Duration
@@ -123,6 +130,11 @@ func (e *DBEnforcer) maybeWarn(scopeKey string, spent, cap int64, warnPct int) {
 	}
 	e.mu.Unlock()
 	e.warn(scopeKey)
+	// Compute integer percentage consumed and fire the optional broadcast hook.
+	if e.OnWarn != nil {
+		pct := int(spent * 100 / cap)
+		e.OnWarn(scopeKey, pct)
+	}
 }
 
 // pgBudgetRepo reads gateway_budgets caps and gateway_spend.cost_total_uusd.

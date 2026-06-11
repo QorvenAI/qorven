@@ -518,6 +518,13 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 				// pipeline. The pipeline's own budget check delegates to this same
 				// engine so there is exactly one enforcement implementation.
 				dbEnforcer := gatewayllm.NewDBEnforcer(db.Pool)
+				// Wire the WS broadcast so budget threshold crossings reach
+				// the browser in real time (budget_warning event).
+				dbEnforcer.OnWarn = func(scopeKey string, pct int) {
+					// scopeKey is "scope:scopeID", e.g. "project:abc123"
+					scope, scopeID, _ := strings.Cut(scopeKey, ":")
+					gw.broadcastBudgetWarning(scope, scopeID, pct)
+				}
 				budgetEngine.SetEnforcer(dbEnforcer)
 				gw.providerReg.SetMetering(dbEnforcer, costLedger)
 
