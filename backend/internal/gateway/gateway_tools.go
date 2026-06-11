@@ -1626,6 +1626,7 @@ func (gw *Gateway) registerTools() {
 			},
 		))
 		reg.Register(tools.NewGhOpenPRToolWithToken(ghGetToken))
+		reg.Register(tools.NewGhSubmitReviewToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhPostCommentToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhListPRChecksToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhMergePRToolWithToken(ghGetToken))
