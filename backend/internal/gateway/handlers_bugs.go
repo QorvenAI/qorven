@@ -2,6 +2,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -47,9 +48,9 @@ func (gw *Gateway) handleReportBug(w http.ResponseWriter, r *http.Request) {
 
 	// Dedup key from a slug of the title so duplicate reports of the same bug coalesce.
 	ref := "bug-" + slugifyBug(body.Title)
-	// Use context.Background() so an early client disconnect does not cancel the
-	// GitHub API call inside triggerFixLoop.
-	gw.triggerFixLoop(r.Context(), briefID, "bug", ref, "Bug: "+body.Title, body.Body)
+	// Run on a detached context so an early client disconnect can't cancel the
+	// GitHub issue + fix-task creation inside triggerFixLoop mid-flight.
+	go gw.triggerFixLoop(context.Background(), briefID, "bug", ref, "Bug: "+body.Title, body.Body)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "filed"})
 }
 
