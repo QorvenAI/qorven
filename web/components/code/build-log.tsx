@@ -9,8 +9,9 @@ import type { BuildEntry } from './code-types';
 import { FileChangeChip } from './file-change-chip';
 import { PrCard } from './pr-card';
 import { CommandTimeline } from './command-timeline';
+import { ActivityFeed } from './activity-feed';
 
-type BuildView = 'log' | 'timeline';
+type BuildView = 'log' | 'timeline' | 'feed';
 
 export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpenSession }: {
   entries: BuildEntry[];
@@ -38,7 +39,7 @@ export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpe
 
         {/* View toggle */}
         <div className="flex items-center rounded-md border border-border overflow-hidden text-xs shrink-0">
-          {(['log', 'timeline'] as BuildView[]).map(v => (
+          {(['log', 'timeline', 'feed'] as BuildView[]).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={cn('px-2.5 py-0.5 capitalize transition-colors',
                 view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent')}>
@@ -54,7 +55,9 @@ export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpe
         )}
       </div>
 
-      {view === 'timeline' ? (
+      {view === 'feed' ? (
+        <ActivityFeed entries={entries} running={running} onFileClick={onFileClick} onOpenSession={onOpenSession} />
+      ) : view === 'timeline' ? (
         <CommandTimeline entries={entries} running={running} onFileClick={onFileClick} />
       ) : (
       <div className="flex-1 overflow-y-auto p-3 space-y-1 font-mono text-xs">
