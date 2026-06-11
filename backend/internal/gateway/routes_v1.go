@@ -1166,6 +1166,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/project-briefs/{id}/team", gw.handleGetBriefTeam)
 		r.Post("/project-briefs/{id}/build", gw.handleBriefBuildProject)
 
+		// Merge queue — serialized per-project PR merge with conflict dispatch
+		r.Get("/projects/{id}/merge-queue", gw.handleGetMergeQueue)
+
 		// GitHub webhook
 		r.Post("/webhooks/github", gw.handleGitHubWebhook)
 
