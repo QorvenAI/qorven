@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { projectBriefs as api } from '@/lib/api';
 import { InceptionChat } from '@/components/code/inception-chat';
 import { ProjectStudio } from '@/components/code/project-studio';
+import { OrgPipeline } from '@/components/code/org-pipeline';
 import { CodeLanding } from '@/components/code/code-landing';
 import { useStore } from '@/store';
 import type { ProjectBrief } from '@/types';
@@ -62,6 +63,16 @@ export function InceptionTab() {
           setActiveBriefId(brief.id);
         }}
       />
+    );
+  }
+
+  // Org-mode (the default) renders the artifact pipeline. Vibe-mode keeps the
+  // classic inception chat + studio canvas.
+  if (active.mode !== 'vibe') {
+    return (
+      <div className="h-full overflow-hidden">
+        <OrgPipeline briefId={active.id} />
+      </div>
     );
   }
 
