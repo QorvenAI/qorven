@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest } from './api-core';
-import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent } from '@/types';
+import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact } from '@/types';
 
 // Skills
 export const skills = {
@@ -121,6 +121,17 @@ export const projectBriefs = {
       `/project-briefs/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' }),
   team: (id: string) =>
     request<{ agents: BriefAgent[] }>(`/project-briefs/${encodeURIComponent(id)}/team`),
+  clarify: (id: string, message: string, history: { role: string; content: string }[]) =>
+    request<{ reply: string }>(`/project-briefs/${encodeURIComponent(id)}/clarify`,
+      { method: 'POST', body: JSON.stringify({ message, history }) }),
+  artifacts: (id: string) =>
+    request<{ stage: string; mode: string; artifacts: ProjectArtifact[] }>(`/project-briefs/${encodeURIComponent(id)}/artifacts`),
+  generate: (id: string, type: string) =>
+    request<ProjectArtifact>(`/project-briefs/${encodeURIComponent(id)}/artifacts/${type}/generate`, { method: 'POST', body: '{}' }),
+  approveArtifact: (id: string, type: string) =>
+    request<ProjectArtifact>(`/project-briefs/${encodeURIComponent(id)}/artifacts/${type}/approve`, { method: 'POST', body: '{}' }),
+  requestChanges: (id: string, type: string, feedback: string) =>
+    request<{ status: string; downstream_reopened: string[] }>(`/project-briefs/${encodeURIComponent(id)}/artifacts/${type}/request-changes`, { method: 'POST', body: JSON.stringify({ feedback }) }),
 };
 
 // Workspaces / Templates

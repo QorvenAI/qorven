@@ -325,8 +325,28 @@ export interface ProjectBrief {
   timeline: string;
   quality: ProjectQuality;
   status: ProjectBriefStatus;
+  stage?: ProjectStage;
+  mode?: 'vibe' | 'org';
   proposal?: TeamProposal;
   goal_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type ArtifactType = 'prd' | 'spec' | 'design' | 'resource_plan';
+export type ArtifactStatus = 'draft' | 'in_review' | 'approved' | 'needs_review' | 'superseded';
+export type ProjectStage = 'intake' | 'clarify' | 'prd' | 'spec' | 'design' | 'resource_plan' | 'approved' | 'building';
+
+export interface ProjectArtifact {
+  id: string;
+  brief_id: string;
+  type: ArtifactType;
+  version: number;
+  content_md: string;
+  status: ArtifactStatus;
+  repo_committed: boolean;
+  created_by: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
 }
