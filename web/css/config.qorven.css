@@ -56,6 +56,29 @@
   --connector-netlify: #00AD9F;
   --connector-vercel: #000000;
   --connector-github-pages: #24292e;
+
+  /* xterm.js terminal theme — light mode */
+  --xterm-bg:              #f8f9fb;
+  --xterm-fg:              #1a1e2e;
+  --xterm-cursor:          #5271ff;
+  --xterm-cursor-accent:   #f8f9fb;
+  --xterm-selection-bg:    rgba(82,113,255,0.22);
+  --xterm-black:           #1a1e2e;
+  --xterm-red:             #d7263d;
+  --xterm-green:           #1a8a4a;
+  --xterm-yellow:          #c57b00;
+  --xterm-blue:            #3b6fd4;
+  --xterm-magenta:         #8040bf;
+  --xterm-cyan:            #1a8fa0;
+  --xterm-white:           #e8ecf4;
+  --xterm-bright-black:    #6b7599;
+  --xterm-bright-red:      #e8485f;
+  --xterm-bright-green:    #23c55e;
+  --xterm-bright-yellow:   #f59e0b;
+  --xterm-bright-blue:     #5b8fee;
+  --xterm-bright-magenta:  #a855f7;
+  --xterm-bright-cyan:     #22d3ee;
+  --xterm-bright-white:    #ffffff;
 }
 
 .dark {
@@ -87,6 +110,29 @@
 
   --channel-github: var(--color-zinc-50);
   --connector-notion: var(--color-zinc-50);
+
+  /* xterm.js terminal theme — dark mode */
+  --xterm-bg:              #0d0f14;
+  --xterm-fg:              #c8d0e8;
+  --xterm-cursor:          #7c9eff;
+  --xterm-cursor-accent:   #0d0f14;
+  --xterm-selection-bg:    rgba(124,158,255,0.25);
+  --xterm-black:           #1a1f2e;
+  --xterm-red:             #f07178;
+  --xterm-green:           #3dd68c;
+  --xterm-yellow:          #ffc66d;
+  --xterm-blue:            #80bfff;
+  --xterm-magenta:         #c792ea;
+  --xterm-cyan:            #89ddff;
+  --xterm-white:           #c8d0e8;
+  --xterm-bright-black:    #4a5068;
+  --xterm-bright-red:      #ff8b92;
+  --xterm-bright-green:    #55e09a;
+  --xterm-bright-yellow:   #ffd580;
+  --xterm-bright-blue:     #9cc4ff;
+  --xterm-bright-magenta:  #d6acf5;
+  --xterm-bright-cyan:     #abeeff;
+  --xterm-bright-white:    #ffffff;
 }
 
 /** Theme presets — full palettes selectable in Settings → Appearance.

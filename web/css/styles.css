@@ -10,6 +10,9 @@
 /* Layout */
 @import './layout.qorven.css';
 
+/* xterm.js terminal emulator styles */
+@import '@xterm/xterm/css/xterm.css';
+
 /** Global Styles **/
 @layer base {
   * {
