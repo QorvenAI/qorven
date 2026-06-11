@@ -12,9 +12,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/tools"
 	"github.com/qorvenai/qorven/internal/vault"
 )
 
@@ -156,6 +158,19 @@ func (e *Executor) executeDirect(ctx context.Context, platform *Platform, action
 		params = make(map[string]any)
 	}
 
+	// Host placeholders ({site}, {instance}, …) are filled from the CONNECTION's
+	// stored config FIRST and pinned — an agent's per-call params can NOT
+	// override a host the user set at connect-time (that would be an SSRF lever).
+	if cred, cerr := e.vault.Get(ctx, e.tenantID, platform.ID); cerr == nil && cred != nil {
+		for k, v := range cred.Data.Extra {
+			ph := "{" + k + "}"
+			if v != "" && strings.Contains(fullURL, ph) {
+				fullURL = strings.ReplaceAll(fullURL, ph, v)
+				delete(params, k) // connection wins; ignore any same-named param
+			}
+		}
+	}
+
 	for k, v := range params {
 		ph := "{" + k + "}"
 		if strings.Contains(fullURL, ph) {
@@ -165,15 +180,26 @@ func (e *Executor) executeDirect(ctx context.Context, platform *Platform, action
 	}
 
 	if action.Method == "GET" && len(params) > 0 {
-		parts := make([]string, 0, len(params))
+		q := url.Values{}
 		for k, v := range params {
-			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+			q.Set(k, fmt.Sprintf("%v", v))
 		}
 		sep := "?"
 		if strings.Contains(fullURL, "?") {
 			sep = "&"
 		}
-		fullURL += sep + strings.Join(parts, "&")
+		fullURL += sep + q.Encode() // URL-encode to prevent query/param injection
+	}
+
+	// SSRF guard: a connector's host can come from a {site}/{instance}
+	// placeholder; reject any URL that resolves to an internal/private/metadata
+	// target so a malicious param (or prompt injection) can't turn a connected
+	// integration into a request against the internal network — with creds.
+	if u, perr := url.Parse(fullURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("connector %s: invalid request URL", platform.ID)
+	}
+	if blocked, reason := tools.IsInternalURL(fullURL); blocked {
+		return "", fmt.Errorf("connector %s: blocked outbound URL (%s)", platform.ID, reason)
 	}
 
 	var bodyReader io.Reader

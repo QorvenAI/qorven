@@ -42,14 +42,6 @@ func IsInternalURL(rawURL string) (bool, string) {
 		return true, fmt.Sprintf("internal port %s blocked", port)
 	}
 
-	// Block private IP ranges
-	ip := net.ParseIP(host)
-	if ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return true, fmt.Sprintf("private IP %s blocked", host)
-		}
-	}
-
 	// Block metadata endpoints (cloud provider)
 	if host == "169.254.169.254" || host == "metadata.google.internal" {
 		return true, "cloud metadata endpoint blocked"
@@ -64,5 +56,53 @@ func IsInternalURL(rawURL string) (bool, string) {
 		}
 	}
 
+	// Literal IP — check the address directly.
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedIP(ip) {
+			return true, fmt.Sprintf("private IP %s blocked", host)
+		}
+		return false, ""
+	}
+
+	// Hostname — RESOLVE it and check every address. This closes the
+	// DNS-rebinding / decoy-domain vector where a public name resolves to an
+	// internal/metadata IP. Fail CLOSED on resolution error.
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return true, fmt.Sprintf("DNS resolution failed for %s — blocked", host)
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return true, fmt.Sprintf("hostname %s resolves to blocked IP %s", host, ip)
+		}
+	}
+
 	return false, ""
+}
+
+// isBlockedIP reports whether an IP is loopback/private/link-local or the
+// IPv4/IPv6 cloud-metadata address.
+func isBlockedIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	// AWS/GCP/Azure metadata.
+	if ip.Equal(net.ParseIP("169.254.169.254")) || ip.Equal(net.ParseIP("fd00:ec2::254")) {
+		return true
+	}
+	return false
+}
+
+// SafeNavigateURL rejects non-http(s) schemes and any URL that resolves to an
+// internal/private/metadata target. Shared by the browse agent and the
+// browser_goto primitive so every navigation entry point is guarded uniformly.
+func SafeNavigateURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("blocked: only http(s) URLs allowed")
+	}
+	if blocked, reason := IsInternalURL(raw); blocked {
+		return fmt.Errorf("blocked: %s", reason)
+	}
+	return nil
 }

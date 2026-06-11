@@ -132,10 +132,12 @@ export const connectors = {
 // Connections (vault-backed)
 export const connections = {
   list: () => request<{ connections: any[] }>('/connections'),
-  save: (platformId: string, token: string, label?: string) =>
+  // config carries per-connection host placeholders (e.g. {site} for WordPress),
+  // pinned + SSRF-validated server-side.
+  save: (platformId: string, token: string, label?: string, config?: Record<string, string>) =>
     request<any>(`/connections/${platformId}`, {
       method: 'POST',
-      body: JSON.stringify({ token, label: label || 'default' }),
+      body: JSON.stringify({ token, label: label || 'default', config: config || undefined }),
     }),
   delete: (platformId: string) =>
     request<void>(`/connections/${platformId}`, { method: 'DELETE' }),

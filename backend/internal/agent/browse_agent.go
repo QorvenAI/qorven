@@ -83,7 +83,15 @@ Rules:
 - Always complete within 15 steps.`
 
 // BrowseAndAct autonomously browses the web to achieve a goal.
+// safeNavigateURL is the shared SSRF guard (DNS-resolving) for every browser
+// navigation entry point. Defined in internal/tools so the browser primitive
+// tool uses the exact same check.
+func safeNavigateURL(raw string) error { return tools.SafeNavigateURL(raw) }
+
 func (ba *BrowseAgent) BrowseAndAct(ctx context.Context, goal, startURL string) (string, []AgentStep, error) {
+	if err := safeNavigateURL(startURL); err != nil {
+		return "", nil, err
+	}
 	if err := ba.browser.Start(ctx); err != nil {
 		return "", nil, fmt.Errorf("browser start: %w", err)
 	}
@@ -210,6 +218,9 @@ func (ba *BrowseAgent) executeAction(ctx context.Context, action *AgentAction) s
 
 	case "navigate":
 		if action.URL == "" { return "error: no url" }
+		if err := safeNavigateURL(action.URL); err != nil {
+			return "navigate " + err.Error()
+		}
 		if err := ba.browser.Navigate(ctx, action.URL); err != nil {
 			return fmt.Sprintf("navigate failed: %v", err)
 		}

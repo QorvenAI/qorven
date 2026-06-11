@@ -9,7 +9,14 @@ import { cn } from '@/lib/utils';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE } from '@/lib/api-core';
 
-type Platform = { id: string; name: string; category: string; description: string; icon: string; auth_type: string; docs_url: string; connected: boolean };
+type Platform = { id: string; name: string; category: string; description: string; icon: string; auth_type: string; docs_url: string; connected: boolean; base_url?: string };
+
+// Extract a host placeholder ({site}, {instance}) from a platform base URL —
+// these connections need the user to provide their own host, pinned server-side.
+function hostPlaceholder(baseURL?: string): string | null {
+  const m = baseURL?.match(/\{(site|instance)\}/);
+  return m?.[1] ?? null;
+}
 type Action = { action_key: string; name: string; description: string; when_to_use: string; method: string; path: string };
 type Connection = { id: string; platform_id: string; label: string; auth_type: string; scopes: string[]; expires_at: string | null };
 
@@ -22,7 +29,7 @@ export default function ConnectionsPage() {
   const [category, setCategory] = useState('all');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [actions, setActions] = useState<Record<string, Action[]>>({});
-  const [connectForm, setConnectForm] = useState<{ id: string; key: string } | null>(null);
+  const [connectForm, setConnectForm] = useState<{ id: string; key: string; host: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -49,9 +56,14 @@ export default function ConnectionsPage() {
     loadActions(id);
   };
 
-  const connect = async (platformId: string, key: string) => {
+  const connect = async (platformId: string, key: string, host?: string, placeholder?: string | null) => {
     try {
-      await request<any>(`/connections/${platformId}`, { method: 'POST', body: JSON.stringify({ api_key: key, token: key }) });
+      const body: any = { api_key: key, token: key };
+      if (placeholder && host?.trim()) {
+        // strip scheme/trailing slash — server pins + validates the host
+        body.config = { [placeholder]: host.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') };
+      }
+      await request<any>(`/connections/${platformId}`, { method: 'POST', body: JSON.stringify(body) });
       setConnectForm(null);
       refresh();
     } catch {
@@ -158,14 +170,19 @@ export default function ConnectionsPage() {
                   </button>
                 ) : connectForm?.id === p.id ? (
                   <div className="flex gap-1">
+                    {hostPlaceholder(p.base_url) && (
+                      <input placeholder={hostPlaceholder(p.base_url) === 'instance' ? 'your-instance' : 'yoursite.com'} value={connectForm.host}
+                        onChange={e => setConnectForm({ ...connectForm, host: e.target.value })}
+                        className="w-36 rounded border border-input bg-transparent px-2 py-1 text-xs font-mono" />
+                    )}
                     <input placeholder={p.auth_type === 'api_key' ? 'API Key' : 'Token'} value={connectForm.key}
-                      onChange={e => setConnectForm({ id: p.id, key: e.target.value })}
+                      onChange={e => setConnectForm({ ...connectForm, key: e.target.value })}
                       className="w-40 rounded border border-input bg-transparent px-2 py-1 text-xs font-mono" />
-                    <button onClick={() => connect(p.id, connectForm.key)}
+                    <button onClick={() => connect(p.id, connectForm.key, connectForm.host, hostPlaceholder(p.base_url))}
                       className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground cursor-pointer">Save</button>
                   </div>
                 ) : (
-                  <button onClick={() => setConnectForm({ id: p.id, key: '' })}
+                  <button onClick={() => setConnectForm({ id: p.id, key: '', host: '' })}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-1.5 text-xs font-medium hover:bg-accent cursor-pointer">
                     <Key className="h-3 w-3" />Connect
                   </button>

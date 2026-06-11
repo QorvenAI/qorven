@@ -244,6 +244,13 @@ func buildPlatformKnowledge() []string {
 		"### CLI Commands",
 		"qorven init, doctor, research, graph, vault, costs, scan, read, tasks, update",
 		"",
+		"### Working on the user's External Sites (WordPress, etc.)",
+		"To act on a user's own website/WordPress/SaaS, they first CONNECT it in Settings → Connections (providing the site URL + credentials, e.g. a WordPress application password). Once connected:",
+		"- Use `list_connector_actions` to see available actions, then `execute_action(platform, action, params)` — e.g. execute_action('wordpress','create_post',{title,content,status}).",
+		"- The site host is PINNED to the connection; do NOT pass a 'site'/'instance' param — it's set at connect time and cannot be overridden.",
+		"- For sites with no API, use the browse tool (autonomous browser) to navigate and act.",
+		"- Internal/private/localhost/metadata URLs are always blocked on these outbound paths.",
+		"",
 	}
 	// Platform extensibility — how to build apps/plugins on Qorven (always-on
 	// summary; agents pull deep detail via the get_builder_knowledge tool).

@@ -84,6 +84,9 @@ Rules:
 // BrowseAndActVision runs the vision-driven loop. Requires a provider
 // + model that supports vision; caller is responsible for that check.
 func (ba *BrowseAgent) BrowseAndActVision(ctx context.Context, goal, startURL string) (string, []AgentStep, error) {
+	if err := safeNavigateURL(startURL); err != nil {
+		return "", nil, err
+	}
 	if err := ba.browser.Start(ctx); err != nil {
 		return "", nil, fmt.Errorf("browser start: %w", err)
 	}
@@ -246,6 +249,9 @@ func (ba *BrowseAgent) executeVisionAction(ctx context.Context, a *VisionAction)
 	case "navigate":
 		if a.URL == "" {
 			return "error: navigate requires url"
+		}
+		if err := safeNavigateURL(a.URL); err != nil {
+			return "navigate " + err.Error()
 		}
 		if err := ba.browser.Navigate(ctx, a.URL); err != nil {
 			return fmt.Sprintf("navigate failed: %v", err)
