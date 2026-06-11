@@ -381,6 +381,18 @@ function handleEvent(event: WSEvent) {
       break;
     }
 
+    case 'event': {
+      // Canonical envelope forwarded by the realtime hub.
+      // Shape: { type: 'event', data: { type: string, properties: unknown, id?, ts? } }
+      const envelope = event.data as { type?: string; properties?: unknown } | null;
+      if (envelope?.type === 'file.edited' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('qorven:file_edited', { detail: envelope.properties }));
+      }
+      // Fall through to pushEvent so Activity tab still shows it.
+      store.pushEvent(liveEvent);
+      break;
+    }
+
     default: {
       // Phase 9 Step 1 — orchestrator telemetry.
       // `graph.node_*` + `agent.progress` events carry a session_id

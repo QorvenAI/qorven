@@ -257,6 +257,22 @@ export const projectFiles = {
     request<void>(`/projects/${encodeURIComponent(id)}/file/mkdir`, { method: 'POST', body: JSON.stringify({ path }) }),
 };
 
+// Project checkpoint / undo / restore
+export type Checkpoint = {
+  hash: string;
+  subject: string;
+  ts: number;
+};
+
+export const projectCheckpoints = {
+  list: (id: string) =>
+    request<{ checkpoints: Checkpoint[] }>(`/projects/${encodeURIComponent(id)}/checkpoints`),
+  undo: (id: string) =>
+    request<{ reverted: boolean; commit?: string }>(`/projects/${encodeURIComponent(id)}/undo`, { method: 'POST' }),
+  restore: (id: string, commit: string) =>
+    request<{ restored: boolean; commit: string }>(`/projects/${encodeURIComponent(id)}/restore`, { method: 'POST', body: JSON.stringify({ commit }) }),
+};
+
 // Deploy
 export const deployApi = {
   deploy:       (id: string, target: string = 'hosted') =>
