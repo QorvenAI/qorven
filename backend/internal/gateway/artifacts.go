@@ -439,10 +439,14 @@ func (gw *Gateway) applyResourcePlanCaps(ctx context.Context, briefID, contentMD
 	if capUSD <= 0 {
 		return
 	}
-	_ = gw.budgetStore.SetBudget(ctx, defaultTenant, budgets.BudgetScope{
+	if err := gw.budgetStore.SetBudget(ctx, defaultTenant, budgets.BudgetScope{
 		Scope:          "project",
 		ScopeID:        briefID,
 		MonthlyUSD:     capUSD,
 		AllocationMode: "fresh",
-	})
+	}); err != nil {
+		// The artifact is already approved; surface this so a missing cap is
+		// observable rather than silently leaving the project uncapped.
+		slog.Warn("resource_plan.set_cap_failed", "brief", briefID, "cap_usd", capUSD, "err", err)
+	}
 }

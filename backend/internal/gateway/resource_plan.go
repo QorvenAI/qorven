@@ -130,10 +130,12 @@ func buildResourcePlan(roles []string, quality, timeline string, budgetUSD float
 			pa.CapUUSD = 1_000_000 // $1 floor
 		}
 		if missing {
-			p.Notes = append(p.Notes, "pricing unknown for "+modelID+" — estimate excludes it")
+			p.Notes = append(p.Notes, "pricing unknown for "+modelID+" — using a $1 floor for it")
 		}
 		p.Agents = append(p.Agents, pa)
-		p.TotalEstUUSD += cost
+		// Sum the floored cap (not raw cost) so the project cap covers every
+		// agent's enforceable cap, even when a model's pricing is unknown.
+		p.TotalEstUUSD += pa.CapUUSD
 	}
 	cap := p.TotalEstUUSD + p.TotalEstUUSD/4 // +25% buffer
 	if budgetUSD > 0 {
