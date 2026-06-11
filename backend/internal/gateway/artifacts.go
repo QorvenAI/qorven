@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/budgets"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
 	"github.com/qorvenai/qorven/internal/providers"
 )
@@ -355,6 +357,9 @@ func (gw *Gateway) handleApproveArtifact(w http.ResponseWriter, r *http.Request)
 	}
 	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_briefs SET stage=$2, updated_at=now() WHERE id=$1`, id, NextStage(typ))
 	gw.commitArtifactToRepo(r.Context(), id, typ, art.ContentMD)
+	if typ == "resource_plan" {
+		gw.applyResourcePlanCaps(r.Context(), id, art.ContentMD)
+	}
 	updated, err := gw.getActiveArtifact(r.Context(), id, typ)
 	if err != nil || updated == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "approved but failed to reload artifact"})
@@ -416,4 +421,28 @@ func (gw *Gateway) handleListProjectArtifacts(w http.ResponseWriter, r *http.Req
 	arts, err := gw.listArtifacts(r.Context(), id)
 	if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)}); return }
 	writeJSON(w, http.StatusOK, map[string]any{"stage": brief.Stage, "mode": brief.Mode, "artifacts": arts})
+}
+
+// applyResourcePlanCaps parses the approved plan and writes the project-scope µUSD
+// budget cap. Per-agent caps are applied at team-approval (handleApproveTeam) since
+// agents don't exist yet at plan-approval time; here we set the PROJECT scope cap.
+func (gw *Gateway) applyResourcePlanCaps(ctx context.Context, briefID, contentMD string) {
+	plan, err := ParseResourcePlan(contentMD)
+	if err != nil {
+		slog.Warn("resource_plan.parse_failed", "brief", briefID, "err", err)
+		return
+	}
+	if gw.budgetStore == nil {
+		return
+	}
+	capUSD := float64(plan.ProjectCapUUSD) / uusdPerUSD
+	if capUSD <= 0 {
+		return
+	}
+	_ = gw.budgetStore.SetBudget(ctx, defaultTenant, budgets.BudgetScope{
+		Scope:          "project",
+		ScopeID:        briefID,
+		MonthlyUSD:     capUSD,
+		AllocationMode: "fresh",
+	})
 }
