@@ -110,7 +110,7 @@ export const tickets = {
 // Project Briefs
 export const projectBriefs = {
   list: () => request<ProjectBrief[]>('/project-briefs'),
-  create: (body: { title: string; idea: string; stack?: string; budget_cents?: number; timeline?: string; quality?: ProjectQuality }) =>
+  create: (body: { title: string; idea: string; stack?: string; budget_cents?: number; timeline?: string; quality?: ProjectQuality; mode?: 'vibe' | 'org' }) =>
     request<ProjectBrief>('/project-briefs', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: Partial<Pick<ProjectBrief, 'title' | 'idea' | 'stack' | 'budget_cents' | 'timeline' | 'quality' | 'status'>>) =>
     request<ProjectBrief>(`/project-briefs/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),

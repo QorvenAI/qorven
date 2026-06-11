@@ -114,6 +114,7 @@ func (gw *Gateway) handleCreateProjectBrief(w http.ResponseWriter, r *http.Reque
 		Timeline    string  `json:"timeline"`
 		Quality     string  `json:"quality"`
 		GoalID      *string `json:"goal_id"`
+		Mode        string  `json:"mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Title == "" {
 		writeJSON(w, 400, map[string]string{"error": "title required"})
@@ -125,16 +126,19 @@ func (gw *Gateway) handleCreateProjectBrief(w http.ResponseWriter, r *http.Reque
 	if body.Timeline == "" {
 		body.Timeline = "no_rush"
 	}
+	if body.Mode != "vibe" {
+		body.Mode = "org"
+	}
 
 	var b ProjectBrief
 	err := gw.db.Pool.QueryRow(r.Context(),
 		`INSERT INTO project_briefs
-		   (tenant_id, title, idea, stack, budget_cents, timeline, quality, goal_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		   (tenant_id, title, idea, stack, budget_cents, timeline, quality, goal_id, mode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		 RETURNING id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
 		           status, proposal, goal_id, created_at, updated_at, stage, mode`,
 		defaultTenant, body.Title, body.Idea, body.Stack, body.BudgetCents,
-		body.Timeline, body.Quality, body.GoalID).
+		body.Timeline, body.Quality, body.GoalID, body.Mode).
 		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
 			nil, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)

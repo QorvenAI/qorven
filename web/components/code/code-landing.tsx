@@ -64,6 +64,7 @@ export function CodeLanding({ onCreate }: Props) {
         quality:      selectedMode.quality,
         budget_cents: budget,
         timeline,
+        mode:         selectedMode.id === 'vibe' ? 'vibe' : 'org',
       });
       onCreate(brief);
     } catch {
