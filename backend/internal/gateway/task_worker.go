@@ -33,12 +33,51 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 		return
 	}
 
+	// Resolve an isolated git worktree for this task when it belongs to an Org
+	// project with a real checkout; fall back to the flat task workspace otherwise
+	// (non-Org tasks, or no .git). The worktree gives the worker an isolated branch.
+	var worktreeDir string
+	var ws *agent.Workspace
+	if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" && gw.projectReg != nil {
+		if cp := gw.projectReg.GetByBriefID(briefID); cp != nil && cp.Path != "" {
+			if w, err := agent.ResolveWorkspace(agentID, taskID, agent.WorkspaceIsolated, cp.Path); err == nil && w != nil {
+				ws = w
+				worktreeDir = w.Dir
+				// Record the branch on the task so the PR/merge layer can find it.
+				if gw.db != nil && gw.db.Pool != nil && w.BranchName != "" {
+					_, _ = gw.db.Pool.Exec(ctx,
+						`UPDATE tasks SET github_branch=$2 WHERE id=$1 AND (github_branch IS NULL OR github_branch='')`,
+						taskID, w.BranchName)
+				}
+			} else if err != nil {
+				slog.Warn("task_worker: worktree resolve failed, using flat workspace", "task", taskID, "err", err)
+			}
+		}
+	}
+
 	retries := 0
 	for {
 		// Abort if context is done.
 		if ctx.Err() != nil {
 			slog.Info("task_worker: context cancelled", "task", taskID)
+			if ws != nil {
+				_ = agent.CleanupWorkspace(ws)
+			}
 			return
+		}
+
+		// STOP-file kill-switch: if a STOP file exists in the worktree root,
+		// cancel the task immediately (allows human to halt a running worker
+		// by dropping a file in the checkout). Best-effort — ignore stat errors.
+		if worktreeDir != "" {
+			if _, stopErr := os.Stat(worktreeDir + "/STOP"); stopErr == nil {
+				slog.Info("task_worker: STOP file found — cancelling task", "task", taskID, "dir", worktreeDir)
+				_ = gw.taskStore.Transition(ctx, taskID, tasks.StatusCancelled)
+				if ws != nil {
+					_ = agent.CleanupWorkspace(ws)
+				}
+				return
+			}
 		}
 
 		// Fetch current task state.
@@ -55,12 +94,19 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			if gw.taskCoordinator != nil {
 				gw.taskCoordinator.onTaskComplete(ctx, *task)
 			}
+			if ws != nil {
+				_ = agent.CleanupWorkspace(ws)
+			}
 			return
 		case tasks.StatusCancelled:
 			slog.Info("task_worker: task cancelled", "task", taskID)
+			if ws != nil {
+				_ = agent.CleanupWorkspace(ws)
+			}
 			return
 		case tasks.StatusBlocked:
 			slog.Info("task_worker: task blocked — stopping iteration", "task", taskID)
+			// Keep the worktree alive — a human may inspect the work-in-progress.
 			return
 		}
 
@@ -68,11 +114,13 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 		if task.Cancelled {
 			slog.Info("task_worker: cancelled flag set — stopping", "task", taskID)
 			_ = gw.taskStore.Transition(ctx, taskID, tasks.StatusCancelled)
+			if ws != nil {
+				_ = agent.CleanupWorkspace(ws)
+			}
 			return
 		}
 
 		// Hard iteration cap: stop and block when the task has hit its max turns.
-		// TODO(Task 9): also check for a STOP file in the worktree root as a kill-switch.
 		if task.MaxIterations > 0 && task.IterationCount >= task.MaxIterations {
 			slog.Warn("task_worker: iteration cap reached — blocking", "task", taskID,
 				"iteration_count", task.IterationCount, "max_iterations", task.MaxIterations)
@@ -166,7 +214,7 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			}
 		}()
 
-		signal, iterErr := gw.runOneIteration(iterCtx, agentID, task)
+		signal, iterErr := gw.runOneIteration(iterCtx, agentID, task, worktreeDir)
 		hbStop()
 		cancel()
 
@@ -212,12 +260,17 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 					gw.taskCoordinator.onTaskComplete(ctx, *finalTask)
 				}
 			}
+			// Clean up the isolated worktree — task is complete, branch can be removed.
+			if ws != nil {
+				_ = agent.CleanupWorkspace(ws)
+			}
 			return
 		case SignalBlocked:
 			slog.Info("task_worker: task blocked by agent", "task", taskID)
 			if gw.taskStateMachine != nil {
 				gw.taskStateMachine.Transition(ctx, defaultTenant, taskID, "in_progress", "blocked", agentID, "agent reported blocked")
 			}
+			// Keep the worktree alive — a human may need to inspect the work-in-progress.
 			return
 		case SignalContinue:
 			// Loop immediately — next iteration.
@@ -235,7 +288,9 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 // runOneIteration executes a single agent iteration for the task.
 // It injects task-lifecycle tools, builds the TEC prompt, runs the agent,
 // and returns the TaskSignal the agent emitted (or an error).
-func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *tasks.Task) (TaskSignal, error) {
+// workspaceDir, when non-empty, overrides the default flat workspace with the
+// task's isolated git worktree directory.
+func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *tasks.Task, workspaceDir string) (TaskSignal, error) {
 	// Increment iteration counter.
 	iterNum, err := gw.taskStore.IncrementIteration(ctx, task.ID)
 	if err != nil {
@@ -263,14 +318,14 @@ func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *ta
 		}
 	}
 
-	// Build the exec tool scoped to this task's workspace.
-	execTool := gw.buildExecToolForTask(task.ID)
+	// Build the exec tool scoped to this task's workspace (or worktree if available).
+	execTool := gw.buildExecToolForTask(task.ID, workspaceDir)
 	if execTool != nil {
 		taskTools = append(taskTools, execTool)
 	}
 
 	// Build the code_edit tool (same workspace, with post-edit verify).
-	codeEditTool := gw.buildCodeEditToolForTask(task.ID)
+	codeEditTool := gw.buildCodeEditToolForTask(task.ID, workspaceDir)
 	if codeEditTool != nil {
 		taskTools = append(taskTools, codeEditTool)
 	}
@@ -385,17 +440,24 @@ You are working the above task autonomously. Rules:
 	)
 }
 
-// buildExecToolForTask returns an exec tool scoped to <WorkspaceRoot>/task-<id[:8]>/.
-// The workspace directory is created on demand.
-func (gw *Gateway) buildExecToolForTask(taskID string) tools.Tool {
-	idSnip := taskID
-	if len(idSnip) > 8 {
-		idSnip = idSnip[:8]
-	}
-	workspace := fmt.Sprintf("%s/task-%s", tools.WorkspaceRoot(), idSnip)
-	if err := os.MkdirAll(workspace, 0o750); err != nil {
-		slog.Warn("task_worker: could not create workspace", "workspace", workspace, "error", err)
-		return nil
+// buildExecToolForTask returns an exec tool scoped to the task workspace.
+// If dirOverride is non-empty it is used directly (the git worktree path);
+// otherwise the tool falls back to <WorkspaceRoot>/task-<id[:8]>/.
+// The directory is created on demand when using the flat fallback.
+func (gw *Gateway) buildExecToolForTask(taskID, dirOverride string) tools.Tool {
+	var workspace string
+	if dirOverride != "" {
+		workspace = dirOverride
+	} else {
+		idSnip := taskID
+		if len(idSnip) > 8 {
+			idSnip = idSnip[:8]
+		}
+		workspace = fmt.Sprintf("%s/task-%s", tools.WorkspaceRoot(), idSnip)
+		if err := os.MkdirAll(workspace, 0o750); err != nil {
+			slog.Warn("task_worker: could not create workspace", "workspace", workspace, "error", err)
+			return nil
+		}
 	}
 	// restrict=true: commands are limited to the task workspace.
 	return tools.NewExecTool(workspace, true)
@@ -405,18 +467,22 @@ func (gw *Gateway) buildExecToolForTask(taskID string) tools.Tool {
 // workspace as buildExecToolForTask. It injects a verify function that
 // runs detectVerifyCommand+runVerify so the agent receives compiler/linter
 // output after every edit.
-//
-// TODO(Task 9): the workspace dir source will change to the real worktree
-// path once git-worktree isolation is wired up.
-func (gw *Gateway) buildCodeEditToolForTask(taskID string) tools.Tool {
-	idSnip := taskID
-	if len(idSnip) > 8 {
-		idSnip = idSnip[:8]
-	}
-	workspace := fmt.Sprintf("%s/task-%s", tools.WorkspaceRoot(), idSnip)
-	if err := os.MkdirAll(workspace, 0o750); err != nil {
-		slog.Warn("task_worker: could not create code_edit workspace", "workspace", workspace, "error", err)
-		return nil
+// If dirOverride is non-empty it is used as the workspace (the git worktree
+// path); otherwise falls back to <WorkspaceRoot>/task-<id[:8]>/.
+func (gw *Gateway) buildCodeEditToolForTask(taskID, dirOverride string) tools.Tool {
+	var workspace string
+	if dirOverride != "" {
+		workspace = dirOverride
+	} else {
+		idSnip := taskID
+		if len(idSnip) > 8 {
+			idSnip = idSnip[:8]
+		}
+		workspace = fmt.Sprintf("%s/task-%s", tools.WorkspaceRoot(), idSnip)
+		if err := os.MkdirAll(workspace, 0o750); err != nil {
+			slog.Warn("task_worker: could not create code_edit workspace", "workspace", workspace, "error", err)
+			return nil
+		}
 	}
 	verifyFn := func(ctx context.Context, dir string) (string, bool) {
 		return runVerify(ctx, dir, detectVerifyCommand(dir))
