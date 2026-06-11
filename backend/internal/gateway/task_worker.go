@@ -269,6 +269,12 @@ func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *ta
 		taskTools = append(taskTools, execTool)
 	}
 
+	// Build the code_edit tool (same workspace, with post-edit verify).
+	codeEditTool := gw.buildCodeEditToolForTask(task.ID)
+	if codeEditTool != nil {
+		taskTools = append(taskTools, codeEditTool)
+	}
+
 	// Fetch subtask results for synthesis context (empty if no subtasks exist).
 	var subtaskResults []tasks.Task
 	if gw.taskStore != nil {
@@ -393,4 +399,27 @@ func (gw *Gateway) buildExecToolForTask(taskID string) tools.Tool {
 	}
 	// restrict=true: commands are limited to the task workspace.
 	return tools.NewExecTool(workspace, true)
+}
+
+// buildCodeEditToolForTask returns a code_edit tool scoped to the same
+// workspace as buildExecToolForTask. It injects a verify function that
+// runs detectVerifyCommand+runVerify so the agent receives compiler/linter
+// output after every edit.
+//
+// TODO(Task 9): the workspace dir source will change to the real worktree
+// path once git-worktree isolation is wired up.
+func (gw *Gateway) buildCodeEditToolForTask(taskID string) tools.Tool {
+	idSnip := taskID
+	if len(idSnip) > 8 {
+		idSnip = idSnip[:8]
+	}
+	workspace := fmt.Sprintf("%s/task-%s", tools.WorkspaceRoot(), idSnip)
+	if err := os.MkdirAll(workspace, 0o750); err != nil {
+		slog.Warn("task_worker: could not create code_edit workspace", "workspace", workspace, "error", err)
+		return nil
+	}
+	verifyFn := func(ctx context.Context, dir string) (string, bool) {
+		return runVerify(ctx, dir, detectVerifyCommand(dir))
+	}
+	return tools.NewCodeEditTool(workspace, verifyFn)
 }
