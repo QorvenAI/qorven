@@ -1164,6 +1164,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/project-briefs/{id}/artifacts/{type}/approve", gw.handleApproveArtifact)
 		r.Post("/project-briefs/{id}/artifacts/{type}/request-changes", gw.handleRequestChanges)
 		r.Get("/project-briefs/{id}/team", gw.handleGetBriefTeam)
+		r.Post("/project-briefs/{id}/build", gw.handleBriefBuildProject)
 
 		// GitHub webhook
 		r.Post("/webhooks/github", gw.handleGitHubWebhook)
