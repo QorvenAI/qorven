@@ -116,26 +116,32 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			return
 		}
 
-		// Transition task to in_progress if not already there.
-		if task.Status != tasks.StatusInProgress {
-			if err := gw.taskStore.Transition(ctx, taskID, tasks.StatusInProgress); err != nil {
-				slog.Warn("task_worker: could not transition to in_progress", "task", taskID, "error", err)
+		// Transition to in_progress AND claim the lease in a single atomic UPDATE.
+		// These must be one statement: a separate lease-claim after the transition
+		// leaves a window where the row is in_progress with a NULL lease, in which
+		// the watchdog would reclaim a live task and spawn a duplicate worker.
+		// Done once per loop turn so even a fast task always holds a fresh lease
+		// before work starts (and a reclaimed task re-stamps its lease on re-entry).
+		justStarted := task.Status != tasks.StatusInProgress
+		if gw.db != nil && gw.db.Pool != nil {
+			if _, err := gw.db.Pool.Exec(ctx,
+				`UPDATE tasks SET status = 'in_progress',
+				    started_at = COALESCE(started_at, NOW()),
+				    lease_expires = NOW() + INTERVAL '3 minutes',
+				    locked_by = $2, updated_at = NOW()
+				 WHERE id = $1`,
+				taskID, agentID); err != nil {
+				slog.Warn("task_worker: could not claim lease / transition to in_progress", "task", taskID, "error", err)
 			}
-			// Durable project-scoped event for task start (best-effort).
+		}
+		// Durable project-scoped event for task start (best-effort) — emitted only
+		// on the turn that actually started the task, AFTER the lease is held.
+		if justStarted {
 			if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" {
 				gw.emitProjectEvent(ctx, briefID, "task_started", task.Title, map[string]any{
 					"status": "in_progress",
 				}, taskID, agentID)
 			}
-		}
-
-		// Claim the lease: stamp lease_expires + locked_by so the watchdog knows
-		// this worker is alive. Done once per loop turn (not per-iteration) so that
-		// even a fast task always has a fresh lease before work starts.
-		if gw.db != nil && gw.db.Pool != nil {
-			_, _ = gw.db.Pool.Exec(ctx,
-				`UPDATE tasks SET lease_expires = NOW() + INTERVAL '3 minutes', locked_by = $2 WHERE id = $1`,
-				taskID, agentID)
 		}
 
 		// Run one iteration with a per-iteration timeout, keeping the lease alive
