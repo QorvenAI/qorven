@@ -7,9 +7,9 @@ var stageOrder = []string{"intake", "clarify", "prd", "spec", "design", "resourc
 // artifactTypes are the gated documents (including CFO-owned resource_plan), in pipeline order.
 var artifactTypes = []string{"prd", "spec", "design", "resource_plan"}
 
-// cascadeArtifacts are the user-approved documents that cascade-reopen on request-changes.
-// resource_plan is owned by 8B (CFO) and is not cascaded here.
-var cascadeArtifacts = []string{"prd", "spec", "design"}
+// cascadeArtifacts are the documents that cascade-reopen when request-changes are made.
+// resource_plan is the last member: upstream changes (prd/spec/design) reopen it, but it has no downstream.
+var cascadeArtifacts = []string{"prd", "spec", "design", "resource_plan"}
 
 func stageIndex(s string) int {
 	for i, v := range stageOrder {
@@ -38,8 +38,8 @@ func NextStage(cur string) string {
 func ArtifactStage(t string) string { return t }
 
 // DownstreamArtifacts returns artifact types that come AFTER t in the cascade
-// (used to cascade-reopen documents when changes are requested). Only covers
-// user-approved doc artifacts [prd, spec, design]; resource_plan is excluded.
+// (used to cascade-reopen documents when changes are requested). Covers all
+// cascade artifacts [prd, spec, design, resource_plan] in pipeline order.
 func DownstreamArtifacts(t string) []string {
 	out := []string{}
 	seen := false
