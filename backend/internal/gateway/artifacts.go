@@ -44,7 +44,7 @@ func (gw *Gateway) listArtifacts(ctx context.Context, briefID string) ([]Project
 		        created_by, approved_by, approved_at, created_at
 		 FROM project_artifacts
 		 WHERE brief_id = $1 AND status <> 'superseded'
-		 ORDER BY type`, briefID)
+		 ORDER BY CASE type WHEN 'prd' THEN 1 WHEN 'spec' THEN 2 WHEN 'design' THEN 3 WHEN 'resource_plan' THEN 4 ELSE 5 END`, briefID)
 	if err != nil { return nil, err }
 	defer rows.Close()
 	out := []ProjectArtifact{}
@@ -233,6 +233,11 @@ func (gw *Gateway) handleGenerateArtifact(w http.ResponseWriter, r *http.Request
 	statuses, _ := gw.artifactStatusMap(r.Context(), id)
 	if !CanAdvanceTo(typ, statuses) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "previous artifact not approved"}); return
+	}
+
+	if cur, _ := gw.getActiveArtifact(r.Context(), id, typ); cur != nil && cur.Status == "approved" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "artifact already approved; use request-changes first"})
+		return
 	}
 
 	prompt := gw.artifactPromptFor(r.Context(), brief, typ)

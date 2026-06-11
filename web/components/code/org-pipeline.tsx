@@ -66,10 +66,14 @@ export function OrgPipeline({ briefId }: { briefId: string }) {
         </div>
         <div className="shrink-0 border-t border-border p-3 space-y-2">
           <div className="flex gap-1.5">
-            {STAGE_ARTIFACT.map(t => (
-              <button key={t} onClick={() => generate(t)} disabled={busy}
-                className="qr-btn qr-btn-outline qr-btn-xs capitalize">{t}</button>
-            ))}
+            {STAGE_ARTIFACT.map(t => {
+              const a = artifacts.find(x => x.type === t);
+              const isApproved = a?.status === 'approved';
+              return (
+                <button key={t} onClick={() => generate(t)} disabled={busy || isApproved}
+                  className="qr-btn qr-btn-outline qr-btn-xs capitalize">{t}</button>
+              );
+            })}
           </div>
           <div className="flex gap-2">
             <input value={input} onChange={e => setInput(e.target.value)}
