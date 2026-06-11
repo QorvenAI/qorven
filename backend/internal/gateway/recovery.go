@@ -56,9 +56,33 @@ func (gw *Gateway) recoverInflightTasks(ctx context.Context) {
 	}
 }
 
+// recoverStuckMerges resets merge_queue rows stranded in 'merging' — a process
+// death (or a cancelled context) between claiming a row and writing its final
+// status would otherwise leave it 'merging' forever, and the queue's
+// NOT EXISTS('merging') serialization guard would then deadlock every future
+// merge for that project. A row whose updated_at is older than 5 minutes (well
+// past the 20 s merge call) is presumed stranded and returned to 'queued'.
+func (gw *Gateway) recoverStuckMerges(ctx context.Context) {
+	if gw.db == nil || gw.db.Pool == nil {
+		return
+	}
+	tag, err := gw.db.Pool.Exec(ctx,
+		`UPDATE merge_queue
+		    SET status = 'queued', updated_at = NOW()
+		  WHERE status = 'merging' AND updated_at < NOW() - INTERVAL '5 minutes'`)
+	if err != nil {
+		slog.Warn("recovery.merge_sweep_failed", "err", err)
+		return
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		slog.Info("recovery.merge_requeued", "count", n)
+	}
+}
+
 // startTaskWatchdog periodically reclaims tasks whose worker stopped
 // heartbeating (dead or stuck process) so they never hang 'in_progress'
-// forever. Runs every 60 seconds; each tick gets its own 30-second deadline.
+// forever, and frees merge_queue rows stranded in 'merging'. Runs every 60
+// seconds; each tick gets its own 30-second deadline.
 func (gw *Gateway) startTaskWatchdog() {
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -68,6 +92,7 @@ func (gw *Gateway) startTaskWatchdog() {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 				gw.recoverInflightTasks(ctx)
+				gw.recoverStuckMerges(ctx)
 			}()
 		}
 	}()

@@ -279,7 +279,10 @@ func (gw *Gateway) handleCheckRunEvent(ctx context.Context, payload map[string]a
 		slog.Error("merge_queue.enqueue_failed", "brief", briefID, "pr", prNumber, "err", err)
 		return
 	}
-	go gw.processMergeQueue(ctx, briefID)
+	// Detach from the webhook request context: net/http cancels r.Context() the
+	// moment this handler returns, which would abort the merge PUT / status
+	// update mid-flight and strand the row in 'merging' (deadlocking the queue).
+	go gw.processMergeQueue(context.Background(), briefID)
 }
 
 // prHasApprovedReview returns true if the PR has at least one APPROVED review
@@ -293,12 +296,26 @@ func (gw *Gateway) prHasApprovedReview(ctx context.Context, owner, repo string, 
 	}
 	var reviews []struct {
 		State string `json:"state"`
+		User  struct {
+			Login string `json:"login"`
+		} `json:"user"`
 	}
 	if err := json.Unmarshal(data, &reviews); err != nil {
 		return false
 	}
+	// Collapse to the latest review per reviewer (the API returns them in
+	// chronological order) so a later CHANGES_REQUESTED/DISMISSED supersedes an
+	// earlier APPROVED — a stale approval must not gate an autonomous merge.
+	latest := map[string]string{}
 	for _, rv := range reviews {
-		if rv.State == "APPROVED" {
+		// COMMENTED reviews don't change approval state — skip them.
+		if rv.State == "COMMENTED" {
+			continue
+		}
+		latest[rv.User.Login] = rv.State
+	}
+	for _, state := range latest {
+		if state == "APPROVED" {
 			return true
 		}
 	}
