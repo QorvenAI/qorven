@@ -10,6 +10,12 @@
 /* Layout */
 @import './layout.qorven.css';
 
+/* xterm.js terminal emulator styles */
+@import '@xterm/xterm/css/xterm.css';
+
+/* @xyflow/react DAG canvas styles (task-graph + workflow editor) */
+@import '@xyflow/react/dist/style.css';
+
 /** Global Styles **/
 @layer base {
   * {

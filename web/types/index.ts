@@ -127,7 +127,9 @@ export type WSEventType =
   | 'page.navigate'
   | 'app_installed'
   | 'dashboard_refresh'
-  | 'dashboard_data';
+  | 'dashboard_data'
+  // Canonical hub envelope wrapper (type: 'event', data: typed envelope)
+  | 'event';
 
 export interface WSEvent {
   type: WSEventType;

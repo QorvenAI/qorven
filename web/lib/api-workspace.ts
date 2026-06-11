@@ -110,7 +110,7 @@ export const tickets = {
 // Project Briefs
 export const projectBriefs = {
   list: () => request<ProjectBrief[]>('/project-briefs'),
-  create: (body: { title: string; idea: string; stack?: string; budget_cents?: number; timeline?: string; quality?: ProjectQuality }) =>
+  create: (body: { title: string; idea: string; stack?: string; budget_cents?: number; timeline?: string; quality?: ProjectQuality; mode?: 'vibe' | 'org' }) =>
     request<ProjectBrief>('/project-briefs', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: Partial<Pick<ProjectBrief, 'title' | 'idea' | 'stack' | 'budget_cents' | 'timeline' | 'quality' | 'status'>>) =>
     request<ProjectBrief>(`/project-briefs/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -245,6 +245,32 @@ export const github = {
     request<{ files: PRFile[] }>(`/github/${owner}/${repo}/pulls/${n}/files`),
   prReview: (owner: string, repo: string, n: number, body: PRReviewSubmit) =>
     request(`/github/${owner}/${repo}/pulls/${n}/review`, { method: 'POST', body: JSON.stringify(body) }),
+};
+
+// Project file operations
+export const projectFiles = {
+  delete: (id: string, path: string) =>
+    request<void>(`/projects/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+  rename: (id: string, from: string, to: string) =>
+    request<void>(`/projects/${encodeURIComponent(id)}/file/rename`, { method: 'POST', body: JSON.stringify({ from, to }) }),
+  mkdir: (id: string, path: string) =>
+    request<void>(`/projects/${encodeURIComponent(id)}/file/mkdir`, { method: 'POST', body: JSON.stringify({ path }) }),
+};
+
+// Project checkpoint / undo / restore
+export type Checkpoint = {
+  hash: string;
+  subject: string;
+  ts: number;
+};
+
+export const projectCheckpoints = {
+  list: (id: string) =>
+    request<{ checkpoints: Checkpoint[] }>(`/projects/${encodeURIComponent(id)}/checkpoints`),
+  undo: (id: string) =>
+    request<{ reverted: boolean; commit?: string }>(`/projects/${encodeURIComponent(id)}/undo`, { method: 'POST' }),
+  restore: (id: string, commit: string) =>
+    request<{ restored: boolean; commit: string }>(`/projects/${encodeURIComponent(id)}/restore`, { method: 'POST', body: JSON.stringify({ commit }) }),
 };
 
 // Deploy

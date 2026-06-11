@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/agent"
 	apievents "github.com/qorvenai/qorven/internal/api/events"
+	"github.com/qorvenai/qorven/internal/diff"
 	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/plans"
 	"github.com/qorvenai/qorven/internal/providers"
@@ -119,6 +120,7 @@ func (gw *Gateway) handleBuildProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Description string `json:"description"`
 		Stack       string `json:"stack"`
+		Mode        string `json:"mode"` // "vibe" → skip human plan-approval gate
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if req.Description == "" {
@@ -375,44 +377,63 @@ Be thorough in the files list. Include every file that needs to exist for the pr
 		Raw:       planJSON,
 		Summary:   func() string { s, _ := planMap["summary"].(string); return s }(),
 	})
+
+	// Vibe builds skip the human plan-approval gate and proceed automatically.
+	// The governance/budget guard and the pre-build checkpoint are still enforced
+	// inside proceedToBuild — vibe only removes the human wait.
+	if req.Mode == "vibe" && planID != "" {
+		if govErr := gw.proceedToBuild(r.Context(), projectID, planID); govErr != nil {
+			// Governance hard-blocked the build — surface to the SSE stream.
+			_ = ew.SendEnvelope(string(apievents.TypeBuildPhase), apievents.BuildPhaseProps{
+				ProjectID: projectID, Phase: "failed",
+			})
+			_ = ew.SendDone()
+			return
+		}
+		_ = ew.SendEnvelope(string(apievents.TypeBuildPhase), apievents.BuildPhaseProps{
+			ProjectID: projectID, Phase: "spawning",
+		})
+	}
+
 	_ = ew.SendDone()
 }
 
-// handleApproveProject — Phase B: delegates to the graph runtime.
-// The orchestrator drives execution; clients subscribe to handleProjectBuildStream
-// for ongoing canonical SSE events (graph.node_started/completed/paused/failed).
-func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) {
-	if gw.projectReg == nil {
-		writeJSON(w, 503, map[string]string{"error": "not initialized"})
-		return
-	}
-
-	projectID := chi.URLParam(r, "id")
+// proceedToBuild runs the governance/budget guard, the pre-build git checkpoint,
+// and fires ExecutePlan in a goroutine. It is called by both handleApproveProject
+// (after a human approves) and the vibe auto-path in handleBuildProject (no human wait).
+//
+// Guards preserved in ALL cases (vibe or not):
+//   - policyEngine.Evaluate — hard-deny blocks the build
+//   - approvalStore.CheckRequiresApproval — governance log/escalation
+//   - pre-build git checkpoint — revert point always created
+//
+// The ONLY thing vibe skips is the human plan-approval gate (pending_approval wait).
+//
+// Returns a non-nil error only when governance hard-blocks the build (action == "deny").
+func (gw *Gateway) proceedToBuild(ctx context.Context, projectID, planID string) error {
 	project := gw.projectReg.Get(projectID)
 	if project == nil {
-		writeJSON(w, 404, map[string]string{"error": "project not found"})
-		return
+		return fmt.Errorf("project not found: %s", projectID)
 	}
 
 	// ─── Governance gate: policy + approval check before build execution ───
 	if gw.policyEngine != nil {
-		decision := gw.policyEngine.Evaluate(r.Context(), "build_approve", "prime", 3, map[string]any{
+		decision := gw.policyEngine.Evaluate(ctx, "build_approve", "prime", 3, map[string]any{
 			"project_id":   projectID,
 			"project_name": project.Name,
 			"project_type": project.ProjectType,
 		})
 		if decision.Action == "deny" {
-			writeJSON(w, 403, map[string]string{
-				"error":  "build blocked by governance policy",
-				"reason": decision.PolicyName + ": " + decision.Message,
+			gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
+				p.BuildPhase = "failed"
 			})
-			return
+			return fmt.Errorf("governance policy %s: %s", decision.PolicyName, decision.Message)
 		}
 	}
 	if gw.approvalStore != nil {
-		rule, err := gw.approvalStore.CheckRequiresApproval(r.Context(), defaultTenant, "build_execute", 0)
+		rule, err := gw.approvalStore.CheckRequiresApproval(ctx, defaultTenant, "build_execute", 0)
 		if err == nil && rule != nil {
-			slog.Info("project.approve: build requires governance approval",
+			slog.Info("project.build: build requires governance approval",
 				"project", projectID, "rule", rule.ActionType, "approver", rule.ApproverRole)
 		}
 	}
@@ -425,19 +446,15 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 			defer cancel()
 			gitInit := exec.CommandContext(cpCtx, "git", "-C", workspace, "rev-parse", "--is-inside-work-tree")
 			if gitInit.Run() != nil {
-				initCmd := exec.CommandContext(cpCtx, "git", "-C", workspace, "init")
-				initCmd.Run()
+				exec.CommandContext(cpCtx, "git", "-C", workspace, "init").Run()
 			}
-			addCmd := exec.CommandContext(cpCtx, "git", "-C", workspace, "add", "-A")
-			addCmd.Run()
+			exec.CommandContext(cpCtx, "git", "-C", workspace, "add", "-A").Run()
 			label := fmt.Sprintf("qorven:checkpoint:pre-build:%d", time.Now().UnixMilli())
-			commitCmd := exec.CommandContext(cpCtx, "git", "-C", workspace, "commit", "-m", label, "--allow-empty")
-			commitCmd.Run()
-			slog.Debug("project.approve: pre-build checkpoint created", "project", projectID, "label", label)
+			exec.CommandContext(cpCtx, "git", "-C", workspace, "commit", "-m", label, "--allow-empty").Run()
+			slog.Debug("project.build: pre-build checkpoint created", "project", projectID, "label", label)
 		}()
 	}
 
-	planID := project.PlanID
 	gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
 		p.BuildPhase = "spawning"
 	})
@@ -459,7 +476,7 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 					for _, f := range files {
 						fileConstraint += "- " + f + "\n"
 					}
-					nodes, err := gw.plans.ListNodesByPlan(r.Context(), planID)
+					nodes, err := gw.plans.ListNodesByPlan(ctx, planID)
 					if err == nil {
 						for _, n := range nodes {
 							if n.Kind != plans.KindAgentTask {
@@ -469,8 +486,8 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 							if json.Unmarshal(n.Inputs, &inp) == nil {
 								if instr, ok := inp["instruction"].(string); ok {
 									inp["instruction"] = instr + fileConstraint
-									if updErr := gw.plans.UpdateNodeInputs(r.Context(), n.ID, inp); updErr != nil {
-										slog.Warn("project.approve: UpdateNodeInputs failed", "node", n.ID, "err", updErr)
+									if updErr := gw.plans.UpdateNodeInputs(ctx, n.ID, inp); updErr != nil {
+										slog.Warn("project.build: UpdateNodeInputs failed", "node", n.ID, "err", updErr)
 									}
 								}
 							}
@@ -503,11 +520,10 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 			defer buildCancel()
 			buildStart := time.Now()
 			if err := gw.orchestrator.ExecutePlan(buildCtx, planID); err != nil {
-				slog.Error("project.approve: ExecutePlan failed", "project", projectID, "plan", planID, "err", err)
+				slog.Error("project.build: ExecutePlan failed", "project", projectID, "plan", planID, "err", err)
 				gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
 					p.BuildPhase = "failed"
 				})
-				// Update Command Center job
 				if gw.commandCenter != nil {
 					gw.commandCenter.UpdateJob(planID, func(j *AgentJob) {
 						now := time.Now()
@@ -517,7 +533,6 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 						j.Error = err.Error()
 					})
 				}
-				// Record build failure as governance exception
 				if gw.exceptionStore != nil {
 					gw.exceptionStore.Record(context.Background(), governance.Exception{
 						TenantID:    defaultTenant,
@@ -535,16 +550,13 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			buildDuration := time.Since(buildStart)
-			// Record build success for SLA tracking
 			if gw.slaStore != nil {
 				gw.slaStore.RecordMeasurement(context.Background(), defaultTenant, "build_time", buildDuration.Seconds(), buildDuration.Seconds() < 600)
 			}
-			// Mark build as done
 			gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
 				p.BuildPhase = "done"
 				p.BuildDurationMs = buildDuration.Milliseconds()
 			})
-			// Update Command Center job
 			if gw.commandCenter != nil {
 				gw.commandCenter.UpdateJob(planID, func(j *AgentJob) {
 					now := time.Now()
@@ -554,13 +566,13 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 					j.Progress = 100
 				})
 			}
-			slog.Info("project.approve: build completed", "project", projectID, "duration", buildDuration)
+			slog.Info("project.build: build completed", "project", projectID, "duration", buildDuration)
 			// Auto-install if this was a qorven_app build.
 			if project.ProjectType == "qorven_app" && gw.appMgr != nil {
 				if app, err := gw.appMgr.Install(context.Background(), project.Path); err != nil {
-					slog.Warn("project.approve: app auto-install failed", "project", projectID, "path", project.Path, "err", err)
+					slog.Warn("project.build: app auto-install failed", "project", projectID, "path", project.Path, "err", err)
 				} else {
-					slog.Info("project.approve: app installed", "slug", app.Slug, "id", app.ID)
+					slog.Info("project.build: app installed", "slug", app.Slug, "id", app.ID)
 					if gw.events != nil {
 						_ = gw.events.Emit(context.Background(), apievents.SinkAll, apievents.Type("app.installed"), map[string]any{"app_id": app.ID, "slug": app.Slug})
 					}
@@ -568,8 +580,36 @@ func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) 
 			}
 		}()
 	} else {
-		slog.Warn("project.approve: no plan_id or orchestrator — build skipped", "project", projectID)
+		slog.Warn("project.build: no plan_id or orchestrator — build skipped", "project", projectID)
 		gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) { p.BuildPhase = "failed" })
+	}
+
+	return nil
+}
+
+// handleApproveProject — Phase B: delegates to the graph runtime.
+// The orchestrator drives execution; clients subscribe to handleProjectBuildStream
+// for ongoing canonical SSE events (graph.node_started/completed/paused/failed).
+func (gw *Gateway) handleApproveProject(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, 503, map[string]string{"error": "not initialized"})
+		return
+	}
+
+	projectID := chi.URLParam(r, "id")
+	project := gw.projectReg.Get(projectID)
+	if project == nil {
+		writeJSON(w, 404, map[string]string{"error": "project not found"})
+		return
+	}
+
+	planID := project.PlanID
+	if err := gw.proceedToBuild(r.Context(), projectID, planID); err != nil {
+		writeJSON(w, 403, map[string]string{
+			"error":  "build blocked by governance policy",
+			"reason": err.Error(),
+		})
+		return
 	}
 
 	writeJSON(w, 200, map[string]string{"status": "building", "project_id": projectID, "plan_id": planID})
@@ -776,12 +816,16 @@ func (gw *Gateway) handleReadProjectFile(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, 400, map[string]string{"error": "path required"})
 		return
 	}
-	// Security: path must be inside workspace
+	// Security: resolve + clean the path and confirm it stays inside the
+	// workspace (filepath.Clean collapses any ".." before the prefix check, so
+	// traversal like workspace/../../etc/passwd is rejected).
 	workspace := resolveWorkspace(project)
-	if !strings.HasPrefix(filePath, workspace) {
+	abs, ok := sandboxPath(workspace, filePath)
+	if !ok {
 		writeJSON(w, 403, map[string]string{"error": "path outside workspace"})
 		return
 	}
+	filePath = abs
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "file not found"})
@@ -813,22 +857,168 @@ func (gw *Gateway) handleWriteProjectFile(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 400, map[string]string{"error": "path and content required"})
 		return
 	}
+	// Resolve + clean the path (handles relative paths by joining onto the
+	// workspace) and confirm it stays inside the workspace — filepath.Clean
+	// collapses ".." so traversal escapes are rejected.
 	workspace := resolveWorkspace(project)
-	if !strings.HasPrefix(req.Path, workspace) {
-		// Allow relative paths by prepending workspace
-		if !strings.HasPrefix(req.Path, "/") {
-			req.Path = workspace + "/" + req.Path
-		} else {
-			writeJSON(w, 403, map[string]string{"error": "path outside workspace"})
-			return
-		}
+	abs, ok := sandboxPath(workspace, req.Path)
+	if !ok {
+		writeJSON(w, 403, map[string]string{"error": "path outside workspace"})
+		return
 	}
+	req.Path = abs
 	os.MkdirAll(strings.TrimSuffix(req.Path, "/"+last(req.Path)), 0755)
+
+	// Read prior content best-effort for diff generation (new file → empty string).
+	var oldContent string
+	if raw, err := os.ReadFile(req.Path); err == nil {
+		oldContent = string(raw)
+	}
+
 	if err := os.WriteFile(req.Path, []byte(req.Content), 0644); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Emit file.edited realtime event (non-fatal).
+	if gw.events != nil {
+		relPath := strings.TrimPrefix(req.Path, workspace+"/")
+		fileDiff, _, _ := diff.GenerateDiff(oldContent, req.Content, relPath)
+		_ = gw.events.Emit(r.Context(), apievents.SinkAll, apievents.TypeFileEdited, apievents.FileEditedProps{
+			ProjectID:  project.ID,
+			Path:       relPath,
+			Diff:       fileDiff,
+			BytesAfter: len(req.Content),
+			Actor:      actorFromContext(r.Context()),
+		})
+	}
+
 	writeJSON(w, 200, map[string]any{"path": req.Path, "size": len(req.Content)})
+}
+
+// sandboxPath resolves a (possibly relative) path inside the workspace and
+// returns the cleaned absolute path. If the result escapes the workspace root,
+// the second return value is false and the caller must reject the request.
+func sandboxPath(workspace, rawPath string) (string, bool) {
+	abs := rawPath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(workspace, abs)
+	}
+	abs = filepath.Clean(abs)
+	// Require the cleaned absolute path to be workspace itself or a descendant.
+	return abs, abs == workspace || strings.HasPrefix(abs, workspace+"/")
+}
+
+// handleDeleteProjectFile deletes a file or directory from the project workspace.
+// DELETE /v1/projects/{id}/file?path=<rel>
+func (gw *Gateway) handleDeleteProjectFile(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	rawPath := r.URL.Query().Get("path")
+	if rawPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path required"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	abs, ok := sandboxPath(workspace, rawPath)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	if err := os.RemoveAll(abs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	// Emit file.edited with a "deleted" marker (non-fatal).
+	if gw.events != nil {
+		relPath := strings.TrimPrefix(abs, workspace+"/")
+		_ = gw.events.Emit(r.Context(), apievents.SinkAll, apievents.TypeFileEdited, apievents.FileEditedProps{
+			ProjectID:  project.ID,
+			Path:       relPath,
+			Diff:       "(deleted)",
+			BytesAfter: 0,
+			Actor:      actorFromContext(r.Context()),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": rawPath})
+}
+
+// handleRenameProjectFile renames (or moves) a file within the project workspace.
+// POST /v1/projects/{id}/file/rename  body: {from, to}
+func (gw *Gateway) handleRenameProjectFile(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.From == "" || req.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to required"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	absFrom, okFrom := sandboxPath(workspace, req.From)
+	absTo, okTo := sandboxPath(workspace, req.To)
+	if !okFrom || !okTo {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	// Ensure destination parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(absTo), 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	if err := os.Rename(absFrom, absTo); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"from": req.From, "to": req.To})
+}
+
+// handleMkdirProjectFile creates a directory (and any parents) in the project workspace.
+// POST /v1/projects/{id}/file/mkdir  body: {path}
+func (gw *Gateway) handleMkdirProjectFile(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path required"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	abs, ok := sandboxPath(workspace, req.Path)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": req.Path})
 }
 
 func last(path string) string {

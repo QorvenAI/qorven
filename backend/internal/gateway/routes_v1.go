@@ -157,6 +157,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/projects/{id}/tree", gw.handleProjectTree)
 		r.Get("/projects/{id}/file", gw.handleReadProjectFile)
 		r.Put("/projects/{id}/file", gw.handleWriteProjectFile)
+		r.Delete("/projects/{id}/file", gw.handleDeleteProjectFile)
+		r.Post("/projects/{id}/file/rename", gw.handleRenameProjectFile)
+		r.Post("/projects/{id}/file/mkdir", gw.handleMkdirProjectFile)
 		r.Post("/projects/{id}/checkpoint", gw.handleProjectCheckpoint)
 		r.Post("/projects/{id}/undo", gw.handleProjectUndo)
 		r.Get("/projects/{id}/checkpoints", gw.handleProjectCheckpoints)
@@ -1124,6 +1127,12 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/terminal/sessions", gw.handleCreateTerminalSession)
 		r.Delete("/terminal/sessions/{id}", gw.handleDeleteTerminalSession)
 		r.Get("/terminal/sessions/{id}/ws", gw.wsAuth(gw.handleTerminalWS))
+
+		// LSP bridge — relays JSON-RPC between browser (monaco-languageclient)
+		// and a language server process over stdio (Content-Length framed).
+		// Route: GET /v1/lsp/{projectId}?lang=go|typescript|javascript|python
+		r.Get("/lsp/{projectId}", gw.wsAuth(gw.handleLSPWS))
+		r.Get("/lsp/lang", gw.handleLSPLanguage)
 
 		// Work goals
 		r.Get("/work-goals", gw.handleListWorkGoals)

@@ -21,6 +21,7 @@ import { BottomDrawerTab } from '@/components/layouts/qorven/bottom-drawer';
 import { AgentDashboard } from '@/components/agents/AgentDashboard';
 import { TaskFeed } from '@/components/agents/TaskFeed';
 import { CommandCenter } from '@/components/code/command-center';
+import { FileExplorer } from '@/components/code/file-explorer';
 import { useAgentsStream } from '@/hooks/use-agents-stream';
 import { ensureCanonicalSessionId } from '@/lib/session';
 import {
@@ -40,6 +41,10 @@ import { CodeEditor } from '@/components/code/code-editor';
 import { TerminalPane } from '@/components/code/terminal-pane';
 import { BuildLog } from '@/components/code/build-log';
 import { DiffViewer } from '@/components/code/diff-viewer';
+import { AgentDiffView } from '@/components/code/agent-diff-view';
+import { projectCheckpoints } from '@/lib/api-workspace';
+import { syncModelContent } from '@/lib/monaco-models';
+import type { FileEditedProps } from '@/lib/events';
 import { EditorViewToggle } from '@/components/code/editor-view-toggle';
 import { PreviewPanel } from '@/components/code/preview-panel';
 import { AppBuilderPanel } from '@/components/code/app-builder-panel';
@@ -169,6 +174,14 @@ export default function CodePage() {
   const [contextFiles, setContextFiles] = useState<string[]>([]);
   const [addContextOpen, setAddContextOpen] = useState(false);
   const [initChipVisible, setInitChipVisible] = useState(false);
+  // Agent diff view — populated when an agent edits a file (file.edited event)
+  const [agentDiff, setAgentDiff] = useState<{ path: string; original: string; modified: string } | null>(null);
+  const [agentDiffReverting, setAgentDiffReverting] = useState(false);
+  // Paths the agent changed while user had unsaved edits (show a subtle banner)
+  const [diskChangedPaths, setDiskChangedPaths] = useState<Set<string>>(new Set());
+  // Per-path "last known disk content" cache — used to provide the original side
+  // of the diff. Updated whenever we successfully load a file from the server.
+  const lastKnownContentRef = useRef<Map<string, string>>(new Map());
   // Mirror refs kept in sync with the 4 state values that parseSSEStream reads
   // inside an async callback where closure-captured state would be stale.
   const buildStartTimeRef = useRef<number>(0);
@@ -287,6 +300,65 @@ export default function CodePage() {
     return () => window.removeEventListener('keydown', handler);
   }, [activeTab]);
 
+  // ── file.edited consumer ─────────────────────────────────────────────────
+  // Listens for qorven:file_edited CustomEvents dispatched by websocket.ts
+  // when the realtime hub forwards a canonical 'event' envelope carrying
+  // { type: 'file.edited', properties: FileEditedProps }.
+  useEffect(() => {
+    const onFileEdited = async (e: Event) => {
+      const detail = (e as CustomEvent<FileEditedProps>).detail;
+      if (!detail) return;
+
+      const pid = useStore.getState().codeActiveProjectId;
+      if (!pid || detail.project_id !== pid) return;
+
+      const { path, actor } = detail;
+      // Only surface agent edits (actor !== undefined/null and not user-originated).
+      // User's own saves come through without an actor or with actor === 'user'.
+      if (!actor || actor === 'user') return;
+
+      // Fetch the new (modified) content from the server.
+      let newContent = '';
+      try {
+        const res = await apiFetch(`/projects/${pid}/file?path=${encodeURIComponent(path)}`);
+        if (res.ok) {
+          const data = await res.json();
+          newContent = data.content || '';
+        }
+      } catch { return; }
+
+      const originalContent = lastKnownContentRef.current.get(path) ?? '';
+
+      setTabs(prevTabs => {
+        const tab = prevTabs.find(t => t.path === path);
+        if (tab?.dirty) {
+          // User has unsaved edits — don't clobber; record the disk change.
+          setDiskChangedPaths(prev => new Set([...prev, path]));
+          return prevTabs;
+        }
+
+        // Not dirty — sync the Monaco model and the tab content.
+        syncModelContent(path, newContent);
+        lastKnownContentRef.current.set(path, newContent);
+        // Clear any stale disk-change indicator for this path.
+        setDiskChangedPaths(prev => { const s = new Set(prev); s.delete(path); return s; });
+
+        return prevTabs.map(t => t.path === path ? { ...t, content: newContent, dirty: false } : t);
+      });
+
+      // Open the agent diff view so the user sees what changed.
+      setAgentDiff({ path, original: originalContent, modified: newContent });
+      setEditorView('diff');
+
+      // Mark the file as changed in the tree (decorates the file explorer).
+      setChanges(prev => prev.some(c => c.path === path) ? prev : [...prev, { path, action: 'modified' }]);
+    };
+
+    window.addEventListener('qorven:file_edited', onFileEdited);
+    return () => window.removeEventListener('qorven:file_edited', onFileEdited);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const parseTree = (text: string, base: string): FileNode[] => {
     const nodes: FileNode[] = [];
     for (const line of text.split('\n').filter(l => l.trim())) {
@@ -321,6 +393,33 @@ export default function CodePage() {
       setTree(parsed); setStoreTree(parsed); setStoreProjectPath(path);
     } catch {}
   }, [setStoreTree, setStoreProjectPath]);
+
+  // Revert handler: POST /projects/{id}/undo (git revert HEAD), then reload
+  // the affected file and re-sync open models.
+  const handleAgentDiffRevert = useCallback(async () => {
+    const pid = useStore.getState().codeActiveProjectId;
+    if (!pid || !agentDiff) return;
+    setAgentDiffReverting(true);
+    try {
+      await projectCheckpoints.undo(pid);
+      // Reload tree
+      const proj = activeProject;
+      if (proj) loadProjectTree(proj.path, proj.id);
+      // Re-fetch the reverted file and sync the open model / tab.
+      const res = await apiFetch(`/projects/${pid}/file?path=${encodeURIComponent(agentDiff.path)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.content || '';
+        syncModelContent(agentDiff.path, content);
+        lastKnownContentRef.current.set(agentDiff.path, content);
+        setTabs(prev => prev.map(t => t.path === agentDiff.path ? { ...t, content, dirty: false } : t));
+      }
+      // Dismiss the diff view and return to code view.
+      setAgentDiff(null);
+      setEditorView('code');
+    } catch { /* silent — user can retry */ }
+    finally { setAgentDiffReverting(false); }
+  }, [agentDiff, activeProject, loadProjectTree]);
 
   const restoreSnapshot = useCallback((snap: SessionSnapshot) => {
     setTree(snap.tree); setTabs(snap.tabs); setActiveTab(snap.activeTab);
@@ -372,6 +471,7 @@ export default function CodePage() {
       agentStatusRef.current = {};
       setPreviewUrlSync(''); setBuildPrUrlSync(''); setBuildStartTimeSync(0);
       setProjectPath(p.path); setTree([]); setEditorView(p.project_type === 'qorven_app' ? 'app' : 'code');
+      setAgentDiff(null); setDiskChangedPaths(new Set());
       loadProjectTree(p.path, p.id);
     }
   }, [activeProject?.id, loadProjectTree, setCodeProjectName, setStoreActiveProjectId, setStoreTree, setStoreProjectPath, restoreSnapshot, setPreviewUrlSync, setBuildPrUrlSync, setBuildStartTimeSync]);
@@ -688,7 +788,9 @@ export default function CodePage() {
         const res = await apiFetch(`/projects/${activeProject.id}/file?path=${encodeURIComponent(path)}`);
         if (res.ok) {
           const data = await res.json();
-          setTabs(prev => [...prev, { path, name: path.split('/').pop() || path, content: data.content || '', dirty: false }]);
+          const content = data.content || '';
+          lastKnownContentRef.current.set(path, content);
+          setTabs(prev => [...prev, { path, name: path.split('/').pop() || path, content, dirty: false }]);
           setActiveTab(path);
           return;
         }
@@ -701,6 +803,7 @@ export default function CodePage() {
         message: `Use read_file to read ${path}. Return ONLY the raw file contents, no formatting or explanation.`,
       }) as any;
       const content = (data?.choices?.[0]?.message?.content || '').replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+      lastKnownContentRef.current.set(path, content);
       setTabs(prev => [...prev, { path, name: path.split('/').pop() || path, content, dirty: false }]);
       setActiveTab(path);
     } catch {}
@@ -843,6 +946,10 @@ export default function CodePage() {
   const currentTab = tabs.find(t => t.path === activeTab);
   const flatFiles = useCallback((nodes: FileNode[]): FileNode[] =>
     nodes.flatMap(n => n.type === 'file' ? [n] : flatFiles(n.children ?? [])), []);
+  const changedPaths = useMemo(
+    () => new Set(tabs.filter(t => t.dirty).map(t => t.path)),
+    [tabs],
+  );
 
   // Export session as Markdown
   const exportSession = useCallback(() => {
@@ -986,6 +1093,18 @@ export default function CodePage() {
       )}
 
       <div className="flex flex-1 overflow-hidden min-h-0">
+        {/* File explorer — left pane */}
+        <div className="w-60 shrink-0 border-r border-border flex flex-col overflow-hidden">
+          <FileExplorer
+            projectId={activeProject.id}
+            tree={tree}
+            activePath={activeTab}
+            changedPaths={changedPaths}
+            onFileClick={openFile}
+            onTreeRefresh={() => loadProjectTree(activeProject.path, activeProject.id)}
+          />
+        </div>
+
         <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
           <div className="flex shrink-0 items-center gap-2 border-b border-border">
@@ -996,7 +1115,7 @@ export default function CodePage() {
               <EditorViewToggle
                 view={editorView}
                 onChange={setEditorView}
-                hasDiffs={pendingDiffs.size > 0}
+                hasDiffs={pendingDiffs.size > 0 || agentDiff !== null}
                 hasPreview={!!previewUrl}
                 isQorvenApp={activeProject?.project_type === 'qorven_app'}
               />
@@ -1006,6 +1125,11 @@ export default function CodePage() {
           {currentTab && editorView === 'code' && (
             <div className="flex h-[22px] shrink-0 items-center border-b border-border bg-muted/20 px-3 gap-2">
               <span className="text-xs text-muted-foreground font-mono truncate">{currentTab.path}</span>
+              {diskChangedPaths.has(currentTab.path) && (
+                <span className="shrink-0 rounded border border-border bg-muted px-1.5 py-px text-xs text-muted-foreground">
+                  file changed on disk
+                </span>
+              )}
             </div>
           )}
 
@@ -1018,6 +1142,20 @@ export default function CodePage() {
               />
             ) : editorView === 'diff' ? (
               (() => {
+                // Agent diff takes precedence: show Monaco diff with revert button.
+                if (agentDiff) {
+                  return (
+                    <AgentDiffView
+                      path={agentDiff.path}
+                      original={agentDiff.original}
+                      modified={agentDiff.modified}
+                      onRevert={handleAgentDiffRevert}
+                      reverting={agentDiffReverting}
+                      className="h-full"
+                    />
+                  );
+                }
+                // Fall back to the text-based DiffViewer for chat-triggered diffs.
                 const entries = [...pendingDiffs.entries()];
                 const diffEntry = entries[entries.length - 1];
                 if (!diffEntry) return (
@@ -1249,6 +1387,8 @@ export default function CodePage() {
                   onFileClick={openFile}
                   onOpenSession={() => openBottomDrawer('build')}
                   summary={buildSummary || undefined}
+                  agentStatus={agentStatus}
+                  prUrl={buildPrUrl || undefined}
                 />
               </div>
             )}

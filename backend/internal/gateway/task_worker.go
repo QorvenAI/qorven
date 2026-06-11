@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qorvenai/qorven/internal/agent"
+	apievents "github.com/qorvenai/qorven/internal/api/events"
 	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/realtime"
 	"github.com/qorvenai/qorven/internal/tasks"
@@ -324,8 +325,8 @@ func (gw *Gateway) runOneIteration(ctx context.Context, agentID string, task *ta
 		taskTools = append(taskTools, execTool)
 	}
 
-	// Build the code_edit tool (same workspace, with post-edit verify).
-	codeEditTool := gw.buildCodeEditToolForTask(task.ID, workspaceDir)
+	// Build the code_edit tool (same workspace, with post-edit verify + file.edited emit).
+	codeEditTool := gw.buildCodeEditToolForTask(ctx, task.ID, agentID, workspaceDir)
 	if codeEditTool != nil {
 		taskTools = append(taskTools, codeEditTool)
 	}
@@ -469,7 +470,9 @@ func (gw *Gateway) buildExecToolForTask(taskID, dirOverride string) tools.Tool {
 // output after every edit.
 // If dirOverride is non-empty it is used as the workspace (the git worktree
 // path); otherwise falls back to <WorkspaceRoot>/task-<id[:8]>/.
-func (gw *Gateway) buildCodeEditToolForTask(taskID, dirOverride string) tools.Tool {
+// agentID is captured into the onEdit closure so file.edited events carry the
+// correct actor. projectID is resolved best-effort via projectBriefForTask.
+func (gw *Gateway) buildCodeEditToolForTask(ctx context.Context, taskID, agentID, dirOverride string) tools.Tool {
 	var workspace string
 	if dirOverride != "" {
 		workspace = dirOverride
@@ -487,5 +490,32 @@ func (gw *Gateway) buildCodeEditToolForTask(taskID, dirOverride string) tools.To
 	verifyFn := func(ctx context.Context, dir string) (string, bool) {
 		return runVerify(ctx, dir, detectVerifyCommand(dir))
 	}
-	return tools.NewCodeEditTool(workspace, verifyFn)
+
+	// Resolve projectID once at construction (best-effort).
+	var projectID string
+	if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" && gw.projectReg != nil {
+		if cp := gw.projectReg.GetByBriefID(briefID); cp != nil {
+			projectID = cp.ID
+		}
+	}
+
+	// onEdit emits a file.edited realtime event after each successful agent write.
+	// NOTE: this emits an ABSOLUTE path (the FE agent-edit consumer matches against
+	// absolute tab/tree paths). User-write/delete emitters use a workspace-relative
+	// path; the two consumers are distinct today. Standardizing both emit sites +
+	// the FE matchers on one format is a documented follow-up.
+	var onEditFn func(path, diffText string)
+	if gw.events != nil {
+		onEditFn = func(absPath, diffText string) {
+			_ = gw.events.Emit(context.Background(), apievents.SinkAll, apievents.TypeFileEdited, apievents.FileEditedProps{
+				ProjectID:  projectID,
+				Path:       absPath,
+				Diff:       diffText,
+				BytesAfter: 0, // size not tracked here; FE fetches content via path
+				Actor:      agentID,
+			})
+		}
+	}
+
+	return tools.NewCodeEditTool(workspace, verifyFn, onEditFn)
 }

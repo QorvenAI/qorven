@@ -14,9 +14,38 @@ interface Props {
 
 type ConnState = 'connecting' | 'open' | 'closed' | 'error';
 
+/** Read computed xterm theme colors from CSS variables set in config.qorven.css */
+function getXtermTheme(el: Element) {
+  const s = getComputedStyle(el);
+  const v = (name: string) => s.getPropertyValue(name).trim();
+  return {
+    background:       v('--xterm-bg'),
+    foreground:       v('--xterm-fg'),
+    cursor:           v('--xterm-cursor'),
+    cursorAccent:     v('--xterm-cursor-accent'),
+    selectionBackground: v('--xterm-selection-bg'),
+    black:            v('--xterm-black'),
+    red:              v('--xterm-red'),
+    green:            v('--xterm-green'),
+    yellow:           v('--xterm-yellow'),
+    blue:             v('--xterm-blue'),
+    magenta:          v('--xterm-magenta'),
+    cyan:             v('--xterm-cyan'),
+    white:            v('--xterm-white'),
+    brightBlack:      v('--xterm-bright-black'),
+    brightRed:        v('--xterm-bright-red'),
+    brightGreen:      v('--xterm-bright-green'),
+    brightYellow:     v('--xterm-bright-yellow'),
+    brightBlue:       v('--xterm-bright-blue'),
+    brightMagenta:    v('--xterm-bright-magenta'),
+    brightCyan:       v('--xterm-bright-cyan'),
+    brightWhite:      v('--xterm-bright-white'),
+  };
+}
+
 /**
- * Real PTY terminal pane. Creates a session via POST /v1/terminal/sessions
- * then connects to the returned session's WebSocket endpoint.
+ * Real PTY terminal pane backed by xterm.js. Creates a session via
+ * POST /v1/terminal/sessions then connects to the returned WebSocket endpoint.
  *
  * Protocol (JSON frames):
  *   Server → Client: { type: "output", data: "<raw bytes as string>" }
@@ -25,27 +54,115 @@ type ConnState = 'connecting' | 'open' | 'closed' | 'error';
  *                    { type: "resize", cols: N, rows: N }
  */
 export function TerminalPane({ onOutput }: Props) {
-  const [lines, setLines] = useState<string[]>([]);
   const [connState, setConnState] = useState<ConnState>('connecting');
   const [error, setError] = useState<string | null>(null);
-  const [cmd, setCmd] = useState('');
 
-  const sessionIdRef = useRef<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef  = useRef<string | null>(null);
+  const wsRef         = useRef<WebSocket | null>(null);
+  const containerRef  = useRef<HTMLDivElement>(null);
+  // xterm instance refs — typed as any to avoid importing types at module level
+  // (the actual Terminal / FitAddon are dynamically imported inside useEffect)
+  const termRef       = useRef<any>(null);
+  const fitAddonRef   = useRef<any>(null);
+  const onOutputRef   = useRef(onOutput);
+  onOutputRef.current = onOutput;
 
-  const appendLine = useCallback((text: string) => {
-    setLines(prev => {
-      // Split raw output on newlines, preserving carriage returns as display
-      const parts = text.split('\n');
-      return [...prev, ...parts.filter(p => p !== '')];
-    });
-    onOutput?.(text);
-  }, [onOutput]);
+  // ── helpers ──────────────────────────────────────────────────────────────
 
-  const connect = useCallback(async () => {
-    // Clean up any existing WS.
+  const sendWs = useCallback((msg: object) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  }, []);
+
+  // ── xterm bootstrap ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    let disposed = false;
+    let term: any = null;
+    let fitAddon: any = null;
+    let ro: ResizeObserver | null = null;
+    let onDataDisposable: { dispose: () => void } | null = null;
+    let onResizeDisposable: { dispose: () => void } | null = null;
+
+    async function init() {
+      const { Terminal: XTerm }   = await import('@xterm/xterm');
+      const { FitAddon }          = await import('@xterm/addon-fit');
+      const { WebLinksAddon }     = await import('@xterm/addon-web-links');
+      if (disposed || !containerRef.current) return;
+
+      fitAddon = new FitAddon();
+      term = new XTerm({
+        fontFamily: '"JetBrains Mono", "Cascadia Code", ui-monospace, monospace',
+        fontSize: 13,
+        lineHeight: 1.4,
+        scrollback: 10000,
+        cursorBlink: true,
+        cursorStyle: 'block',
+        allowProposedApi: false,
+        theme: getXtermTheme(document.documentElement),
+      });
+
+      term.loadAddon(fitAddon);
+      term.loadAddon(new WebLinksAddon());
+      term.open(containerRef.current);
+      fitAddon.fit();
+
+      termRef.current    = term;
+      fitAddonRef.current = fitAddon;
+
+      // Wire keystrokes → WS (xterm's onData sends raw chars incl. Ctrl-C/D)
+      onDataDisposable = term.onData((data: string) => {
+        sendWs({ type: 'input', data });
+        onOutputRef.current?.(data);
+      });
+
+      // Wire PTY resize → WS
+      onResizeDisposable = term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+        sendWs({ type: 'resize', cols, rows });
+      });
+
+      // Re-fit + re-apply theme when the container resizes or dark-mode toggles
+      ro = new ResizeObserver(() => {
+        fitAddon?.fit();
+      });
+      ro.observe(containerRef.current!);
+
+      // Connect WS now that xterm is ready
+      connectWs(term, fitAddon);
+    }
+
+    init().catch(() => {});
+
+    return () => {
+      disposed = true;
+      onDataDisposable?.dispose();
+      onResizeDisposable?.dispose();
+      ro?.disconnect();
+      term?.dispose();
+      termRef.current     = null;
+      fitAddonRef.current = null;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-apply xterm theme when dark/light class toggles on <html>
+  useEffect(() => {
+    const update = () => {
+      if (termRef.current) {
+        termRef.current.options.theme = getXtermTheme(document.documentElement);
+      }
+    };
+    const obs = new MutationObserver(update);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+
+  // ── WebSocket connect ─────────────────────────────────────────────────────
+
+  const connectWs = useCallback(async (term: any, fitAddon: any) => {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -53,10 +170,8 @@ export function TerminalPane({ onOutput }: Props) {
 
     setConnState('connecting');
     setError(null);
-    setLines([]);
 
     try {
-      // Reuse existing session if we have one; otherwise create a new one.
       let id = sessionIdRef.current;
       if (!id) {
         const sess = await terminal.create('Code');
@@ -65,27 +180,28 @@ export function TerminalPane({ onOutput }: Props) {
       }
 
       const url = terminal.wsUrl(id);
-      const ws = new WebSocket(url);
+      const ws  = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setConnState('open');
-        // Send initial resize based on container dimensions.
-        sendResize(ws);
+        // Sync the PTY size to the actual xterm dimensions after connect
+        if (fitAddon) fitAddon.fit();
       };
 
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data as string) as { type: string; data?: string; code?: number };
           if (msg.type === 'output' && msg.data) {
-            appendLine(msg.data);
+            term?.write(msg.data);
+            onOutputRef.current?.(msg.data);
           } else if (msg.type === 'closed') {
             setConnState('closed');
-            appendLine(`\n[Process exited with code ${msg.code ?? 0}]`);
+            term?.write(`\r\n\x1b[2m[process exited with code ${msg.code ?? 0}]\x1b[0m\r\n`);
           }
         } catch {
-          // non-JSON frame — treat as raw output
-          appendLine(ev.data as string);
+          // Non-JSON frame — write raw
+          term?.write(ev.data as string);
         }
       };
 
@@ -95,23 +211,24 @@ export function TerminalPane({ onOutput }: Props) {
       };
 
       ws.onclose = (ev) => {
-        if (connState !== 'closed') {
-          setConnState('closed');
-          if (!ev.wasClean) appendLine('\n[Connection lost]');
-        }
+        setConnState(prev => {
+          if (prev === 'closed') return prev;
+          if (!ev.wasClean) term?.write('\r\n\x1b[2m[connection lost]\x1b[0m\r\n');
+          return 'closed';
+        });
       };
     } catch (err) {
       setConnState('error');
       setError(err instanceof Error ? err.message : 'Failed to create terminal session');
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sendWs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Initial connect.
+  // Initial WS connect (xterm may not exist yet — connectWs is called from
+  // within the xterm init useEffect once the Terminal is open).
+  // Unmount cleanup: close WS + delete session
   useEffect(() => {
-    connect();
     return () => {
-      if (wsRef.current) wsRef.current.close();
-      // Delete session on unmount so the backend doesn't accumulate idle sessions.
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       if (sessionIdRef.current) {
         terminal.delete(sessionIdRef.current).catch(() => {});
         sessionIdRef.current = null;
@@ -119,60 +236,20 @@ export function TerminalPane({ onOutput }: Props) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll to bottom on new output.
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'auto' }); }, [lines]);
-
-  // Observe container resize and send PTY resize event.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) sendResize(wsRef.current);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const sendResize = (ws: WebSocket) => {
-    const el = containerRef.current;
-    if (!el) return;
-    // Estimate cols/rows from container dimensions using 8px char width, 18px line height.
-    const cols = Math.max(40, Math.floor(el.clientWidth / 8));
-    const rows = Math.max(10, Math.floor(el.clientHeight / 18));
-    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-  };
-
-  const sendInput = useCallback((data: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'input', data }));
-    }
-  }, []);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      if (!cmd.trim()) return;
-      // Send the command + newline to the PTY.
-      sendInput(cmd + '\n');
-      setCmd('');
-      e.preventDefault();
-    } else if (e.key === 'c' && e.ctrlKey) {
-      // Ctrl+C — send ETX
-      sendInput('\x03');
-      e.preventDefault();
-    } else if (e.key === 'd' && e.ctrlKey) {
-      // Ctrl+D — send EOT
-      sendInput('\x04');
-      e.preventDefault();
-    }
-  }, [cmd, sendInput]);
-
   const handleReconnect = useCallback(() => {
     sessionIdRef.current = null; // force a new session
-    connect();
-  }, [connect]);
+    const t = termRef.current;
+    const f = fitAddonRef.current;
+    if (t) {
+      t.clear();
+      connectWs(t, f);
+    }
+  }, [connectWs]);
+
+  // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col bg-background font-mono text-xs">
+    <div className="flex h-full flex-col bg-background">
       {/* Header */}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-3 gap-2">
         <div className="flex items-center gap-2">
@@ -180,12 +257,12 @@ export function TerminalPane({ onOutput }: Props) {
           <span className="text-xs font-medium text-foreground">Terminal</span>
           <span className={cn(
             'h-1.5 w-1.5 rounded-full',
-            connState === 'open' ? 'bg-emerald-500' :
-            connState === 'connecting' ? 'bg-amber-500 animate-pulse' :
-            'bg-red-500'
+            connState === 'open'        ? 'bg-emerald-500' :
+            connState === 'connecting'  ? 'bg-amber-500 animate-pulse' :
+                                          'bg-red-500'
           )} />
           {connState === 'connecting' && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-          {connState === 'error' && <AlertCircle className="h-3 w-3 text-destructive" />}
+          {connState === 'error'      && <AlertCircle className="h-3 w-3 text-destructive" />}
         </div>
         {(connState === 'closed' || connState === 'error') && (
           <button
@@ -204,39 +281,11 @@ export function TerminalPane({ onOutput }: Props) {
         </div>
       )}
 
-      {/* Output */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 leading-[18px]">
-        {lines.length === 0 && connState === 'open' && (
-          <span className="text-muted-foreground/50">Connected. Type a command.</span>
-        )}
-        {lines.map((line, i) => (
-          <div key={i} className={cn(
-            'whitespace-pre-wrap break-all',
-            line.startsWith('$') ? 'text-emerald-400' :
-            line.startsWith('Error') || line.startsWith('[Process exited') || line.startsWith('[Connection') ? 'text-red-400' :
-            'text-foreground/90'
-          )}>
-            {line}
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input */}
-      <div className={cn(
-        'flex h-7 shrink-0 items-center border-t border-border px-3 gap-2',
-        connState !== 'open' && 'opacity-50',
-      )}>
-        <span className="text-emerald-400">$</span>
-        <input
-          value={cmd}
-          disabled={connState !== 'open'}
-          onChange={e => setCmd(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={connState === 'connecting' ? 'Connecting…' : connState === 'open' ? 'Enter command…' : 'Disconnected'}
-          className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground/40 text-foreground"
-        />
-      </div>
+      {/* xterm container — takes all remaining space */}
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-hidden p-1"
+      />
     </div>
   );
 }
