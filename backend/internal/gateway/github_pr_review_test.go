@@ -40,6 +40,22 @@ func TestParseUnifiedPatch_MultiHunk(t *testing.T) {
 	}
 }
 
+func TestParseUnifiedPatch_FunctionContextTail(t *testing.T) {
+	// GitHub appends the enclosing function signature after the second @@, and it
+	// can contain +/- tokens. Those must NOT corrupt the line counters.
+	patch := "@@ -1,3 +1,4 @@ func foo(-x, +y)\n ctx0\n-removed\n+added1\n+added2\n ctx1"
+	lines := parseUnifiedPatch(patch)
+	if len(lines) != 5 {
+		t.Fatalf("want 5 lines got %d: %+v", len(lines), lines)
+	}
+	if lines[0].Type != "eq" || lines[0].OldLine != 1 || lines[0].NewLine != 1 {
+		t.Errorf("ctx0 wrong (tail tokens corrupted counters): %+v", lines[0])
+	}
+	if lines[4].Type != "eq" || lines[4].OldLine != 3 || lines[4].NewLine != 4 {
+		t.Errorf("ctx1 wrong (tail tokens corrupted counters): %+v", lines[4])
+	}
+}
+
 func TestReviewAnchor_AddedLineUsesRightSide(t *testing.T) {
 	l := patchLine{Type: "add", NewLine: 7, OldLine: 0}
 	line, side := reviewAnchor(l)

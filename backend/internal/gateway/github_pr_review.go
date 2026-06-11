@@ -31,8 +31,13 @@ func parseUnifiedPatch(patch string) []patchLine {
 	oldN, newN := 0, 0
 	for _, raw := range strings.Split(patch, "\n") {
 		if strings.HasPrefix(raw, "@@") {
+			// Header form: "@@ -oldStart,oldCount +newStart,newCount @@ [context]".
+			// The -/+ ranges are always the 2nd and 3rd fields; scan ONLY those so
+			// a trailing function context (which GitHub includes and may itself
+			// contain +/- tokens, e.g. "func foo(-x, +y)") can't corrupt counters.
 			fields := strings.Fields(raw)
-			for _, f := range fields {
+			for i := 1; i < len(fields) && i <= 2; i++ {
+				f := fields[i]
 				if strings.HasPrefix(f, "-") {
 					oldN = atoiStart(f[1:]) - 1
 				} else if strings.HasPrefix(f, "+") {
@@ -176,7 +181,14 @@ func (gw *Gateway) handleGitHubPRReview(w http.ResponseWriter, r *http.Request) 
 
 	data, status, err := gw.ghPost(r.Context(), fmt.Sprintf("/repos/%s/%s/pulls/%s/reviews", owner, repo, num), body)
 	if err != nil {
-		writeJSON(w, 502, map[string]string{"error": err.Error()})
+		// Surface GitHub's real status (e.g. 422 "invalid event") so the review
+		// UI can branch on it; fall back to 502 only for transport failures
+		// where ghPost couldn't reach GitHub at all.
+		code := status
+		if code < 400 {
+			code = http.StatusBadGateway
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
