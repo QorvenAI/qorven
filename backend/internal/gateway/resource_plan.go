@@ -100,3 +100,63 @@ func ParseResourcePlan(md string) (ResourcePlan, error) {
 	}
 	return p, nil
 }
+
+// ModelPricingLite is the per-1M rate pair the engine needs (decoupled from llm pkg).
+type ModelPricingLite struct{ Input, Output float64 }
+
+// modelPicker returns (modelID, providerID) for a role+tier from enabled models.
+type modelPicker func(role, tier string) (string, string)
+
+// buildResourcePlan is the pure cost engine: for each role pick a model, estimate
+// tokens, price it; sum to a total; project cap = total + 25% buffer, clamped to
+// the user's budget (USD). budgetUSD<=0 means no ceiling.
+func buildResourcePlan(roles []string, quality, timeline string, budgetUSD float64, pick modelPicker, rates map[string]ModelPricingLite) ResourcePlan {
+	p := ResourcePlan{Timeline: timeline}
+	tier := qualityTier(quality)
+	for _, role := range roles {
+		modelID, providerID := pick(role, tier)
+		inTok := estimateTokens(role, quality)
+		outTok := inTok / 2 // rough: output ~half of input for codegen
+		var cost int64
+		var missing bool
+		if r, ok := rates[modelID]; ok {
+			cost, missing = computeAgentCostUUSD(r.Input, r.Output, inTok, outTok)
+		} else {
+			missing = true
+		}
+		pa := PlannedAgent{Role: role, ModelID: modelID, ProviderID: providerID,
+			EstTokensIn: inTok, EstTokensOut: outTok, CapUUSD: cost, PricingKnown: !missing}
+		if pa.CapUUSD <= 0 {
+			pa.CapUUSD = 1_000_000 // $1 floor
+		}
+		if missing {
+			p.Notes = append(p.Notes, "pricing unknown for "+modelID+" — estimate excludes it")
+		}
+		p.Agents = append(p.Agents, pa)
+		p.TotalEstUUSD += cost
+	}
+	cap := p.TotalEstUUSD + p.TotalEstUUSD/4 // +25% buffer
+	if budgetUSD > 0 {
+		ceil := int64(budgetUSD * uusdPerUSD)
+		if cap > ceil {
+			cap = ceil
+			p.Notes = append(p.Notes, "project cap clamped to your budget")
+		}
+	}
+	if cap <= 0 {
+		cap = 1_000_000
+	}
+	p.ProjectCapUUSD = cap
+	return p
+}
+
+func qualityTier(quality string) string {
+	switch quality {
+	case "enterprise":
+		return "complex"
+	case "production":
+		return "standard"
+	default:
+		return "simple"
+	}
+}
