@@ -299,7 +299,12 @@ func (gw *Gateway) startDeploy(project *tools.CodeProject, target, releaseID, re
 				fmt.Sprintf("Deploy %s failed: %s", projectName, errMsg),
 				map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID, "error": errMsg, "release_id": releaseID},
 				"", "")
-			// TODO(Task 9): gw.triggerFixLoop on failure
+			if briefID != "" {
+				gw.triggerFixLoop(context.Background(), briefID,
+					"deploy", "deploy-"+rec.ID,
+					"Deploy failed: "+rec.ProjectName,
+					errMsg)
+			}
 			slog.Error("deploy.failed", "project", projectID, "target", target, "err", err)
 			return
 		}
