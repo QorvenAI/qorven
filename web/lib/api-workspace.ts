@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest } from './api-core';
-import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact } from '@/types';
+import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn } from '@/types';
 
 // Skills
 export const skills = {
@@ -132,6 +132,8 @@ export const projectBriefs = {
     request<ProjectArtifact>(`/project-briefs/${encodeURIComponent(id)}/artifacts/${type}/approve`, { method: 'POST', body: '{}' }),
   requestChanges: (id: string, type: string, feedback: string) =>
     request<{ status: string; downstream_reopened: string[] }>(`/project-briefs/${encodeURIComponent(id)}/artifacts/${type}/request-changes`, { method: 'POST', body: JSON.stringify({ feedback }) }),
+  burn: (id: string) =>
+    request<ProjectBurn>(`/projects/${encodeURIComponent(id)}/burn`),
 };
 
 // Workspaces / Templates

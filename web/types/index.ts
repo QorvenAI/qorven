@@ -350,3 +350,33 @@ export interface ProjectArtifact {
   approved_at?: string | null;
   created_at: string;
 }
+
+// ─── Phase 8B — CFO Resource Planner ─────────────────────────────────────────
+
+export interface PlannedAgent {
+  role: string;
+  model_id: string;
+  provider_id: string;
+  est_tokens_in: number;
+  est_tokens_out: number;
+  cap_uusd: number;
+  pricing_known: boolean;
+}
+
+export interface ResourcePlan {
+  agents: PlannedAgent[];
+  total_est_uusd: number;
+  project_cap_uusd: number;
+  timeline: string;
+  notes?: string[];
+}
+
+export interface ProjectBurn {
+  project_id: string;
+  used_uusd: number;
+  cap_uusd: number;
+  used_usd: number;
+  cap_usd: number;
+  pct: number;
+  warn_pct: number;
+}
