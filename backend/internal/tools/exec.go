@@ -445,35 +445,8 @@ func capOutput(s string, max int) string {
 	return s[:max] + fmt.Sprintf("\n[truncated — %d bytes total]", len(s))
 }
 
-func resolvePath(path, base string, mustExist bool) (string, error) {
-	if path == "" {
-		return base, nil
-	}
-	// Expand tilde to real home directory
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = home + path[1:]
-		}
-	} else if path == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = home
-		}
-	}
-	// Expand relative paths against base
-	if !strings.HasPrefix(path, "/") {
-		path = base + "/" + path
-	}
-	// Allow workspace or home-dir paths
-	home, _ := os.UserHomeDir()
-	if !strings.HasPrefix(path, base) && (home == "" || !strings.HasPrefix(path, home)) {
-		return "", fmt.Errorf("path %s is outside workspace", path)
-	}
-	if mustExist {
-		if _, err := os.Stat(path); err != nil {
-			return "", fmt.Errorf("path does not exist: %s", path)
-		}
-	}
-	return path, nil
-}
+// resolvePath moved to path_resolve.go (platform-neutral) so non-Windows-only
+// exec.go isn't its sole home — filesystem.go and code_edit.go also use it and
+// must compile on Windows.
 
 // Context helpers are in types.go
