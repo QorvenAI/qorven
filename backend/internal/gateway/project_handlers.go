@@ -853,6 +853,131 @@ func (gw *Gateway) handleWriteProjectFile(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, map[string]any{"path": req.Path, "size": len(req.Content)})
 }
 
+// sandboxPath resolves a (possibly relative) path inside the workspace and
+// returns the cleaned absolute path. If the result escapes the workspace root,
+// the second return value is false and the caller must reject the request.
+func sandboxPath(workspace, rawPath string) (string, bool) {
+	abs := rawPath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(workspace, abs)
+	}
+	abs = filepath.Clean(abs)
+	// Require the cleaned absolute path to be workspace itself or a descendant.
+	return abs, abs == workspace || strings.HasPrefix(abs, workspace+"/")
+}
+
+// handleDeleteProjectFile deletes a file or directory from the project workspace.
+// DELETE /v1/projects/{id}/file?path=<rel>
+func (gw *Gateway) handleDeleteProjectFile(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	rawPath := r.URL.Query().Get("path")
+	if rawPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path required"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	abs, ok := sandboxPath(workspace, rawPath)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	if err := os.RemoveAll(abs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	// Emit file.edited with a "deleted" marker (non-fatal).
+	if gw.events != nil {
+		relPath := strings.TrimPrefix(abs, workspace+"/")
+		_ = gw.events.Emit(r.Context(), apievents.SinkAll, apievents.TypeFileEdited, apievents.FileEditedProps{
+			ProjectID:  project.ID,
+			Path:       relPath,
+			Diff:       "(deleted)",
+			BytesAfter: 0,
+			Actor:      actorFromContext(r.Context()),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": rawPath})
+}
+
+// handleRenameProjectFile renames (or moves) a file within the project workspace.
+// POST /v1/projects/{id}/file/rename  body: {from, to}
+func (gw *Gateway) handleRenameProjectFile(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.From == "" || req.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to required"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	absFrom, okFrom := sandboxPath(workspace, req.From)
+	absTo, okTo := sandboxPath(workspace, req.To)
+	if !okFrom || !okTo {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	// Ensure destination parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(absTo), 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	if err := os.Rename(absFrom, absTo); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"from": req.From, "to": req.To})
+}
+
+// handleMkdirProjectFile creates a directory (and any parents) in the project workspace.
+// POST /v1/projects/{id}/file/mkdir  body: {path}
+func (gw *Gateway) handleMkdirProjectFile(w http.ResponseWriter, r *http.Request) {
+	if gw.projectReg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not initialized"})
+		return
+	}
+	project := gw.projectReg.Get(chi.URLParam(r, "id"))
+	if project == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path required"})
+		return
+	}
+	workspace := resolveWorkspace(project)
+	abs, ok := sandboxPath(workspace, req.Path)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": req.Path})
+}
+
 func last(path string) string {
 	parts := strings.Split(path, "/")
 	return parts[len(parts)-1]
