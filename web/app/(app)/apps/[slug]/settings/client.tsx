@@ -5,8 +5,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, Save, Settings } from 'lucide-react';
-import { getApp, patchApp } from '@/lib/api-apps';
+import { ArrowLeft, Loader2, Save, Settings, Globe } from 'lucide-react';
+import { getApp, patchApp, publishApp } from '@/lib/api-apps';
 import type { QorvenApp, SettingDef } from '@/lib/api-apps';
 import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
@@ -23,6 +23,22 @@ export default function AppSettingsClient() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+
+  async function handlePublishToggle() {
+    if (!app) return;
+    setPublishing(true);
+    try {
+      const next = !app.external_enabled;
+      await publishApp(app.id, next);
+      setApp({ ...app, external_enabled: next });
+      toast.success(next ? 'Published externally — start a tunnel in Settings → Network to make it reachable' : 'Unpublished — external surface is now closed');
+    } catch {
+      toast.error('Failed to update publish state (admin only)');
+    } finally {
+      setPublishing(false);
+    }
+  }
 
   useEffect(() => {
     if (!slug || slug === '__app__') return;
@@ -124,6 +140,29 @@ export default function AppSettingsClient() {
     >
       <div className="flex-1 min-w-0 overflow-y-auto px-6 pb-6">
         <div className="max-w-2xl">
+          {/* External publishing */}
+          <div className="rounded-xl border border-border bg-card mb-6">
+            <div className="flex items-start justify-between gap-4 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold flex items-center gap-1.5"><Globe className="h-4 w-4 text-muted-foreground" /> Publish externally</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-md">
+                  Expose this app's public pages/tools on the internet (via a tunnel). Only manifest-declared public surfaces are reachable — your admin API stays private. Start a tunnel in Settings → Network → Internet exposure.
+                </p>
+              </div>
+              <button
+                onClick={handlePublishToggle}
+                disabled={publishing}
+                className={cn(
+                  'shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50',
+                  app.external_enabled ? 'border border-border text-muted-foreground hover:bg-accent' : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                )}
+              >
+                {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}
+                {app.external_enabled ? 'Unpublish' : 'Publish'}
+              </button>
+            </div>
+          </div>
+
           {schema.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted mb-4">

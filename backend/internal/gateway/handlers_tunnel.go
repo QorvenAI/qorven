@@ -36,6 +36,12 @@ func (gw *Gateway) publicPort() int {
 func (gw *Gateway) buildPublicMux() chi.Router {
 	r := chi.NewRouter()
 	r.Use(PathTraversalGuard)
+	// Public surface is unauthenticated + internet-facing: throttle per IP so
+	// the tool bridge can't be used to spawn unbounded subprocesses (DoS), and
+	// lock down the response headers (tight CSP, deny framing) since the page
+	// loads third-party app bundle code.
+	r.Use(NewIPRateLimit(10, 20).Middleware())
+	r.Use(publicSecurityHeaders)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -43,11 +49,14 @@ func (gw *Gateway) buildPublicMux() chi.Router {
 		_, _ = w.Write([]byte(`{"status":"ok","surface":"public"}`))
 	})
 
-	// Placeholder landing until item 5 mounts real external app surfaces.
+	// Placeholder landing.
 	r.Get("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("Qorven public surface. No app is published here yet."))
 	})
+
+	// External-facing app surfaces (default-deny; only published + public).
+	gw.mountPublicApps(r)
 
 	return r
 }

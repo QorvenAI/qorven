@@ -35,14 +35,14 @@ func (s *AppStore) Create(ctx context.Context, a App) (App, error) {
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO apps (tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-		 RETURNING id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema`,
+		 RETURNING id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema, external_enabled`,
 		a.TenantID, a.Slug, a.DisplayName, a.Description, a.Version, a.Author, a.IconURL, a.InstallPath, a.Enabled, cfgJSON, scope, a.OwnerAgentID, a.OwnerTeamID,
 		a.Icon, a.PinnedRail, a.RailOrder, a.PinnedTopbar, a.TopbarOrder, schemaJSON,
 	).Scan(&created.ID, &created.TenantID, &created.Slug, &created.DisplayName,
 		&created.Description, &created.Version, &created.Author, &created.IconURL,
 		&created.InstallPath, &created.Enabled, &cfgRaw, &created.InstalledAt, &created.UpdatedAt,
 		&created.Scope, &created.OwnerAgentID, &created.OwnerTeamID,
-		&created.Icon, &created.PinnedRail, &created.RailOrder, &created.PinnedTopbar, &created.TopbarOrder, &schemaRaw)
+		&created.Icon, &created.PinnedRail, &created.RailOrder, &created.PinnedTopbar, &created.TopbarOrder, &schemaRaw, &created.ExternalEnabled)
 	if err != nil {
 		return App{}, err
 	}
@@ -56,21 +56,21 @@ func (s *AppStore) Create(ctx context.Context, a App) (App, error) {
 // Get returns an app by ID scoped to tenantID.
 func (s *AppStore) Get(ctx context.Context, tenantID, id string) (App, error) {
 	return s.scanOne(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema, external_enabled
 		 FROM apps WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 }
 
 // GetBySlug returns an app by slug scoped to tenantID.
 func (s *AppStore) GetBySlug(ctx context.Context, tenantID, slug string) (App, error) {
 	return s.scanOne(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema, external_enabled
 		 FROM apps WHERE slug = $1 AND tenant_id = $2`, slug, tenantID)
 }
 
 // List returns all apps for a tenant ordered by display_name (admin view — unscoped).
 func (s *AppStore) List(ctx context.Context, tenantID string) ([]App, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema, external_enabled
 		 FROM apps WHERE tenant_id = $1 ORDER BY display_name ASC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (s *AppStore) List(ctx context.Context, tenantID string) ([]App, error) {
 // agentID or teamID means those scoped apps are never returned.
 func (s *AppStore) ListScoped(ctx context.Context, tenantID, agentID, teamID string) ([]App, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema
+		`SELECT id, tenant_id, slug, display_name, description, version, author, icon_url, install_path, enabled, config, installed_at, updated_at, scope, owner_agent_id, owner_team_id, icon, pinned_rail, rail_order, pinned_topbar, topbar_order, settings_schema, external_enabled
 		 FROM apps
 		 WHERE tenant_id = $1 AND enabled = true
 		   AND (
@@ -127,6 +127,14 @@ func (s *AppStore) ListScoped(ctx context.Context, tenantID, agentID, teamID str
 func (s *AppStore) SetEnabled(ctx context.Context, tenantID, id string, enabled bool) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE apps SET enabled=$1, updated_at=$2 WHERE id=$3 AND tenant_id=$4`,
+		enabled, time.Now(), id, tenantID)
+	return err
+}
+
+// SetExternalEnabled toggles whether the app is published externally.
+func (s *AppStore) SetExternalEnabled(ctx context.Context, tenantID, id string, enabled bool) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE apps SET external_enabled=$1, updated_at=$2 WHERE id=$3 AND tenant_id=$4`,
 		enabled, time.Now(), id, tenantID)
 	return err
 }
@@ -188,7 +196,7 @@ func (s *AppStore) scanRow(r rowScanner) (App, error) {
 		&a.Version, &a.Author, &a.IconURL, &a.InstallPath, &a.Enabled,
 		&cfgRaw, &a.InstalledAt, &a.UpdatedAt,
 		&a.Scope, &a.OwnerAgentID, &a.OwnerTeamID,
-		&a.Icon, &a.PinnedRail, &a.RailOrder, &a.PinnedTopbar, &a.TopbarOrder, &schemaRaw); err != nil {
+		&a.Icon, &a.PinnedRail, &a.RailOrder, &a.PinnedTopbar, &a.TopbarOrder, &schemaRaw, &a.ExternalEnabled); err != nil {
 		return App{}, err
 	}
 	if len(cfgRaw) > 0 {

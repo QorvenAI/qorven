@@ -312,6 +312,85 @@ func (m *AppManager) BundlePath(slug string) (string, bool) {
 	return path, true
 }
 
+// IsToolPublic reports whether the loaded app exposes a tool with the given
+// name flagged Public — i.e. callable from the public bridge.
+func (m *AppManager) IsToolPublic(slug, toolName string) bool {
+	m.mu.RLock()
+	la, ok := m.loaded[slug]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	for i := range la.manifest.Tools {
+		if la.manifest.Tools[i].Name == toolName {
+			return la.manifest.Tools[i].Public
+		}
+	}
+	return false
+}
+
+// IsPagePublic reports whether the loaded app exposes a page with the given
+// path (or id) flagged Public — i.e. part of the external public surface.
+func (m *AppManager) IsPagePublic(slug, pagePath string) bool {
+	m.mu.RLock()
+	la, ok := m.loaded[slug]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	for i := range la.manifest.Frontend.Pages {
+		p := la.manifest.Frontend.Pages[i]
+		if (p.Path == pagePath || p.ID == pagePath) && p.Public {
+			return true
+		}
+	}
+	return false
+}
+
+// PublicPages returns the loaded app's public-flagged pages (may be empty).
+func (m *AppManager) PublicPages(slug string) []PageDef {
+	m.mu.RLock()
+	la, ok := m.loaded[slug]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	var pages []PageDef
+	for i := range la.manifest.Frontend.Pages {
+		if la.manifest.Frontend.Pages[i].Public {
+			pages = append(pages, la.manifest.Frontend.Pages[i])
+		}
+	}
+	return pages
+}
+
+// IsExternalEnabled reports whether the loaded app has been published
+// externally (admin toggle). Public pages/tools are reachable on the public
+// mux ONLY when this is true.
+func (m *AppManager) IsExternalEnabled(slug string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	la, ok := m.loaded[slug]
+	return ok && la.app.ExternalEnabled
+}
+
+// SetExternalEnabled persists the publish flag and updates the in-memory app
+// so IsExternalEnabled reflects it immediately (no reload needed).
+func (m *AppManager) SetExternalEnabled(ctx context.Context, id string, enabled bool) error {
+	if err := m.store.SetExternalEnabled(ctx, m.tenantID, id, enabled); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	for _, la := range m.loaded {
+		if la.app.ID == id {
+			la.app.ExternalEnabled = enabled
+			break
+		}
+	}
+	m.mu.Unlock()
+	return nil
+}
+
 // FrontendManifests returns the frontend manifest for every loaded enabled app.
 func (m *AppManager) FrontendManifests() []AppFrontendEntry {
 	m.mu.RLock()
@@ -570,7 +649,20 @@ func (m *AppManager) dropAppTables(ctx context.Context, a App) {
 
 // RunTool executes a named tool for a loaded app and returns its Result.
 // Returns an error if the app is not loaded/enabled or the tool is not found.
+// RunTool runs an app tool with full internal context (DB DSN + connector
+// credentials in the subprocess env). Use for authenticated/internal callers.
 func (m *AppManager) RunTool(ctx context.Context, slug, toolName string, args map[string]any) (*tools.Result, error) {
+	return m.runTool(ctx, slug, toolName, args, false)
+}
+
+// RunToolPublic runs an app tool invoked from the UNAUTHENTICATED public bridge.
+// It withholds all secrets from the subprocess env (no QORVEN_DB_DSN, no
+// connector key) so an untrusted public tool cannot read or exfiltrate them.
+func (m *AppManager) RunToolPublic(ctx context.Context, slug, toolName string, args map[string]any) (*tools.Result, error) {
+	return m.runTool(ctx, slug, toolName, args, true)
+}
+
+func (m *AppManager) runTool(ctx context.Context, slug, toolName string, args map[string]any, public bool) (*tools.Result, error) {
 	m.mu.RLock()
 	la, ok := m.loaded[slug]
 	m.mu.RUnlock()
@@ -612,14 +704,19 @@ func (m *AppManager) RunTool(ctx context.Context, slug, toolName string, args ma
 		"QORVEN_TENANT_ID=" + la.app.TenantID,
 		"QORVEN_APP_ID=" + la.app.ID,
 		"QORVEN_AGENT_ID=" + tools.AgentIDFromCtx(ctx),
-		"QORVEN_DB_DSN=" + m.dsn,
+	}
+	// Public-bridge tools get the DB DSN ONLY if the app explicitly declared the
+	// db_write permission (opt-in by the author). Connector credentials are
+	// NEVER given to public tools. Internal callers always get the DSN.
+	if !public || HasPermission(la.manifest, "db_write") {
+		baseEnv = append(baseEnv, "QORVEN_DB_DSN="+m.dsn)
 	}
 	for k, v := range la.app.Config {
 		envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
 		baseEnv = append(baseEnv, envKey+"="+fmt.Sprintf("%v", v))
 	}
 	c.Env = appToolEnv(la.app.InstallPath, baseEnv...)
-	if m.credLookup != nil {
+	if !public && m.credLookup != nil {
 		if key := m.credLookup(la.app.TenantID, la.manifest.Slug); key != "" {
 			c.Env = append(c.Env, "CONNECTOR_"+strings.ToUpper(strings.ReplaceAll(la.manifest.Slug, "-", "_"))+"_KEY="+key)
 		}
@@ -673,7 +770,9 @@ type appTool struct {
 	run               func(ctx context.Context, args map[string]any) *tools.Result
 }
 
-func (t *appTool) Name() string                                            { return t.name }
-func (t *appTool) Description() string                                     { return t.description }
-func (t *appTool) Parameters() map[string]any                              { return t.parameters }
-func (t *appTool) Execute(ctx context.Context, args map[string]any) *tools.Result { return t.run(ctx, args) }
+func (t *appTool) Name() string               { return t.name }
+func (t *appTool) Description() string        { return t.description }
+func (t *appTool) Parameters() map[string]any { return t.parameters }
+func (t *appTool) Execute(ctx context.Context, args map[string]any) *tools.Result {
+	return t.run(ctx, args)
+}
