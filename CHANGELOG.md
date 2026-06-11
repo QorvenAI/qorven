@@ -4,6 +4,28 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.10.0-alpha — 2026-06-11
+
+Build on Qorven, take it to the internet, and let agents work on your sites.
+
+### Added
+- **Build apps on Qorven.** Just ask — "build me a todo app", "a stock dashboard", "a CRM for the office" — and your agents build it as a real app that installs into your workspace, with its own pages, tools, and data. Like plugins on top of a platform. Agents now have a built-in knowledge base for the UI, code, and database conventions, so you don't have to explain anything.
+- **External-facing apps.** Apps can serve a public page to the outside world (e.g. a customer booking form) that safely writes back to your internal data, while you manage it from an admin page inside Qorven. Publish an app externally with one toggle.
+- **Internet exposure (tunnel).** Open a public URL to a chosen surface in one click — Cloudflare quick tunnel (no account needed) or Tailscale Funnel — under Settings → Network. Only what you publish is reachable; your admin backend stays private.
+- **Agents work on your external sites.** Connect your own WordPress, store, or SaaS under Settings → Connections (with your site URL + credentials), and agents can act on it — create posts, manage content — or drive any site through an autonomous browser.
+- **Pin hubs & chats.** Pin the hubs and chats you use most to the top of the sidebar; they follow you across devices.
+- **Global search in the header.** A search box on every page (also ⌘K) finds agents, hubs, files, and more.
+
+### Changed
+- **Consistent, polished navigation.** Each section now shows its own sidebar (Code explorer, Mail folders, Channels, Social, Drive…), with your hubs and recent chats always pinned at the bottom. Unified section headers and spacing throughout.
+- **"Hubs" everywhere.** Group workspaces are consistently called Hubs; the page now lives at `/hubs` (old links redirect automatically).
+- **New UI system documentation** for contributors (`docs/ui/`) and an app-builder knowledge base.
+
+### Security
+- Hardened every new internet-facing and outbound path: the public app surface is default-deny, rate-limited, and runs without access to your secrets; agent access to external sites is guarded against requests to internal/private addresses (with DNS resolution to stop rebinding tricks).
+
+---
+
 ## v0.9.1-alpha — 2026-06-10
 
 Polish for the new workspace design.
