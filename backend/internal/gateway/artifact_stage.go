@@ -22,6 +22,8 @@ func stageIndex(s string) int {
 
 // NextStage returns the stage after cur, or cur if terminal/unknown.
 func NextStage(cur string) string {
+	// "approved" is a human gate. The transition to "building" is driven by the
+	// build-dispatch event (8C orchestration), not by NextStage, so hold here.
 	if cur == "approved" {
 		return "approved"
 	}
