@@ -28,6 +28,8 @@ type ProjectBrief struct {
 	Timeline    string        `json:"timeline"`
 	Quality     string        `json:"quality"`
 	Status      string        `json:"status"`
+	Stage       string        `json:"stage"`
+	Mode        string        `json:"mode"`
 	Proposal    *TeamProposal `json:"proposal,omitempty"`
 	GoalID      *string       `json:"goal_id,omitempty"`
 	CreatedAt   time.Time     `json:"created_at"`
@@ -41,7 +43,7 @@ func (gw *Gateway) handleListProjectBriefs(w http.ResponseWriter, r *http.Reques
 	}
 	rows, err := gw.db.Pool.Query(r.Context(),
 		`SELECT id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
-		        status, proposal, goal_id, created_at, updated_at
+		        status, proposal, goal_id, created_at, updated_at, stage, mode
 		 FROM project_briefs WHERE tenant_id = $1 ORDER BY created_at DESC`, defaultTenant)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -54,7 +56,7 @@ func (gw *Gateway) handleListProjectBriefs(w http.ResponseWriter, r *http.Reques
 		var proposalJSON []byte
 		if err := rows.Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
-			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode); err != nil {
 			continue
 		}
 		if proposalJSON != nil {
@@ -81,11 +83,11 @@ func (gw *Gateway) handleGetProjectBrief(w http.ResponseWriter, r *http.Request)
 	var proposalJSON []byte
 	err := gw.db.Pool.QueryRow(r.Context(),
 		`SELECT id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
-		        status, proposal, goal_id, created_at, updated_at
+		        status, proposal, goal_id, created_at, updated_at, stage, mode
 		 FROM project_briefs WHERE id = $1 AND tenant_id = $2`, id, defaultTenant).
 		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
-			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt)
+			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 		return
@@ -130,12 +132,12 @@ func (gw *Gateway) handleCreateProjectBrief(w http.ResponseWriter, r *http.Reque
 		   (tenant_id, title, idea, stack, budget_cents, timeline, quality, goal_id)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		 RETURNING id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
-		           status, proposal, goal_id, created_at, updated_at`,
+		           status, proposal, goal_id, created_at, updated_at, stage, mode`,
 		defaultTenant, body.Title, body.Idea, body.Stack, body.BudgetCents,
 		body.Timeline, body.Quality, body.GoalID).
 		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
-			nil, &b.GoalID, &b.CreatedAt, &b.UpdatedAt)
+			nil, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -173,12 +175,12 @@ func (gw *Gateway) handleUpdateProjectBrief(w http.ResponseWriter, r *http.Reque
 		   updated_at   = NOW()
 		 WHERE id = $1 AND tenant_id = $9
 		 RETURNING id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
-		           status, proposal, goal_id, created_at, updated_at`,
+		           status, proposal, goal_id, created_at, updated_at, stage, mode`,
 		id, body.Title, body.Idea, body.Stack, body.BudgetCents,
 		body.Timeline, body.Quality, body.Status, defaultTenant).
 		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
-			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt)
+			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -210,11 +212,11 @@ func (gw *Gateway) handleProposeTeam(w http.ResponseWriter, r *http.Request) {
 	var proposalJSON []byte
 	err := gw.db.Pool.QueryRow(r.Context(),
 		`SELECT id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
-		        status, proposal, goal_id, created_at, updated_at
+		        status, proposal, goal_id, created_at, updated_at, stage, mode
 		 FROM project_briefs WHERE id = $1 AND tenant_id = $2`, id, defaultTenant).
 		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
-			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt)
+			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "brief not found"})
 		return
@@ -397,11 +399,11 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 	var proposalJSON []byte
 	err := gw.db.Pool.QueryRow(ctx,
 		`SELECT id, tenant_id, title, idea, stack, budget_cents, timeline, quality,
-		        status, proposal, goal_id, created_at, updated_at
+		        status, proposal, goal_id, created_at, updated_at, stage, mode
 		 FROM project_briefs WHERE id = $1 AND tenant_id = $2`, id, defaultTenant).
 		Scan(&b.ID, &b.TenantID, &b.Title, &b.Idea, &b.Stack,
 			&b.BudgetCents, &b.Timeline, &b.Quality, &b.Status,
-			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt)
+			&proposalJSON, &b.GoalID, &b.CreatedAt, &b.UpdatedAt, &b.Stage, &b.Mode)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "brief not found"})
 		return
