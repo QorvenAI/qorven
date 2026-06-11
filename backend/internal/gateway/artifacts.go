@@ -327,3 +327,15 @@ func (gw *Gateway) commitArtifactToRepo(ctx context.Context, briefID, typ, conte
 	// call site here means 8C only fills the body.
 	_ = ctx; _ = briefID; _ = typ; _ = contentMD
 }
+
+// handleListProjectArtifacts returns the active artifacts + the project's stage.
+// GET /v1/project-briefs/{id}/artifacts
+func (gw *Gateway) handleListProjectArtifacts(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil { writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"}); return }
+	id := chi.URLParam(r, "id")
+	brief, err := gw.readBrief(r.Context(), id)
+	if err != nil { writeJSON(w, http.StatusNotFound, map[string]string{"error": "brief not found"}); return }
+	arts, err := gw.listArtifacts(r.Context(), id)
+	if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)}); return }
+	writeJSON(w, http.StatusOK, map[string]any{"stage": brief.Stage, "mode": brief.Mode, "artifacts": arts})
+}
