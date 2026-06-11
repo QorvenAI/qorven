@@ -22,10 +22,11 @@ func TestArtifactStageFor(t *testing.T) {
 
 func TestDownstreamArtifacts(t *testing.T) {
 	got := DownstreamArtifacts("prd")
-	want := []string{"spec", "design"}
+	want := []string{"spec", "design", "resource_plan"}
 	if len(got) != len(want) { t.Fatalf("got %v want %v", got, want) }
 	for i := range want { if got[i] != want[i] { t.Errorf("idx %d: %q != %q", i, got[i], want[i]) } }
-	if len(DownstreamArtifacts("design")) != 0 { t.Error("design has no downstream") }
+	ds := DownstreamArtifacts("design")
+	if len(ds) != 1 || ds[0] != "resource_plan" { t.Errorf("design downstream should be [resource_plan], got %v", ds) }
 }
 
 func TestCanAdvance(t *testing.T) {
@@ -44,6 +45,15 @@ func TestCanAdvance_EdgeCases(t *testing.T) {
 }
 
 func TestDownstreamArtifacts_ResourcePlan(t *testing.T) {
-	// resource_plan is owned by 8B (CFO), not part of the request-changes cascade.
+	// resource_plan is the LAST cascade member, so it has no downstream of its own
+	// (but upstream changes — prd/spec/design — do reopen it).
 	if len(DownstreamArtifacts("resource_plan")) != 0 { t.Error("resource_plan has no cascade downstream") }
+}
+
+func TestDownstreamArtifacts_IncludesResourcePlan(t *testing.T) {
+	// changing the design must now reopen the resource_plan (it depends on scope)
+	got := DownstreamArtifacts("design")
+	found := false
+	for _, d := range got { if d == "resource_plan" { found = true } }
+	if !found { t.Error("design change should reopen resource_plan") }
 }

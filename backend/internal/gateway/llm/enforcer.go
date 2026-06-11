@@ -31,6 +31,13 @@ type DBEnforcer struct {
 	repo budgetRepo
 	warn func(scopeKey string)
 
+	// OnWarn is an optional hook called after the slog.Warn when a scope
+	// crosses its warn threshold. scopeKey has the form "scope:scopeID"
+	// (e.g. "project:abc123"). pct is the integer percentage of cap consumed.
+	// It is safe to set this field after NewDBEnforcer returns and before the
+	// first Check call.
+	OnWarn func(scopeKey string, pct int)
+
 	mu    sync.Mutex
 	cache map[string]cachedVerdict
 	ttl   time.Duration
@@ -123,6 +130,11 @@ func (e *DBEnforcer) maybeWarn(scopeKey string, spent, cap int64, warnPct int) {
 	}
 	e.mu.Unlock()
 	e.warn(scopeKey)
+	// Compute integer percentage consumed and fire the optional broadcast hook.
+	if e.OnWarn != nil {
+		pct := int(spent * 100 / cap)
+		e.OnWarn(scopeKey, pct)
+	}
 }
 
 // pgBudgetRepo reads gateway_budgets caps and gateway_spend.cost_total_uusd.
@@ -221,9 +233,14 @@ func (r *pgBudgetRepo) DepartmentBudget(ctx context.Context, tenantID, departmen
 }
 
 // scopedBudget reads the cap for a department/project scope row and sums its
-// month-to-date spend from the raw ledger (which carries department_id /
-// project_id after migration 030). col is a hardcoded literal (never user
-// input) so concatenating it is safe; ids are bound params.
+// spend from the raw ledger (which carries department_id / project_id after
+// migration 030). col is a hardcoded literal (never user input) so
+// concatenating it is safe; ids are bound params.
+//
+// Department budgets are recurring monthly allowances, so their spend is summed
+// month-to-date. A project cap is a one-off lifetime allocation from the
+// resource plan, so project spend is summed across all time — a /code project
+// runs to completion and may span more than one calendar month.
 func (r *pgBudgetRepo) scopedBudget(ctx context.Context, tenantID, col, id, scope string) (int64, int64, int, bool) {
 	var monthlyUSD *float64
 	var warnPct *int
@@ -235,9 +252,13 @@ func (r *pgBudgetRepo) scopedBudget(ctx context.Context, tenantID, col, id, scop
 		return 0, 0, 0, false
 	}
 	capUUSD := int64(*monthlyUSD * float64(uusdPerUSD))
+	spendFilter := `FILTER (WHERE created_at >= date_trunc('month', CURRENT_DATE))`
+	if scope == "project" {
+		spendFilter = "" // lifetime spend for one-off project caps
+	}
 	var spent *int64
 	_ = r.db.QueryRow(ctx,
-		`SELECT SUM(cost_total_uusd) FILTER (WHERE created_at >= date_trunc('month', CURRENT_DATE))
+		`SELECT SUM(cost_total_uusd) `+spendFilter+`
 		 FROM gateway_spend_raw WHERE tenant_id = $1 AND `+col+` = $2`,
 		tenantID, id).Scan(&spent)
 	wp := 80

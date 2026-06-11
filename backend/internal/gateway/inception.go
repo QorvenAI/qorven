@@ -428,6 +428,19 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 
 	agentIDs := map[string]string{}
 
+	// Load the approved resource_plan artifact (written at artifact approval time).
+	// planByRole maps each agent role to its PlannedAgent cap/model entry.
+	// A missing resource_plan (older briefs) is not an error — planByRole stays empty
+	// and agents are created without a cap (credit_budget_cents = 0 = unlimited).
+	planByRole := map[string]PlannedAgent{}
+	if art, err := gw.getActiveArtifact(ctx, id, "resource_plan"); err == nil && art != nil {
+		if plan, perr := ParseResourcePlan(art.ContentMD); perr == nil {
+			for _, rp := range plan.Agents {
+				planByRole[rp.Role] = rp
+			}
+		}
+	}
+
 	for _, pa := range proposal.Agents {
 		sysPrompt := buildAgentSystemPrompt(pa.Role, b.Title, inceptionWorkspace)
 		// Resolve a model that the configured providers can actually serve.
@@ -441,13 +454,33 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+
+		// Per-agent cap from the approved resource plan.
+		// 1 cent = 10_000 µUSD. A floor of 1 cent is applied when CapUUSD > 0
+		// but the integer division rounds to zero (i.e. sub-cent allocations).
+		// Agents with no plan entry get 0, preserving the "unlimited" semantic.
+		// NOTE: the project-level cap row is written by applyResourcePlanCaps at
+		// artifact approval time. Task 8C's dispatch must stamp
+		// MeterScope.ProjectID = briefID for the DBEnforcer to enforce that cap.
+		var creditCents int64
+		if rpa, ok := planByRole[pa.Role]; ok {
+			creditCents = rpa.CapUUSD / 10_000
+			if creditCents <= 0 && rpa.CapUUSD > 0 {
+				creditCents = 1
+			}
+			// Use the plan's model when available; it has been matched to provider rates.
+			if rpa.ModelID != "" {
+				resolvedModel = rpa.ModelID
+			}
+		}
+
 		var agentID string
 		err := gw.db.Pool.QueryRow(ctx,
 			`INSERT INTO agents
 			   (tenant_id, agent_key, display_name, role, model, system_prompt, status,
 			    project_brief_id, outbound_approval, tool_profile, max_tool_iterations,
-			    memory_enabled, runtime_mode)
-			 VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, 'none', 'full', 40, true, 'continuous')
+			    memory_enabled, runtime_mode, credit_budget_cents)
+			 VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, 'none', 'full', 40, true, 'continuous', $8)
 			 RETURNING id`,
 			defaultTenant,
 			sanitizeKey(pa.DisplayName+"-"+b.ID[:8]),
@@ -456,13 +489,14 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 			resolvedModel,
 			sysPrompt,
 			id,
+			creditCents,
 		).Scan(&agentID)
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": "create agent: " + err.Error()})
 			return
 		}
 		agentIDs[pa.Role] = agentID
-		slog.Info("inception.agent_created", "role", pa.Role, "id", agentID)
+		slog.Info("inception.agent_created", "role", pa.Role, "id", agentID, "credit_budget_cents", creditCents)
 	}
 
 	ticketIDs := map[string]string{}
