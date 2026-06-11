@@ -79,6 +79,16 @@
   --xterm-bright-magenta:  #a855f7;
   --xterm-bright-cyan:     #22d3ee;
   --xterm-bright-white:    #ffffff;
+
+  /* task-graph DAG node status colors — consumed by task-graph.tsx via var() */
+  --graph-node-root:       #6d28d9;   /* violet-700 */
+  --graph-node-working:    #d97706;   /* amber-600  */
+  --graph-node-done:       #059669;   /* emerald-600 */
+  --graph-node-error:      #dc2626;   /* red-600    */
+  --graph-node-idle:       #71717a;   /* zinc-500   */
+  --graph-node-pr:         #0284c7;   /* sky-600    */
+  --graph-node-file:       #374151;   /* gray-700   */
+  --graph-edge:            #a1a1aa;   /* zinc-400   */
 }
 
 .dark {
@@ -133,6 +143,16 @@
   --xterm-bright-magenta:  #d6acf5;
   --xterm-bright-cyan:     #abeeff;
   --xterm-bright-white:    #ffffff;
+
+  /* task-graph DAG node status colors — dark mode */
+  --graph-node-root:       #7c3aed;   /* violet-600 */
+  --graph-node-working:    #f59e0b;   /* amber-500  */
+  --graph-node-done:       #10b981;   /* emerald-500 */
+  --graph-node-error:      #ef4444;   /* red-500    */
+  --graph-node-idle:       #a1a1aa;   /* zinc-400   */
+  --graph-node-pr:         #0ea5e9;   /* sky-500    */
+  --graph-node-file:       #9ca3af;   /* gray-400   */
+  --graph-edge:            #52525b;   /* zinc-600   */
 }
 
 /** Theme presets — full palettes selectable in Settings → Appearance.

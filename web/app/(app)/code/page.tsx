@@ -1387,6 +1387,8 @@ export default function CodePage() {
                   onFileClick={openFile}
                   onOpenSession={() => openBottomDrawer('build')}
                   summary={buildSummary || undefined}
+                  agentStatus={agentStatus}
+                  prUrl={buildPrUrl || undefined}
                 />
               </div>
             )}

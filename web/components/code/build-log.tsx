@@ -2,24 +2,35 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
+import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, GitBranch, Loader2, Play, StopCircle, Zap } from 'lucide-react';
+import { AlertCircle, CheckCircle2, GitBranch, Loader2, Play, Share2, StopCircle, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { BuildEntry } from './code-types';
 import { FileChangeChip } from './file-change-chip';
 import { PrCard } from './pr-card';
 import { CommandTimeline } from './command-timeline';
 import { ActivityFeed } from './activity-feed';
+import type { TaskGraphProps } from './task-graph';
 
-type BuildView = 'log' | 'timeline' | 'feed';
+// Lazy-load the xyflow-based graph canvas — ~300 kB, only paid when the
+// 'graph' view is selected. SSR disabled because ReactFlow requires DOM.
+const TaskGraph = dynamic<TaskGraphProps>(
+  () => import('./task-graph').then((m) => m.TaskGraph),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Loading graph…</div> },
+);
 
-export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpenSession }: {
+type BuildView = 'log' | 'timeline' | 'feed' | 'graph';
+
+export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpenSession, agentStatus, prUrl }: {
   entries: BuildEntry[];
   running: boolean;
   onStop: () => void;
   onFileClick?: (path: string) => void;
   onOpenSession?: () => void;
   summary?: { files: number; agents: number; prUrl?: string; previewUrl?: string; elapsed?: string };
+  agentStatus?: Record<string, 'working' | 'done' | 'error'>;
+  prUrl?: string;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<BuildView>('log');
@@ -37,13 +48,13 @@ export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpe
           <span className="text-xs font-medium">{running ? 'Building…' : 'Build complete'}</span>
         </div>
 
-        {/* View toggle */}
+        {/* View toggle: log | timeline | feed | graph */}
         <div className="flex items-center rounded-md border border-border overflow-hidden text-xs shrink-0">
-          {(['log', 'timeline', 'feed'] as BuildView[]).map(v => (
+          {(['log', 'timeline', 'feed', 'graph'] as BuildView[]).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={cn('px-2.5 py-0.5 capitalize transition-colors',
                 view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent')}>
-              {v}
+              {v === 'graph' ? <Share2 className="inline h-3 w-3 mr-0.5 -mt-px" /> : null}{v}
             </button>
           ))}
         </div>
@@ -55,7 +66,16 @@ export function BuildLog({ entries, running, onStop, onFileClick, summary, onOpe
         )}
       </div>
 
-      {view === 'feed' ? (
+      {view === 'graph' ? (
+        <div className="flex-1 overflow-hidden">
+          <TaskGraph
+            entries={entries}
+            agentStatus={agentStatus}
+            prUrl={prUrl ?? summary?.prUrl}
+            running={running}
+          />
+        </div>
+      ) : view === 'feed' ? (
         <ActivityFeed entries={entries} running={running} onFileClick={onFileClick} onOpenSession={onOpenSession} />
       ) : view === 'timeline' ? (
         <CommandTimeline entries={entries} running={running} onFileClick={onFileClick} />
