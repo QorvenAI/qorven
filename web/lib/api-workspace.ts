@@ -247,6 +247,16 @@ export const github = {
     request(`/github/${owner}/${repo}/pulls/${n}/review`, { method: 'POST', body: JSON.stringify(body) }),
 };
 
+// Project file operations
+export const projectFiles = {
+  delete: (id: string, path: string) =>
+    request<void>(`/projects/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+  rename: (id: string, from: string, to: string) =>
+    request<void>(`/projects/${encodeURIComponent(id)}/file/rename`, { method: 'POST', body: JSON.stringify({ from, to }) }),
+  mkdir: (id: string, path: string) =>
+    request<void>(`/projects/${encodeURIComponent(id)}/file/mkdir`, { method: 'POST', body: JSON.stringify({ path }) }),
+};
+
 // Deploy
 export const deployApi = {
   deploy:       (id: string, target: string = 'hosted') =>

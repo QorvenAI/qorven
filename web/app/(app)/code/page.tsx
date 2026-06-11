@@ -21,6 +21,7 @@ import { BottomDrawerTab } from '@/components/layouts/qorven/bottom-drawer';
 import { AgentDashboard } from '@/components/agents/AgentDashboard';
 import { TaskFeed } from '@/components/agents/TaskFeed';
 import { CommandCenter } from '@/components/code/command-center';
+import { FileExplorer } from '@/components/code/file-explorer';
 import { useAgentsStream } from '@/hooks/use-agents-stream';
 import { ensureCanonicalSessionId } from '@/lib/session';
 import {
@@ -843,6 +844,10 @@ export default function CodePage() {
   const currentTab = tabs.find(t => t.path === activeTab);
   const flatFiles = useCallback((nodes: FileNode[]): FileNode[] =>
     nodes.flatMap(n => n.type === 'file' ? [n] : flatFiles(n.children ?? [])), []);
+  const changedPaths = useMemo(
+    () => new Set(tabs.filter(t => t.dirty).map(t => t.path)),
+    [tabs],
+  );
 
   // Export session as Markdown
   const exportSession = useCallback(() => {
@@ -986,6 +991,18 @@ export default function CodePage() {
       )}
 
       <div className="flex flex-1 overflow-hidden min-h-0">
+        {/* File explorer — left pane */}
+        <div className="w-60 shrink-0 border-r border-border flex flex-col overflow-hidden">
+          <FileExplorer
+            projectId={activeProject.id}
+            tree={tree}
+            activePath={activeTab}
+            changedPaths={changedPaths}
+            onFileClick={openFile}
+            onTreeRefresh={() => loadProjectTree(activeProject.path, activeProject.id)}
+          />
+        </div>
+
         <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
           <div className="flex shrink-0 items-center gap-2 border-b border-border">
