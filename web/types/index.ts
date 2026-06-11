@@ -446,3 +446,33 @@ export interface PRReviewSubmit {
   body: string;
   comments: PRReviewComment[];
 }
+
+// ─── Phase 8C — Autonomous Orchestration ─────────────────────────────────────
+
+export interface MergeQueueItem {
+  id: string;
+  tenant_id: string;
+  project_brief_id: string;
+  task_id?: string;
+  pr_number: number;
+  branch: string;
+  base_sha: string;
+  status: 'queued' | 'merging' | 'conflict' | 'merged' | 'failed';
+  attempt: number;
+  detail: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReleaseGate {
+  id: string;
+  tenant_id: string;
+  project_brief_id: string;
+  version: string;
+  changelog_md: string;
+  status: 'proposed' | 'approved' | 'released' | 'rejected';
+  proposed_by: string;
+  approved_by: string;
+  created_at: string;
+  updated_at: string;
+}

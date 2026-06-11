@@ -59,6 +59,12 @@ type Task struct {
 	// Origin linkage (migration 073)
 	DiscussionID    string `json:"discussion_id,omitempty"`
 	OriginSessionID string `json:"origin_session_id,omitempty"`
+
+	// Orchestration fields (migration 045)
+	Phase         string     `json:"phase,omitempty"`
+	LeaseExpires  *time.Time `json:"lease_expires,omitempty"`
+	MaxIterations int        `json:"max_iterations,omitempty"`
+	Cancelled     bool       `json:"cancelled,omitempty"`
 }
 
 // Store handles task CRUD with assignment and status transitions.
@@ -107,12 +113,14 @@ func (s *Store) Get(ctx context.Context, id string) (*Task, error) {
 		        assigned_to, assigned_by,
 		        status, priority, COALESCE(result,''), tokens_used, cost_cents,
 		        due_at, started_at, completed_at, created_at, updated_at,
-		        COALESCE(scratchpad,''), last_heartbeat_at, budget_cents, iteration_count, synthesis_triggered_at
+		        COALESCE(scratchpad,''), last_heartbeat_at, budget_cents, iteration_count, synthesis_triggered_at,
+		        COALESCE(phase,''), lease_expires, max_iterations, cancelled
 		 FROM tasks WHERE id = $1`, id,
 	).Scan(&t.ID, &t.TenantID, &t.ParentID, &t.TicketID, &t.Title, &t.Description, &t.Context,
 		&t.AssignedTo, &t.AssignedBy, &t.Status, &t.Priority, &t.Result,
 		&t.TokensUsed, &t.CostCents, &t.DueAt, &t.StartedAt, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt,
-		&t.Scratchpad, &t.LastHeartbeatAt, &t.BudgetCents, &t.IterationCount, &t.SynthesisTriggeredAt)
+		&t.Scratchpad, &t.LastHeartbeatAt, &t.BudgetCents, &t.IterationCount, &t.SynthesisTriggeredAt,
+		&t.Phase, &t.LeaseExpires, &t.MaxIterations, &t.Cancelled)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %s", id)
 	}

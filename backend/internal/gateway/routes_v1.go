@@ -1164,6 +1164,15 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/project-briefs/{id}/artifacts/{type}/approve", gw.handleApproveArtifact)
 		r.Post("/project-briefs/{id}/artifacts/{type}/request-changes", gw.handleRequestChanges)
 		r.Get("/project-briefs/{id}/team", gw.handleGetBriefTeam)
+		r.Post("/project-briefs/{id}/build", gw.handleBriefBuildProject)
+
+		// Merge queue — serialized per-project PR merge with conflict dispatch
+		r.Get("/projects/{id}/merge-queue", gw.handleGetMergeQueue)
+
+		// Release gates — human-gated release proposals (Task 12)
+		r.Post("/projects/{id}/release", gw.handleProposeRelease)
+		r.Post("/projects/{id}/release/{releaseId}/approve", gw.handleApproveRelease)
+		r.Get("/projects/{id}/releases", gw.handleListReleases)
 
 		// GitHub webhook
 		r.Post("/webhooks/github", gw.handleGitHubWebhook)

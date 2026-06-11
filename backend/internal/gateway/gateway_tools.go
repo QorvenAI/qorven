@@ -1626,10 +1626,12 @@ func (gw *Gateway) registerTools() {
 			},
 		))
 		reg.Register(tools.NewGhOpenPRToolWithToken(ghGetToken))
+		reg.Register(tools.NewGhSubmitReviewToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhPostCommentToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhListPRChecksToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhMergePRToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhCreateRepoToolWithToken(ghGetToken))
+		reg.Register(tools.NewGhCreateReleaseToolWithToken(ghGetToken))
 
 		// gh_task_register — agent commits to working on an issue autonomously.
 		// Wire the global task queue via callback (avoids circular tools→agent import).

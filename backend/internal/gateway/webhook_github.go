@@ -138,6 +138,8 @@ func (gw *Gateway) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCheckRunEvent advances or fails a GitHubTask when a CI check completes.
+// When CI passes it also gates on an approved review and, if both conditions
+// hold, enqueues the PR into the serialized per-project merge queue.
 func (gw *Gateway) handleCheckRunEvent(ctx context.Context, payload map[string]any) {
 	action, _ := payload["action"].(string)
 	if action != "completed" {
@@ -214,6 +216,110 @@ func (gw *Gateway) handleCheckRunEvent(ctx context.Context, payload map[string]a
 		}
 		break
 	}
+
+	// Merge-queue gate: CI pass + approved review → enqueue.
+	// Only attempt when DB is available and the conclusion is a passing one.
+	if gw.db == nil || gw.db.Pool == nil {
+		return
+	}
+	switch conclusion {
+	case "success", "neutral", "skipped":
+		// proceed
+	default:
+		return
+	}
+
+	// Extract owner, repo, PR number and branch from the webhook payload.
+	owner, _ := nestedStr2(payload, "repository", "owner", "login")
+	repo, _ := nestedStr2(payload, "repository", "name")
+	if owner == "" || repo == "" {
+		return
+	}
+
+	// The check_run payload carries a pull_requests array; grab the first one.
+	prNumber := 0
+	headBranch := ""
+	if crMap, ok := payload["check_run"].(map[string]any); ok {
+		if prList, ok := crMap["pull_requests"].([]any); ok && len(prList) > 0 {
+			if prMap, ok := prList[0].(map[string]any); ok {
+				if n, ok := prMap["number"].(float64); ok {
+					prNumber = int(n)
+				}
+				if head, ok := prMap["head"].(map[string]any); ok {
+					headBranch, _ = head["ref"].(string)
+				}
+			}
+		}
+	}
+	if prNumber == 0 {
+		return
+	}
+
+	// Look up a project_brief linked to this repo.
+	var briefID string
+	if err := gw.db.Pool.QueryRow(ctx,
+		`SELECT id::text FROM project_briefs
+		 WHERE github_owner=$1 AND github_repo=$2
+		 LIMIT 1`,
+		owner, repo,
+	).Scan(&briefID); err != nil || briefID == "" {
+		// No brief registered for this repo — skip.
+		return
+	}
+
+	// Check for at least one APPROVED review on the PR.
+	approved := gw.prHasApprovedReview(ctx, owner, repo, prNumber)
+	if !approved {
+		slog.Info("merge_queue.gate.no_approval", "owner", owner, "repo", repo, "pr", prNumber)
+		return
+	}
+
+	// Both gates passed: enqueue and kick off the processor.
+	if err := gw.enqueueMerge(ctx, briefID, prNumber, headBranch, nil); err != nil {
+		slog.Error("merge_queue.enqueue_failed", "brief", briefID, "pr", prNumber, "err", err)
+		return
+	}
+	// Detach from the webhook request context: net/http cancels r.Context() the
+	// moment this handler returns, which would abort the merge PUT / status
+	// update mid-flight and strand the row in 'merging' (deadlocking the queue).
+	go gw.processMergeQueue(context.Background(), briefID)
+}
+
+// prHasApprovedReview returns true if the PR has at least one APPROVED review
+// via the GitHub REST API.
+func (gw *Gateway) prHasApprovedReview(ctx context.Context, owner, repo string, prNumber int) bool {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
+	data, _, err := gw.ghProxy(ctx, path, nil)
+	if err != nil {
+		slog.Warn("merge_queue.reviews_fetch_failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
+		return false
+	}
+	var reviews []struct {
+		State string `json:"state"`
+		User  struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(data, &reviews); err != nil {
+		return false
+	}
+	// Collapse to the latest review per reviewer (the API returns them in
+	// chronological order) so a later CHANGES_REQUESTED/DISMISSED supersedes an
+	// earlier APPROVED — a stale approval must not gate an autonomous merge.
+	latest := map[string]string{}
+	for _, rv := range reviews {
+		// COMMENTED reviews don't change approval state — skip them.
+		if rv.State == "COMMENTED" {
+			continue
+		}
+		latest[rv.User.Login] = rv.State
+	}
+	for _, state := range latest {
+		if state == "APPROVED" {
+			return true
+		}
+	}
+	return false
 }
 
 // handlePRMerged notifies Prime and marks the relevant GitHubTask complete.

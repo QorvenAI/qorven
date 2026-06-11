@@ -591,11 +591,11 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 		}
 		var taskID string
 		if err := gw.db.Pool.QueryRow(ctx,
-			`INSERT INTO tasks (tenant_id, ticket_id, title, description, status, assigned_to, priority)
-			 VALUES ($1, $2, $3, $4, $5, $6, 3) RETURNING id`,
+			`INSERT INTO tasks (tenant_id, ticket_id, title, description, status, assigned_to, priority, project_brief_id)
+			 VALUES ($1, $2, $3, $4, $5, $6, 3, $7) RETURNING id`,
 			defaultTenant, ticketID, pt.Title,
 			fmt.Sprintf("Part of project: %s", b.Title),
-			status, nullStr(agentID),
+			status, nullStr(agentID), id,
 		).Scan(&taskID); err != nil {
 			slog.Warn("inception.task_create_failed", "title", pt.Title, "error", err)
 		} else {
@@ -628,6 +628,12 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = gw.ensureProjectHub(ctx, b.ID)
+
+	// Kick off the build swarm now that agents and tasks exist.
+	// Non-fatal: a brief without a connected GitHub repo just skips the dispatch.
+	if err := gw.buildDispatch(ctx, id); err != nil {
+		slog.Warn("approve.build_dispatch_skipped", "brief", id, "err", err)
+	}
 
 	gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventProjectUpdated, Data: b})
 	writeJSON(w, 200, map[string]any{

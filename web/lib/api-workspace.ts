@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest } from './api-core';
-import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn, ProjectEvent, ProjectAnalytics, PRFile, PRReviewSubmit } from '@/types';
+import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn, ProjectEvent, ProjectAnalytics, PRFile, PRReviewSubmit, MergeQueueItem, ReleaseGate } from '@/types';
 
 // Skills
 export const skills = {
@@ -140,6 +140,16 @@ export const projectBriefs = {
     request<ProjectAnalytics>(`/projects/${encodeURIComponent(id)}/analytics`),
   hub: (id: string) =>
     request<{ room_id: string }>(`/projects/${encodeURIComponent(id)}/hub`),
+  build: (id: string) =>
+    request(`/project-briefs/${encodeURIComponent(id)}/build`, { method: 'POST' }),
+  mergeQueue: (id: string) =>
+    request<{ queue: MergeQueueItem[] }>(`/projects/${encodeURIComponent(id)}/merge-queue`),
+  releases: (id: string) =>
+    request<{ releases: ReleaseGate[] }>(`/projects/${encodeURIComponent(id)}/releases`),
+  proposeRelease: (id: string) =>
+    request<ReleaseGate>(`/projects/${encodeURIComponent(id)}/release`, { method: 'POST' }),
+  approveRelease: (id: string, rid: string) =>
+    request(`/projects/${encodeURIComponent(id)}/release/${encodeURIComponent(rid)}/approve`, { method: 'POST' }),
 };
 
 // Workspaces / Templates
