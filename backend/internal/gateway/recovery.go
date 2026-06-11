@@ -10,14 +10,13 @@ import (
 	"github.com/qorvenai/qorven/internal/tasks"
 )
 
-// recoverInflightTasks reclaims any task left 'in_progress' whose lock-renewal
-// heartbeat (updated_at) has gone stale — meaning the worker goroutine died
-// with the process or became permanently stuck. Those tasks are moved back to
-// 'assigned' and the owning agent is re-woken from its last checkpoint
-// (scratchpad). Idempotent: safe to call on every boot and on every watchdog
-// tick. Active tasks are protected: task_worker calls startTaskLockRenewal
-// which bumps updated_at every 5 minutes, so only genuinely dead tasks (silent
-// for >10 minutes) are reclaimed.
+// recoverInflightTasks reclaims any task left 'in_progress' whose lease has
+// expired — meaning the worker goroutine died or became permanently stuck.
+// Active tasks are protected: task_worker renews lease_expires every ~20 s
+// via the heartbeat goroutine, keeping it 3 minutes in the future.  A task
+// whose lease_expires is NULL (pre-045 row) or in the past is considered dead
+// and is moved back to 'assigned' so the agent is re-woken from its last
+// scratchpad checkpoint.  Idempotent: safe to call on every boot and watchdog tick.
 func (gw *Gateway) recoverInflightTasks(ctx context.Context) {
 	if gw.db == nil || gw.db.Pool == nil {
 		return
@@ -27,7 +26,7 @@ func (gw *Gateway) recoverInflightTasks(ctx context.Context) {
 		`UPDATE tasks
 		    SET status = $1, locked_by = NULL, updated_at = NOW()
 		  WHERE status = $2
-		    AND updated_at < NOW() - INTERVAL '10 minutes'
+		    AND (lease_expires IS NULL OR lease_expires < NOW())
 		  RETURNING id::text, COALESCE(assigned_to::text, '')`,
 		tasks.StatusAssigned, tasks.StatusInProgress,
 	)

@@ -64,6 +64,30 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			return
 		}
 
+		// Kill-switch: cancelled flag set directly on the row (bypasses status FSM).
+		if task.Cancelled {
+			slog.Info("task_worker: cancelled flag set — stopping", "task", taskID)
+			_ = gw.taskStore.Transition(ctx, taskID, tasks.StatusCancelled)
+			return
+		}
+
+		// Hard iteration cap: stop and block when the task has hit its max turns.
+		// TODO(Task 9): also check for a STOP file in the worktree root as a kill-switch.
+		if task.MaxIterations > 0 && task.IterationCount >= task.MaxIterations {
+			slog.Warn("task_worker: iteration cap reached — blocking", "task", taskID,
+				"iteration_count", task.IterationCount, "max_iterations", task.MaxIterations)
+			_ = gw.taskStore.Transition(ctx, taskID, tasks.StatusBlocked)
+			broadcastTaskEvent(gw, taskID, agentID, realtime.EventTaskBlocked, map[string]any{
+				"reason": "iteration_cap",
+			})
+			if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" {
+				gw.emitProjectEvent(ctx, briefID, "blocked", task.Title, map[string]any{
+					"reason": "iteration_cap",
+				}, taskID, agentID)
+			}
+			return
+		}
+
 		// Budget guard: stop if cost has exceeded the per-task budget.
 		// NOTE: BudgetCents is int; CostCents is int64 — compare correctly.
 		if task.BudgetCents > 0 && int(task.CostCents) >= task.BudgetCents {
@@ -105,9 +129,39 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			}
 		}
 
-		// Run one iteration with a per-iteration timeout.
+		// Claim the lease: stamp lease_expires + locked_by so the watchdog knows
+		// this worker is alive. Done once per loop turn (not per-iteration) so that
+		// even a fast task always has a fresh lease before work starts.
+		if gw.db != nil && gw.db.Pool != nil {
+			_, _ = gw.db.Pool.Exec(ctx,
+				`UPDATE tasks SET lease_expires = NOW() + INTERVAL '3 minutes', locked_by = $2 WHERE id = $1`,
+				taskID, agentID)
+		}
+
+		// Run one iteration with a per-iteration timeout, keeping the lease alive
+		// via a background heartbeat goroutine that ticks every 20 seconds.
 		iterCtx, cancel := context.WithTimeout(ctx, taskIterTimeout)
+
+		hbCtx, hbStop := context.WithCancel(ctx)
+		go func() {
+			t := time.NewTicker(20 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-hbCtx.Done():
+					return
+				case <-t.C:
+					if gw.db != nil && gw.db.Pool != nil {
+						_, _ = gw.db.Pool.Exec(context.Background(),
+							`UPDATE tasks SET last_heartbeat_at = NOW(), lease_expires = NOW() + INTERVAL '3 minutes', updated_at = NOW() WHERE id = $1`,
+							taskID)
+					}
+				}
+			}
+		}()
+
 		signal, iterErr := gw.runOneIteration(iterCtx, agentID, task)
+		hbStop()
 		cancel()
 
 		if iterErr != nil {
