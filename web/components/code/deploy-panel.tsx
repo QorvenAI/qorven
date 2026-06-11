@@ -2,10 +2,11 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useState, useEffect, useCallback } from 'react';
-import { Download, ExternalLink, Loader2, Rocket, CheckCircle2, XCircle, Globe } from 'lucide-react';
+import { Download, ExternalLink, Loader2, Rocket, CheckCircle2, XCircle, Globe, Bug } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getToken, request, BASE as API_BASE } from '@/lib/api-core';
-import type { DeployState } from '@/types';
+import { getToken, BASE as API_BASE } from '@/lib/api-core';
+import { deployApi } from '@/lib/api-workspace';
+import type { DeployState, DeployTargetName } from '@/types';
 
 interface DeployPanelProps {
   projectId: string;
@@ -15,13 +16,20 @@ interface DeployPanelProps {
   className?: string;
 }
 
-interface DeployTarget {
+interface ExternalTarget {
   id: string;
   label: string;
   description: string;
   color: string;
   action: 'link' | 'download';
 }
+
+const DEPLOY_TARGETS: { value: DeployTargetName; label: string; hint: string }[] = [
+  { value: 'local',          label: 'Local',   hint: 'Runs on this machine' },
+  { value: 'hosted',         label: 'Hosted',  hint: 'Public preview URL' },
+  { value: 'cloud:vercel',   label: 'Vercel',  hint: 'Needs a connected repo + token in Settings' },
+  { value: 'cloud:netlify',  label: 'Netlify', hint: 'Needs a connected repo + token in Settings' },
+];
 
 function githubRepoUrl(owner?: string, repo?: string) {
   if (!owner || !repo) return '';
@@ -35,14 +43,23 @@ export function DeployPanel({
   githubRepo,
   className,
 }: DeployPanelProps) {
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState('');
-  const [deploying, setDeploying] = useState(false);
-  const [deployState, setDeployState] = useState<DeployState | null>(null);
+  const [downloading, setDownloading]         = useState(false);
+  const [downloadError, setDownloadError]     = useState('');
+  const [deploying, setDeploying]             = useState(false);
+  const [deployState, setDeployState]         = useState<DeployState | null>(null);
+  const [selectedTarget, setSelectedTarget]   = useState<DeployTargetName>('hosted');
+
+  // Bug-report state
+  const [bugOpen, setBugOpen]         = useState(false);
+  const [bugTitle, setBugTitle]       = useState('');
+  const [bugBody, setBugBody]         = useState('');
+  const [bugLoading, setBugLoading]   = useState(false);
+  const [bugSuccess, setBugSuccess]   = useState(false);
+  const [bugError, setBugError]       = useState('');
 
   const pollStatus = useCallback(async () => {
     try {
-      const res = await request(`/projects/${projectId}/deploy/status`) as DeployState;
+      const res = await deployApi.deployStatus(projectId);
       setDeployState(res);
       if (res.status === 'live' || res.status === 'failed' || res.status === 'stopped') {
         setDeploying(false);
@@ -64,9 +81,7 @@ export function DeployPanel({
     setDeploying(true);
     setDownloadError('');
     try {
-      const res = await request(`/projects/${projectId}/deploy`, {
-        method: 'POST',
-      }) as DeployState;
+      const res = await deployApi.deploy(projectId, selectedTarget);
       setDeployState(res);
     } catch (e: any) {
       setDownloadError(e?.message || 'Deploy failed');
@@ -74,9 +89,25 @@ export function DeployPanel({
     }
   }
 
+  async function handleReportBug() {
+    if (!bugTitle.trim()) return;
+    setBugLoading(true);
+    setBugError('');
+    try {
+      await deployApi.reportBug(projectId, { title: bugTitle.trim(), body: bugBody.trim() });
+      setBugSuccess(true);
+      setBugTitle('');
+      setBugBody('');
+    } catch (e: any) {
+      setBugError(e?.message || 'Failed to open issue');
+    } finally {
+      setBugLoading(false);
+    }
+  }
+
   const repoUrl = githubRepoUrl(githubOwner, githubRepo);
 
-  const targets: DeployTarget[] = [
+  const externalTargets: ExternalTarget[] = [
     {
       id: 'vercel',
       label: 'Vercel',
@@ -149,35 +180,87 @@ export function DeployPanel({
     }
   }
 
-  const hasGitHub = !!repoUrl;
-  const isLive = deployState?.status === 'live';
+  const hasGitHub  = !!repoUrl;
+  const isLive     = deployState?.status === 'live';
   const isBuilding = deploying || deployState?.status === 'building' || deployState?.status === 'pushing';
+
+  // Resolve the public URL: prefer deployed_url, fall back to url
+  const liveUrl = deployState?.deployed_url || deployState?.url || '';
 
   return (
     <div className={cn('space-y-3', className)}>
-      {/* One-click deploy to qorven.run */}
+      {/* One-click deploy */}
       <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
+        {/* Header row */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 text-primary" />
-            <span className="text-xs font-semibold">Deploy to qorven.run</span>
+            <span className="text-xs font-semibold">Deploy project</span>
           </div>
-          {isLive && deployState?.url && (
-            <a href={deployState.url} target="_blank" rel="noopener noreferrer"
-              className="text-2xs text-primary hover:underline truncate max-w-[160px]">
-              {deployState.url.replace('https://', '')}
+          {isLive && liveUrl && (
+            <a
+              href={liveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-2xs text-primary hover:underline truncate max-w-[160px]"
+            >
+              {liveUrl.replace('https://', '')}
             </a>
           )}
         </div>
 
-        {isLive ? (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-            <span className="text-xs text-green-600">Live</span>
-            <button onClick={handleDeploy}
-              className="ml-auto rounded bg-primary/10 px-2 py-0.5 text-2xs text-primary hover:bg-primary/20">
-              Redeploy
+        {/* Target picker — segmented control */}
+        <div className="flex rounded-md border border-border overflow-hidden">
+          {DEPLOY_TARGETS.map(t => (
+            <button
+              key={t.value}
+              type="button"
+              title={t.hint}
+              onClick={() => setSelectedTarget(t.value)}
+              className={cn(
+                'flex-1 py-1 text-2xs font-medium transition-colors truncate px-1',
+                selectedTarget === t.value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-background text-muted-foreground hover:bg-muted',
+              )}
+            >
+              {t.label}
             </button>
+          ))}
+        </div>
+
+        {/* Per-target helper text */}
+        <p className="text-2xs text-muted-foreground leading-snug">
+          {DEPLOY_TARGETS.find(t => t.value === selectedTarget)?.hint}
+        </p>
+
+        {/* Deploy status / action */}
+        {isLive ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+              <span className="text-xs text-green-600">Live</span>
+              {deployState?.target && (
+                <span className="text-2xs text-muted-foreground">via {deployState.target}</span>
+              )}
+              <button
+                onClick={handleDeploy}
+                className="ml-auto rounded bg-primary/10 px-2 py-0.5 text-2xs text-primary hover:bg-primary/20"
+              >
+                Redeploy
+              </button>
+            </div>
+            {liveUrl && (
+              <a
+                href={liveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-2xs text-primary hover:underline"
+              >
+                <ExternalLink className="h-3 w-3 shrink-0" />
+                <span className="truncate">{liveUrl}</span>
+              </a>
+            )}
           </div>
         ) : isBuilding ? (
           <div className="space-y-1.5">
@@ -197,14 +280,19 @@ export function DeployPanel({
           <div className="flex items-center gap-2">
             <XCircle className="h-3.5 w-3.5 text-destructive" />
             <span className="text-xs text-destructive truncate">{deployState.error || 'Deploy failed'}</span>
-            <button onClick={handleDeploy}
-              className="ml-auto rounded bg-primary/10 px-2 py-0.5 text-2xs text-primary hover:bg-primary/20">
+            <button
+              onClick={handleDeploy}
+              className="ml-auto rounded bg-primary/10 px-2 py-0.5 text-2xs text-primary hover:bg-primary/20"
+            >
               Retry
             </button>
           </div>
         ) : (
-          <button onClick={handleDeploy} disabled={deploying}
-            className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
+          <button
+            onClick={handleDeploy}
+            disabled={deploying}
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
             <Rocket className="h-3.5 w-3.5" />
             Deploy Now
           </button>
@@ -215,11 +303,66 @@ export function DeployPanel({
             Detected: {deployState.framework} — auto-generates Dockerfile
           </p>
         )}
+
+        {/* Report a bug — shown once deployed (live) */}
+        {isLive && (
+          <div className="border-t border-border/50 pt-2 space-y-1.5">
+            {bugSuccess ? (
+              <p className="text-2xs text-green-600">Issue opened — the team is on it.</p>
+            ) : bugOpen ? (
+              <div className="space-y-1.5">
+                <input
+                  type="text"
+                  value={bugTitle}
+                  onChange={e => setBugTitle(e.target.value)}
+                  placeholder="Bug title"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-2xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                />
+                <textarea
+                  value={bugBody}
+                  onChange={e => setBugBody(e.target.value)}
+                  placeholder="Describe the bug (optional)"
+                  rows={3}
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-2xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
+                />
+                {bugError && (
+                  <p className="rounded px-2 py-1 text-2xs bg-destructive/10 text-destructive">
+                    {bugError}
+                  </p>
+                )}
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={handleReportBug}
+                    disabled={bugLoading || !bugTitle.trim()}
+                    className="flex items-center gap-1 rounded bg-primary px-2 py-0.5 text-2xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {bugLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                    Submit
+                  </button>
+                  <button
+                    onClick={() => { setBugOpen(false); setBugError(''); setBugTitle(''); setBugBody(''); }}
+                    className="rounded px-2 py-0.5 text-2xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setBugOpen(true); setBugSuccess(false); }}
+                className="flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Bug className="h-3 w-3" />
+                Report a bug
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* External deploy targets */}
       <div className="grid grid-cols-2 gap-2">
-        {targets.map(t => {
+        {externalTargets.map(t => {
           const disabled = t.id !== 'zip' && !hasGitHub;
           return (
             <button
