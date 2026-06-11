@@ -4,6 +4,29 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.11.0-alpha — 2026-06-11
+
+Describe an app — your agents design it, build it, review it, ship it, and fix it. `/code` is now a full autonomous software-development platform with a real IDE.
+
+### Added
+- **Plan-to-ship pipeline.** Describe what you want and a CTO agent interviews you, then writes a product spec, a technical spec, and a system design — each a document you approve before the next begins. Nothing gets built until you've signed off on the plan.
+- **A cost plan before any code.** A CFO agent proposes the team — how many agents, which model for each role (from the providers you've enabled) — with a real dollar cost breakdown and a timeline. Approve it and those become hard spending caps. A live burn meter shows real spend; at 80% you're warned, and at 100% the work pauses safely and asks you for more budget rather than overrunning.
+- **An autonomous build swarm.** Once approved, agents build the project as a real software team: each works on its own branch in isolation, opens a pull request, gets its work reviewed, and merges through a queue that handles conflicts — all on your connected GitHub repo. You watch it happen and stay in control of every gate.
+- **In-app code review.** Review pull requests inside Qorven — file tree, side-by-side diff, line-by-line comments, approve or request changes — and it mirrors straight to GitHub. Never leave the platform.
+- **Project Hub & analytics.** Every project gets a live coordination room and a dashboard: cost burn over time, what each agent is doing, the task flow, and pull-request status — a glass box into the work.
+- **Deploy where you want.** Ship a finished project to a target you choose: run it locally, host it on a public URL through Qorven, push it to Vercel or Netlify, or just download the code. Deploy follows an approved release.
+- **A self-healing fix loop.** When CI fails, a deploy breaks, or a user reports a bug, Qorven opens a GitHub issue, hands it to the CTO to triage, and re-assigns the fix to the swarm — looping until it's green, within the budget you set.
+- **A real IDE.** A VSCode-feel editor with code intelligence (hover, go-to-definition, autocomplete, live error underlines for Go, TypeScript, and Python), a file explorer, a live preview that hot-reloads as code changes, and a real terminal. When an agent edits a file you see exactly what changed as a diff — and can undo its whole turn in one click.
+- **Vibe mode.** For quick builds, a fast single-agent path with no gates — describe it, watch it build in the preview live, iterate by chatting.
+
+### Changed
+- **Runs unattended for hours.** Long autonomous sessions survive restarts and stay on track — work resumes from where it stopped if anything crashes, stuck or runaway agents are caught, and hard limits on time, steps, and cost prevent anything from spiralling.
+
+### Security
+- Hardened file access in the workspace against path-traversal, and gated every outward action — release, deploy, and merge are governed by approvals and the budget you set.
+
+---
+
 ## v0.10.0-alpha — 2026-06-11
 
 Build on Qorven, take it to the internet, and let agents work on your sites.
