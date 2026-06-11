@@ -20,22 +20,21 @@ type projectEventRow struct {
 }
 
 // realtimeTypeFor maps a project_event type to the WS event type the frontend
-// listens on. task_started surfaces as its own signal; task_progress maps to
-// the EventTaskProgress constant; unmapped types fall back to the generic
-// project_updated refresh.
+// listens on. task_progress/done/blocked map to their dedicated constants;
+// task_started (and any unmapped type) falls back to the generic project_updated
+// refresh — which the project timeline/dashboard already subscribe to — so a
+// task-start event still triggers a live refresh.
 func realtimeTypeFor(t string) string {
 	switch t {
 	case "task_progress":
 		return realtime.EventTaskProgress
-	case "task_started":
-		return "task_started"
 	case "done":
 		return realtime.EventTaskDone
 	case "blocked":
 		return realtime.EventTaskBlocked
 	case "budget_warning":
 		return realtime.EventBudgetWarning
-	default:
+	default: // task_started, pr_opened, gate_decision, agent_spawned, …
 		return realtime.EventProjectUpdated
 	}
 }

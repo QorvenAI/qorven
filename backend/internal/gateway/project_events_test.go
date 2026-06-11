@@ -20,8 +20,13 @@ func TestBuildProjectEvent(t *testing.T) {
 	if d["project_id"] != "brief-1" {
 		t.Errorf("event data missing project_id: %s", b)
 	}
-	if ev.Type != "task_started" {
+	// task_started surfaces as the generic project_updated refresh (which the
+	// timeline subscribes to); the original type is preserved in the payload.
+	if ev.Type != "project_updated" {
 		t.Errorf("event type mismatch: %s", ev.Type)
+	}
+	if d["type"] != "task_started" {
+		t.Errorf("payload should preserve original type: %s", b)
 	}
 }
 
