@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -83,7 +84,24 @@ Rules:
 - Always complete within 15 steps.`
 
 // BrowseAndAct autonomously browses the web to achieve a goal.
+// safeNavigateURL rejects internal/private/metadata targets and non-http(s)
+// schemes so a goal/start URL or an LLM-chosen navigate can't pivot the browser
+// into the internal network (e.g. localhost:4200, cloud metadata).
+func safeNavigateURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("blocked: only http(s) URLs allowed")
+	}
+	if blocked, reason := tools.IsInternalURL(raw); blocked {
+		return fmt.Errorf("blocked: %s", reason)
+	}
+	return nil
+}
+
 func (ba *BrowseAgent) BrowseAndAct(ctx context.Context, goal, startURL string) (string, []AgentStep, error) {
+	if err := safeNavigateURL(startURL); err != nil {
+		return "", nil, err
+	}
 	if err := ba.browser.Start(ctx); err != nil {
 		return "", nil, fmt.Errorf("browser start: %w", err)
 	}
@@ -210,6 +228,9 @@ func (ba *BrowseAgent) executeAction(ctx context.Context, action *AgentAction) s
 
 	case "navigate":
 		if action.URL == "" { return "error: no url" }
+		if err := safeNavigateURL(action.URL); err != nil {
+			return "navigate " + err.Error()
+		}
 		if err := ba.browser.Navigate(ctx, action.URL); err != nil {
 			return fmt.Sprintf("navigate failed: %v", err)
 		}

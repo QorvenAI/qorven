@@ -7,9 +7,11 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/mcp"
+	"github.com/qorvenai/qorven/internal/tools"
 	"github.com/qorvenai/qorven/internal/vault"
 )
 
@@ -102,9 +104,10 @@ func (gw *Gateway) handleSaveConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	platformID := chi.URLParam(r, "platform_id")
 	var body struct {
-		APIKey string `json:"api_key"`
-		Token  string `json:"token"`
-		Label  string `json:"label"`
+		APIKey string            `json:"api_key"`
+		Token  string            `json:"token"`
+		Label  string            `json:"label"`
+		Config map[string]string `json:"config"` // per-connection host placeholders, e.g. {"site":"myblog.com"}
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 
@@ -125,6 +128,31 @@ func (gw *Gateway) handleSaveConnection(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeJSON(w, 400, map[string]string{"error": "use OAuth flow for " + platform.AuthType})
 		return
+	}
+
+	// Capture per-connection host placeholders (e.g. WordPress {site}) into the
+	// credential's Extra so the executor pins them — and validate now that the
+	// resulting host is not internal/private (defense in depth against SSRF).
+	if len(body.Config) > 0 {
+		data.Extra = map[string]string{}
+		for k, v := range body.Config {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				continue
+			}
+			// If the platform's BaseURL embeds this placeholder as the host,
+			// validate the would-be URL is external.
+			if probe := strings.ReplaceAll(platform.BaseURL, "{"+k+"}", v); probe != platform.BaseURL {
+				if !strings.HasPrefix(probe, "http://") && !strings.HasPrefix(probe, "https://") {
+					probe = "https://" + probe
+				}
+				if blocked, reason := tools.IsInternalURL(probe); blocked {
+					writeJSON(w, 400, map[string]string{"error": "host not allowed (" + reason + ")"})
+					return
+				}
+			}
+			data.Extra[k] = v
+		}
 	}
 
 	cred, err := gw.vault.Save(r.Context(), defaultTenant, platformID, body.Label, platform.AuthType, data, nil, nil)
