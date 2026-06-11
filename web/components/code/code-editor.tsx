@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
 import { detectLang } from './code-utils';
 import { request } from '@/lib/api-core';
+import { setMonaco } from '@/lib/monaco-models';
 
 const MonacoEditor = dynamic(
   () => import('@monaco-editor/react').then(m => m.default),
@@ -36,6 +37,8 @@ export function CodeEditor({ content, path, onChange, projectId }: {
   }, []);
 
   const handleEditorMount = useCallback((editor: any, monaco: any) => {
+    // Seed the registry so syncModelContent / modelIsDirtyVsDisk work
+    setMonaco(monaco);
     // Register inline completion provider for AI ghost text
     completionDisposable.current?.dispose();
     completionDisposable.current = monaco.languages.registerInlineCompletionsProvider('*', {
@@ -113,9 +116,12 @@ export function CodeEditor({ content, path, onChange, projectId }: {
   return (
     <MonacoEditor
       height="100%"
+      path={path}
+      defaultValue={content}
       language={detectLang(path)}
-      value={content}
       theme={isDark ? 'vs-dark' : 'light'}
+      keepCurrentModel={true}
+      saveViewState={true}
       onChange={v => onChange?.(v ?? '')}
       onMount={handleEditorMount}
       options={{
