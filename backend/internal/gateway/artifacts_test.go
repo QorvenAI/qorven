@@ -14,3 +14,12 @@ func TestArtifactRepoPath(t *testing.T) {
 		if got := artifactRepoPath(typ); got != want { t.Errorf("%s: %q != %q", typ, got, want) }
 	}
 }
+
+func TestCanAdvanceTo_PipelineGate(t *testing.T) {
+	if CanAdvanceTo("design", map[string]string{"prd": "approved", "spec": "approved"}) != true {
+		t.Error("design should advance when spec approved")
+	}
+	if CanAdvanceTo("design", map[string]string{"prd": "approved", "spec": "in_review"}) != false {
+		t.Error("design blocked when spec not approved")
+	}
+}

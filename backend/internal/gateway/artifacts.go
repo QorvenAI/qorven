@@ -174,3 +174,117 @@ func (gw *Gateway) readBrief(ctx context.Context, id string) (*ProjectBrief, err
 	}
 	return &b, nil
 }
+
+// artifactPromptFor builds the CTO generation prompt for an artifact type,
+// grounding it in the brief + the prior approved artifact.
+func (gw *Gateway) artifactPromptFor(ctx context.Context, b *ProjectBrief, typ string) string {
+	var sb strings.Builder
+	titles := map[string]string{
+		"prd":    "Product Requirements Document (PRD)",
+		"spec":   "Technical Specification",
+		"design": "System Design Document",
+	}
+	fmt.Fprintf(&sb, "You are the CTO. Write a complete %s in Markdown for this project. Be concrete and implementation-ready. Output ONLY the markdown document.\n\n", titles[typ])
+	fmt.Fprintf(&sb, "Project: %s\nIdea: %s\nStack: %s\nQuality: %s\n\n", b.Title, b.Idea, b.Stack, b.Quality)
+	prior := map[string]string{"spec": "prd", "design": "spec"}
+	if p, ok := prior[typ]; ok {
+		if a, _ := gw.getActiveArtifact(ctx, b.ID, p); a != nil && a.Status == "approved" {
+			fmt.Fprintf(&sb, "Build on the approved %s:\n\n%s\n", p, a.ContentMD)
+		}
+	}
+	return sb.String()
+}
+
+// handleGenerateArtifact has the CTO draft an artifact (prd|spec|design).
+// POST /v1/project-briefs/{id}/artifacts/{type}/generate
+func (gw *Gateway) handleGenerateArtifact(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil { writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"}); return }
+	id := chi.URLParam(r, "id")
+	typ := chi.URLParam(r, "type")
+	if typ != "prd" && typ != "spec" && typ != "design" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be prd, spec, or design"}); return
+	}
+	brief, err := gw.readBrief(r.Context(), id)
+	if err != nil { writeJSON(w, http.StatusNotFound, map[string]string{"error": "brief not found"}); return }
+
+	statuses, _ := gw.artifactStatusMap(r.Context(), id)
+	if !CanAdvanceTo(typ, statuses) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "previous artifact not approved"}); return
+	}
+
+	prompt := gw.artifactPromptFor(r.Context(), brief, typ)
+	var collected strings.Builder
+	if gw.agentLoop != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+		defer cancel()
+		_, _ = gw.agentLoop.Run(ctx, agent.RunRequest{
+			AgentID: "prime", SessionID: fmt.Sprintf("artifact-%s-%s", typ, id), UserMessage: prompt,
+			Channel: "plan_graph", Stream: true, NoPersist: true, TenantID: defaultTenant,
+		}, func(ev agent.StreamEvent) {
+			if ev.Type == "text_delta" && ev.Delta != "" { collected.WriteString(ev.Delta) }
+		})
+	}
+	md := strings.TrimSpace(collected.String())
+	if md == "" { writeJSON(w, http.StatusBadGateway, map[string]string{"error": "generation failed, retry"}); return }
+
+	art, err := gw.upsertArtifactRevision(r.Context(), id, typ, md)
+	if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)}); return }
+	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_briefs SET stage=$2, updated_at=now() WHERE id=$1`, id, typ)
+	writeJSON(w, http.StatusOK, art)
+}
+
+// handleApproveArtifact approves the active artifact and advances the stage.
+// POST /v1/project-briefs/{id}/artifacts/{type}/approve
+func (gw *Gateway) handleApproveArtifact(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil { writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"}); return }
+	id := chi.URLParam(r, "id")
+	typ := chi.URLParam(r, "type")
+	art, _ := gw.getActiveArtifact(r.Context(), id, typ)
+	if art == nil { writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active artifact"}); return }
+	approver := "user"
+	if u := userFromContext(r.Context()); u != nil { approver = u.Username }
+	if _, err := gw.db.Pool.Exec(r.Context(),
+		`UPDATE project_artifacts SET status='approved', approved_by=$2, approved_at=now() WHERE id=$1`,
+		art.ID, approver); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)}); return
+	}
+	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_briefs SET stage=$2, updated_at=now() WHERE id=$1`, id, NextStage(typ))
+	gw.commitArtifactToRepo(r.Context(), id, typ, art.ContentMD)
+	updated, _ := gw.getActiveArtifact(r.Context(), id, typ)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleRequestChanges records feedback and cascades downstream artifacts to needs_review.
+// POST /v1/project-briefs/{id}/artifacts/{type}/request-changes  {feedback}
+func (gw *Gateway) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil { writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"}); return }
+	id := chi.URLParam(r, "id")
+	typ := chi.URLParam(r, "type")
+	art, _ := gw.getActiveArtifact(r.Context(), id, typ)
+	if art == nil { writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active artifact"}); return }
+	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_artifacts SET status='needs_review' WHERE id=$1`, art.ID)
+	for _, d := range DownstreamArtifacts(typ) {
+		if da, _ := gw.getActiveArtifact(r.Context(), id, d); da != nil && da.Status == "approved" {
+			_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_artifacts SET status='needs_review' WHERE id=$1`, da.ID)
+		}
+	}
+	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_briefs SET stage=$2, updated_at=now() WHERE id=$1`, id, typ)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "needs_review", "type": typ, "downstream_reopened": DownstreamArtifacts(typ)})
+}
+
+func (gw *Gateway) artifactStatusMap(ctx context.Context, briefID string) (map[string]string, error) {
+	arts, err := gw.listArtifacts(ctx, briefID)
+	m := map[string]string{}
+	for _, a := range arts { m[a.Type] = a.Status }
+	return m, err
+}
+
+// commitArtifactToRepo writes docs/<type>.md into the project's workspace repo
+// and commits it. Best-effort: DB is the source of truth. No-op until a repo is
+// connected (Org-mode GitHub connect lands in 8C). Marks repo_committed accordingly.
+func (gw *Gateway) commitArtifactToRepo(ctx context.Context, briefID, typ, contentMD string) {
+	// 8A: repo wiring lands with GitHub-required Org projects in 8C. For now this
+	// is a no-op placeholder; the artifact stays repo_committed=false. Keeping the
+	// call site here means 8C only fills the body.
+	_ = ctx; _ = briefID; _ = typ; _ = contentMD
+}
