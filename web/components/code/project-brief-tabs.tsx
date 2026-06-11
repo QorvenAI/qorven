@@ -7,15 +7,17 @@ import { OrgPipeline } from './org-pipeline';
 import { ProjectHubView } from './project-hub-view';
 import { ProjectAnalytics } from './project-analytics';
 import { ProjectTimeline } from './project-timeline';
+import { SwarmView } from './swarm-view';
 import { cn } from '@/lib/utils';
 
-type BriefTab = 'pipeline' | 'hub' | 'analytics' | 'timeline';
+type BriefTab = 'pipeline' | 'hub' | 'analytics' | 'timeline' | 'build';
 
 const TABS: { id: BriefTab; label: string }[] = [
   { id: 'pipeline',  label: 'Pipeline'  },
   { id: 'hub',       label: 'Hub'       },
   { id: 'analytics', label: 'Analytics' },
   { id: 'timeline',  label: 'Timeline'  },
+  { id: 'build',     label: 'Build'     },
 ];
 
 interface Props {
@@ -57,6 +59,9 @@ export function ProjectBriefTabs({ briefId }: Props) {
       </div>
       <div className={cn('flex-1 min-h-0 overflow-hidden', active !== 'timeline' && 'hidden')}>
         <ProjectTimeline briefId={briefId} />
+      </div>
+      <div className={cn('flex-1 min-h-0 overflow-hidden', active !== 'build' && 'hidden')}>
+        <SwarmView briefId={briefId} />
       </div>
     </div>
   );
