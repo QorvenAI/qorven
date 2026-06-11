@@ -777,12 +777,16 @@ func (gw *Gateway) handleReadProjectFile(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, 400, map[string]string{"error": "path required"})
 		return
 	}
-	// Security: path must be inside workspace
+	// Security: resolve + clean the path and confirm it stays inside the
+	// workspace (filepath.Clean collapses any ".." before the prefix check, so
+	// traversal like workspace/../../etc/passwd is rejected).
 	workspace := resolveWorkspace(project)
-	if !strings.HasPrefix(filePath, workspace) {
+	abs, ok := sandboxPath(workspace, filePath)
+	if !ok {
 		writeJSON(w, 403, map[string]string{"error": "path outside workspace"})
 		return
 	}
+	filePath = abs
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "file not found"})
@@ -814,16 +818,16 @@ func (gw *Gateway) handleWriteProjectFile(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 400, map[string]string{"error": "path and content required"})
 		return
 	}
+	// Resolve + clean the path (handles relative paths by joining onto the
+	// workspace) and confirm it stays inside the workspace — filepath.Clean
+	// collapses ".." so traversal escapes are rejected.
 	workspace := resolveWorkspace(project)
-	if !strings.HasPrefix(req.Path, workspace) {
-		// Allow relative paths by prepending workspace
-		if !strings.HasPrefix(req.Path, "/") {
-			req.Path = workspace + "/" + req.Path
-		} else {
-			writeJSON(w, 403, map[string]string{"error": "path outside workspace"})
-			return
-		}
+	abs, ok := sandboxPath(workspace, req.Path)
+	if !ok {
+		writeJSON(w, 403, map[string]string{"error": "path outside workspace"})
+		return
 	}
+	req.Path = abs
 	os.MkdirAll(strings.TrimSuffix(req.Path, "/"+last(req.Path)), 0755)
 
 	// Read prior content best-effort for diff generation (new file → empty string).
