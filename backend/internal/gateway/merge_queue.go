@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -109,12 +110,20 @@ func (gw *Gateway) processMergeQueue(ctx context.Context, briefID string) {
 			return
 		}
 
+		// Claim the oldest queued PR, but ONLY if no merge is already in flight
+		// for this project — this is what serializes merges. Without the NOT
+		// EXISTS guard a second processMergeQueue invocation could claim the next
+		// queued row and merge it in parallel, racing the base branch.
 		err = tx.QueryRow(ctx,
 			`UPDATE merge_queue
 			 SET status='merging', attempt=attempt+1, updated_at=NOW()
 			 WHERE id = (
 			   SELECT id FROM merge_queue
 			   WHERE project_brief_id=$1 AND status='queued'
+			     AND NOT EXISTS (
+			       SELECT 1 FROM merge_queue
+			       WHERE project_brief_id=$1 AND status='merging'
+			     )
 			   ORDER BY created_at
 			   LIMIT 1
 			   FOR UPDATE SKIP LOCKED
@@ -146,6 +155,23 @@ func (gw *Gateway) processMergeQueue(ctx context.Context, briefID string) {
 				rowID,
 			)
 			slog.Info("merge_queue.merged", "brief", briefID, "pr", prNumber)
+			gw.emitProjectEvent(ctx, briefID, "pr_merged",
+				fmt.Sprintf("PR #%d merged", prNumber),
+				map[string]any{"pr_number": prNumber, "branch": branch},
+				"", "",
+			)
+
+		case (httpStatus == 405 || httpStatus == 409) &&
+			strings.Contains(strings.ToLower(mergeErr.Error()), "already merged"):
+			// GitHub returns 405 both for real conflicts AND for an
+			// already-merged PR. The latter is not a conflict — record it as
+			// merged so we don't spawn a needless conflict worker on a branch
+			// that no longer exists.
+			_, _ = gw.db.Pool.Exec(ctx,
+				`UPDATE merge_queue SET status='merged', detail='already merged', updated_at=NOW() WHERE id=$1`,
+				rowID,
+			)
+			slog.Info("merge_queue.already_merged", "brief", briefID, "pr", prNumber)
 			gw.emitProjectEvent(ctx, briefID, "pr_merged",
 				fmt.Sprintf("PR #%d merged", prNumber),
 				map[string]any{"pr_number": prNumber, "branch": branch},
