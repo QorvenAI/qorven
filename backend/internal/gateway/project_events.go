@@ -34,6 +34,10 @@ func realtimeTypeFor(t string) string {
 		return realtime.EventTaskBlocked
 	case "budget_warning":
 		return realtime.EventBudgetWarning
+	// Deploy + fix-loop types (migration 047) — explicit cases for discoverability;
+	// the default already routes them to EventProjectUpdated.
+	case "deploy_started", "deploy_live", "deploy_failed", "fix_triggered":
+		return realtime.EventProjectUpdated
 	default: // task_started, pr_opened, gate_decision, agent_spawned, …
 		return realtime.EventProjectUpdated
 	}

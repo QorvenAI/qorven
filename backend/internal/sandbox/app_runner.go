@@ -198,6 +198,66 @@ func (ar *AppRunner) Start(ctx context.Context, p RunAppParams) (*RunningApp, er
 	return app, nil
 }
 
+// RegisterRunningContainer registers an already-running container (identified by
+// its short containerID) into the AppRunner's proxy route table and DB.
+// internalPort is the port the container listens on inside Docker; hostPort is
+// the host-side port already bound by the caller.  TTLMinutes ≤ 0 means
+// persistent (capped at 8 h like Start).
+func (ar *AppRunner) RegisterRunningContainer(ctx context.Context, p RunAppParams, containerID string, hostPort int) (*RunningApp, error) {
+	ttl := p.TTLMinutes
+	if ttl <= 0 {
+		ttl = 480 // persistent: use the 8-hour maximum
+	}
+	if ttl > 480 {
+		ttl = 480
+	}
+
+	label := p.Label
+	if label == "" {
+		label = labelFromImageOrRepo(p.ImageOrRepo)
+	}
+
+	prefix := uuid.New().String()
+	target := fmt.Sprintf("http://127.0.0.1:%d", hostPort)
+	expiresAt := time.Now().Add(time.Duration(ttl) * time.Minute)
+
+	envJSON, _ := json.Marshal(p.Env)
+
+	port := p.Port
+	if port <= 0 {
+		port = 80
+	}
+
+	app := &RunningApp{}
+	err := ar.db.QueryRow(ctx,
+		`INSERT INTO running_apps
+			(tenant_id, session_id, agent_id, container_id, image, label, proxy_prefix,
+			 internal_port, host_port, status, env, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'running',$10,$11)
+		 RETURNING id, tenant_id, COALESCE(session_id::text,''), COALESCE(agent_id::text,''),
+		           container_id, image, label, proxy_prefix, internal_port, host_port,
+		           status, env, expires_at, created_at`,
+		nilUUID(p.TenantID), nilUUID(p.SessionID), nilUUID(p.AgentID),
+		containerID, p.ImageOrRepo, label, prefix,
+		port, hostPort,
+		envJSON, expiresAt,
+	).Scan(
+		&app.ID, &app.TenantID, &app.SessionID, &app.AgentID,
+		&app.ContainerID, &app.Image, &app.Label, &app.ProxyPrefix,
+		&app.InternalPort, &app.HostPort,
+		&app.Status, &envJSON, &app.ExpiresAt, &app.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("register_container: db insert: %w", err)
+	}
+	json.Unmarshal(envJSON, &app.Env) //nolint:errcheck
+	app.ProxyURL = ar.baseURL + "/sandbox/" + prefix + "/"
+
+	ar.routes.Store(prefix, target)
+	slog.Info("app_runner.registered", "id", app.ID, "label", label, "prefix", prefix, "host_port", hostPort)
+	return app, nil
+}
+
 // Stop kills a container and marks it stopped in DB.
 // If tenantID is non-empty the query is filtered to that tenant (API path).
 // If tenantID is empty the filter is skipped (agent tool path, already tenant-scoped).

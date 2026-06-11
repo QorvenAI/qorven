@@ -53,6 +53,9 @@
   --connector-jira: #0052CC;
   --connector-google: #4285F4;
   --connector-gmail: #EA4335;
+  --connector-netlify: #00AD9F;
+  --connector-vercel: #000000;
+  --connector-github-pages: #24292e;
 }
 
 .dark {

@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest } from './api-core';
-import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn, ProjectEvent, ProjectAnalytics, PRFile, PRReviewSubmit, MergeQueueItem, ReleaseGate } from '@/types';
+import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn, ProjectEvent, ProjectAnalytics, PRFile, PRReviewSubmit, MergeQueueItem, ReleaseGate, DeployState, BugReport } from '@/types';
 
 // Skills
 export const skills = {
@@ -245,4 +245,18 @@ export const github = {
     request<{ files: PRFile[] }>(`/github/${owner}/${repo}/pulls/${n}/files`),
   prReview: (owner: string, repo: string, n: number, body: PRReviewSubmit) =>
     request(`/github/${owner}/${repo}/pulls/${n}/review`, { method: 'POST', body: JSON.stringify(body) }),
+};
+
+// Deploy
+export const deployApi = {
+  deploy:       (id: string, target: string = 'hosted') =>
+    request<DeployState>(`/projects/${encodeURIComponent(id)}/deploy`, { method: 'POST', body: JSON.stringify({ target }) }),
+  deployStatus: (id: string) =>
+    request<DeployState>(`/projects/${encodeURIComponent(id)}/deploy/status`),
+  deployStop:   (id: string) =>
+    request<{ status: string }>(`/projects/${encodeURIComponent(id)}/deploy/stop`, { method: 'POST' }),
+  archive:      (id: string) =>
+    request<Blob>(`/projects/${encodeURIComponent(id)}/archive`),
+  reportBug:    (id: string, bug: BugReport) =>
+    request<{ status: string }>(`/projects/${encodeURIComponent(id)}/bugs`, { method: 'POST', body: JSON.stringify(bug) }),
 };

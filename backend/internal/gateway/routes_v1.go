@@ -189,6 +189,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/projects/{id}/deploy/dockerfile", gw.handleDeployDockerfile)
 		r.Get("/projects/{id}/deploy/logs", gw.handleDeployLogs)
 		r.Get("/deployments", gw.handleDeployList)
+		r.Post("/projects/{id}/bugs", gw.handleReportBug)
 
 		// Providers
 		r.Get("/providers/auth-profiles", gw.handleProviderAuthProfiles)
