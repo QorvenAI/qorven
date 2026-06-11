@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Download, ExternalLink, Loader2, Rocket, CheckCircle2, XCircle, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getToken, request, BASE as API_BASE } from '@/lib/api-core';
+import type { DeployState } from '@/types';
 
 interface DeployPanelProps {
   projectId: string;
@@ -20,15 +21,6 @@ interface DeployTarget {
   description: string;
   color: string;
   action: 'link' | 'download';
-}
-
-interface DeployState {
-  id: string;
-  status: 'pending' | 'building' | 'pushing' | 'live' | 'failed' | 'stopped' | 'none';
-  url?: string;
-  framework?: string;
-  error?: string;
-  build_log?: string[];
 }
 
 function githubRepoUrl(owner?: string, repo?: string) {
@@ -89,21 +81,21 @@ export function DeployPanel({
       id: 'vercel',
       label: 'Vercel',
       description: 'Deploy to Vercel',
-      color: 'bg-black text-white',
+      color: 'bg-[var(--connector-vercel)] text-white',
       action: 'link',
     },
     {
       id: 'netlify',
       label: 'Netlify',
       description: 'Deploy to Netlify',
-      color: 'bg-[#00AD9F] text-white',
+      color: 'bg-[var(--connector-netlify)] text-white',
       action: 'link',
     },
     {
       id: 'pages',
       label: 'GitHub Pages',
       description: 'Enable Pages in repo settings',
-      color: 'bg-[#24292e] text-white',
+      color: 'bg-[var(--connector-github-pages)] text-white',
       action: 'link',
     },
     {

@@ -476,3 +476,23 @@ export interface ReleaseGate {
   created_at: string;
   updated_at: string;
 }
+
+// ─── Phase 8C.2 — Deploy targets + bug reporting ─────────────────────────────
+
+export type DeployTargetName = 'local' | 'hosted' | 'cloud:vercel' | 'cloud:netlify';
+
+export interface DeployState {
+  id?: string;
+  status: 'pending' | 'building' | 'pushing' | 'live' | 'failed' | 'stopped' | 'none';
+  url?: string;
+  deployed_url?: string;
+  target?: string;
+  framework?: string;
+  error?: string;
+  build_log?: string[];
+}
+
+export interface BugReport {
+  title: string;
+  body: string;
+}
