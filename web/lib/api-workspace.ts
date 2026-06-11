@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest } from './api-core';
-import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn } from '@/types';
+import type { Skill, WorkGoal, WorkGoalTreeNode, Ticket, TicketComment, TicketFile, TicketPriority, ProjectBrief, TeamProposal, ProjectQuality, BriefAgent, ProjectArtifact, ProjectBurn, ProjectEvent, ProjectAnalytics, PRFile, PRReviewSubmit } from '@/types';
 
 // Skills
 export const skills = {
@@ -134,6 +134,12 @@ export const projectBriefs = {
     request<{ status: string; downstream_reopened: string[] }>(`/project-briefs/${encodeURIComponent(id)}/artifacts/${type}/request-changes`, { method: 'POST', body: JSON.stringify({ feedback }) }),
   burn: (id: string) =>
     request<ProjectBurn>(`/projects/${encodeURIComponent(id)}/burn`),
+  events: (id: string) =>
+    request<{ events: ProjectEvent[] }>(`/projects/${encodeURIComponent(id)}/events`),
+  analytics: (id: string) =>
+    request<ProjectAnalytics>(`/projects/${encodeURIComponent(id)}/analytics`),
+  hub: (id: string) =>
+    request<{ room_id: string }>(`/projects/${encodeURIComponent(id)}/hub`),
 };
 
 // Workspaces / Templates
@@ -221,4 +227,12 @@ export const workItems = {
     request<{ work_items: WorkItem[] }>(`/work-items?room=${encodeURIComponent(roomId)}`),
   get: (id: string) =>
     request<{ work_item: WorkItem; events: WorkItemEvent[] }>(`/work-items/${id}`),
+};
+
+// GitHub PR Review
+export const github = {
+  prFiles: (owner: string, repo: string, n: number) =>
+    request<{ files: PRFile[] }>(`/github/${owner}/${repo}/pulls/${n}/files`),
+  prReview: (owner: string, repo: string, n: number, body: PRReviewSubmit) =>
+    request(`/github/${owner}/${repo}/pulls/${n}/review`, { method: 'POST', body: JSON.stringify(body) }),
 };

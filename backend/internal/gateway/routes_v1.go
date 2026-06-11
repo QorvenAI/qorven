@@ -163,6 +163,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/projects/{id}/restore", gw.handleProjectRestore)
 		r.Get("/projects/{id}/archive", gw.handleArchiveProject)
 		r.Get("/projects/{id}/burn", gw.handleProjectBurn)
+		r.Get("/projects/{id}/analytics", gw.handleProjectAnalytics)
+		r.Get("/projects/{id}/events", gw.handleProjectEvents)
+		r.Get("/projects/{id}/hub", gw.handleProjectHub)
 		r.Post("/projects/{id}/pause", gw.handleProjectPause)
 		r.Post("/projects/{id}/resume", gw.handleProjectResume)
 
@@ -818,6 +821,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/github/{owner}/{repo}/pulls", gw.handleGitHubListPulls)
 		r.Post("/github/{owner}/{repo}/pulls/{pr}/merge", gw.handleGitHubMergePR)
 		r.Get("/github/{owner}/{repo}/pulls/{prNum}/checks", gw.handleGitHubPRChecks)
+		r.Get("/github/{owner}/{repo}/pulls/{n}/files", gw.handleGitHubPRFiles)
+		r.Post("/github/{owner}/{repo}/pulls/{n}/review", gw.handleGitHubPRReview)
 		r.Post("/github/{owner}/{repo}/issues/{number}/close", gw.handleGitHubCloseIssue)
 		// GitHub autonomous task queue (in-memory GitHubTaskQueue)
 		r.Get("/github/tasks", gw.handleListGitHubTasks)

@@ -14,6 +14,7 @@ import { githubApi, type GitHubPR, type GitHubCheck, type GitHubIssue, type GitH
 import { request } from '@/lib/api-core';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
+import { PRReview } from '@/components/code/pr-review';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,10 @@ interface PRDetailProps {
   onMerged: () => void;
 }
 
+type DrawerTab = 'overview' | 'review';
+
 function PRDetail({ pr, owner, repo, allPRs, onClose, onMerged }: PRDetailProps) {
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>('overview');
   const [checks, setChecks] = useState<GitHubCheck[]>([]);
   const [loadingChecks, setLoadingChecks] = useState(true);
   const [merging, setMerging] = useState(false);
@@ -153,121 +157,148 @@ function PRDetail({ pr, owner, repo, allPRs, onClose, onMerged }: PRDetailProps)
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {/* Branch info */}
-          <div className="px-5 py-3 border-b border-border flex items-center gap-2 text-xs text-muted-foreground">
-            <GitBranch className="h-3.5 w-3.5 shrink-0" />
-            <span className="font-mono text-foreground">{pr.head.ref}</span>
-            <ArrowRight className="h-3 w-3 shrink-0" />
-            <span className="font-mono">{pr.base.ref}</span>
-            <a href={pr.html_url} target="_blank" rel="noopener noreferrer"
-               className="ml-auto flex items-center gap-1 hover:text-foreground transition-colors">
-              Open on GitHub <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-
-          {/* Stack panel */}
-          {(stackParent || stackChildren.length > 0) && (
-            <div className="px-5 py-3 border-b border-border">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Stack</p>
-              <div className="space-y-1 text-xs">
-                {stackParent && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Circle className="h-2.5 w-2.5 shrink-0" />
-                    <span className="font-mono">#{stackParent.number}</span>
-                    <span className="truncate">{stackParent.title}</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-2 text-primary font-medium">
-                  <ChevronRight className="h-3 w-3 shrink-0" />
-                  <span className="font-mono">#{pr.number}</span>
-                  <span className="truncate">{pr.title}</span>
-                </div>
-                {stackChildren.map((child) => (
-                  <div key={child.number} className="flex items-center gap-2 text-muted-foreground ml-4">
-                    <Circle className="h-2 w-2 shrink-0" />
-                    <span className="font-mono">#{child.number}</span>
-                    <span className="truncate">{child.title}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* CI Checks */}
-          <div className="px-5 py-3 border-b border-border">
-            <p className="text-xs font-medium text-muted-foreground mb-2">
-              Checks {!loadingChecks && checks.length > 0 && `(${checks.length})`}
-            </p>
-            {loadingChecks ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : checks.length === 0 ? (
-              <span className="text-xs text-muted-foreground">No checks</span>
-            ) : (
-              <div className="space-y-1.5">
-                {checks.map((c) => {
-                  const passed = c.conclusion === 'success';
-                  const failed = c.conclusion === 'failure' || c.conclusion === 'cancelled';
-                  const running = c.status !== 'completed';
-                  return (
-                    <div key={c.id} className="flex items-center gap-2 text-xs">
-                      {running  && <Loader2 className="h-3 w-3 animate-spin text-amber-400 shrink-0" />}
-                      {!running && passed  && <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />}
-                      {!running && failed  && <XCircle className="h-3 w-3 text-destructive shrink-0" />}
-                      {!running && !passed && !failed && <Circle className="h-3 w-3 text-muted-foreground shrink-0" />}
-                      <a href={c.html_url} target="_blank" rel="noopener noreferrer"
-                         className="hover:underline truncate text-foreground">
-                        {c.name}
-                      </a>
-                      {c.completed_at && (
-                        <span className="ml-auto shrink-0 text-muted-foreground">{relTime(c.completed_at)}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Activity: most recent commits (head SHA as reference) */}
-          <div className="px-5 py-3">
-            <p className="text-xs font-medium text-muted-foreground mb-2">Head</p>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-              <GitCommit className="h-3.5 w-3.5 shrink-0" />
-              {pr.head.sha.slice(0, 7)}
-            </div>
-          </div>
+        {/* Drawer tab strip */}
+        <div className="flex items-center gap-1 border-b border-border px-4 shrink-0">
+          {(['overview', 'review'] as DrawerTab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setDrawerTab(t)}
+              className={cn(
+                'px-3 py-2 text-xs font-medium transition-colors border-b-2',
+                drawerTab === t
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t === 'overview' ? 'Overview' : 'Files & Review'}
+            </button>
+          ))}
         </div>
 
-        {/* Merge panel */}
-        {pr.state === 'open' && (
-          <div className="px-5 py-4 border-t border-border shrink-0 space-y-2">
-            <div className="flex items-center gap-2">
-              <select
-                value={mergeMethod}
-                onChange={(e) => setMergeMethod(e.target.value as any)}
-                className="qr-select text-xs flex-1"
-              >
-                <option value="squash">Squash and merge</option>
-                <option value="merge">Create a merge commit</option>
-                <option value="rebase">Rebase and merge</option>
-              </select>
-              <button
-                onClick={handleMerge}
-                disabled={merging}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap',
-                  'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50',
-                )}>
-                {merging ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
-                Merge
-              </button>
+        {drawerTab === 'overview' ? (
+          <>
+            <div className="flex-1 overflow-y-auto">
+              {/* Branch info */}
+              <div className="px-5 py-3 border-b border-border flex items-center gap-2 text-xs text-muted-foreground">
+                <GitBranch className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-mono text-foreground">{pr.head.ref}</span>
+                <ArrowRight className="h-3 w-3 shrink-0" />
+                <span className="font-mono">{pr.base.ref}</span>
+                <a href={pr.html_url} target="_blank" rel="noopener noreferrer"
+                   className="ml-auto flex items-center gap-1 hover:text-foreground transition-colors">
+                  Open on GitHub <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+
+              {/* Stack panel */}
+              {(stackParent || stackChildren.length > 0) && (
+                <div className="px-5 py-3 border-b border-border">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Stack</p>
+                  <div className="space-y-1 text-xs">
+                    {stackParent && (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Circle className="h-2.5 w-2.5 shrink-0" />
+                        <span className="font-mono">#{stackParent.number}</span>
+                        <span className="truncate">{stackParent.title}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-primary font-medium">
+                      <ChevronRight className="h-3 w-3 shrink-0" />
+                      <span className="font-mono">#{pr.number}</span>
+                      <span className="truncate">{pr.title}</span>
+                    </div>
+                    {stackChildren.map((child) => (
+                      <div key={child.number} className="flex items-center gap-2 text-muted-foreground ml-4">
+                        <Circle className="h-2 w-2 shrink-0" />
+                        <span className="font-mono">#{child.number}</span>
+                        <span className="truncate">{child.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* CI Checks */}
+              <div className="px-5 py-3 border-b border-border">
+                <p className="text-xs font-medium text-muted-foreground mb-2">
+                  Checks {!loadingChecks && checks.length > 0 && `(${checks.length})`}
+                </p>
+                {loadingChecks ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                ) : checks.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">No checks</span>
+                ) : (
+                  <div className="space-y-1.5">
+                    {checks.map((c) => {
+                      const passed = c.conclusion === 'success';
+                      const failed = c.conclusion === 'failure' || c.conclusion === 'cancelled';
+                      const running = c.status !== 'completed';
+                      return (
+                        <div key={c.id} className="flex items-center gap-2 text-xs">
+                          {running  && <Loader2 className="h-3 w-3 animate-spin text-amber-400 shrink-0" />}
+                          {!running && passed  && <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />}
+                          {!running && failed  && <XCircle className="h-3 w-3 text-destructive shrink-0" />}
+                          {!running && !passed && !failed && <Circle className="h-3 w-3 text-muted-foreground shrink-0" />}
+                          <a href={c.html_url} target="_blank" rel="noopener noreferrer"
+                             className="hover:underline truncate text-foreground">
+                            {c.name}
+                          </a>
+                          {c.completed_at && (
+                            <span className="ml-auto shrink-0 text-muted-foreground">{relTime(c.completed_at)}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Activity: most recent commits (head SHA as reference) */}
+              <div className="px-5 py-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Head</p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                  <GitCommit className="h-3.5 w-3.5 shrink-0" />
+                  {pr.head.sha.slice(0, 7)}
+                </div>
+              </div>
             </div>
-            {pr.ci_status && pr.ci_status !== 'success' && (
-              <p className="text-xs text-amber-400">
-                CI is {pr.ci_status} — merge anyway at your own risk.
-              </p>
+
+            {/* Merge panel */}
+            {pr.state === 'open' && (
+              <div className="px-5 py-4 border-t border-border shrink-0 space-y-2">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={mergeMethod}
+                    onChange={(e) => setMergeMethod(e.target.value as any)}
+                    className="qr-select text-xs flex-1"
+                  >
+                    <option value="squash">Squash and merge</option>
+                    <option value="merge">Create a merge commit</option>
+                    <option value="rebase">Rebase and merge</option>
+                  </select>
+                  <button
+                    onClick={handleMerge}
+                    disabled={merging}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap',
+                      'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50',
+                    )}>
+                    {merging ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+                    Merge
+                  </button>
+                </div>
+                {pr.ci_status && pr.ci_status !== 'success' && (
+                  <p className="text-xs text-amber-400">
+                    CI is {pr.ci_status} — merge anyway at your own risk.
+                  </p>
+                )}
+              </div>
             )}
+          </>
+        ) : (
+          /* Files & Review tab */
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <PRReview owner={owner} repo={repo} prNumber={pr.number} />
           </div>
         )}
       </div>

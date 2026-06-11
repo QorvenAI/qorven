@@ -83,6 +83,12 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 			broadcastTaskEvent(gw, taskID, agentID, realtime.EventTaskBlocked, map[string]any{
 				"reason": "budget_exceeded",
 			})
+			// Durable project-scoped event (best-effort).
+			if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" {
+				gw.emitProjectEvent(ctx, briefID, "blocked", task.Title, map[string]any{
+					"reason": "budget_exceeded",
+				}, taskID, agentID)
+			}
 			return
 		}
 
@@ -90,6 +96,12 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 		if task.Status != tasks.StatusInProgress {
 			if err := gw.taskStore.Transition(ctx, taskID, tasks.StatusInProgress); err != nil {
 				slog.Warn("task_worker: could not transition to in_progress", "task", taskID, "error", err)
+			}
+			// Durable project-scoped event for task start (best-effort).
+			if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" {
+				gw.emitProjectEvent(ctx, briefID, "task_started", task.Title, map[string]any{
+					"status": "in_progress",
+				}, taskID, agentID)
 			}
 		}
 
@@ -108,6 +120,12 @@ func (gw *Gateway) processTask(ctx context.Context, agentID string, taskID strin
 				broadcastTaskEvent(gw, taskID, agentID, realtime.EventTaskBlocked, map[string]any{
 					"reason": fmt.Sprintf("max retries exceeded: %v", iterErr),
 				})
+				// Durable project-scoped event (best-effort).
+				if briefID := gw.projectBriefForTask(ctx, taskID); briefID != "" {
+					gw.emitProjectEvent(ctx, briefID, "blocked", task.Title, map[string]any{
+						"reason": fmt.Sprintf("max retries exceeded: %v", iterErr),
+					}, taskID, agentID)
+				}
 				return
 			}
 			// Back off before retrying.

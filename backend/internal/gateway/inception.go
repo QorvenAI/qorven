@@ -627,6 +627,8 @@ func (gw *Gateway) handleApproveTeam(w http.ResponseWriter, r *http.Request) {
 		slog.Info("inception.project_registry_created", "brief_id", b.ID, "workspace", inceptionWorkspace)
 	}
 
+	_ = gw.ensureProjectHub(ctx, b.ID)
+
 	gw.rtHub.Broadcast(realtime.Event{Type: realtime.EventProjectUpdated, Data: b})
 	writeJSON(w, 200, map[string]any{
 		"brief":   b,
