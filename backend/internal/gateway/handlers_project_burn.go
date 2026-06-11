@@ -11,7 +11,7 @@ import (
 	"github.com/qorvenai/qorven/internal/realtime"
 )
 
-// handleProjectBurn returns live µUSD spend vs. the monthly cap for a project.
+// handleProjectBurn returns live µUSD lifetime spend vs. the project cap.
 //
 //	GET /v1/projects/{id}/burn
 //
@@ -23,6 +23,7 @@ import (
 //	  "cap_uusd":   100000000,
 //	  "used_usd":   12.345678,
 //	  "cap_usd":    100.0,
+//	  "pct":        12,
 //	  "warn_pct":   80
 //	}
 //
@@ -39,12 +40,17 @@ func (gw *Gateway) handleProjectBurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const uusdPerUSD = 1_000_000
+	pct := 0
+	if cap > 0 {
+		pct = int(used * 100 / cap)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": projectID,
 		"used_uusd":  used,
 		"cap_uusd":   cap,
 		"used_usd":   float64(used) / float64(uusdPerUSD),
 		"cap_usd":    float64(cap) / float64(uusdPerUSD),
+		"pct":        pct,
 		"warn_pct":   warnPct,
 	})
 }
@@ -74,14 +80,16 @@ func projectUsedAndCap(ctx context.Context, db *pgxpool.Pool, projectID string) 
 	}
 	// No budget row is not an error — just uncapped.
 
-	// 2. Sum month-to-date spend from the raw ledger (gateway_spend_raw).
+	// 2. Sum lifetime spend from the raw ledger (gateway_spend_raw). The project
+	// cap is a one-off lifetime allocation from the resource plan, not a monthly
+	// allowance, so spend must accumulate across month boundaries — a /code
+	// project runs to completion and may span more than one calendar month.
 	var spent *int64
 	_ = db.QueryRow(ctx, `
 		SELECT SUM(cost_total_uusd)
 		FROM gateway_spend_raw
 		WHERE tenant_id = $1
 		  AND project_id = $2
-		  AND created_at >= date_trunc('month', CURRENT_DATE)
 	`, defaultTenant, projectID).Scan(&spent)
 	if spent != nil {
 		usedUUSD = *spent
