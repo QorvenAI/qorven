@@ -150,12 +150,25 @@ func (gw *Gateway) handleProposeRelease(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, gate)
 }
 
+// approveRequest is the optional JSON body for the approve endpoint.
+// auto_deploy: if true the server triggers a deploy immediately after marking
+// the release as 'released' (detached, non-blocking).
+// deploy_target: deploy target to use when auto_deploy is true (default "hosted").
+type approveRequest struct {
+	AutoDeploy   bool   `json:"auto_deploy"`
+	DeployTarget string `json:"deploy_target"`
+}
+
 // handleApproveRelease serves POST /v1/projects/{id}/release/{releaseId}/approve.
 //
 // Human gate: requires an authenticated user (401 if not present).
 // The gate must be in status='proposed'. On approval it is immediately executed:
 // the GitHub release is published. On success the gate moves to 'released'.
 // On GitHub API failure the gate stays 'approved' so the caller can retry.
+//
+// Optional JSON body: {"auto_deploy": true, "deploy_target": "hosted"}.
+// When auto_deploy is false (default), a gate_decision event is emitted so the
+// UI can surface the Deploy button.
 func (gw *Gateway) handleApproveRelease(w http.ResponseWriter, r *http.Request) {
 	if gw.db == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
@@ -172,6 +185,14 @@ func (gw *Gateway) handleApproveRelease(w http.ResponseWriter, r *http.Request) 
 	briefID := chi.URLParam(r, "id")
 	releaseID := chi.URLParam(r, "releaseId")
 	ctx := r.Context()
+
+	// Decode optional body (auto_deploy / deploy_target). Tolerate empty body.
+	var approveReq approveRequest
+	json.NewDecoder(r.Body).Decode(&approveReq) //nolint:errcheck
+	deployTarget := approveReq.DeployTarget
+	if deployTarget == "" {
+		deployTarget = "hosted"
+	}
 
 	// Load the gate and verify it belongs to this project.
 	var gate releaseGateRow
@@ -274,7 +295,52 @@ func (gw *Gateway) handleApproveRelease(w http.ResponseWriter, r *http.Request) 
 	)
 	slog.Info("release_gate.released", "brief", briefID, "version", gate.Version, "gate", releaseID)
 
+	// ── Post-release deploy hook ─────────────────────────────────────────────
+	if approveReq.AutoDeploy && gw.deployReg != nil {
+		// Detached context: the HTTP request will return immediately; the deploy
+		// runs in the background and emits its own deploy_started / deploy_live /
+		// deploy_failed events.
+		go gw.deployReleasedVersion(context.Background(), briefID, releaseID, gate.Version, deployTarget)
+	} else {
+		// Manual-deploy path: emit a gate_decision event so the UI can surface
+		// the Deploy button for this release.
+		gw.emitProjectEvent(ctx, briefID, "gate_decision",
+			fmt.Sprintf("Release %s ready to deploy", gate.Version),
+			map[string]any{
+				"release_gate_id": gate.ID,
+				"version":         gate.Version,
+				"action":          "ready_to_deploy",
+				"deploy_target":   deployTarget,
+			},
+			"", "",
+		)
+	}
+
 	writeJSON(w, http.StatusOK, gate)
+}
+
+// deployReleasedVersion deploys the just-released version of a project to the
+// chosen target, stamping the deployment with the originating release for lineage.
+// Called in a detached goroutine from handleApproveRelease when auto_deploy=true.
+func (gw *Gateway) deployReleasedVersion(ctx context.Context, briefID, releaseID, version, target string) {
+	if gw.projectReg == nil || gw.deployReg == nil {
+		slog.Warn("deploy_released.skip", "reason", "registry not ready", "release", releaseID)
+		return
+	}
+
+	// Look up the project via the brief ID.
+	project := gw.projectReg.GetByBriefID(briefID)
+	if project == nil {
+		slog.Warn("deploy_released.skip", "reason", "project not found for brief", "brief", briefID, "release", releaseID)
+		return
+	}
+
+	slog.Info("deploy_released.start", "brief", briefID, "release", releaseID, "version", version, "target", target)
+
+	// startDeploy creates the Deployment record (with release_id stamped), launches
+	// the goroutine, and returns immediately. The version tag is passed as
+	// ReleaseTag so cloud targets can check out the exact ref.
+	gw.startDeploy(project, target, releaseID, version)
 }
 
 // handleListReleases serves GET /v1/projects/{id}/releases.

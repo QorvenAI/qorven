@@ -50,6 +50,10 @@ type Deployment struct {
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 	BuildLog    []string     `json:"build_log,omitempty"`
+	// Added by migration 047: deploy lineage + target.
+	ReleaseID   string `json:"release_id,omitempty"`  // release_gates.id that triggered this deploy
+	Target      string `json:"target,omitempty"`      // "local" | "hosted" | "cloud:*"
+	DeployedURL string `json:"deployed_url,omitempty"` // canonical public URL once live
 }
 
 // DeployManager manages project deployments with DB persistence.
@@ -113,11 +117,25 @@ func (dm *DeployManager) persistCreate(d *Deployment) {
 		return
 	}
 	go func() {
+		// release_id is nullable uuid — pass nil when empty so pgx doesn't fail.
+		var releaseID *string
+		if d.ReleaseID != "" {
+			releaseID = &d.ReleaseID
+		}
+		target := d.Target
+		if target == "" {
+			target = "local"
+		}
 		_, err := dm.db.Exec(context.Background(), `
-			INSERT INTO deployments (id, project_id, project_name, status, framework, url, dockerfile, error, build_log, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-			ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
-		`, d.ID, d.ProjectID, d.ProjectName, string(d.Status), d.Framework, d.URL, d.Dockerfile, d.Error, d.BuildLog, d.CreatedAt, d.UpdatedAt)
+			INSERT INTO deployments
+				(id, project_id, project_name, status, framework, url, dockerfile, error,
+				 build_log, created_at, updated_at, release_id, target, deployed_url)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $13, $14)
+			ON CONFLICT (id) DO UPDATE
+				SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+		`, d.ID, d.ProjectID, d.ProjectName, string(d.Status), d.Framework, d.URL,
+			d.Dockerfile, d.Error, d.BuildLog, d.CreatedAt, d.UpdatedAt,
+			releaseID, target, d.DeployedURL)
 		if err != nil {
 			slog.Debug("deploy.persist_create", "err", err)
 		}
@@ -135,12 +153,15 @@ func (dm *DeployManager) persistUpdate(d *Deployment) {
 		errStr := d.Error
 		buildLog := d.BuildLog
 		updatedAt := d.UpdatedAt
+		deployedURL := d.DeployedURL
 		dm.mu.RUnlock()
 
 		_, err := dm.db.Exec(context.Background(), `
-			UPDATE deployments SET status = $2, url = $3, error = $4, build_log = $5, updated_at = $6
+			UPDATE deployments
+			SET status = $2, url = $3, error = $4, build_log = $5, updated_at = $6,
+			    deployed_url = $7
 			WHERE id = $1::uuid
-		`, d.ID, status, url, errStr, buildLog, updatedAt)
+		`, d.ID, status, url, errStr, buildLog, updatedAt, deployedURL)
 		if err != nil {
 			slog.Debug("deploy.persist_update", "err", err)
 		}
@@ -153,7 +174,9 @@ func (dm *DeployManager) loadFromDB() {
 	}
 	rows, err := dm.db.Query(context.Background(), `
 		SELECT DISTINCT ON (project_id)
-			id, project_id, project_name, status, framework, url, dockerfile, error, build_log, created_at, updated_at
+			id, project_id, project_name, status, framework, url, dockerfile, error,
+			build_log, created_at, updated_at,
+			COALESCE(release_id::text, ''), COALESCE(target, ''), COALESCE(deployed_url, '')
 		FROM deployments
 		ORDER BY project_id, created_at DESC
 	`)
@@ -168,7 +191,11 @@ func (dm *DeployManager) loadFromDB() {
 	for rows.Next() {
 		var d Deployment
 		var status string
-		if err := rows.Scan(&d.ID, &d.ProjectID, &d.ProjectName, &status, &d.Framework, &d.URL, &d.Dockerfile, &d.Error, &d.BuildLog, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&d.ID, &d.ProjectID, &d.ProjectName, &status, &d.Framework,
+			&d.URL, &d.Dockerfile, &d.Error, &d.BuildLog, &d.CreatedAt, &d.UpdatedAt,
+			&d.ReleaseID, &d.Target, &d.DeployedURL,
+		); err != nil {
 			continue
 		}
 		d.Status = DeployStatus(status)
@@ -184,6 +211,132 @@ func (dm *DeployManager) loadFromDB() {
 type deployRequest struct {
 	Target     string `json:"target"`      // "local" | "hosted" (default) | "cloud:vercel" | "cloud:netlify"
 	ReleaseTag string `json:"release_tag"` // git ref to deploy (cloud targets); empty → "main"
+}
+
+// startDeploy creates and launches a deployment for the given project.
+// releaseID may be empty (manual deploy via API); when non-empty it is stamped
+// on the deployments row so the deployment is traceable to its release gate.
+// Returns the new Deployment record (status=building) immediately; the actual
+// deploy runs in a detached goroutine.
+func (gw *Gateway) startDeploy(project *tools.CodeProject, target, releaseID, releaseTag string) *Deployment {
+	projectID := project.ID
+	projectName := project.Name
+	projectPath := project.Path
+	briefID := project.InceptionBriefID
+
+	// Detect framework (used as a hint by targets that write their own Dockerfile).
+	framework, _ := detectFramework(projectPath)
+	if framework == "" {
+		framework = "static"
+	}
+	dockerfile := generateDockerfile(framework, projectPath)
+	slug := sanitizeSlug(projectName)
+
+	// Build the deploy spec from project metadata.
+	spec := deploy.Spec{
+		ProjectID:   projectID,
+		ProjectPath: projectPath,
+		Slug:        slug,
+		Framework:   framework,
+		ReleaseTag:  releaseTag,
+		RepoOwner:   project.GitHubOwner,
+		RepoName:    project.GitHubRepo,
+	}
+
+	// Create deployment record — status building from the start.
+	rec := &Deployment{
+		ID:          uuid.New().String(),
+		ProjectID:   projectID,
+		ProjectName: projectName,
+		Status:      DeployBuilding,
+		Framework:   framework,
+		Dockerfile:  dockerfile,
+		Target:      target,
+		ReleaseID:   releaseID,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	gw.deployMgr.Create(rec)
+
+	// Track as a Command Center job.
+	if gw.commandCenter != nil {
+		now := time.Now()
+		gw.commandCenter.AddJob(&AgentJob{
+			ID:        rec.ID,
+			ProjectID: projectID,
+			AgentID:   "deploy",
+			AgentName: "Deploy Agent",
+			Title:     fmt.Sprintf("Deploy %s (%s)", projectName, target),
+			Status:    JobStatusRunning,
+			StartedAt: &now,
+		})
+	}
+
+	// Launch the deploy asynchronously — use a detached context so the
+	// goroutine is not cancelled when the HTTP request (or calling function) returns.
+	go func() {
+		gw.emitProjectEvent(context.Background(), briefID, "deploy_started",
+			fmt.Sprintf("Deploy %s started (%s)", projectName, target),
+			map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID, "release_id": releaseID},
+			"", "")
+
+		res, err := gw.deployReg.Deploy(context.Background(), target, spec)
+		if err != nil {
+			errMsg := err.Error()
+			gw.deployMgr.Update(rec.ID, func(d *Deployment) {
+				d.Status = DeployFailed
+				d.Error = errMsg
+			})
+			if gw.commandCenter != nil {
+				now := time.Now()
+				gw.commandCenter.UpdateJob(rec.ID, func(j *AgentJob) {
+					j.Status = JobStatusFailed
+					j.Error = errMsg
+					j.CompletedAt = &now
+				})
+			}
+			gw.emitProjectEvent(context.Background(), briefID, "deploy_failed",
+				fmt.Sprintf("Deploy %s failed: %s", projectName, errMsg),
+				map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID, "error": errMsg, "release_id": releaseID},
+				"", "")
+			// TODO(Task 9): gw.triggerFixLoop on failure
+			slog.Error("deploy.failed", "project", projectID, "target", target, "err", err)
+			return
+		}
+
+		// Success — mark live with the REAL url from the target.
+		gw.deployMgr.Update(rec.ID, func(d *Deployment) {
+			d.Status = DeployLive
+			d.URL = res.URL
+			d.DeployedURL = res.URL
+		})
+		if gw.commandCenter != nil {
+			now := time.Now()
+			gw.commandCenter.UpdateJob(rec.ID, func(j *AgentJob) {
+				j.Status = JobStatusCompleted
+				j.Progress = 100
+				j.CompletedAt = &now
+				if j.StartedAt != nil {
+					j.DurationMs = now.Sub(*j.StartedAt).Milliseconds()
+				}
+			})
+		}
+
+		// Reflect deployed URL on the project's PreviewURL (best-effort).
+		if gw.projectReg != nil && res.URL != "" {
+			gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
+				p.PreviewURL = res.URL
+			})
+		}
+
+		gw.emitProjectEvent(context.Background(), briefID, "deploy_live",
+			fmt.Sprintf("Deploy %s live at %s", projectName, res.URL),
+			map[string]any{"project_id": projectID, "target": res.Target, "deploy_id": rec.ID, "url": res.URL, "release_id": releaseID},
+			"", "")
+		slog.Info("deploy.complete", "project", projectID, "target", res.Target, "url", res.URL, "release_id", releaseID)
+	}()
+
+	return rec
 }
 
 // handleDeploy starts a deployment for a project, dispatching to the chosen
@@ -219,123 +372,8 @@ func (gw *Gateway) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectPath := project.Path
-	projectName := project.Name
-
-	// Detect framework (used as a hint by targets that write their own Dockerfile).
-	framework, _ := detectFramework(projectPath)
-	if framework == "" {
-		framework = "static"
-	}
-
-	dockerfile := generateDockerfile(framework, projectPath)
-	slug := sanitizeSlug(projectName)
-
-	// Build the deploy spec from project metadata.
-	spec := deploy.Spec{
-		ProjectID:   projectID,
-		ProjectPath: projectPath,
-		Slug:        slug,
-		Framework:   framework,
-		ReleaseTag:  req.ReleaseTag,
-		RepoOwner:   project.GitHubOwner,
-		RepoName:    project.GitHubRepo,
-	}
-
-	// Create deployment record — status building from the start.
-	rec := &Deployment{
-		ID:          uuid.New().String(),
-		ProjectID:   projectID,
-		ProjectName: projectName,
-		Status:      DeployBuilding,
-		Framework:   framework,
-		Dockerfile:  dockerfile,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-
-	gw.deployMgr.Create(rec)
-
-	// Track as a Command Center job.
-	if gw.commandCenter != nil {
-		now := time.Now()
-		gw.commandCenter.AddJob(&AgentJob{
-			ID:        rec.ID,
-			ProjectID: projectID,
-			AgentID:   "deploy",
-			AgentName: "Deploy Agent",
-			Title:     fmt.Sprintf("Deploy %s (%s)", projectName, target),
-			Status:    JobStatusRunning,
-			StartedAt: &now,
-		})
-	}
-
-	// Resolve briefID once for project events (best-effort).
-	briefID := project.InceptionBriefID
-
-	// Launch the deploy asynchronously — use a detached context so the
-	// goroutine is not cancelled when the HTTP request returns.
-	go func() {
-		gw.emitProjectEvent(context.Background(), briefID, "deploy_started",
-			fmt.Sprintf("Deploy %s started (%s)", projectName, target),
-			map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID},
-			"", "")
-
-		res, err := gw.deployReg.Deploy(context.Background(), target, spec)
-		if err != nil {
-			errMsg := err.Error()
-			gw.deployMgr.Update(rec.ID, func(d *Deployment) {
-				d.Status = DeployFailed
-				d.Error = errMsg
-			})
-			if gw.commandCenter != nil {
-				now := time.Now()
-				gw.commandCenter.UpdateJob(rec.ID, func(j *AgentJob) {
-					j.Status = JobStatusFailed
-					j.Error = errMsg
-					j.CompletedAt = &now
-				})
-			}
-			gw.emitProjectEvent(context.Background(), briefID, "deploy_failed",
-				fmt.Sprintf("Deploy %s failed: %s", projectName, errMsg),
-				map[string]any{"project_id": projectID, "target": target, "deploy_id": rec.ID, "error": errMsg},
-				"", "")
-			// TODO(Task 9): gw.triggerFixLoop on failure
-			slog.Error("deploy.failed", "project", projectID, "target", target, "err", err)
-			return
-		}
-
-		// Success — mark live with the REAL url from the target.
-		gw.deployMgr.Update(rec.ID, func(d *Deployment) {
-			d.Status = DeployLive
-			d.URL = res.URL
-		})
-		if gw.commandCenter != nil {
-			now := time.Now()
-			gw.commandCenter.UpdateJob(rec.ID, func(j *AgentJob) {
-				j.Status = JobStatusCompleted
-				j.Progress = 100
-				j.CompletedAt = &now
-				if j.StartedAt != nil {
-					j.DurationMs = now.Sub(*j.StartedAt).Milliseconds()
-				}
-			})
-		}
-
-		// Reflect deployed URL on the project's PreviewURL (best-effort).
-		if gw.projectReg != nil && res.URL != "" {
-			gw.projectReg.UpdateBuild(projectID, func(p *tools.CodeProject) {
-				p.PreviewURL = res.URL
-			})
-		}
-
-		gw.emitProjectEvent(context.Background(), briefID, "deploy_live",
-			fmt.Sprintf("Deploy %s live at %s", projectName, res.URL),
-			map[string]any{"project_id": projectID, "target": res.Target, "deploy_id": rec.ID, "url": res.URL},
-			"", "")
-		slog.Info("deploy.complete", "project", projectID, "target", res.Target, "url", res.URL)
-	}()
-
+	// Delegate to shared helper; manual deploys carry no release_id.
+	rec := gw.startDeploy(project, target, "", req.ReleaseTag)
 	writeJSON(w, http.StatusAccepted, rec)
 }
 
