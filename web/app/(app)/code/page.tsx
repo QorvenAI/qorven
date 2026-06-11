@@ -43,7 +43,7 @@ import { BuildLog } from '@/components/code/build-log';
 import { DiffViewer } from '@/components/code/diff-viewer';
 import { AgentDiffView } from '@/components/code/agent-diff-view';
 import { projectCheckpoints } from '@/lib/api-workspace';
-import { syncModelContent, modelIsDirtyVsDisk } from '@/lib/monaco-models';
+import { syncModelContent } from '@/lib/monaco-models';
 import type { FileEditedProps } from '@/lib/events';
 import { EditorViewToggle } from '@/components/code/editor-view-toggle';
 import { PreviewPanel } from '@/components/code/preview-panel';

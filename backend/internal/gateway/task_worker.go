@@ -500,6 +500,10 @@ func (gw *Gateway) buildCodeEditToolForTask(ctx context.Context, taskID, agentID
 	}
 
 	// onEdit emits a file.edited realtime event after each successful agent write.
+	// NOTE: this emits an ABSOLUTE path (the FE agent-edit consumer matches against
+	// absolute tab/tree paths). User-write/delete emitters use a workspace-relative
+	// path; the two consumers are distinct today. Standardizing both emit sites +
+	// the FE matchers on one format is a documented follow-up.
 	var onEditFn func(path, diffText string)
 	if gw.events != nil {
 		onEditFn = func(absPath, diffText string) {

@@ -45,13 +45,3 @@ export function disposeModel(path: string) {
   if (!_m) return;
   _m.editor.getModel(_m.Uri.file(path))?.dispose();
 }
-
-/**
- * modelIsDirtyVsDisk reports whether the open model diverges from disk content
- * (so a file.edited from an agent doesn't clobber the user's unsaved edits).
- */
-export function modelIsDirtyVsDisk(path: string, diskContent: string): boolean {
-  if (!_m) return false;
-  const model = _m.editor.getModel(_m.Uri.file(path));
-  return !!model && model.getValue() !== diskContent;
-}
