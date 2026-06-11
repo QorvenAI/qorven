@@ -4,12 +4,14 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/qorvenai/qorven/internal/agent"
 )
 
@@ -50,7 +52,7 @@ func (gw *Gateway) listArtifacts(ctx context.Context, briefID string) ([]Project
 		var a ProjectArtifact
 		if err := rows.Scan(&a.ID, &a.BriefID, &a.Type, &a.Version, &a.ContentMD, &a.Status,
 			&a.RepoCommitted, &a.CreatedBy, &a.ApprovedBy, &a.ApprovedAt, &a.CreatedAt); err != nil {
-			continue
+			return nil, err
 		}
 		out = append(out, a)
 	}
@@ -67,7 +69,12 @@ func (gw *Gateway) getActiveArtifact(ctx context.Context, briefID, typ string) (
 		 WHERE brief_id = $1 AND type = $2 AND status <> 'superseded'`, briefID, typ).
 		Scan(&a.ID, &a.BriefID, &a.Type, &a.Version, &a.ContentMD, &a.Status,
 			&a.RepoCommitted, &a.CreatedBy, &a.ApprovedBy, &a.ApprovedAt, &a.CreatedAt)
-	if err != nil { return nil, nil }
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	return &a, nil
 }
 
@@ -192,7 +199,23 @@ func (gw *Gateway) artifactPromptFor(ctx context.Context, b *ProjectBrief, typ s
 			fmt.Fprintf(&sb, "Build on the approved %s:\n\n%s\n", p, a.ContentMD)
 		}
 	}
+	// If a prior draft of this artifact was sent back with revision feedback, include it.
+	if prevMD, _ := gw.getLatestNeedsReview(ctx, b.ID, typ); prevMD != "" {
+		fmt.Fprintf(&sb, "\nThe previous draft was returned with this feedback — address it:\n%s\n", prevMD)
+	}
 	return sb.String()
+}
+
+// getLatestNeedsReview returns the content_md of the most recent needs_review
+// (or superseded) artifact of a type, for feeding revision feedback into regen.
+func (gw *Gateway) getLatestNeedsReview(ctx context.Context, briefID, typ string) (string, error) {
+	var md string
+	err := gw.db.Pool.QueryRow(ctx,
+		`SELECT content_md FROM project_artifacts
+		 WHERE brief_id=$1 AND type=$2 AND status IN ('needs_review','superseded')
+		 ORDER BY version DESC LIMIT 1`, briefID, typ).Scan(&md)
+	if err != nil { return "", err }
+	return md, nil
 }
 
 // handleGenerateArtifact has the CTO draft an artifact (prd|spec|design).
@@ -213,12 +236,16 @@ func (gw *Gateway) handleGenerateArtifact(w http.ResponseWriter, r *http.Request
 	}
 
 	prompt := gw.artifactPromptFor(r.Context(), brief, typ)
+	sid := fmt.Sprintf("artifact-%s-%s", typ, id)
+	if cur, _ := gw.getActiveArtifact(r.Context(), id, typ); cur != nil {
+		sid = fmt.Sprintf("%s-v%d", sid, cur.Version+1)
+	}
 	var collected strings.Builder
 	if gw.agentLoop != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
 		_, _ = gw.agentLoop.Run(ctx, agent.RunRequest{
-			AgentID: "prime", SessionID: fmt.Sprintf("artifact-%s-%s", typ, id), UserMessage: prompt,
+			AgentID: "prime", SessionID: sid, UserMessage: prompt,
 			Channel: "plan_graph", Stream: true, NoPersist: true, TenantID: defaultTenant,
 		}, func(ev agent.StreamEvent) {
 			if ev.Type == "text_delta" && ev.Delta != "" { collected.WriteString(ev.Delta) }
@@ -250,7 +277,11 @@ func (gw *Gateway) handleApproveArtifact(w http.ResponseWriter, r *http.Request)
 	}
 	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_briefs SET stage=$2, updated_at=now() WHERE id=$1`, id, NextStage(typ))
 	gw.commitArtifactToRepo(r.Context(), id, typ, art.ContentMD)
-	updated, _ := gw.getActiveArtifact(r.Context(), id, typ)
+	updated, err := gw.getActiveArtifact(r.Context(), id, typ)
+	if err != nil || updated == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "approved but failed to reload artifact"})
+		return
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -260,9 +291,17 @@ func (gw *Gateway) handleRequestChanges(w http.ResponseWriter, r *http.Request) 
 	if gw.db == nil { writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"}); return }
 	id := chi.URLParam(r, "id")
 	typ := chi.URLParam(r, "type")
+	var body struct{ Feedback string `json:"feedback"` }
+	_ = json.NewDecoder(r.Body).Decode(&body)
 	art, _ := gw.getActiveArtifact(r.Context(), id, typ)
 	if art == nil { writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active artifact"}); return }
 	_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_artifacts SET status='needs_review' WHERE id=$1`, art.ID)
+	// Store feedback appended to content_md so the next generate can incorporate it.
+	if body.Feedback != "" {
+		_, _ = gw.db.Pool.Exec(r.Context(),
+			`UPDATE project_artifacts SET content_md = content_md || E'\n\n<!-- REVISION FEEDBACK: ' || $2 || E' -->' WHERE id=$1`,
+			art.ID, body.Feedback)
+	}
 	for _, d := range DownstreamArtifacts(typ) {
 		if da, _ := gw.getActiveArtifact(r.Context(), id, d); da != nil && da.Status == "approved" {
 			_, _ = gw.db.Pool.Exec(r.Context(), `UPDATE project_artifacts SET status='needs_review' WHERE id=$1`, da.ID)
