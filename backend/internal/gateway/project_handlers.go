@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/agent"
 	apievents "github.com/qorvenai/qorven/internal/api/events"
+	"github.com/qorvenai/qorven/internal/diff"
 	"github.com/qorvenai/qorven/internal/governance"
 	"github.com/qorvenai/qorven/internal/plans"
 	"github.com/qorvenai/qorven/internal/providers"
@@ -824,10 +825,31 @@ func (gw *Gateway) handleWriteProjectFile(w http.ResponseWriter, r *http.Request
 		}
 	}
 	os.MkdirAll(strings.TrimSuffix(req.Path, "/"+last(req.Path)), 0755)
+
+	// Read prior content best-effort for diff generation (new file → empty string).
+	var oldContent string
+	if raw, err := os.ReadFile(req.Path); err == nil {
+		oldContent = string(raw)
+	}
+
 	if err := os.WriteFile(req.Path, []byte(req.Content), 0644); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Emit file.edited realtime event (non-fatal).
+	if gw.events != nil {
+		relPath := strings.TrimPrefix(req.Path, workspace+"/")
+		fileDiff, _, _ := diff.GenerateDiff(oldContent, req.Content, relPath)
+		_ = gw.events.Emit(r.Context(), apievents.SinkAll, apievents.TypeFileEdited, apievents.FileEditedProps{
+			ProjectID:  project.ID,
+			Path:       relPath,
+			Diff:       fileDiff,
+			BytesAfter: len(req.Content),
+			Actor:      actorFromContext(r.Context()),
+		})
+	}
+
 	writeJSON(w, 200, map[string]any{"path": req.Path, "size": len(req.Content)})
 }
 

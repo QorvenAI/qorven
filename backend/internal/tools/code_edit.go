@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qorvenai/qorven/internal/agent/editapply"
+	"github.com/qorvenai/qorven/internal/diff"
 )
 
 // CodeEditTool applies a single search/replace block to a file inside the
@@ -22,20 +23,27 @@ import (
 // An optional verify function is injected at construction; when set it is
 // run after every successful write. Failure output is returned as the tool
 // result so the agent can repair forward — the write is NOT rolled back.
+//
+// An optional onEdit callback is called after every successful write with the
+// absolute path and a unified diff string (old→new). Used by the gateway to
+// emit file.edited realtime events without coupling the tool to the event bus.
 type CodeEditTool struct {
 	baseDir string
 	verify  func(ctx context.Context, dir string) (string, bool) // nil = skip
+	onEdit  func(path, diffText string)                          // nil = skip
 
-	mu    sync.Mutex
+	mu     sync.Mutex
 	mtimes map[string]time.Time // tracked last-seen mtime per absolute path
 }
 
 // NewCodeEditTool constructs a CodeEditTool scoped to baseDir.
 // verify may be nil (post-edit verification is skipped).
-func NewCodeEditTool(baseDir string, verify func(ctx context.Context, dir string) (string, bool)) *CodeEditTool {
+// onEdit may be nil (file.edited event emission is skipped).
+func NewCodeEditTool(baseDir string, verify func(ctx context.Context, dir string) (string, bool), onEdit func(path, diffText string)) *CodeEditTool {
 	return &CodeEditTool{
 		baseDir: baseDir,
 		verify:  verify,
+		onEdit:  onEdit,
 		mtimes:  make(map[string]time.Time),
 	}
 }
@@ -152,7 +160,13 @@ func (t *CodeEditTool) Execute(ctx context.Context, args map[string]any) *Result
 		t.mu.Unlock()
 	}
 
-	// ── 6. Post-edit verify ───────────────────────────────────────────────────
+	// ── 6. Notify caller of the edit (file.edited event hook) ────────────────
+	if t.onEdit != nil {
+		editDiff, _, _ := diff.GenerateDiff(content, out, path)
+		t.onEdit(absPath, editDiff)
+	}
+
+	// ── 7. Post-edit verify ───────────────────────────────────────────────────
 	if t.verify != nil {
 		verifyOut, ok := t.verify(ctx, t.baseDir)
 		if !ok {
