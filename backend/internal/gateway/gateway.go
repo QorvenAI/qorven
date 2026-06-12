@@ -683,6 +683,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			connectors.SeedExpandedPlatforms(context.Background(), gw.connKB)
 			connectors.SeedTopConnectors(context.Background(), gw.connKB)
 			connectors.SeedStorageUploadActions(context.Background(), gw.connKB)
+			connectors.SeedCalendarSyncTargets(context.Background(), gw.connKB)
 			gw.mcpManager = mcp.NewManager(db.Pool, gw.mcpClient)
 			gw.loadProvidersFromDB()
 		}
