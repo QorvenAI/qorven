@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/calendar"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
 	daemonpkg "github.com/qorvenai/qorven/internal/daemon"
 	qorvtls "github.com/qorvenai/qorven/internal/tls"
@@ -165,10 +166,10 @@ func (gw *Gateway) Start() error {
 	}
 	// Start cron runner
 	if gw.db != nil && gw.agentLoop != nil {
-		gw.cronRunner = cronpkg.NewRunner(gw.db.Pool, func(ctx context.Context, jobName, payload, agentID string) {
+		gw.cronRunner = cronpkg.NewRunner(gw.db.Pool, func(ctx context.Context, jobName, payload, agentID string) cronpkg.DBRunResult {
 			slog.Info("cron.execute", "job", jobName, "agent", agentID)
 			if agentID == "" || gw.agentLoop == nil {
-				return
+				return cronpkg.DBRunResult{Success: false, Err: "no agent or loop"}
 			}
 
 			// Parse payload for instruction + executor
@@ -185,6 +186,13 @@ func (gw *Gateway) Start() error {
 				runAs = p["executor_agent_id"]
 			}
 
+			// Record the run as 'running' before dispatch (calendar shows it immediately;
+			// a crash leaves an errored, not phantom, row).
+			var runID string
+			if gw.calendarStore != nil {
+				runID, _ = gw.calendarStore.StartRun(ctx, defaultTenant, runAs, "cron", "", jobName, nil)
+			}
+
 			// Isolated session per cron run (never reuse user's chat session)
 			sess, err := gw.sessions.Create(ctx, defaultTenant, runAs, "cron", "cron")
 			var sessionID string
@@ -193,16 +201,32 @@ func (gw *Gateway) Start() error {
 			}
 
 			// Run agent loop with the cron instruction
-			result, _ := gw.agentLoop.Run(ctx, agent.RunRequest{
+			result, runErr := gw.agentLoop.Run(ctx, agent.RunRequest{
 				AgentID:     runAs,
 				SessionID:   sessionID,
 				UserMessage: instruction,
 				Channel:     "cron",
 			}, func(event agent.StreamEvent) {})
 
+			content := ""
+			if result != nil {
+				content = result.Content
+			}
+
+			// Finish the run record with real status.
+			if gw.calendarStore != nil && runID != "" {
+				status := calendar.RunStatusOK
+				errMsg := ""
+				if runErr != nil {
+					status = calendar.RunStatusError
+					errMsg = runErr.Error()
+				}
+				_ = gw.calendarStore.FinishRun(ctx, runID, status, agent.ExtractHighlight(content, 200), errMsg, 0, 0)
+			}
+
 			// Deliver result to user's DM session (not the isolated cron session)
-			if result != nil && result.Content != "" {
-				highlight := agent.ExtractHighlight(result.Content, 120)
+			if content != "" {
+				highlight := agent.ExtractHighlight(content, 120)
 
 				// Find the user's existing DM session (oldest web session = main conversation)
 				dmSessions, _ := gw.sessions.ListForAgent(ctx, runAs, 10)
@@ -220,14 +244,14 @@ func (gw *Gateway) Start() error {
 				}
 				if dmSessionID != "" {
 					gw.sessions.AppendMessage(ctx, dmSessionID, session.Message{
-						Role: "assistant", Content: result.Content, Timestamp: time.Now().UnixMilli(),
+						Role: "assistant", Content: content, Timestamp: time.Now().UnixMilli(),
 					}, 0, 0)
 				}
 
 				// Notify via WebSocket
 				gw.rtHub.Broadcast(realtime.Event{Type: "new_message", Data: map[string]string{
 					"session_id": dmSessionID, "agent_id": runAs,
-					"role": "assistant", "content": result.Content, "highlight": highlight,
+					"role": "assistant", "content": content, "highlight": highlight,
 					"source": "cron", "job_name": jobName,
 				}})
 			}
@@ -243,8 +267,10 @@ func (gw *Gateway) Start() error {
 				if ag != nil {
 					name = ag.DisplayName
 				}
-				gw.writeNotification(agentID, "", name, "cron", name+" completed", agent.ExtractHighlight(result.Content, 120), "cron", sessionID)
+				gw.writeNotification(agentID, "", name, "cron", name+" completed", agent.ExtractHighlight(content, 120), "cron", sessionID)
 			}
+
+			return cronpkg.DBRunResult{Success: runErr == nil, ResultSnippet: agent.ExtractHighlight(content, 200)}
 		})
 		gw.cronRunner.Start(context.Background())
 		slog.Info("cron runner started")
