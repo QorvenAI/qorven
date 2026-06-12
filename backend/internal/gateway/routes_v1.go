@@ -1061,6 +1061,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/drive/workspace/{agent_id}", gw.handleListWorkspaceFiles)
 		r.Get("/drive/workspace/{agent_id}/{name}", gw.handleGetWorkspaceFile)
 		r.Put("/drive/workspace/{agent_id}/{name}", gw.handlePutWorkspaceFile)
+		r.Get("/drive/workspace/{agent_id}/{name}/versions", gw.handleListWorkspaceVersions)
+		r.Post("/drive/workspace/{agent_id}/versions/{version_id}/restore", gw.handleRestoreWorkspaceVersion)
 		r.Get("/drive/files", gw.handleListDriveFiles)
 		r.Post("/drive/upload", gw.handleUploadFile)
 		r.Get("/drive/files/{id}/download", gw.handleDownloadFile)

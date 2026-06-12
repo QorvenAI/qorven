@@ -329,6 +329,8 @@ export type DriveScope = 'private' | 'company' | 'department' | 'custom';
 
 export interface WorkspaceFileMeta { name: string; missing: boolean; editable: boolean; size: number; }
 
+export interface ContextFileVersion { id: string; file_name: string; content?: string; created_at: string; }
+
 export interface DriveMirror {
   id: string;
   scope: string;
@@ -356,6 +358,10 @@ export const driveApi = {
   workspaceGet: (agentId: string, name: string) => request<{ name: string; content: string; missing: boolean }>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`),
   workspacePut: (agentId: string, name: string, content: string) =>
     request<void>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+  workspaceVersions: (agentId: string, name: string) =>
+    request<{ versions: ContextFileVersion[] }>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}/versions`),
+  workspaceRestore: (agentId: string, versionId: string) =>
+    request<void>(`/drive/workspace/${encodeURIComponent(agentId)}/versions/${versionId}/restore`, { method: 'POST' }),
   mirrors: () => request<{ mirrors: DriveMirror[] }>(`/drive/mirrors`),
   createMirror: (body: { scope: string; scope_id?: string | null; owner_agent_id?: string | null; provider: string; account_id?: string; remote_folder_id?: string }) =>
     request<{ id: string }>(`/drive/mirrors`, { method: 'POST', body: JSON.stringify(body) }),

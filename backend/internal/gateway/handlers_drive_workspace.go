@@ -7,7 +7,6 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
@@ -16,7 +15,7 @@ import (
 )
 
 // workspaceEditableFiles is the allow-list of bootstrap files a user may view
-// and edit through Drive. These are the real on-disk files the agent loads into
+// and edit through Drive. These are the files the agent loads from the DB into
 // its system prompt; editing SOUL.md here changes the agent's persona next run.
 var workspaceEditableFiles = map[string]bool{
 	bootstrap.SoulFile:     true,
@@ -52,23 +51,15 @@ func (gw *Gateway) handleListWorkspaceFiles(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	agentID := chi.URLParam(r, "agent_id")
-	if agentID == "" {
+	if agentID == "" || gw.agents == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id required"})
 		return
 	}
-	ws := tools.AgentWorkspace(agentID)
-	loaded := bootstrap.LoadWorkspaceFiles(ws)
+	existing, _ := gw.agents.GetAgentContextFiles(r.Context(), agentID)
 	out := []map[string]any{}
-	for _, f := range loaded {
-		if !workspaceEditableFiles[f.Name] {
-			continue
-		}
-		out = append(out, map[string]any{
-			"name":     f.Name,
-			"missing":  f.Missing,
-			"editable": true,
-			"size":     len(f.Content),
-		})
+	for name := range workspaceEditableFiles {
+		content, present := existing[name]
+		out = append(out, map[string]any{"name": name, "missing": !present, "editable": true, "size": len(content)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"files": out})
 }
@@ -84,18 +75,9 @@ func (gw *Gateway) handleGetWorkspaceFile(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "file not editable"})
 		return
 	}
-	ws := tools.AgentWorkspace(agentID)
-	path := filepath.Join(ws, name)
-	content, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"name": name, "content": "", "missing": true})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"name": name, "content": string(content), "missing": false})
+	existing, _ := gw.agents.GetAgentContextFiles(r.Context(), agentID)
+	content, present := existing[name]
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "content": content, "missing": !present})
 }
 
 func (gw *Gateway) handlePutWorkspaceFile(w http.ResponseWriter, r *http.Request) {
@@ -120,10 +102,48 @@ func (gw *Gateway) handlePutWorkspaceFile(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file too large"})
 		return
 	}
-	ws := tools.AgentWorkspace(agentID)
-	path := filepath.Join(ws, name)
-	if err := os.WriteFile(path, []byte(body.Content), 0644); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+	if err := gw.agents.SetAgentContextFile(r.Context(), agentID, name, body.Content); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListWorkspaceVersions lists prior saved versions of a context file.
+func (gw *Gateway) handleListWorkspaceVersions(w http.ResponseWriter, r *http.Request) {
+	if !gw.workspaceWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	agentID := chi.URLParam(r, "agent_id")
+	name := chi.URLParam(r, "name")
+	if !workspaceFileEditable(name) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "file not editable"})
+		return
+	}
+	versions, err := gw.agents.ListContextFileVersions(r.Context(), agentID, name)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
+}
+
+// handleRestoreWorkspaceVersion restores a prior version's content as the current file.
+func (gw *Gateway) handleRestoreWorkspaceVersion(w http.ResponseWriter, r *http.Request) {
+	if !gw.workspaceWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	agentID := chi.URLParam(r, "agent_id")
+	versionID := chi.URLParam(r, "version_id")
+	v, err := gw.agents.GetContextFileVersion(r.Context(), agentID, versionID)
+	if err != nil || v == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+		return
+	}
+	if err := gw.agents.SetAgentContextFile(r.Context(), agentID, v.FileName, v.Content); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

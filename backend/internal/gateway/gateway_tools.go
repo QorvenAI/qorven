@@ -17,6 +17,7 @@ import (
 
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/drive"
 	"github.com/qorvenai/qorven/internal/budgets"
 	"github.com/qorvenai/qorven/internal/memory"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
@@ -1515,6 +1516,46 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewEffectiveBudgetTool())
 	reg.Register(emailSend)
 	reg.Register(emailRead)
+
+	// Knowledge base — agents read Drive docs filtered by their own ACL scope
+	kbTool := tools.NewKBReadTool()
+	if gw.driveStore != nil {
+		kbTool.SetReader(func(ctx context.Context, agentID, query string) (string, error) {
+			files, err := gw.driveStore.SearchFiles(ctx, defaultTenant, "", query)
+			if err != nil {
+				return "", err
+			}
+			var sb strings.Builder
+			shown := 0
+			for i := range files {
+				f := &files[i]
+				if f.IsFolder {
+					continue
+				}
+				if ok, _ := gw.driveStore.CanAccess(ctx, f, agentID, false); !ok {
+					continue
+				}
+				if err := drive.ValidateUnderRoot(f.Path); err != nil {
+					continue
+				}
+				content, rerr := os.ReadFile(f.Path)
+				if rerr != nil {
+					continue
+				}
+				body := string(content)
+				if len(body) > 4000 {
+					body = body[:4000] + "\n…(truncated)"
+				}
+				sb.WriteString("## " + f.Name + "\n" + body + "\n\n")
+				shown++
+				if shown >= 3 {
+					break
+				}
+			}
+			return sb.String(), nil
+		})
+	}
+	reg.Register(kbTool)
 
 	// Browser automation tool — AI agents can browse the web
 
