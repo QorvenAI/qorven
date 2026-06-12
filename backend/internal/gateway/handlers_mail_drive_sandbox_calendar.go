@@ -867,8 +867,27 @@ func (gw *Gateway) handleShareFile(w http.ResponseWriter, r *http.Request) {
 		GranteeID   string `json:"grantee_id"`
 		Permission  string `json:"permission"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
-	gw.driveStore.ShareFile(r.Context(), chi.URLParam(r, "id"), body.GranteeType, body.GranteeID, body.Permission)
+	if json.NewDecoder(r.Body).Decode(&body) != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	// Only the owning agent or an admin may grant access to a file — otherwise
+	// any authed caller could hand out access to files they don't own, defeating
+	// the custom-scope ACL.
+	f, err := gw.driveStore.GetFile(r.Context(), defaultTenant, chi.URLParam(r, "id"))
+	if err != nil || f == nil {
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	callerAgent, isAdmin := gw.driveCaller(r)
+	if !(isAdmin || (callerAgent != "" && f.AgentID != nil && callerAgent == *f.AgentID)) {
+		writeJSON(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	if err := gw.driveStore.ShareFile(r.Context(), f.ID, body.GranteeType, body.GranteeID, body.Permission); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
 	w.WriteHeader(204)
 }
 
