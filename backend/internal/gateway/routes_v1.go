@@ -1063,6 +1063,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/drive/files/{id}/download", gw.handleDownloadFile)
 		r.Post("/drive/folders", gw.handleCreateFolder)
 		r.Put("/drive/files/{id}/share", gw.handleShareFile)
+		r.Put("/drive/files/{id}/scope", gw.handleSetDriveScope)
 		r.Delete("/drive/files/{id}", gw.handleDeleteDriveFile)
 		r.Get("/drive/quota", gw.handleDriveQuota)
 		r.Post("/drive/files/{id}/enrich", gw.handleEnrichFile)
