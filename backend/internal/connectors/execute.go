@@ -124,6 +124,9 @@ func (e *Executor) executePipedream(ctx context.Context, platformID string, acti
 	if e.relay == nil {
 		return "", fmt.Errorf("no relay configured — add Pipedream API key in Settings → Integrations")
 	}
+	// Relay backend is currently fixed to Pipedream for seeded actions.
+	// n8n / trigger.dev relay keys are stored for connect-your-own-instance
+	// use; per-action relay-provider selection is a planned follow-on.
 	apiKey, err := e.relay.GetRelayKey(ctx, e.tenantID, "pipedream")
 	if err != nil {
 		return "", fmt.Errorf("pipedream not configured — add API key in Settings → Integrations")
