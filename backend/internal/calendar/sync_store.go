@@ -96,3 +96,17 @@ func (s *SyncStore) RemoteEventID(ctx context.Context, itemID, syncID string) st
 	_ = s.pool.QueryRow(ctx, `SELECT remote_event_id FROM calendar_event_remote WHERE item_id=$1 AND sync_id=$2`, itemID, syncID).Scan(&rid)
 	return rid
 }
+
+// AlreadyPushed reports whether this (item, sync) pair already pushed
+// successfully. The sync ticker re-reads all future items every run; without
+// this guard a one-way create_event (which has no upsert) would re-create a
+// duplicate external event on every tick. We push each item once per sync and
+// skip thereafter (one-way OUT — a later edit to the item is not re-pushed; a
+// real update_event path is a future enhancement).
+func (s *SyncStore) AlreadyPushed(ctx context.Context, itemID, syncID string) bool {
+	var n int
+	_ = s.pool.QueryRow(ctx,
+		`SELECT COUNT(1) FROM calendar_event_remote WHERE item_id=$1 AND sync_id=$2 AND status='ok'`,
+		itemID, syncID).Scan(&n)
+	return n > 0
+}

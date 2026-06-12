@@ -62,6 +62,12 @@ func (gw *Gateway) runCalendarSync(ctx context.Context) {
 			if !calendar.SyncMatchesItem(sc.Scope, sScopeID, sOwner, itemAgent, itemDept) {
 				continue
 			}
+			// Skip items already pushed successfully — create_event has no upsert,
+			// and this ticker re-reads all future items every run, so without this
+			// guard each item would be duplicated in the external calendar per tick.
+			if gw.calSyncStore.AlreadyPushed(ctx, it.ID, sc.ID) {
+				continue
+			}
 			endStr := it.When.Add(time.Hour).Format(time.RFC3339)
 			if it.EndAt != nil {
 				endStr = it.EndAt.Format(time.RFC3339)
