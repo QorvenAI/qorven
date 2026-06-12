@@ -191,6 +191,35 @@ func (s *Store) GetIntegrationByID(ctx context.Context, integrationID string) (*
 	return &i, nil
 }
 
+// GetIntegrationForPlatform returns the full active integration for an agent on
+// a platform (incl. access_token + relay fields) — what the publisher needs to
+// route direct-or-relay. Returns the most recently created active one.
+func (s *Store) GetIntegrationForPlatform(ctx context.Context, agentID string, platform Platform) (*Integration, error) {
+	var i Integration
+	var hoursJSON, daysJSON, relayMetaJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, platform, account_name, account_id, access_token, COALESCE(refresh_token,''),
+		 token_expiry, agent_id, active, created_at,
+		 COALESCE(nickname,''), COALESCE(avatar_url,''), COALESCE(post_hours,'[]'::jsonb),
+		 COALESCE(post_days,'[0,1,2,3,4,5,6]'::jsonb), COALESCE(group_name,''), COALESCE(paused,false),
+		 COALESCE(relay_provider,'direct'), COALESCE(relay_provider_key_id::text,''), COALESCE(relay_account_id,''), COALESCE(relay_metadata,'{}'::jsonb)
+		 FROM social_integrations WHERE agent_id = $1 AND platform = $2 AND active = true
+		 ORDER BY created_at DESC LIMIT 1`, agentID, string(platform)).Scan(
+		&i.ID, &i.Platform, &i.AccountName, &i.AccountID, &i.AccessToken, &i.RefreshToken,
+		&i.TokenExpiry, &i.AgentID, &i.Active, &i.CreatedAt,
+		&i.Nickname, &i.AvatarURL, &hoursJSON, &daysJSON, &i.GroupName, &i.Paused,
+		&i.RelayProvider, &i.RelayProviderKeyID, &i.RelayAccountID, &relayMetaJSON)
+	if err != nil {
+		return nil, err
+	}
+	jsonUnmarshalInts(hoursJSON, &i.PostHours)
+	jsonUnmarshalInts(daysJSON, &i.PostDays)
+	if len(relayMetaJSON) > 0 {
+		json.Unmarshal(relayMetaJSON, &i.RelayMetadata) //nolint:errcheck
+	}
+	return &i, nil
+}
+
 // UpdateIntegrationSettings patches per-channel settings for an integration.
 func (s *Store) UpdateIntegrationSettings(ctx context.Context, id, nickname, avatarURL, groupName string, postHours, postDays []int, paused bool) error {
 	hoursJSON, _ := json.Marshal(postHours)
