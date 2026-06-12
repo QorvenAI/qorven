@@ -2,14 +2,16 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Mail, Send, RefreshCw, ArrowLeft, Loader2, Star, Reply,
   MoreHorizontal, Search, Plus, Settings,
   AlertCircle, Check, Shield, ShieldAlert, X,
+  Paperclip, ChevronDown, ChevronUp, FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { mail as mailApi, MailIdentity } from '@/lib/api';
+import { RichTextEditor } from '@/components/mail/rich-text-editor';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -389,25 +391,121 @@ function SecurityBadge({ isVerified, isFailed, isKnown }: {
 
 // ─── Compose Pane ─────────────────────────────────────────────────────────────
 
+type ComposeAttachment = {
+  name: string;
+  content_type: string;
+  data: string; // base64
+};
+
 function ComposePane({ souls, onClose, onSent }: {
   souls: any[]; onClose: () => void; onSent: () => void;
 }) {
+  // Basic fields
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
+  const [bodyHtml, setBodyHtml] = useState('');
+  const [bodyText, setBodyText] = useState('');
+
+  // Extended fields
+  const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const [importance, setImportance] = useState<'normal' | 'high' | 'low'>('normal');
+  const [identityId, setIdentityId] = useState('');
+  const [identities, setIdentities] = useState<MailIdentity[]>([]);
+  const [attachments, setAttachments] = useState<ComposeAttachment[]>([]);
+  const [draftId, setDraftId] = useState<string | null>(null);
+
+  // UI state
   const [sending, setSending] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load identities on mount
+  useEffect(() => {
+    mailApi.identities()
+      .then(data => {
+        const list = Array.isArray(data) ? data : [];
+        setIdentities(list);
+        const active = list.find(i => i.is_active) ?? list[0];
+        if (active) setIdentityId(active.id);
+      })
+      .catch(() => {/* non-fatal */});
+  }, []);
+
+  const buildPayload = () => ({
+    to: to.split(',').map(s => s.trim()).filter(Boolean),
+    cc: cc ? cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    bcc: bcc ? bcc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    subject,
+    body_html: bodyHtml,
+    body_text: bodyText,
+    importance: importance !== 'normal' ? importance : undefined,
+    identity_id: identityId || undefined,
+    attachments: attachments.length > 0 ? attachments : undefined,
+  });
 
   const send = async () => {
-    if (!to.trim() || !body.trim()) { toast.error('To and body are required'); return; }
+    if (!to.trim() || !bodyText.trim()) { toast.error('To and body are required'); return; }
     setSending(true);
     try {
-      await mailApi.send({ to: [to], subject, body });
+      await mailApi.send(buildPayload());
       toast.success('Message sent');
       onSent();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to send');
     } finally { setSending(false); }
   };
+
+  const saveDraft = async () => {
+    setSavingDraft(true);
+    try {
+      const payload: Record<string, unknown> = {
+        to: to.split(',').map(s => s.trim()).filter(Boolean),
+        cc: cc ? cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        bcc: bcc ? bcc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        subject,
+        body_html: bodyHtml,
+        body_text: bodyText,
+        importance,
+        identity_id: identityId || undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      };
+      if (draftId) {
+        await mailApi.draftUpdate(draftId, payload);
+      } else {
+        const draft = await mailApi.draftSave(payload);
+        if (draft?.id) setDraftId(draft.id);
+      }
+      toast.success('Draft saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save draft');
+    } finally { setSavingDraft(false); }
+  };
+
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // result is "data:<mime>;base64,<data>" — strip the prefix
+        const base64 = result.split(',')[1] ?? '';
+        setAttachments(prev => [
+          ...prev,
+          { name: file.name, content_type: file.type || 'application/octet-stream', data: base64 },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset input so the same file can be re-added if removed
+    e.target.value = '';
+  };
+
+  const removeAttachment = (idx: number) =>
+    setAttachments(prev => prev.filter((_, i) => i !== idx));
+
+  const selectedIdentity = identities.find(i => i.id === identityId);
 
   return (
     <div className="flex flex-col h-full">
@@ -416,40 +514,176 @@ function ComposePane({ souls, onClose, onSent }: {
         <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
           <X className="h-4 w-4" />
         </button>
-        <span className="text-sm font-semibold">New Message</span>
+        <span className="text-sm font-semibold flex-1">New Message</span>
+        {/* Importance selector */}
+        <select
+          value={importance}
+          onChange={e => setImportance(e.target.value as 'normal' | 'high' | 'low')}
+          className={cn(
+            'text-xs rounded-md border border-border bg-background px-2 py-1 outline-none cursor-pointer',
+            importance === 'high' && 'text-destructive border-destructive/40',
+            importance === 'low' && 'text-muted-foreground',
+          )}
+          title="Importance"
+        >
+          <option value="high">! High</option>
+          <option value="normal">Normal</option>
+          <option value="low">Low</option>
+        </select>
       </div>
 
       {/* Fields */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-y-auto">
+
+        {/* From / Identity */}
+        {identities.length > 0 && (
+          <div className="border-b border-border px-4 py-2 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-12 shrink-0">From</span>
+            <select
+              value={identityId}
+              onChange={e => setIdentityId(e.target.value)}
+              className="flex-1 bg-transparent text-sm outline-none cursor-pointer"
+            >
+              {identities.map(id => (
+                <option key={id.id} value={id.id}>
+                  {id.display_name ? `${id.display_name} <${id.address}>` : id.address}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* To + Cc/Bcc toggle */}
         <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
           <span className="text-xs text-muted-foreground w-12 shrink-0">To</span>
-          <input value={to} onChange={e => setTo(e.target.value)}
+          <input
+            value={to}
+            onChange={e => setTo(e.target.value)}
             placeholder="recipient@example.com"
-            className="flex-1 bg-transparent text-sm outline-none" />
+            className="flex-1 bg-transparent text-sm outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => setShowCcBcc(v => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-0.5 shrink-0"
+            title={showCcBcc ? 'Hide Cc/Bcc' : 'Show Cc/Bcc'}
+          >
+            Cc Bcc {showCcBcc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
         </div>
+
+        {/* Cc field */}
+        {showCcBcc && (
+          <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-12 shrink-0">Cc</span>
+            <input
+              value={cc}
+              onChange={e => setCc(e.target.value)}
+              placeholder="cc@example.com, another@example.com"
+              className="flex-1 bg-transparent text-sm outline-none"
+            />
+          </div>
+        )}
+
+        {/* Bcc field */}
+        {showCcBcc && (
+          <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-12 shrink-0">Bcc</span>
+            <input
+              value={bcc}
+              onChange={e => setBcc(e.target.value)}
+              placeholder="bcc@example.com"
+              className="flex-1 bg-transparent text-sm outline-none"
+            />
+          </div>
+        )}
+
+        {/* Subject */}
         <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
           <span className="text-xs text-muted-foreground w-12 shrink-0">Subject</span>
-          <input value={subject} onChange={e => setSubject(e.target.value)}
+          <input
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
             placeholder="Subject"
-            className="flex-1 bg-transparent text-sm outline-none" />
+            className="flex-1 bg-transparent text-sm outline-none"
+          />
         </div>
-        <textarea
-          value={body}
-          onChange={e => setBody(e.target.value)}
-          placeholder="Write your message…"
-          className="flex-1 px-4 py-3 text-sm bg-transparent resize-none outline-none"
-        />
+
+        {/* Rich-text body */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <RichTextEditor
+            value={bodyHtml}
+            onChange={(html, text) => { setBodyHtml(html); setBodyText(text); }}
+            placeholder="Write your message…"
+            className="flex-1"
+            minHeight={220}
+          />
+        </div>
+
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 py-2 border-t border-border bg-muted/10">
+            {attachments.map((att, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs"
+              >
+                <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+                <span className="max-w-32 truncate">{att.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  className="text-muted-foreground hover:text-destructive cursor-pointer ml-0.5"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Footer */}
       <div className="flex items-center gap-2 px-4 py-3 border-t border-border bg-muted/20 shrink-0">
-        <button onClick={send} disabled={sending || !to.trim() || !body.trim()}
-          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+        <button
+          onClick={send}
+          disabled={sending || !to.trim() || !bodyText.trim()}
+          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+        >
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Send
         </button>
-        <button onClick={onClose}
-          className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors">
+        <button
+          onClick={saveDraft}
+          disabled={savingDraft}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors disabled:opacity-50"
+        >
+          {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Save Draft
+        </button>
+
+        {/* Attach button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
+          title="Attach files"
+        >
+          <Paperclip className="h-4 w-4" />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileAttach}
+        />
+
+        <div className="flex-1" />
+        <button
+          onClick={onClose}
+          className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors"
+        >
           Discard
         </button>
       </div>

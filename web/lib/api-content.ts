@@ -298,7 +298,7 @@ export const mail = {
     reply_to?: string;
     identity_id?: string;
     agent_id?: string;
-    attachments?: unknown[];
+    attachments?: Array<{ name: string; content_type?: string; data?: string }>;
   }) => request<void>('/mail/send', { method: 'POST', body: JSON.stringify(body) }),
 
   // ── Message actions ──
