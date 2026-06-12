@@ -1622,8 +1622,8 @@ func (gw *Gateway) registerTools() {
 			reg.Register(socialqor.NewSocialRelayTool(gw.socialRelayStore, socialStore, gw.db.Pool))
 			slog.Info("manage_social_relay tool registered")
 		}
-		// Start the social post scheduler daemon
-		go gw.runSocialScheduler(socialStore)
+		// NOTE: scheduled-post dispatcher is started in gateway_server.go
+		// (startScheduledPostDispatcher). Do NOT start a second loop here.
 	}
 	reg.Register(tools.NewQorvenFly())                            // Qorven-Fly: flight search plugin
 	reg.Register(tools.NewQorvenDownload(workspace))              // Qorven-Download: file downloader

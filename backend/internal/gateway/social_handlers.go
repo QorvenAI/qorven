@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/qorvenai/qorven/internal/realtime"
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 )
 
@@ -88,17 +89,34 @@ func (gw *Gateway) dispatchDuePosts(ctx context.Context, store *socialqor.Store)
 		slog.Warn("social.scheduled_dispatch: list failed", "error", err)
 		return
 	}
+	now := time.Now()
 	for i := range posts {
 		post := &posts[i]
-		results := socialqor.NewPublisher().PublishToAllVia(ctx, store, gw.socialRelayRouter(), post)
+		// Filter out platforms whose integration has posting-hour or posting-day
+		// restrictions that exclude the current time, or that are paused.
+		// Platforms without a matching integration (e.g. token-based) are always allowed.
+		allowedPlatforms, skipAll := store.FilterAllowedPlatforms(ctx, post.AgentID, post.Platforms, now)
+		if skipAll {
+			// All target platforms are outside their allowed posting window — leave
+			// the post scheduled; the next tick will retry when a window opens.
+			slog.Info("social.scheduled_dispatch.deferred", "post", post.ID, "reason", "outside posting window")
+			continue
+		}
+		publishPost := *post
+		publishPost.Platforms = allowedPlatforms
+
+		results := socialqor.NewPublisher().PublishToAllVia(ctx, store, gw.socialRelayRouter(), &publishPost)
 		allOK := true
 		platformIDs := map[string]string{}
 		for _, res := range results {
 			if !res.Success {
 				allOK = false
-			}
-			if res.PostID != "" {
-				platformIDs[string(res.Platform)] = res.PostID
+				slog.Warn("social.scheduled_dispatch.publish_failed", "post", post.ID, "platform", res.Platform, "error", res.Error)
+			} else {
+				slog.Info("social.scheduled_dispatch.published", "post", post.ID, "platform", res.Platform, "url", res.PostURL)
+				if res.PostID != "" {
+					platformIDs[string(res.Platform)] = res.PostID
+				}
 			}
 		}
 		if allOK {
@@ -109,7 +127,27 @@ func (gw *Gateway) dispatchDuePosts(ctx context.Context, store *socialqor.Store)
 		if len(platformIDs) > 0 {
 			store.StorePlatformPostIDs(ctx, post.ID, platformIDs)
 		}
+		// In-app notification
 		gw.emitSocialPublishNotification(post.AgentID, allOK, results)
+		// Outgoing webhooks
+		webhookEvent := "post.published"
+		if !allOK {
+			webhookEvent = "post.failed"
+		}
+		gw.fireSocialWebhooks(ctx, post.AgentID, "", webhookEvent, SocialWebhookPayload{
+			Event:     webhookEvent,
+			Timestamp: now,
+			AgentID:   post.AgentID,
+			Post:      map[string]any{"id": post.ID, "content": post.Content, "platforms": post.Platforms},
+			Results:   results,
+		})
+		// Broadcast to web UI
+		if gw.rtHub != nil {
+			gw.rtHub.Broadcast(realtime.Event{
+				Type: "social_published",
+				Data: map[string]any{"post_id": post.ID, "results": results},
+			})
+		}
 		slog.Info("social.scheduled_dispatch: published", "post_id", post.ID, "ok", allOK)
 	}
 }
