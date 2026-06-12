@@ -18,7 +18,11 @@ import (
 )
 
 // AgentTrigger is called when a new email arrives and should trigger the Soul.
-type AgentTrigger func(ctx context.Context, agentID, sessionID, emailContent, subject, from string)
+// inReplyTo is the RFC 2822 In-Reply-To header value (may be empty for new threads).
+// authResults is the Authentication-Results header value from the mail provider.
+// Both are passed so the gateway can build anti-fabrication context via
+// BuildVerifiedContext before routing to the agent brain.
+type AgentTrigger func(ctx context.Context, agentID, sessionID, emailContent, subject, from, inReplyTo, authResults string)
 
 // IMAPPoller polls UNSEEN messages from IMAP and routes them through the Router.
 type IMAPPoller struct {
@@ -70,10 +74,17 @@ func (p *IMAPPoller) PollIdentity(ctx context.Context, tenantID string, id *Iden
 	}
 
 	seqSet := imap.SeqSetNum(seqNums...)
+	// Fetch envelope (From/Subject/MessageID/InReplyTo), body text, and the
+	// Authentication-Results header so we can build anti-fabrication context.
+	authHeaderSection := &imap.FetchItemBodySection{
+		Specifier:    imap.PartSpecifierHeader,
+		HeaderFields: []string{"Authentication-Results"},
+	}
 	fetchOptions := &imap.FetchOptions{
 		Envelope: true,
 		BodySection: []*imap.FetchItemBodySection{
 			{Specifier: imap.PartSpecifierText},
+			authHeaderSection,
 		},
 	}
 
@@ -87,7 +98,7 @@ func (p *IMAPPoller) PollIdentity(ctx context.Context, tenantID string, id *Iden
 			break
 		}
 
-		var from, subject, messageID, bodyText string
+		var from, subject, messageID, bodyText, authResults string
 		toAddrs := []string{}
 		var inReplyTo string
 
@@ -115,8 +126,13 @@ func (p *IMAPPoller) PollIdentity(ctx context.Context, tenantID string, id *Iden
 			case imapclient.FetchItemDataBodySection:
 				data, _ := io.ReadAll(d.Literal)
 				raw := string(data)
-				// Fix #3: Handle multi-part MIME — extract plain text or strip HTML
-				bodyText = extractPlainText(raw)
+				if d.Section != nil && d.Section.Specifier == imap.PartSpecifierHeader {
+					// Authentication-Results header block
+					authResults = extractHeader(raw, "Authentication-Results")
+				} else {
+					// Fix #3: Handle multi-part MIME — extract plain text or strip HTML
+					bodyText = extractPlainText(raw)
+				}
 			}
 		}
 
@@ -133,10 +149,12 @@ func (p *IMAPPoller) PollIdentity(ctx context.Context, tenantID string, id *Iden
 		// Fire the agent brain for every resolved target — covers both
 		// dedicated identities (one target = their agent) and shared-mailbox
 		// / alias mail (one or more targets = the mapped agents).
+		// Pass inReplyTo and authResults so the gateway can build full
+		// anti-fabrication context (BuildVerifiedContext) before routing.
 		if p.agentTrigger != nil {
 			for _, t := range targets {
 				agentID := t.AgentID
-				go p.agentTrigger(ctx, agentID, "", bodyText, subject, from)
+				go p.agentTrigger(ctx, agentID, "", bodyText, subject, from, inReplyTo, authResults)
 			}
 		}
 
@@ -267,6 +285,19 @@ func (p *IMAPPoller) StartPolling(ctx context.Context, tenantID string, getPassw
 			p.StartIDLE(ctx, tenantID, &id, pass)
 		}
 	}()
+}
+
+// extractHeader parses a raw IMAP header block and returns the value of the
+// named header field (case-insensitive).  Used to extract Authentication-Results
+// from the header-only body section fetched for anti-fabrication context.
+func extractHeader(raw, name string) string {
+	lower := strings.ToLower(name) + ":"
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(strings.ToLower(line), lower) {
+			return strings.TrimSpace(line[len(lower):])
+		}
+	}
+	return ""
 }
 
 // extractPlainText handles multi-part MIME — extracts text/plain or strips HTML.

@@ -20,6 +20,7 @@ import (
 	"github.com/qorvenai/qorven/internal/calendar"
 	"github.com/qorvenai/qorven/internal/channels"
 	"github.com/qorvenai/qorven/internal/crypto"
+	"github.com/qorvenai/qorven/internal/mail"
 )
 
 func (gw *Gateway) handleListMailIdentities(w http.ResponseWriter, r *http.Request) {
@@ -347,18 +348,33 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 	// MAIL_WEBHOOK_SECRET HMAC (verified above) already authenticates the
 	// payload — the identity is not known until after routing resolves it.
 	if gw.inbound != nil {
-		content := body.BodyText
-		if content == "" {
-			content = body.BodyHTML
+		rawBody := body.BodyText
+		if rawBody == "" {
+			rawBody = body.BodyHTML
+		}
+		// Resolve thread ID: prefer In-Reply-To, fall back to first References entry.
+		threadID := body.InReplyTo
+		if threadID == "" && body.References != "" {
+			refs := strings.Fields(body.References)
+			if len(refs) > 0 {
+				threadID = refs[0]
+			}
 		}
 		for _, t := range targets {
+			// Build anti-fabrication context: TRUST & VERIFICATION instruction +
+			// verified thread history from the DB (not from the webhook payload).
+			// This is identical to what the channel path and IMAP poller produce.
+			verifiedContent := mail.BuildVerifiedContext(
+				r.Context(), gw.mailStore, t.AgentID, defaultTenant,
+				threadID, body.From, body.FromName, body.Subject, rawBody, body.AuthResults,
+			)
 			go gw.inbound.Process(r.Context(), channels.InboundMessage{
 				ChannelType: "email",
 				ChannelName: "mail",
 				AgentID:     t.AgentID,
 				SenderID:    body.From,
 				SenderName:  body.FromName,
-				Content:     content,
+				Content:     verifiedContent,
 				Subject:     body.Subject,
 				ReplyTo:     body.MessageID,
 				Metadata: map[string]string{

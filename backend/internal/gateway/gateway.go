@@ -1566,16 +1566,26 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 	// naturally excluded even without an explicit transport check.
 	if gw.mailStore != nil && gw.mailRouter != nil && gw.inbound != nil && gw.db != nil {
 		gw.mailPoller = mail.NewIMAPPoller(gw.mailStore, gw.mailRouter)
-		gw.mailPoller.SetAgentTrigger(func(ctx context.Context, agentID, sessionID, emailContent, subject, from string) {
+		gw.mailPoller.SetAgentTrigger(func(ctx context.Context, agentID, sessionID, emailContent, subject, from, inReplyTo, authResults string) {
+			// Build the full anti-fabrication context before routing to the brain.
+			// BuildVerifiedContext prepends the TRUST & VERIFICATION instruction block
+			// and appends the verified thread history from the DB (not from the email body).
+			verifiedContent := mail.BuildVerifiedContext(
+				ctx, gw.mailStore, agentID, defaultTenant,
+				inReplyTo, from, "", subject, emailContent, authResults,
+			)
 			// Route fetched mail through the classify→auto-reply/draft brain.
 			gw.inbound.Process(ctx, channels.InboundMessage{
 				ChannelType: "email",
 				ChannelName: "mail",
 				AgentID:     agentID,
 				SenderID:    from,
-				Content:     emailContent,
+				Content:     verifiedContent,
 				Subject:     subject,
-				Metadata:    map[string]string{},
+				Metadata: map[string]string{
+					"in_reply_to":  inReplyTo,
+					"auth_results": authResults,
+				},
 			})
 		})
 		encKey := gw.cfg.Auth.EncryptionKey
