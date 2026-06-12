@@ -33,6 +33,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/knowledgegraph"
 	"github.com/qorvenai/qorven/internal/memory"
 	"github.com/qorvenai/qorven/internal/providers"
 )
@@ -250,6 +251,18 @@ func (l *Loop) stagePrompt(ctx context.Context, s *PipelineState) error {
 		).Scan(&mailAddr)
 		if mailAddr != "" {
 			cb.SetMailAddress(mailAddr)
+		}
+	}
+
+	// Knowledge-graph injection: relevant entities + their 1-hop relationships
+	// from the shared company graph, so the agent reasons with accumulated
+	// knowledge. Mirrors memory injection; one bounded query per run.
+	if l.KnowledgeGraph != nil && l.tenantID != "" && s.Req.UserMessage != "" {
+		ents, rels, nameMap, kerr := l.KnowledgeGraph.RelevantContext(ctx, l.tenantID, s.Req.UserMessage, 5)
+		if kerr == nil && len(ents) > 0 {
+			if kg := knowledgegraph.FormatForPrompt(ents, rels, nameMap); kg != "" {
+				cb.SetKnowledge(kg)
+			}
 		}
 	}
 

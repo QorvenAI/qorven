@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -227,4 +228,124 @@ func (s *Store) GetNeighbors(ctx context.Context, tenantID, entityID string) ([]
 		})
 	}
 	return neighbors, nil
+}
+
+// UpsertEntity inserts or updates an entity, deduped on (tenant_id, name,
+// entity_type). Returns the entity's UUID (new or existing). Merges properties,
+// keeps the higher confidence, and preserves the first agent_id as provenance.
+func (s *Store) UpsertEntity(ctx context.Context, tenantID string, e Entity) (string, error) {
+	var agentID any = e.AgentID
+	if e.AgentID == "" {
+		agentID = nil
+	}
+	props := e.Properties
+	if props == nil {
+		props = map[string]string{}
+	}
+	conf := e.Confidence
+	if conf == 0 {
+		conf = 1.0
+	}
+	var id string
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO kg_entities (tenant_id, agent_id, name, entity_type, properties, source, confidence)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 ON CONFLICT (tenant_id, name, entity_type) DO UPDATE SET
+		   properties = COALESCE(kg_entities.properties, '{}'::jsonb) || EXCLUDED.properties,
+		   confidence = GREATEST(kg_entities.confidence, EXCLUDED.confidence),
+		   source = COALESCE(NULLIF(EXCLUDED.source, ''), kg_entities.source),
+		   updated_at = now()
+		 RETURNING id`,
+		tenantID, agentID, e.Name, e.EntityType, props, e.Source, conf,
+	).Scan(&id)
+	return id, err
+}
+
+// UpsertRelationship inserts or updates an edge, deduped on
+// (tenant_id, source_id, target_id, rel_type). source_id/target_id MUST be real
+// entity UUIDs (the caller remaps LLM names → UUIDs first).
+func (s *Store) UpsertRelationship(ctx context.Context, tenantID string, r Relationship) (string, error) {
+	props := r.Properties
+	if props == nil {
+		props = map[string]string{}
+	}
+	conf := r.Confidence
+	if conf == 0 {
+		conf = 1.0
+	}
+	var id string
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO kg_relationships (tenant_id, source_id, target_id, rel_type, properties, confidence)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (tenant_id, source_id, target_id, rel_type) DO UPDATE SET
+		   properties = COALESCE(kg_relationships.properties, '{}'::jsonb) || EXCLUDED.properties,
+		   confidence = GREATEST(kg_relationships.confidence, EXCLUDED.confidence)
+		 RETURNING id`,
+		tenantID, r.SourceID, r.TargetID, r.RelType, props, conf,
+	).Scan(&id)
+	return id, err
+}
+
+// RelevantContext finds entities matching the query and their 1-hop relationships,
+// tenant-scoped — the data injected into the agent prompt. Returns entities, their
+// edges, and a uuid→name map for rendering. maxEntities bounds token cost.
+func (s *Store) RelevantContext(ctx context.Context, tenantID, query string, maxEntities int) ([]Entity, []Relationship, map[string]string, error) {
+	if maxEntities <= 0 {
+		maxEntities = 5
+	}
+	ents, err := s.SearchEntities(ctx, tenantID, query, maxEntities)
+	if err != nil || len(ents) == 0 {
+		return ents, nil, nil, err
+	}
+	nameMap := map[string]string{}
+	for _, e := range ents {
+		nameMap[e.ID] = e.Name
+	}
+	rels := []Relationship{}
+	for _, e := range ents {
+		ers, gerr := s.GetRelationships(ctx, tenantID, e.ID)
+		if gerr != nil {
+			continue
+		}
+		rels = append(rels, ers...)
+	}
+	for _, r := range rels {
+		for _, eid := range []string{r.SourceID, r.TargetID} {
+			if _, ok := nameMap[eid]; !ok {
+				var n string
+				if s.pool.QueryRow(ctx, `SELECT name FROM kg_entities WHERE tenant_id=$1 AND id=$2`, tenantID, eid).Scan(&n) == nil {
+					nameMap[eid] = n
+				}
+			}
+		}
+	}
+	return ents, rels, nameMap, nil
+}
+
+// FormatForPrompt renders entities + relationships for injection into the agent
+// prompt. nameMap resolves relationship endpoint UUIDs → names. Empty input → "".
+func FormatForPrompt(entities []Entity, rels []Relationship, nameMap map[string]string) string {
+	if len(entities) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("### Entities\n")
+	for _, e := range entities {
+		b.WriteString(fmt.Sprintf("- **%s** (%s)\n", e.Name, e.EntityType))
+	}
+	if len(rels) > 0 {
+		b.WriteString("\n### Relationships\n")
+		for _, r := range rels {
+			src := nameMap[r.SourceID]
+			if src == "" {
+				src = "?"
+			}
+			tgt := nameMap[r.TargetID]
+			if tgt == "" {
+				tgt = "?"
+			}
+			b.WriteString(fmt.Sprintf("- %s —[%s]→ %s\n", src, r.RelType, tgt))
+		}
+	}
+	return b.String()
 }

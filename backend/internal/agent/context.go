@@ -31,6 +31,7 @@ type ContextBuilder struct {
 	memResults   []string
 	learnedHints string
 	mailAddress  string // bound mailbox address (from soul_mail_identities); "" = no mailbox
+	knowledge    string // formatted knowledge-graph context; "" = omit KG section
 
 	// extraTools is the per-run list injected via RunRequest.ExtraTools.
 	// Populated by Loop.Run before BuildToolDefs runs. this
@@ -48,6 +49,10 @@ func (cb *ContextBuilder) SetLearnedHints(hints string) { cb.learnedHints = hint
 // SetMailAddress records the agent's bound mailbox address so it is
 // included in the system prompt. Pass "" to omit the mail section.
 func (cb *ContextBuilder) SetMailAddress(addr string) { cb.mailAddress = addr }
+
+// SetKnowledge passes pre-formatted knowledge-graph context (entities +
+// relationships) to the PromptBuilder. Pass "" to omit the KG section.
+func (cb *ContextBuilder) SetKnowledge(s string) { cb.knowledge = s }
 
 // SetTeamRoster sets the list of other agents for team section.
 func (cb *ContextBuilder) SetTeamRoster(agents []*Agent) {
@@ -126,6 +131,9 @@ func (cb *ContextBuilder) BuildSystemPrompt(bulletin string) string {
 	if len(cb.memResults) > 0 { pb.SetMemoryResults(cb.memResults) }
 	if cb.mailAddress != "" {
 		pb.SetMailAddress(cb.mailAddress)
+	}
+	if cb.knowledge != "" {
+		pb.SetKnowledge(cb.knowledge)
 	}
 
 	prompt := pb.Build()

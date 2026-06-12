@@ -16,6 +16,7 @@ import (
 	"github.com/qorvenai/qorven/internal/billing"
 	"github.com/qorvenai/qorven/internal/connectors"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
+	"github.com/qorvenai/qorven/internal/knowledgegraph"
 	"github.com/qorvenai/qorven/internal/mcp"
 	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/memory"
@@ -60,7 +61,7 @@ type Loop struct {
 	PrimeID         string                                          // Prime's agent ID for heartbeats
 	HierarchyMem    *memory.HierarchyStore                          // company > team > agent memory
 	WorkingMem      *memory.WorkingMemory                           // short-term events
-	KnowledgeGraph  *memory.KnowledgeGraph                          // entity + relationship graph
+	KnowledgeGraph  *knowledgegraph.Store                           // entity + relationship graph
 	systemKnowledge string                                          // QORVEN.md content for Prime
 	skillLearner    *skills.Learner                                 // self-improving skill creation
 	pluginMgr       *plugin.Manager                                 // plugin system
@@ -431,6 +432,16 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 				memStrs[i] = m.Memory.Content
 			}
 			cb.SetMemoryResults(memStrs)
+		}
+		// Knowledge-graph injection: relevant entities + their 1-hop relationships
+		// from the shared company graph, so the agent reasons with accumulated
+		// knowledge automatically (mirrors memory injection). Bounded, one query.
+		if l.KnowledgeGraph != nil && l.tenantID != "" && req.UserMessage != "" {
+			if ents, rels, nameMap, kerr := l.KnowledgeGraph.RelevantContext(ctx, l.tenantID, req.UserMessage, 5); kerr == nil && len(ents) > 0 {
+				if kg := knowledgegraph.FormatForPrompt(ents, rels, nameMap); kg != "" {
+					cb.SetKnowledge(kg)
+				}
+			}
 		}
 		// Inject learned preferences from learning loop
 		if l.LearningLoop != nil {

@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qorvenai/qorven/internal/llm"
-	"github.com/qorvenai/qorven/internal/memory"
 	"github.com/qorvenai/qorven/internal/connectors"
+	"github.com/qorvenai/qorven/internal/knowledgegraph"
+	"github.com/qorvenai/qorven/internal/llm"
 	"github.com/qorvenai/qorven/internal/mcp"
+	"github.com/qorvenai/qorven/internal/memory"
 )
 
 // Pipeline enriches user messages before sending to the LLM.
@@ -24,11 +25,12 @@ type Pipeline struct {
 	mcpMgr   *mcp.Manager
 	tenantID string
 	memStore *memory.Store
+	kg       *knowledgegraph.Store
 	agent    *Agent
 }
 
-func NewPipeline(agent *Agent, memStore *memory.Store, connKB *connectors.KnowledgeStore, mcpMgr *mcp.Manager, tenantID string) *Pipeline {
-	return &Pipeline{agent: agent, memStore: memStore, connKB: connKB, mcpMgr: mcpMgr, tenantID: tenantID}
+func NewPipeline(agent *Agent, memStore *memory.Store, kg *knowledgegraph.Store, connKB *connectors.KnowledgeStore, mcpMgr *mcp.Manager, tenantID string) *Pipeline {
+	return &Pipeline{agent: agent, memStore: memStore, kg: kg, connKB: connKB, mcpMgr: mcpMgr, tenantID: tenantID}
 }
 
 // Enrich takes a raw user message and returns enriched LLM messages.
@@ -56,6 +58,20 @@ func (p *Pipeline) Enrich(ctx context.Context, userMsg string, history []llm.Mes
 			memCtx := memory.FormatForContext(memories)
 			messages = append(messages, llm.Message{Role: "system", Content: "## Relevant Memories\n" + memCtx})
 			slog.Debug("pipeline.memory_injected", "count", len(memories))
+		}
+	}
+
+	// Stage 4.5: Knowledge-graph injection — relevant entities + their 1-hop
+	// relationships from the shared company graph, so the agent reasons with
+	// accumulated knowledge automatically (mirrors memory injection).
+	if p.kg != nil && tenantID != "" {
+		ents, rels, nameMap, err := p.kg.RelevantContext(ctx, tenantID, userMsg, 5)
+		if err == nil && len(ents) > 0 {
+			kgCtx := knowledgegraph.FormatForPrompt(ents, rels, nameMap)
+			if kgCtx != "" {
+				messages = append(messages, llm.Message{Role: "system", Content: "## Relevant Knowledge\n" + kgCtx})
+				slog.Debug("pipeline.kg_injected", "entities", len(ents), "rels", len(rels))
+			}
 		}
 	}
 

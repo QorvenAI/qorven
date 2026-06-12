@@ -108,22 +108,24 @@ func (t *KnowledgeGraphSearchTool) Execute(ctx context.Context, args map[string]
 	if t.pool == nil { return ErrorResult("knowledge graph not configured") }
 	query, _ := args["query"].(string)
 	if query == "" { return ErrorResult("query is required") }
-	agentID := AgentIDFromCtx(ctx)
+	tenantID := TenantIDFromCtx(ctx)
 	entityType, _ := args["entity_type"].(string)
 
 	var b strings.Builder
 
-	// Search entities
+	// Search entities — scoped to tenant, not agent (agent_id is provenance only)
 	var sqlQuery string
 	var sqlArgs []any
 	if entityType != "" {
 		sqlQuery = `SELECT name, entity_type, properties FROM kg_entities
-			 WHERE agent_id = $1 AND entity_type = $2 AND name ILIKE '%' || $3 || '%' LIMIT 10`
-		sqlArgs = []any{agentID, entityType, query}
+			 WHERE tenant_id = $1 AND entity_type = $2 AND name ILIKE '%' || $3 || '%'
+			 ORDER BY confidence DESC LIMIT 10`
+		sqlArgs = []any{tenantID, entityType, query}
 	} else {
 		sqlQuery = `SELECT name, entity_type, properties FROM kg_entities
-			 WHERE agent_id = $1 AND (name ILIKE '%' || $2 || '%' OR entity_type ILIKE '%' || $2 || '%') LIMIT 10`
-		sqlArgs = []any{agentID, query}
+			 WHERE tenant_id = $1 AND (name ILIKE '%' || $2 || '%' OR entity_type ILIKE '%' || $2 || '%')
+			 ORDER BY confidence DESC LIMIT 10`
+		sqlArgs = []any{tenantID, query}
 	}
 
 	rows, err := t.pool.Query(ctx, sqlQuery, sqlArgs...)
@@ -139,13 +141,13 @@ func (t *KnowledgeGraphSearchTool) Execute(ctx context.Context, args map[string]
 		fmt.Fprintf(&b, "Entity: %s [%s]\n  Properties: %s\n\n", name, eType, string(props))
 	}
 
-	// Search relationships
+	// Search relationships — scoped to tenant via the relationship's own tenant_id column
 	relRows, err := t.pool.Query(ctx,
 		`SELECT e1.name, r.rel_type, e2.name FROM kg_relationships r
 		 JOIN kg_entities e1 ON r.source_id = e1.id
 		 JOIN kg_entities e2 ON r.target_id = e2.id
-		 WHERE e1.agent_id = $1 AND (e1.name ILIKE '%' || $2 || '%' OR e2.name ILIKE '%' || $2 || '%')
-		 LIMIT 10`, agentID, query)
+		 WHERE r.tenant_id = $1 AND (e1.name ILIKE '%' || $2 || '%' OR e2.name ILIKE '%' || $2 || '%')
+		 LIMIT 10`, tenantID, query)
 	if err == nil {
 		defer relRows.Close()
 		for relRows.Next() {

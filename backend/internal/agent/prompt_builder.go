@@ -49,6 +49,7 @@ type PromptBuilder struct {
 	wikiArticles []string
 	runtime    RuntimeContext
 	mailAddress string // bound mailbox address; "" = omit mail section
+	knowledge   string // formatted knowledge-graph context; "" = omit KG section
 }
 
 // NewPromptBuilder creates a builder for the given agent and context.
@@ -62,6 +63,7 @@ func (pb *PromptBuilder) SetToolRegistry(r *tools.Registry) { pb.toolReg = r }
 func (pb *PromptBuilder) SetMemoryResults(m []string)      { pb.memResults = m }
 func (pb *PromptBuilder) SetWikiArticles(a []string)       { pb.wikiArticles = a }
 func (pb *PromptBuilder) SetMailAddress(addr string)       { pb.mailAddress = addr }
+func (pb *PromptBuilder) SetKnowledge(s string)            { pb.knowledge = s }
 
 // BuildStablePrefix returns the sections of the system prompt that are
 // identical across turns within a session: platform facts, operating rules,
@@ -180,6 +182,7 @@ func (pb *PromptBuilder) Build() string {
 	add(sectionSafety())                                // 8. Always
 	if mode == PromptFull || mode == PromptChannel || mode == PromptIntake || mode == PromptCron {
 		add(pb.sectionMemory())                         // 9. Full/Channel/Intake/Cron
+		add(pb.sectionKnowledge())                      // 9c. Knowledge-graph context (same modes)
 	}
 	if mode == PromptFull || mode == PromptChannel {
 		add(pb.sectionWikiKnowledge())                  // 9b. Wiki knowledge (not intake)
@@ -500,6 +503,15 @@ func (pb *PromptBuilder) sectionMemory() string {
 		b.WriteString(fmt.Sprintf("- %s\n", m))
 	}
 	return b.String()
+}
+
+// ── Section 9b: Knowledge Graph Context ──
+
+func (pb *PromptBuilder) sectionKnowledge() string {
+	if pb.knowledge == "" {
+		return ""
+	}
+	return "## Relevant Knowledge\n" + pb.knowledge
 }
 
 // ── Section 10: User Context ──

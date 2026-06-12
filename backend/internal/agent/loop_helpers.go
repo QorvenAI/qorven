@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qorvenai/qorven/internal/knowledgegraph"
 	"github.com/qorvenai/qorven/internal/memory"
 	"github.com/qorvenai/qorven/internal/providers"
 	"github.com/qorvenai/qorven/internal/session"
@@ -120,19 +121,71 @@ func (l *Loop) extractMemories(ctx context.Context, agentID, userMsg, assistantM
 				}
 				l.memStore.Save(bgCtx, l.tenantID, m)
 			}
+		}()
+	}
 
-			// Knowledge Graph: extract entities and relationships
+	// Knowledge Graph: extract entities/relationships and write to the shared
+	// company graph. Insert entities first to get their UUIDs, then remap the
+	// extractor's name-based relationships onto those UUIDs (dropping any edge
+	// whose endpoints we didn't persist), so edges never dangle.
+	if defaultProv := l.providerReg.Default(); defaultProv != nil && userMsg != "" && l.KnowledgeGraph != nil {
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					slog.Error("kg.extract.panic", "panic", rec)
+				}
+			}()
+			bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
 			entities, rels := memory.ExtractEntities(bgCtx, defaultProv, "", userMsg, assistantMsg)
-			if l.KnowledgeGraph != nil && len(entities) > 0 {
-				for _, e := range entities {
-					e.AgentID = agentID
-					l.KnowledgeGraph.UpsertEntity(bgCtx, e)
-				}
-				for _, r := range rels {
-					l.KnowledgeGraph.UpsertRelationship(bgCtx, r)
-				}
-				slog.Debug("kg.extracted", "entities", len(entities), "rels", len(rels), "agent", agentID)
+			if len(entities) == 0 {
+				return
 			}
+			if len(entities) > 20 {
+				entities = entities[:20]
+			}
+			nameToID := make(map[string]string, len(entities))
+			savedEnts := 0
+			for _, e := range entities {
+				if e.Name == "" || e.EntityType == "" {
+					continue
+				}
+				id, err := l.KnowledgeGraph.UpsertEntity(bgCtx, l.tenantID, knowledgegraph.Entity{
+					AgentID:    agentID,
+					Name:       e.Name,
+					EntityType: e.EntityType,
+					Properties: e.Properties,
+					Source:     e.Source,
+					Confidence: e.Confidence,
+				})
+				if err != nil {
+					slog.Warn("kg.entity.upsert_failed", "name", e.Name, "err", err)
+					continue
+				}
+				nameToID[e.Name] = id
+				savedEnts++
+			}
+			if len(rels) > 30 {
+				rels = rels[:30]
+			}
+			savedRels, dropped := 0, 0
+			for _, r := range rels {
+				srcID, okS := nameToID[r.SourceID]
+				tgtID, okT := nameToID[r.TargetID]
+				if !okS || !okT {
+					dropped++
+					continue
+				}
+				if _, err := l.KnowledgeGraph.UpsertRelationship(bgCtx, l.tenantID, knowledgegraph.Relationship{
+					SourceID: srcID, TargetID: tgtID, RelType: r.RelType, Confidence: r.Confidence,
+				}); err != nil {
+					slog.Warn("kg.rel.upsert_failed", "err", err)
+					continue
+				}
+				savedRels++
+			}
+			slog.Debug("kg.extracted", "entities_saved", savedEnts, "rels_saved", savedRels, "rels_dropped", dropped, "agent", agentID)
 		}()
 	}
 }
