@@ -1,0 +1,10 @@
+DROP INDEX IF EXISTS idx_mailbox_search;
+DROP INDEX IF EXISTS idx_mailbox_folder;
+ALTER TABLE mailbox_messages DROP COLUMN IF EXISTS importance;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS transport;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS forward_url;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS inbound_secret_enc;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS signature_html;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS signature_text;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS reply_to;
+ALTER TABLE soul_mail_identities DROP COLUMN IF EXISTS default_importance;
