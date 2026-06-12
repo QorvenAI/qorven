@@ -210,6 +210,7 @@ type Gateway struct {
 	mirrorStore      *drive.MirrorStore
 	sandboxStore     *sandbox.Store
 	calendarStore    *calendar.Store
+	calSyncStore     *calendar.SyncStore
 	mcpManager       *mcp.Manager
 	supervisor       *supervisorpkg.Supervisor
 	codePipeline     *systempkg.Pipeline
@@ -655,6 +656,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.deployReg.Register("cloud:vercel", newCloudTarget(gw, "vercel"))
 			gw.deployReg.Register("cloud:netlify", newCloudTarget(gw, "netlify"))
 			gw.calendarStore = calendar.NewStore(db.Pool)
+				gw.calSyncStore = calendar.NewSyncStore(db.Pool)
 			gw.connKB = connectors.NewKnowledgeStore(db.Pool)
 			gw.vault = vault.New(db.Pool, cfg.Auth.EncryptionKey)
 			baseURL := cfg.Server.BaseURL
@@ -683,6 +685,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			connectors.SeedExpandedPlatforms(context.Background(), gw.connKB)
 			connectors.SeedTopConnectors(context.Background(), gw.connKB)
 			connectors.SeedStorageUploadActions(context.Background(), gw.connKB)
+			connectors.SeedCalendarSyncTargets(context.Background(), gw.connKB)
 			gw.mcpManager = mcp.NewManager(db.Pool, gw.mcpClient)
 			gw.loadProvidersFromDB()
 		}
