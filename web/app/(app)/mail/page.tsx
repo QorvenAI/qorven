@@ -2,14 +2,24 @@
 
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Mail, Send, RefreshCw, ArrowLeft, Loader2, Star, Reply,
   MoreHorizontal, Search, Plus, Settings,
   AlertCircle, Check, Shield, ShieldAlert, X,
+  Paperclip, ChevronDown, ChevronUp, FileText,
+  Archive, Trash2, ReplyAll, Forward, BookOpen,
+  CheckSquare, Square, MailOpen, MailCheck,
+  Copy, Trash, Webhook, Users, Link2 as LinkIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { mail as mailApi, MailIdentity } from '@/lib/api';
+import { mail as mailApi, MailIdentity, MailAlias } from '@/lib/api';
+import { RichTextEditor } from '@/components/mail/rich-text-editor';
+import { HtmlBody } from '@/components/mail/html-body';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -19,10 +29,13 @@ import { toast } from 'sonner';
 
 type MailMsg = {
   id: string; from: string; to: string[]; subject: string;
-  body: string; body_text?: string; status: string;
+  body: string; body_text?: string; body_html?: string; status: string;
   created_at: string; received_at?: string;
   read: boolean; starred: boolean; agent_id?: string;
   thread_id?: string; direction?: string;
+  cc?: string[];
+  importance?: 'low' | 'normal' | 'high' | string;
+  attachments?: Array<{ id?: string; name: string; content_type?: string; size?: number }>;
   // Security fields from buildOutlookContext
   auth_status?: string; // 'verified' | 'known' | 'unknown' | 'fail'
   is_verified_thread?: boolean;
@@ -43,30 +56,92 @@ export default function MailPage() {
   const [showAccounts, setShowAccounts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<MailMsg[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkActing, setBulkActing] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Folders that are client-side filtered (no dedicated endpoint)
+  const CLIENT_FILTERED_FOLDERS = ['starred', 'important'];
 
   const load = useCallback(() => {
     setLoading(true);
-    mailApi.folder(folder)
+    setSelectedIds(new Set());
+    // starred and important are client-side: fetch inbox and filter
+    const fetchFolder = CLIENT_FILTERED_FOLDERS.includes(folder) ? 'inbox' : folder;
+    mailApi.folder(fetchFolder, agentFilter ?? undefined)
       .then(d => {
         let msgs: MailMsg[] = Array.isArray(d) ? d : [];
         if (agentFilter) msgs = msgs.filter(m => m.agent_id === agentFilter);
+        if (folder === 'starred') msgs = msgs.filter(m => m.starred);
+        if (folder === 'important') msgs = msgs.filter(m => m.importance === 'high');
         setMessages(msgs);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [folder, agentFilter]);
+  }, [folder, agentFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(); setSelected(null); }, [load]);
+  useEffect(() => { load(); setSelected(null); setSearch(''); setSearchResults(null); }, [load]);
 
-  const filtered = search
-    ? messages.filter(m =>
-        m.subject?.toLowerCase().includes(search.toLowerCase()) ||
-        m.from?.toLowerCase().includes(search.toLowerCase()) ||
-        m.body?.toLowerCase().includes(search.toLowerCase())
-      )
-    : messages;
+  // Server-side search with 300ms debounce
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!search.trim()) { setSearchResults(null); setSearching(false); return; }
+    searchDebounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await mailApi.search(search, agentFilter ?? undefined);
+        const raw: any[] = Array.isArray(results) ? results : [];
+        // Normalize API MailMessage fields to local MailMsg shape
+        const msgs: MailMsg[] = raw.map((m: any) => ({
+          ...m,
+          from: m.from_address ?? m.from ?? '',
+          to: m.to_addresses ?? m.to ?? [],
+          cc: m.cc_addresses ?? m.cc ?? [],
+          body: m.body_text ?? m.body ?? '',
+          read: m.is_read ?? m.read ?? false,
+          starred: m.is_starred ?? m.starred ?? false,
+        }));
+        setSearchResults(msgs);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [search, agentFilter]);
 
+  const displayMessages = searchResults ?? messages;
   const unread = messages.filter(m => !m.read).length;
+
+  // Multi-select helpers
+  const toggleSelectId = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setSelectedIds(new Set(displayMessages.map(m => m.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkAction = async (action: 'read' | 'star' | 'move' | 'delete', value?: unknown) => {
+    if (selectedIds.size === 0) return;
+    setBulkActing(true);
+    try {
+      await mailApi.bulk(Array.from(selectedIds), action, value);
+      const label = action === 'delete' ? 'Deleted' : action === 'move' ? `Moved to ${value}` : action === 'read' ? (value ? 'Marked read' : 'Marked unread') : (value ? 'Starred' : 'Unstarred');
+      toast.success(label);
+      clearSelection();
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setBulkActing(false);
+    }
+  };
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load mail">
@@ -86,9 +161,9 @@ export default function MailPage() {
                 placeholder="Search…"
                 className="qr-input pl-8 text-xs"
               />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  <X className="h-3 w-3" />
+              {(search || searching) && (
+                <button onClick={() => { setSearch(''); setSearchResults(null); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {searching ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
                 </button>
               )}
             </div>
@@ -111,10 +186,87 @@ export default function MailPage() {
             </button>
           </div>
 
+          {/* Folder + agent + unread info row */}
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-border/50">
-            <span className="text-xs font-medium capitalize text-foreground">{folder}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium capitalize text-foreground">
+                {searchResults !== null ? `Results for "${search}"` : folder}
+              </span>
+              {searchResults !== null && (
+                <span className="text-xs text-muted-foreground">({searchResults.length})</span>
+              )}
+              {searchResults === null && unread > 0 && (
+                <span className="rounded-full bg-primary/15 text-primary text-2xs font-semibold px-1.5 py-0.5 leading-none">{unread}</span>
+              )}
+            </div>
             <span className="text-xs text-muted-foreground">{agentFilter ? souls.find(s => s.id === agentFilter)?.display_name ?? 'Agent' : 'All Agents'}</span>
           </div>
+
+          {/* Bulk action bar — appears when messages are selected */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-primary/5 shrink-0 flex-wrap">
+              <span className="text-xs text-primary font-medium mr-1">{selectedIds.size} selected</span>
+              <button
+                onClick={() => handleBulkAction('read', true)}
+                disabled={bulkActing}
+                title="Mark read"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <MailOpen className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('read', false)}
+                disabled={bulkActing}
+                title="Mark unread"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <MailCheck className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('star', true)}
+                disabled={bulkActing}
+                title="Star"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <Star className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('move', 'archive')}
+                disabled={bulkActing}
+                title="Archive"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <Archive className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('delete')}
+                disabled={bulkActing}
+                title="Delete"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              {bulkActing && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground ml-1" />}
+              <div className="flex-1" />
+              <button onClick={clearSelection} title="Clear selection" className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Select-all row */}
+          {displayMessages.length > 0 && selectedIds.size === 0 && (
+            <div className="flex items-center gap-2 px-3 py-1 border-b border-border/30 shrink-0">
+              <button
+                onClick={selectAll}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                title="Select all"
+              >
+                <Square className="h-3.5 w-3.5" />
+                <span>Select all</span>
+              </button>
+            </div>
+          )}
 
           {/* Message rows */}
           <div className="flex-1 overflow-y-auto">
@@ -126,15 +278,37 @@ export default function MailPage() {
                   <div className="h-2 w-20 animate-pulse rounded bg-muted" />
                 </div>
               ))
-            ) : filtered.length === 0 ? (
-              <EmptyState {...emptyStates.mail} description={`No messages in ${folder}`} className="py-10" />
-            ) : filtered.map(m => (
+            ) : displayMessages.length === 0 ? (
+              <EmptyState {...emptyStates.mail} description={searchResults !== null ? `No results for "${search}"` : `No messages in ${folder}`} className="py-10" />
+            ) : displayMessages.map(m => (
               <MessageRow
                 key={m.id}
                 msg={m}
                 selected={selected?.id === m.id}
+                checked={selectedIds.has(m.id)}
                 souls={souls}
                 onClick={() => { setSelected(m); setComposing(false); }}
+                onCheck={(e) => { e.stopPropagation(); toggleSelectId(m.id); }}
+                onStarToggle={(e) => {
+                  e.stopPropagation();
+                  mailApi.setStar(m.id, !m.starred)
+                    .then(() => setMessages(prev => prev.map(x => x.id === m.id ? { ...x, starred: !m.starred } : x)))
+                    .catch(() => toast.error('Failed to update star'));
+                }}
+                onQuickArchive={(e) => {
+                  e.stopPropagation();
+                  mailApi.archive(m.id).then(() => { toast.success('Archived'); load(); }).catch(() => toast.error('Failed'));
+                }}
+                onQuickTrash={(e) => {
+                  e.stopPropagation();
+                  mailApi.trash(m.id).then(() => { toast.success('Deleted'); load(); }).catch(() => toast.error('Failed'));
+                }}
+                onQuickRead={(e) => {
+                  e.stopPropagation();
+                  mailApi.setRead(m.id, !m.read)
+                    .then(() => { setMessages(prev => prev.map(x => x.id === m.id ? { ...x, read: !m.read } : x)); })
+                    .catch(() => toast.error('Failed'));
+                }}
               />
             ))}
           </div>
@@ -155,10 +329,15 @@ export default function MailPage() {
               msg={selected}
               souls={souls}
               onClose={() => setSelected(null)}
-              onReply={(to, subj) => setComposing(true)}
+              onReply={(prefill) => { setComposing(true); }}
               onStarToggle={() => {
                 setMessages(prev => prev.map(m => m.id === selected.id ? { ...m, starred: !m.starred } : m));
                 setSelected(s => s ? { ...s, starred: !s.starred } : null);
+              }}
+              onActionDone={() => { load(); setSelected(null); }}
+              onMarkUnread={() => {
+                setMessages(prev => prev.map(m => m.id === selected.id ? { ...m, read: false } : m));
+                setSelected(s => s ? { ...s, read: false } : null);
               }}
             />
           ) : (
@@ -178,37 +357,70 @@ export default function MailPage() {
 
 // ─── Message Row ──────────────────────────────────────────────────────────────
 
-function MessageRow({ msg, selected, souls, onClick }: {
-  msg: MailMsg; selected: boolean; souls: any[]; onClick: () => void;
+function MessageRow({ msg, selected, checked, souls, onClick, onCheck, onStarToggle, onQuickArchive, onQuickTrash, onQuickRead }: {
+  msg: MailMsg; selected: boolean; checked: boolean; souls: any[];
+  onClick: () => void;
+  onCheck: (e: React.MouseEvent) => void;
+  onStarToggle: (e: React.MouseEvent) => void;
+  onQuickArchive: (e: React.MouseEvent) => void;
+  onQuickTrash: (e: React.MouseEvent) => void;
+  onQuickRead: (e: React.MouseEvent) => void;
 }) {
   const soul = souls.find(s => s.id === msg.agent_id);
   const date = msg.received_at || msg.created_at;
   const dateStr = date ? formatDate(date) : '';
   const preview = (msg.body_text || msg.body || '').replace(/\n/g, ' ').slice(0, 80);
+  const hasAttachments = msg.attachments && msg.attachments.length > 0;
 
   return (
-    <button
+    <div
       onClick={onClick}
       className={cn(
-        'w-full text-left px-3 py-3 border-b border-border/40 cursor-pointer transition-colors group',
+        'relative w-full text-left px-3 py-3 border-b border-border/40 cursor-pointer transition-colors group',
         selected ? 'bg-primary/5 border-l-2 border-l-primary' : 'hover:bg-accent/40',
-        !msg.read && 'bg-primary/[0.02]',
+        checked && !selected ? 'bg-primary/[0.04]' : '',
+        !msg.read && !selected && !checked ? 'bg-primary/[0.02]' : '',
       )}
     >
       <div className="flex items-start gap-2">
-        {/* Avatar */}
+        {/* Checkbox — visible on hover or when checked */}
+        <button
+          onClick={onCheck}
+          className={cn(
+            'flex shrink-0 items-center justify-center mt-1 transition-opacity',
+            checked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+          title={checked ? 'Deselect' : 'Select'}
+        >
+          {checked
+            ? <CheckSquare className="h-4 w-4 text-primary" />
+            : <Square className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {/* Avatar — hidden when checkbox is visible */}
         <div className={cn(
-          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold mt-0.5',
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold mt-0.5 transition-opacity',
+          checked ? 'opacity-0 absolute' : 'group-hover:opacity-0 group-hover:absolute',
           msg.direction === 'outbound' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-primary/10 text-primary'
         )}>
           {(msg.from || 'U').charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
-            <span className={cn('text-sm truncate', !msg.read ? 'font-semibold' : 'font-medium')}>
-              {msg.from || 'Unknown'}
-            </span>
-            <span className="text-xs text-muted-foreground shrink-0">{dateStr}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              {/* Importance indicator */}
+              {msg.importance === 'high' && (
+                <span title="High importance">
+                  <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
+                </span>
+              )}
+              <span className={cn('text-sm truncate', !msg.read ? 'font-semibold' : 'font-medium')}>
+                {msg.from || 'Unknown'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {hasAttachments && <span title="Has attachments"><Paperclip className="h-3 w-3 text-muted-foreground" /></span>}
+              <span className="text-xs text-muted-foreground">{dateStr}</span>
+            </div>
           </div>
           <p className={cn('text-xs truncate mt-0.5', !msg.read ? 'text-foreground/90 font-medium' : 'text-muted-foreground')}>
             {msg.subject || '(no subject)'}
@@ -217,27 +429,197 @@ function MessageRow({ msg, selected, souls, onClick }: {
           {soul && <p className="text-xs text-muted-foreground mt-0.5 truncate">via {soul.display_name}</p>}
         </div>
       </div>
-      {/* Unread dot */}
-      {!msg.read && (
-        <div className="flex justify-end mt-1">
-          <span className="h-2 w-2 rounded-full bg-primary inline-block" />
+
+      {/* Row-level indicators: unread dot + star */}
+      <div className="flex items-center justify-between mt-1">
+        {/* Star toggle */}
+        <button
+          onClick={onStarToggle}
+          className={cn(
+            'h-5 w-5 flex items-center justify-center rounded transition-colors',
+            msg.starred ? 'text-amber-400' : 'text-transparent group-hover:text-muted-foreground hover:text-amber-400'
+          )}
+          title={msg.starred ? 'Unstar' : 'Star'}
+        >
+          <Star className={cn('h-3.5 w-3.5', msg.starred && 'fill-current text-amber-400')} />
+        </button>
+
+        {/* Hover quick-actions (Gmail-style) */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={onQuickRead}
+            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+            title={msg.read ? 'Mark unread' : 'Mark read'}
+          >
+            {msg.read ? <MailCheck className="h-3.5 w-3.5" /> : <MailOpen className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={onQuickArchive}
+            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+            title="Archive"
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onQuickTrash}
+            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {/* Unread dot (right side) — only shown when hover quick-actions aren't visible */}
+        {!msg.read && (
+          <span className="h-2 w-2 rounded-full bg-primary inline-block group-hover:hidden" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Thread Message Card ──────────────────────────────────────────────────────
+
+/** A single message within a thread — collapsed (sender + snippet) or expanded (full body). */
+function ThreadMessageCard({ m, expanded, onToggle, souls }: {
+  m: MailMsg;
+  expanded: boolean;
+  onToggle: () => void;
+  souls: any[];
+}) {
+  const soul = souls.find(s => s.id === m.agent_id);
+  const date = m.received_at || m.created_at;
+  const isVerified = !!(m.body?.includes('✅ DKIM verified') || m.is_verified_thread);
+  const isFailed = !!(m.body?.includes('🔴 DKIM FAILED'));
+  const isKnown = !!(m.body?.includes('📬 Known sender'));
+  const displayBody = parseDisplayBody(m.body || m.body_text || '');
+  const hasHtml = !!(m.body_html?.trim());
+
+  return (
+    <div className={cn(
+      'rounded-xl border bg-card transition-colors',
+      expanded ? 'border-border' : 'border-border/60 hover:border-border cursor-pointer',
+    )}>
+      {/* Collapsed / header row — always visible */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left"
+      >
+        <div className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+          m.direction === 'outbound' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-primary/10 text-primary',
+        )}>
+          {(m.from || 'U').charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium truncate">{m.from || 'Unknown'}</span>
+            <span className="text-xs text-muted-foreground shrink-0">
+              {date ? new Date(date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}
+            </span>
+          </div>
+          {!expanded && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              {hasHtml ? '(HTML message)' : displayBody.slice(0, 100)}
+            </p>
+          )}
+        </div>
+        {soul && !expanded && (
+          <span className="text-xs text-muted-foreground shrink-0">via {soul.display_name}</span>
+        )}
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform', expanded && 'rotate-180')} />
+      </button>
+
+      {/* Expanded body */}
+      {expanded && (
+        <div className="px-4 pb-4">
+          {/* Meta */}
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            {soul && <span className="text-xs text-muted-foreground">via {soul.display_name}</span>}
+            {m.direction === 'outbound' && (
+              <span className="rounded-full bg-emerald-500/10 text-emerald-500 px-2 py-0.5 text-xs font-medium">Sent</span>
+            )}
+          </div>
+          <SecurityBadge isVerified={isVerified} isFailed={isFailed} isKnown={isKnown} />
+          {/* Body */}
+          <HtmlBody
+            html={m.body_html}
+            text={displayBody}
+            className="text-sm leading-relaxed"
+          />
+          {/* Attachments for this message */}
+          {m.attachments && m.attachments.length > 0 && (
+            <AttachmentChips msgId={m.id} attachments={m.attachments} />
+          )}
         </div>
       )}
-    </button>
+    </div>
+  );
+}
+
+// ─── Attachment Chips ─────────────────────────────────────────────────────────
+
+function AttachmentChips({ msgId, attachments }: {
+  msgId: string;
+  attachments: Array<{ id?: string; name: string; content_type?: string; size?: number }>;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-border/50">
+      {attachments.map((att, i) => {
+        const url = mailApi.attachmentUrl(msgId, att.name);
+        return (
+          <a
+            key={i}
+            href={url}
+            download={att.name}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-2.5 py-1 text-xs hover:bg-accent transition-colors"
+          >
+            <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span className="max-w-40 truncate">{att.name}</span>
+            {att.size != null && (
+              <span className="text-muted-foreground shrink-0">
+                ({att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${Math.round(att.size / 1024)}KB` : `${(att.size / 1048576).toFixed(1)}MB`})
+              </span>
+            )}
+          </a>
+        );
+      })}
+    </div>
   );
 }
 
 // ─── Message View ─────────────────────────────────────────────────────────────
 
-function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
+type ComposePrefill = {
+  to: string;
+  cc?: string;
+  subject: string;
+  quotedBody: string;
+  mode: 'reply' | 'reply-all' | 'forward';
+};
+
+function MessageView({ msg, souls, onClose, onReply, onStarToggle, onActionDone, onMarkUnread }: {
   msg: MailMsg; souls: any[];
   onClose: () => void;
-  onReply: (to: string, subject: string) => void;
+  onReply: (prefill: ComposePrefill) => void;
   onStarToggle: () => void;
+  onActionDone: () => void;
+  onMarkUnread: () => void;
 }) {
   const [showReply, setShowReply] = useState(false);
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+
+  // Thread state
+  const [thread, setThread] = useState<MailMsg[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  // Set of expanded message IDs — most recent starts expanded
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set([msg.id]));
+
   const soul = souls.find(s => s.id === msg.agent_id);
   const date = msg.received_at || msg.created_at;
 
@@ -248,6 +630,60 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
 
   // Extract the new message content (strip our security wrapper for display)
   const displayBody = parseDisplayBody(msg.body || msg.body_text || '');
+
+  // Fetch thread when msg.thread_id is present
+  useEffect(() => {
+    if (!msg.thread_id) {
+      setThread([msg]);
+      setExpandedIds(new Set([msg.id]));
+      return;
+    }
+    setThreadLoading(true);
+    mailApi.thread(msg.thread_id)
+      .then((msgs: any[]) => {
+        const mapped: MailMsg[] = msgs.map((m: any) => ({
+          id: m.id,
+          from: m.from_address ?? m.from ?? '',
+          to: m.to_addresses ?? m.to ?? [],
+          cc: m.cc_addresses ?? m.cc ?? [],
+          subject: m.subject ?? '',
+          body: m.body_text ?? m.body ?? '',
+          body_text: m.body_text,
+          body_html: m.body_html,
+          status: m.status ?? '',
+          created_at: m.created_at,
+          received_at: m.received_at,
+          read: m.is_read ?? m.read ?? false,
+          starred: m.is_starred ?? m.starred ?? false,
+          agent_id: m.agent_id,
+          thread_id: m.thread_id,
+          direction: m.direction,
+          attachments: m.attachments,
+          auth_status: m.auth_status,
+          is_verified_thread: m.is_verified_thread,
+        }));
+        // Sort chronologically
+        mapped.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        setThread(mapped);
+        // Expand only the most recent message by default
+        if (mapped.length > 0) {
+          setExpandedIds(new Set([mapped[mapped.length - 1]!.id]));
+        }
+      })
+      .catch(() => {
+        setThread([msg]);
+        setExpandedIds(new Set([msg.id]));
+      })
+      .finally(() => setThreadLoading(false));
+  }, [msg.id, msg.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      return next;
+    });
+  };
 
   const sendReply = async () => {
     if (!replyBody.trim()) return;
@@ -262,6 +698,42 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
     } finally { setSending(false); }
   };
 
+  // ── Message actions ──
+  const act = async (label: string, fn: () => Promise<void>, closeAfter = false) => {
+    setActing(label);
+    try {
+      await fn();
+      toast.success(label);
+      if (closeAfter) onActionDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Failed: ${label}`);
+    } finally { setActing(null); }
+  };
+
+  const handleArchive = () => act('Archived', () => mailApi.archive(msg.id), true);
+  const handleTrash   = () => act('Moved to trash', () => mailApi.trash(msg.id), true);
+  const handleMarkUnread = async () => {
+    try {
+      await mailApi.setRead(msg.id, false);
+      onMarkUnread();
+      toast.success('Marked as unread');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+  const handleStar = async () => {
+    try {
+      await mailApi.setStar(msg.id, !msg.starred);
+      onStarToggle();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const quotedBodyText = `\n\n---\nOn ${date ? new Date(date).toLocaleString() : 'a prior date'}, ${msg.from} wrote:\n${displayBody}`;
+
+  const isThreadView = thread.length > 1;
+
   return (
     <div className="flex flex-col h-full">
       {/* Top toolbar */}
@@ -270,7 +742,8 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="flex-1" />
-        <button onClick={onStarToggle}
+        {acting && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        <button onClick={handleStar}
           className={cn('h-7 w-7 flex items-center justify-center rounded-md cursor-pointer transition-colors',
             msg.starred ? 'text-amber-400' : 'text-muted-foreground hover:text-amber-400 hover:bg-accent')}>
           <Star className={cn('h-4 w-4', msg.starred && 'fill-current')} />
@@ -279,46 +752,128 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
           className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent cursor-pointer transition-colors">
           <Reply className="h-3.5 w-3.5" /> Reply
         </button>
-        <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
+
+        {/* MoreHorizontal — fully wired actions */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={() => setShowReply(true)}>
+              <Reply className="h-4 w-4" /> Reply
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => {
+              setShowReply(false);
+              onReply({ to: msg.from, cc: (msg.cc ?? []).join(', '), subject: `Re: ${msg.subject || ''}`, quotedBody: quotedBodyText, mode: 'reply-all' });
+            }}>
+              <ReplyAll className="h-4 w-4" /> Reply All
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => {
+              setShowReply(false);
+              onReply({ to: '', subject: `Fwd: ${msg.subject || ''}`, quotedBody: quotedBodyText, mode: 'forward' });
+            }}>
+              <Forward className="h-4 w-4" /> Forward
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleMarkUnread}>
+              <BookOpen className="h-4 w-4" /> Mark as unread
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleStar}>
+              <Star className="h-4 w-4" />
+              {msg.starred ? 'Unstar' : 'Star'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleArchive}>
+              <Archive className="h-4 w-4" /> Archive
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={handleTrash}>
+              <Trash2 className="h-4 w-4" /> Move to trash
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Message content */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-6 py-5 max-w-4xl">
-          {/* Subject */}
-          <h2 className="text-lg font-semibold leading-tight mb-4">
-            {msg.subject || '(no subject)'}
-          </h2>
-
-          {/* Security badge */}
-          <SecurityBadge isVerified={isVerified} isFailed={isFailed} isKnown={isKnown} />
-
-          {/* Sender info card */}
-          <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-5">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-              {(msg.from || 'U').charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold">{msg.from}</span>
-                {soul && <span className="text-xs text-muted-foreground">via {soul.display_name}</span>}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                To: {Array.isArray(msg.to) ? msg.to.join(', ') : msg.to}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">{date ? new Date(date).toLocaleString() : ''}</p>
-            </div>
-            {msg.direction === 'outbound' && (
-              <span className="rounded-full bg-emerald-500/10 text-emerald-500 px-2 py-0.5 text-xs font-medium shrink-0">Sent</span>
+          {/* Subject + thread count */}
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <h2 className="text-lg font-semibold leading-tight">
+              {msg.subject || '(no subject)'}
+            </h2>
+            {isThreadView && (
+              <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground font-medium">
+                {thread.length} messages
+              </span>
             )}
           </div>
 
-          {/* Message body */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="text-sm leading-relaxed whitespace-pre-wrap font-sans">{displayBody}</div>
-          </div>
+          {threadLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading thread…
+            </div>
+          )}
+
+          {/* ── Thread conversation view ── */}
+          {isThreadView ? (
+            <div className="space-y-2">
+              {thread.map(m => (
+                <ThreadMessageCard
+                  key={m.id}
+                  m={m}
+                  expanded={expandedIds.has(m.id)}
+                  onToggle={() => toggleExpanded(m.id)}
+                  souls={souls}
+                />
+              ))}
+            </div>
+          ) : (
+            /* ── Single message view ── */
+            <>
+              <SecurityBadge isVerified={isVerified} isFailed={isFailed} isKnown={isKnown} />
+
+              {/* Sender info card */}
+              <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
+                  {(msg.from || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold">{msg.from}</span>
+                    {soul && <span className="text-xs text-muted-foreground">via {soul.display_name}</span>}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    To: {Array.isArray(msg.to) ? msg.to.join(', ') : msg.to}
+                  </p>
+                  {msg.cc && msg.cc.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Cc: {msg.cc.join(', ')}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-0.5">{date ? new Date(date).toLocaleString() : ''}</p>
+                </div>
+                {msg.direction === 'outbound' && (
+                  <span className="rounded-full bg-emerald-500/10 text-emerald-500 px-2 py-0.5 text-xs font-medium shrink-0">Sent</span>
+                )}
+              </div>
+
+              {/* Message body — HTML or plain text */}
+              <div className="rounded-xl border border-border bg-card p-5">
+                <HtmlBody
+                  html={msg.body_html}
+                  text={displayBody}
+                  className="text-sm leading-relaxed"
+                />
+              </div>
+
+              {/* Attachments */}
+              {msg.attachments && msg.attachments.length > 0 && (
+                <AttachmentChips msgId={msg.id} attachments={msg.attachments} />
+              )}
+            </>
+          )}
         </div>
 
         {/* Reply compose box */}
@@ -389,25 +944,121 @@ function SecurityBadge({ isVerified, isFailed, isKnown }: {
 
 // ─── Compose Pane ─────────────────────────────────────────────────────────────
 
+type ComposeAttachment = {
+  name: string;
+  content_type: string;
+  data: string; // base64
+};
+
 function ComposePane({ souls, onClose, onSent }: {
   souls: any[]; onClose: () => void; onSent: () => void;
 }) {
+  // Basic fields
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
+  const [bodyHtml, setBodyHtml] = useState('');
+  const [bodyText, setBodyText] = useState('');
+
+  // Extended fields
+  const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const [importance, setImportance] = useState<'normal' | 'high' | 'low'>('normal');
+  const [identityId, setIdentityId] = useState('');
+  const [identities, setIdentities] = useState<MailIdentity[]>([]);
+  const [attachments, setAttachments] = useState<ComposeAttachment[]>([]);
+  const [draftId, setDraftId] = useState<string | null>(null);
+
+  // UI state
   const [sending, setSending] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load identities on mount
+  useEffect(() => {
+    mailApi.identities()
+      .then(data => {
+        const list = Array.isArray(data) ? data : [];
+        setIdentities(list);
+        const active = list.find(i => i.is_active) ?? list[0];
+        if (active) setIdentityId(active.id);
+      })
+      .catch(() => {/* non-fatal */});
+  }, []);
+
+  const buildPayload = () => ({
+    to: to.split(',').map(s => s.trim()).filter(Boolean),
+    cc: cc ? cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    bcc: bcc ? bcc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    subject,
+    body_html: bodyHtml,
+    body_text: bodyText,
+    importance: importance !== 'normal' ? importance : undefined,
+    identity_id: identityId || undefined,
+    attachments: attachments.length > 0 ? attachments : undefined,
+  });
 
   const send = async () => {
-    if (!to.trim() || !body.trim()) { toast.error('To and body are required'); return; }
+    if (!to.trim() || !bodyText.trim()) { toast.error('To and body are required'); return; }
     setSending(true);
     try {
-      await mailApi.send({ to: [to], subject, body });
+      await mailApi.send(buildPayload());
       toast.success('Message sent');
       onSent();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to send');
     } finally { setSending(false); }
   };
+
+  const saveDraft = async () => {
+    setSavingDraft(true);
+    try {
+      const payload: Record<string, unknown> = {
+        to: to.split(',').map(s => s.trim()).filter(Boolean),
+        cc: cc ? cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        bcc: bcc ? bcc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        subject,
+        body_html: bodyHtml,
+        body_text: bodyText,
+        importance,
+        identity_id: identityId || undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      };
+      if (draftId) {
+        await mailApi.draftUpdate(draftId, payload);
+      } else {
+        const draft = await mailApi.draftSave(payload);
+        if (draft?.id) setDraftId(draft.id);
+      }
+      toast.success('Draft saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save draft');
+    } finally { setSavingDraft(false); }
+  };
+
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // result is "data:<mime>;base64,<data>" — strip the prefix
+        const base64 = result.split(',')[1] ?? '';
+        setAttachments(prev => [
+          ...prev,
+          { name: file.name, content_type: file.type || 'application/octet-stream', data: base64 },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset input so the same file can be re-added if removed
+    e.target.value = '';
+  };
+
+  const removeAttachment = (idx: number) =>
+    setAttachments(prev => prev.filter((_, i) => i !== idx));
+
+  const selectedIdentity = identities.find(i => i.id === identityId);
 
   return (
     <div className="flex flex-col h-full">
@@ -416,40 +1067,176 @@ function ComposePane({ souls, onClose, onSent }: {
         <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
           <X className="h-4 w-4" />
         </button>
-        <span className="text-sm font-semibold">New Message</span>
+        <span className="text-sm font-semibold flex-1">New Message</span>
+        {/* Importance selector */}
+        <select
+          value={importance}
+          onChange={e => setImportance(e.target.value as 'normal' | 'high' | 'low')}
+          className={cn(
+            'text-xs rounded-md border border-border bg-background px-2 py-1 outline-none cursor-pointer',
+            importance === 'high' && 'text-destructive border-destructive/40',
+            importance === 'low' && 'text-muted-foreground',
+          )}
+          title="Importance"
+        >
+          <option value="high">! High</option>
+          <option value="normal">Normal</option>
+          <option value="low">Low</option>
+        </select>
       </div>
 
       {/* Fields */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-y-auto">
+
+        {/* From / Identity */}
+        {identities.length > 0 && (
+          <div className="border-b border-border px-4 py-2 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-12 shrink-0">From</span>
+            <select
+              value={identityId}
+              onChange={e => setIdentityId(e.target.value)}
+              className="flex-1 bg-transparent text-sm outline-none cursor-pointer"
+            >
+              {identities.map(id => (
+                <option key={id.id} value={id.id}>
+                  {id.display_name ? `${id.display_name} <${id.address}>` : id.address}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* To + Cc/Bcc toggle */}
         <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
           <span className="text-xs text-muted-foreground w-12 shrink-0">To</span>
-          <input value={to} onChange={e => setTo(e.target.value)}
+          <input
+            value={to}
+            onChange={e => setTo(e.target.value)}
             placeholder="recipient@example.com"
-            className="flex-1 bg-transparent text-sm outline-none" />
+            className="flex-1 bg-transparent text-sm outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => setShowCcBcc(v => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-0.5 shrink-0"
+            title={showCcBcc ? 'Hide Cc/Bcc' : 'Show Cc/Bcc'}
+          >
+            Cc Bcc {showCcBcc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
         </div>
+
+        {/* Cc field */}
+        {showCcBcc && (
+          <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-12 shrink-0">Cc</span>
+            <input
+              value={cc}
+              onChange={e => setCc(e.target.value)}
+              placeholder="cc@example.com, another@example.com"
+              className="flex-1 bg-transparent text-sm outline-none"
+            />
+          </div>
+        )}
+
+        {/* Bcc field */}
+        {showCcBcc && (
+          <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-12 shrink-0">Bcc</span>
+            <input
+              value={bcc}
+              onChange={e => setBcc(e.target.value)}
+              placeholder="bcc@example.com"
+              className="flex-1 bg-transparent text-sm outline-none"
+            />
+          </div>
+        )}
+
+        {/* Subject */}
         <div className="border-b border-border px-4 py-2.5 flex items-center gap-2">
           <span className="text-xs text-muted-foreground w-12 shrink-0">Subject</span>
-          <input value={subject} onChange={e => setSubject(e.target.value)}
+          <input
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
             placeholder="Subject"
-            className="flex-1 bg-transparent text-sm outline-none" />
+            className="flex-1 bg-transparent text-sm outline-none"
+          />
         </div>
-        <textarea
-          value={body}
-          onChange={e => setBody(e.target.value)}
-          placeholder="Write your message…"
-          className="flex-1 px-4 py-3 text-sm bg-transparent resize-none outline-none"
-        />
+
+        {/* Rich-text body */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <RichTextEditor
+            value={bodyHtml}
+            onChange={(html, text) => { setBodyHtml(html); setBodyText(text); }}
+            placeholder="Write your message…"
+            className="flex-1"
+            minHeight={220}
+          />
+        </div>
+
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 py-2 border-t border-border bg-muted/10">
+            {attachments.map((att, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs"
+              >
+                <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+                <span className="max-w-32 truncate">{att.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  className="text-muted-foreground hover:text-destructive cursor-pointer ml-0.5"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Footer */}
       <div className="flex items-center gap-2 px-4 py-3 border-t border-border bg-muted/20 shrink-0">
-        <button onClick={send} disabled={sending || !to.trim() || !body.trim()}
-          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+        <button
+          onClick={send}
+          disabled={sending || !to.trim() || !bodyText.trim()}
+          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+        >
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Send
         </button>
-        <button onClick={onClose}
-          className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors">
+        <button
+          onClick={saveDraft}
+          disabled={savingDraft}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors disabled:opacity-50"
+        >
+          {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Save Draft
+        </button>
+
+        {/* Attach button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
+          title="Attach files"
+        >
+          <Paperclip className="h-4 w-4" />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileAttach}
+        />
+
+        <div className="flex-1" />
+        <button
+          onClick={onClose}
+          className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer transition-colors"
+        >
           Discard
         </button>
       </div>
@@ -485,6 +1272,7 @@ function getProviderForIdentity(identity: MailIdentity): ProviderPreset | undefi
 }
 
 function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
+  const souls = useStore((s) => s.souls);
   const [identities, setIdentities] = useState<MailIdentity[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -533,11 +1321,13 @@ function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
       <div className="flex-1 overflow-y-auto">
         {showForm ? (
           <AccountForm
+            souls={souls}
             onCancel={() => setShowForm(false)}
             onSaved={() => { setShowForm(false); loadIdentities(); }}
           />
         ) : editingIdentity ? (
           <AccountForm
+            souls={souls}
             identity={editingIdentity}
             onCancel={() => setEditingId(null)}
             onSaved={() => { setEditingId(null); loadIdentities(); }}
@@ -622,21 +1412,40 @@ function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ─── Account Form (Add / Edit) ───────────────────────────────────────────────
+// ─── Account Form (Add / Edit) — three-mode ──────────────────────────────────
 
-function AccountForm({ identity, onCancel, onSaved }: {
+type ConnectionMode = 'dedicated' | 'shared' | 'external';
+
+function deriveMode(identity?: MailIdentity): ConnectionMode {
+  if (!identity) return 'dedicated';
+  if (identity.transport === 'external' || identity.transport === 'forward') return 'external';
+  if (identity.identity_type === 'shared') return 'shared';
+  return 'dedicated';
+}
+
+function AccountForm({ identity, souls, onCancel, onSaved }: {
   identity?: MailIdentity;
+  souls: { id: string; display_name: string }[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const isEdit = !!identity;
+
+  // ── Mode ──
+  const [mode, setMode] = useState<ConnectionMode>(() => deriveMode(identity));
+
+  // ── Basic ──
+  const [address, setAddress] = useState(identity?.address || '');
+  const [displayName, setDisplayName] = useState(identity?.display_name || '');
+  const [agentId, setAgentId] = useState(identity?.agent_id || '');
+  const [isActive, setIsActive] = useState(identity?.is_active ?? true);
+
+  // ── Provider preset (modes dedicated + shared) ──
   const [provider, setProvider] = useState<string>(() => {
     if (!identity) return '';
     const p = getProviderForIdentity(identity);
     return p?.id || 'custom';
   });
-  const [address, setAddress] = useState(identity?.address || '');
-  const [displayName, setDisplayName] = useState(identity?.display_name || '');
   const [smtpHost, setSmtpHost] = useState(identity?.smtp_host || '');
   const [smtpPort, setSmtpPort] = useState<number>(identity?.smtp_port || 587);
   const [smtpUser, setSmtpUser] = useState(identity?.smtp_user || '');
@@ -645,7 +1454,42 @@ function AccountForm({ identity, onCancel, onSaved }: {
   const [imapPort, setImapPort] = useState<number>(identity?.imap_port || 993);
   const [imapUser, setImapUser] = useState(identity?.imap_user || '');
   const [imapPass, setImapPass] = useState('');
+
+  // ── External mode ──
+  const [forwardUrl, setForwardUrl] = useState(identity?.forward_url || '');
+  const [inboundSecret, setInboundSecret] = useState(identity?.inbound_secret || '');
+
+  // ── Per-identity prefs ──
+  const [replyTo, setReplyTo] = useState(identity?.reply_to || '');
+  const [defaultImportance, setDefaultImportance] = useState<'high' | 'normal' | 'low'>(
+    (identity?.default_importance as 'high' | 'normal' | 'low') || 'normal'
+  );
+  const [signatureHtml, setSignatureHtml] = useState(identity?.signature_html || '');
+  const [signatureText, setSignatureText] = useState(identity?.signature_text || '');
+
+  // ── Aliases (modes shared + external) ──
+  const [aliases, setAliases] = useState<MailAlias[]>([]);
+  const [aliasesLoading, setAliasesLoading] = useState(false);
+  const [newAliasAddr, setNewAliasAddr] = useState('');
+  const [newAliasAgent, setNewAliasAgent] = useState('');
+  const [addingAlias, setAddingAlias] = useState(false);
+  const [deletingAliasId, setDeletingAliasId] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
+
+  // Load aliases when editing a shared/external identity
+  useEffect(() => {
+    if (!isEdit || (mode !== 'shared' && mode !== 'external')) return;
+    setAliasesLoading(true);
+    mailApi.aliases()
+      .then(data => {
+        const all = Array.isArray(data) ? data : [];
+        // Show all aliases — the backend associates them with the identity server-side
+        setAliases(all);
+      })
+      .catch(() => {})
+      .finally(() => setAliasesLoading(false));
+  }, [isEdit, mode, identity?.id]);
 
   const selectProvider = (id: string) => {
     setProvider(id);
@@ -658,38 +1502,93 @@ function AccountForm({ identity, onCancel, onSaved }: {
     }
   };
 
+  const addAlias = async () => {
+    if (!newAliasAddr.trim() || !newAliasAgent) { toast.error('Alias address and target agent are required'); return; }
+    setAddingAlias(true);
+    try {
+      await mailApi.createAlias({ alias_address: newAliasAddr.trim(), target_agent_id: newAliasAgent, can_send_as: true, can_receive: true });
+      toast.success('Alias added');
+      setNewAliasAddr('');
+      setNewAliasAgent('');
+      // Reload aliases
+      const data = await mailApi.aliases();
+      setAliases(Array.isArray(data) ? data : []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add alias');
+    } finally { setAddingAlias(false); }
+  };
+
+  const deleteAlias = async (id: string) => {
+    setDeletingAliasId(id);
+    try {
+      await mailApi.deleteAlias(id);
+      setAliases(prev => prev.filter(a => a.id !== id));
+      toast.success('Alias removed');
+    } catch {
+      toast.error('Failed to remove alias');
+    } finally { setDeletingAliasId(null); }
+  };
+
   const save = async () => {
     if (!address.trim()) { toast.error('Email address is required'); return; }
     if (!displayName.trim()) { toast.error('Display name is required'); return; }
     setSaving(true);
     try {
+      const identityType = mode === 'shared' ? 'shared' : 'dedicated';
+      const transport = mode === 'external' ? 'external' : 'smtp';
+
       if (isEdit) {
         const body: Partial<MailIdentity> & { smtp_pass?: string; imap_pass?: string } = {
           display_name: displayName,
-          smtp_host: smtpHost || undefined,
-          smtp_port: smtpPort || undefined,
-          smtp_user: smtpUser || undefined,
-          imap_host: imapHost || undefined,
-          imap_port: imapPort || undefined,
-          imap_user: imapUser || undefined,
+          identity_type: identityType,
+          transport,
+          is_active: isActive,
+          reply_to: replyTo || undefined,
+          default_importance: defaultImportance,
+          signature_html: signatureHtml || undefined,
+          signature_text: signatureText || undefined,
         };
-        if (smtpPass) body.smtp_pass = smtpPass;
-        if (imapPass) body.imap_pass = imapPass;
+        if (mode !== 'external') {
+          body.smtp_host = smtpHost || undefined;
+          body.smtp_port = smtpPort || undefined;
+          body.smtp_user = smtpUser || undefined;
+          body.imap_host = imapHost || undefined;
+          body.imap_port = imapPort || undefined;
+          body.imap_user = imapUser || undefined;
+          if (smtpPass) body.smtp_pass = smtpPass;
+          if (imapPass) body.imap_pass = imapPass;
+        } else {
+          body.forward_url = forwardUrl || undefined;
+          body.inbound_secret = inboundSecret || undefined;
+        }
+        if (mode === 'dedicated') body.agent_id = agentId || undefined;
         await mailApi.updateIdentity(identity!.id, body);
         toast.success('Account updated');
       } else {
         await mailApi.createIdentity({
           address,
           display_name: displayName,
-          identity_type: 'dedicated',
-          smtp_host: smtpHost || undefined,
-          smtp_port: smtpPort || undefined,
-          smtp_user: smtpUser || undefined,
-          smtp_pass: smtpPass || undefined,
-          imap_host: imapHost || undefined,
-          imap_port: imapPort || undefined,
-          imap_user: imapUser || undefined,
-          imap_pass: imapPass || undefined,
+          identity_type: identityType,
+          transport,
+          is_active: isActive,
+          reply_to: replyTo || undefined,
+          default_importance: defaultImportance,
+          signature_html: signatureHtml || undefined,
+          signature_text: signatureText || undefined,
+          ...(mode !== 'external' ? {
+            smtp_host: smtpHost || undefined,
+            smtp_port: smtpPort || undefined,
+            smtp_user: smtpUser || undefined,
+            smtp_pass: smtpPass || undefined,
+            imap_host: imapHost || undefined,
+            imap_port: imapPort || undefined,
+            imap_user: imapUser || undefined,
+            imap_pass: imapPass || undefined,
+          } : {
+            forward_url: forwardUrl || undefined,
+            inbound_secret: inboundSecret || undefined,
+          }),
+          ...(mode === 'dedicated' ? { agent_id: agentId || undefined } : {}),
         });
         toast.success('Account added');
       }
@@ -699,149 +1598,377 @@ function AccountForm({ identity, onCancel, onSaved }: {
     } finally { setSaving(false); }
   };
 
+  const inboundWebhookUrl = '/v1/mail/inbound-webhook';
+
   return (
-    <div className="px-6 py-5 max-w-lg">
-      <h3 className="text-sm font-semibold mb-4">{isEdit ? 'Edit Account' : 'Add Email Account'}</h3>
+    <div className="px-6 py-5 max-w-2xl space-y-6">
+      <h3 className="text-sm font-semibold">{isEdit ? 'Edit Account' : 'Add Email Account'}</h3>
 
-      {/* Provider selection (only for new accounts) */}
-      {!isEdit && (
-        <div className="mb-5">
-          <label className="text-xs font-medium text-muted-foreground mb-2 block">Provider</label>
-          <div className="grid grid-cols-2 gap-2">
-            {PROVIDER_PRESETS.map(p => (
-              <button
-                key={p.id}
-                onClick={() => selectProvider(p.id)}
-                className={cn(
-                  'flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left cursor-pointer transition-colors',
-                  provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
-                )}
-              >
-                <span className={cn(
-                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-                  p.id === 'gmail' ? 'bg-red-500/10 text-red-500' :
-                  p.id === 'outlook' ? 'bg-blue-500/10 text-blue-500' :
-                  p.id === 'zoho' ? 'bg-yellow-500/10 text-yellow-600' :
-                  'bg-muted text-muted-foreground'
-                )}>
-                  {p.icon}
-                </span>
-                <span className="text-sm font-medium">{p.name}</span>
-              </button>
-            ))}
-          </div>
-          {provider === 'gmail' && (
-            <p className="text-xs text-muted-foreground mt-2 px-1">
-              Gmail requires an App Password. Go to Google Account &gt; Security &gt; 2-Step Verification &gt; App passwords to generate one.
-            </p>
-          )}
+      {/* ── Mode selector ── */}
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-2 block">Connection mode</label>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { id: 'dedicated' as ConnectionMode, icon: Mail,    label: 'Dedicated', hint: 'One identity per agent' },
+            { id: 'shared'    as ConnectionMode, icon: Users,   label: 'Shared + aliases', hint: 'Team inbox • customer support' },
+            { id: 'external'  as ConnectionMode, icon: Webhook, label: 'External webhook', hint: 'Gmail/Zoho via Pipedream/n8n' },
+          ] as const).map(m => (
+            <button
+              key={m.id}
+              onClick={() => setMode(m.id)}
+              className={cn(
+                'flex flex-col items-start gap-1 rounded-xl border px-3 py-2.5 text-left cursor-pointer transition-colors',
+                mode === m.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <m.icon className={cn('h-4 w-4', mode === m.id ? 'text-primary' : 'text-muted-foreground')} />
+                <span className={cn('text-sm font-medium', mode === m.id && 'text-primary')}>{m.label}</span>
+              </div>
+              <span className="text-xs text-muted-foreground">{m.hint}</span>
+            </button>
+          ))}
         </div>
-      )}
+        {mode === 'shared' && (
+          <p className="text-xs text-muted-foreground mt-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+            <strong className="text-primary">Customer-support flow:</strong> one shared inbox (e.g. support@company.com) receives all mail. Alias rules below route <code className="bg-muted px-1 rounded">billing@</code>, <code className="bg-muted px-1 rounded">sales@</code>, or plus-addresses to specialist agents. Replies send as the alias address.
+          </p>
+        )}
+        {mode === 'external' && (
+          <p className="text-xs text-muted-foreground mt-2 rounded-lg bg-muted border border-border px-3 py-2">
+            Use this if you cannot register an OAuth app directly. A third-party service (Pipedream, n8n, trigger.dev) owns the Gmail/Zoho OAuth, forwards inbound mail to Qorven&apos;s webhook, and receives outbound mail at your forward URL to relay via OAuth.
+          </p>
+        )}
+      </div>
 
-      {/* Basic fields */}
-      <div className="space-y-3 mb-5">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Email Address</label>
+      {/* ── Basic fields ── */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2 sm:col-span-1">
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">
+            {mode === 'shared' ? 'Shared inbox address' : 'Email address'}
+          </label>
           <input
             value={address}
             onChange={e => setAddress(e.target.value)}
-            placeholder="you@example.com"
+            placeholder={mode === 'shared' ? 'support@company.com' : 'you@example.com'}
             className="qr-input w-full text-sm"
             disabled={isEdit}
           />
         </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Display Name</label>
+        <div className="col-span-2 sm:col-span-1">
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Display name</label>
           <input
             value={displayName}
             onChange={e => setDisplayName(e.target.value)}
-            placeholder="Your Name"
+            placeholder={mode === 'shared' ? 'Support Team' : 'Your Name'}
             className="qr-input w-full text-sm"
           />
         </div>
       </div>
 
-      {/* SMTP Settings */}
-      {(provider || isEdit) && (
-        <>
-          <div className="mb-4">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">SMTP (Outgoing)</h4>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className="col-span-2">
-                <input
-                  value={smtpHost}
-                  onChange={e => setSmtpHost(e.target.value)}
-                  placeholder="smtp.example.com"
-                  className="qr-input w-full text-sm"
-                />
-              </div>
-              <div>
-                <input
-                  type="number"
-                  value={smtpPort}
-                  onChange={e => setSmtpPort(Number(e.target.value))}
-                  placeholder="587"
-                  className="qr-input w-full text-sm"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={smtpUser}
-                onChange={e => setSmtpUser(e.target.value)}
-                placeholder="Username"
-                className="qr-input w-full text-sm"
-              />
-              <input
-                type="password"
-                value={smtpPass}
-                onChange={e => setSmtpPass(e.target.value)}
-                placeholder={isEdit ? '••••••••' : 'Password'}
-                className="qr-input w-full text-sm"
-              />
-            </div>
-          </div>
+      {/* ── Agent binding (dedicated only) ── */}
+      {mode === 'dedicated' && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Bind to agent</label>
+          <select
+            value={agentId}
+            onChange={e => setAgentId(e.target.value)}
+            className="qr-input w-full text-sm"
+          >
+            <option value="">— unbound —</option>
+            {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+          </select>
+          <p className="text-xs text-muted-foreground mt-1">This mailbox will be the exclusive inbox/outbox for the selected agent.</p>
+        </div>
+      )}
 
-          {/* IMAP Settings */}
-          <div className="mb-5">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">IMAP (Incoming)</h4>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className="col-span-2">
-                <input
-                  value={imapHost}
-                  onChange={e => setImapHost(e.target.value)}
-                  placeholder="imap.example.com"
-                  className="qr-input w-full text-sm"
-                />
+      {/* ── Mode 1 + 2: IMAP/SMTP ── */}
+      {(mode === 'dedicated' || mode === 'shared') && (
+        <>
+          {/* Provider presets */}
+          {!isEdit && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-2 block">Provider</label>
+              <div className="grid grid-cols-2 gap-2">
+                {PROVIDER_PRESETS.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => selectProvider(p.id)}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left cursor-pointer transition-colors',
+                      provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+                    )}
+                  >
+                    <span className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+                      p.id === 'gmail' ? 'bg-red-500/10 text-red-500' :
+                      p.id === 'outlook' ? 'bg-blue-500/10 text-blue-500' :
+                      p.id === 'zoho' ? 'bg-yellow-500/10 text-yellow-600' :
+                      'bg-muted text-muted-foreground'
+                    )}>
+                      {p.icon}
+                    </span>
+                    <span className="text-sm font-medium">{p.name}</span>
+                  </button>
+                ))}
               </div>
+              {provider === 'gmail' && (
+                <p className="text-xs text-muted-foreground mt-2">Gmail requires an App Password — Google Account &gt; Security &gt; 2-Step Verification &gt; App passwords.</p>
+              )}
+            </div>
+          )}
+
+          {(provider || isEdit) && (
+            <>
               <div>
-                <input
-                  type="number"
-                  value={imapPort}
-                  onChange={e => setImapPort(Number(e.target.value))}
-                  placeholder="993"
-                  className="qr-input w-full text-sm"
-                />
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">SMTP (Outgoing)</h4>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <div className="col-span-2">
+                    <input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.example.com" className="qr-input w-full text-sm" />
+                  </div>
+                  <input type="number" value={smtpPort} onChange={e => setSmtpPort(Number(e.target.value))} placeholder="587" className="qr-input w-full text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={smtpUser} onChange={e => setSmtpUser(e.target.value)} placeholder="Username" className="qr-input w-full text-sm" />
+                  <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder={isEdit ? '•••••••• (blank = keep)' : 'Password'} className="qr-input w-full text-sm" />
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={imapUser}
-                onChange={e => setImapUser(e.target.value)}
-                placeholder="Username"
-                className="qr-input w-full text-sm"
-              />
-              <input
-                type="password"
-                value={imapPass}
-                onChange={e => setImapPass(e.target.value)}
-                placeholder={isEdit ? '••••••••' : 'Password'}
-                className="qr-input w-full text-sm"
-              />
-            </div>
-          </div>
+
+              <div>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">IMAP (Incoming)</h4>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <div className="col-span-2">
+                    <input value={imapHost} onChange={e => setImapHost(e.target.value)} placeholder="imap.example.com" className="qr-input w-full text-sm" />
+                  </div>
+                  <input type="number" value={imapPort} onChange={e => setImapPort(Number(e.target.value))} placeholder="993" className="qr-input w-full text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={imapUser} onChange={e => setImapUser(e.target.value)} placeholder="Username" className="qr-input w-full text-sm" />
+                  <input type="password" value={imapPass} onChange={e => setImapPass(e.target.value)} placeholder={isEdit ? '•••••••• (blank = keep)' : 'Password'} className="qr-input w-full text-sm" />
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
+
+      {/* ── Mode 2: Alias → agent table ── */}
+      {(mode === 'shared' || mode === 'external') && isEdit && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <LinkIcon className="h-4 w-4 text-muted-foreground" />
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Alias → Agent routing</h4>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Incoming mail to each alias address is routed to its assigned agent. Replies are sent as the alias address.
+            You can also use plus-addressing (<code className="bg-muted px-1 rounded">support+billing@</code>).
+          </p>
+
+          {/* Alias table */}
+          {aliasesLoading ? (
+            <div className="space-y-1.5 mb-3">
+              {[1,2].map(i => <div key={i} className="h-9 animate-pulse rounded-lg bg-muted" />)}
+            </div>
+          ) : aliases.length > 0 ? (
+            <div className="rounded-xl border border-border overflow-hidden mb-3">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40">
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Alias address</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Routes to agent</th>
+                    <th className="px-2 py-2 w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {aliases.map(alias => {
+                    const agentName = souls.find(s => s.id === alias.target_agent_id)?.display_name ?? alias.target_agent_id;
+                    return (
+                      <tr key={alias.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30 transition-colors">
+                        <td className="px-3 py-2 font-mono text-foreground">{alias.alias_address}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{agentName}</td>
+                        <td className="px-2 py-2">
+                          <button
+                            onClick={() => deleteAlias(alias.id)}
+                            disabled={deletingAliasId === alias.id}
+                            className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors disabled:opacity-50"
+                            title="Remove alias"
+                          >
+                            {deletingAliasId === alias.id
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : <Trash className="h-3 w-3" />}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground mb-3 py-2 text-center rounded-lg border border-dashed border-border">No alias rules yet. Add one below.</p>
+          )}
+
+          {/* Add alias row */}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground mb-1 block">Alias address</label>
+              <input
+                value={newAliasAddr}
+                onChange={e => setNewAliasAddr(e.target.value)}
+                placeholder="billing@company.com"
+                className="qr-input w-full text-sm"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground mb-1 block">Route to agent</label>
+              <select
+                value={newAliasAgent}
+                onChange={e => setNewAliasAgent(e.target.value)}
+                className="qr-input w-full text-sm"
+              >
+                <option value="">— select agent —</option>
+                {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+              </select>
+            </div>
+            <button
+              onClick={addAlias}
+              disabled={addingAlias || !newAliasAddr.trim() || !newAliasAgent}
+              className="flex items-center gap-1 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0"
+            >
+              {addingAlias ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mode 2 hint: alias table only visible after save ── */}
+      {(mode === 'shared' || mode === 'external') && !isEdit && (
+        <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+          After creating this account, open it in Edit mode to add alias → agent routing rules.
+        </div>
+      )}
+
+      {/* ── Mode 3: External webhook ── */}
+      {mode === 'external' && (
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Forward URL (outbound relay)</label>
+            <input
+              value={forwardUrl}
+              onChange={e => setForwardUrl(e.target.value)}
+              placeholder="https://hooks.pipedream.net/api/v1/workflows/…"
+              className="qr-input w-full text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Qorven POSTs outbound mail here. Your Pipedream/n8n workflow receives it and sends via Gmail/Zoho OAuth.</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Inbound HMAC secret</label>
+            <input
+              type="password"
+              value={inboundSecret}
+              onChange={e => setInboundSecret(e.target.value)}
+              placeholder={isEdit ? '•••••••• (blank = keep)' : 'Generate a random secret'}
+              className="qr-input w-full text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Used to verify the HMAC signature on inbound webhook calls.</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Inbound webhook URL (paste into your service)</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={inboundWebhookUrl}
+                readOnly
+                className="qr-input w-full text-sm text-muted-foreground cursor-default select-all"
+              />
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(inboundWebhookUrl); toast.success('Copied'); }}
+                className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-accent cursor-pointer shrink-0 transition-colors"
+                title="Copy webhook URL"
+              >
+                <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Paste this URL into the Pipedream/n8n/trigger.dev trigger that forwards inbound Gmail/Zoho mail to Qorven.</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Bind to agent (optional)</label>
+            <select value={agentId} onChange={e => setAgentId(e.target.value)} className="qr-input w-full text-sm">
+              <option value="">— unbound —</option>
+              {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">Or use alias routing below to route to multiple agents.</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Per-identity prefs (all modes) ── */}
+      <div className="space-y-4 rounded-xl border border-border bg-card px-5 py-4">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Email preferences</h4>
+
+        {/* Active toggle */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm font-medium">Active</span>
+            <p className="text-xs text-muted-foreground mt-0.5">Enable or pause this account without deleting it.</p>
+          </div>
+          <button
+            onClick={() => setIsActive(v => !v)}
+            className={cn('relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors', isActive ? 'bg-primary' : 'bg-muted')}
+          >
+            <span className={cn('inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform', isActive ? 'translate-x-4' : 'translate-x-0')} />
+          </button>
+        </div>
+
+        {/* Reply-To */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Reply-To address (optional)</label>
+          <input
+            value={replyTo}
+            onChange={e => setReplyTo(e.target.value)}
+            placeholder="replies@company.com"
+            className="qr-input w-full text-sm"
+          />
+        </div>
+
+        {/* Default importance */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Default importance for outbound mail</label>
+          <div className="flex gap-2">
+            {(['high', 'normal', 'low'] as const).map(imp => (
+              <button
+                key={imp}
+                onClick={() => setDefaultImportance(imp)}
+                className={cn(
+                  'flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors capitalize',
+                  defaultImportance === imp
+                    ? imp === 'high' ? 'border-destructive bg-destructive/10 text-destructive'
+                    : imp === 'low'  ? 'border-muted-foreground bg-muted text-foreground'
+                    : 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:border-primary/30 text-muted-foreground'
+                )}
+              >
+                {imp === 'high' ? '! High' : imp === 'normal' ? 'Normal' : 'Low'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Signature */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Email signature</label>
+          <div className="rounded-xl border border-border overflow-hidden">
+            <RichTextEditor
+              value={signatureHtml}
+              onChange={(html, text) => { setSignatureHtml(html); setSignatureText(text); }}
+              placeholder="Write your email signature…"
+              minHeight={120}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">This signature is automatically appended to outbound mail from this identity.</p>
+        </div>
+      </div>
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2 border-t border-border">

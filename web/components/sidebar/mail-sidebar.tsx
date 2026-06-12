@@ -11,7 +11,7 @@ import {
   Inbox, Send, FileEdit, Clock, Star, ChevronsUpDown, Users,
   GitBranch, Sparkles, FileText, AtSign, ShieldCheck, Settings,
   ArrowLeft, Plus, Check, Loader2, Trash2, Save, Server, Search,
-  Mail,
+  Mail, Archive, AlertCircle,
 } from 'lucide-react';
 import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
@@ -33,6 +33,7 @@ export function MailSidebar() {
   const setMailView = useStore((s) => s.setMailView);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [approvalCount, setApprovalCount] = useState(0);
+  const [inboxUnread, setInboxUnread] = useState(0);
 
   const view: MailView = mailView === 'contacts' ? 'contacts' : mailView === 'mailboxes' ? 'mailboxes' : 'folders';
 
@@ -44,14 +45,22 @@ export function MailSidebar() {
     import('@/lib/api').then(({ outbound }) =>
       outbound.mailPending().then(l => setApprovalCount(Array.isArray(l) ? l.length : 0)).catch(() => {})
     );
+    // inbox unread count — derived from inbox fetch
+    mailApi.inbox('inbox').then(msgs => {
+      const count = Array.isArray(msgs) ? msgs.filter((m: any) => !(m.is_read ?? m.read ?? false)).length : 0;
+      setInboxUnread(count);
+    }).catch(() => {});
   }, []);
 
   const folders = [
-    { icon: Inbox,    label: 'Inbox' },
-    { icon: Send,     label: 'Sent' },
-    { icon: FileEdit, label: 'Drafts' },
-    { icon: Clock,    label: 'Pending' },
-    { icon: Star,     label: 'Starred' },
+    { icon: Inbox,        label: 'Inbox',     badge: inboxUnread > 0 ? String(inboxUnread) : undefined },
+    { icon: Send,         label: 'Sent' },
+    { icon: FileEdit,     label: 'Drafts' },
+    { icon: Clock,        label: 'Pending' },
+    { icon: Star,         label: 'Starred' },
+    { icon: AlertCircle,  label: 'Important' },
+    { icon: Archive,      label: 'Archive' },
+    { icon: Trash2,       label: 'Trash' },
   ];
   const groupOptions = [
     { icon: Inbox,     label: 'All Messages' },
@@ -154,6 +163,8 @@ export function MailSidebar() {
                 icon={f.icon}
                 label={f.label}
                 active={mailFolder === f.label.toLowerCase()}
+                badge={f.badge}
+                badgeColor="bg-primary/15 text-primary"
                 onClick={() => { setMailFolder(f.label.toLowerCase()); router.push('/mail'); }}
               />
             ))}

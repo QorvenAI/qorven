@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
 	"net/smtp"
 	"strings"
 	"time"
@@ -34,11 +35,38 @@ type IMAPConfig struct {
 	Port                 int
 }
 
+// BoundIdentity carries the resolved sending identity for an agent.
+// Address is the locked from-address (cannot be overridden by the LLM).
+type BoundIdentity struct {
+	IdentityID  string
+	Address     string
+	DisplayName string
+	SMTPHost    string
+	SMTPPort    int
+	SMTPUser    string
+	SMTPPass    string // already decrypted
+	Transport   string
+	ForwardURL  string
+	SignatureText string
+	SignatureHTML string
+	ReplyTo     string
+	Importance  string
+	TenantID    string
+}
+
 type MailboxConfig struct {
 	SMTP    *SMTPConfig
 	IMAP    *IMAPConfig
 	AgentID string
 	Pool    *pgxpool.Pool
+	// ResolveIdentity returns the bound mailbox identity for the given agent.
+	// Set by the gateway so the tool can send as the agent's own address without
+	// importing the mail package (avoids a circular dependency).
+	// Returns nil, "" if the agent has no bound identity.
+	ResolveIdentity func(ctx context.Context, agentID, tenantID string) (*BoundIdentity, error)
+	// EncKey is the encryption key used to decrypt SMTP passwords when
+	// ResolveIdentity is not set and a legacy global SMTP config is in use.
+	EncKey string
 }
 
 // --- Email Send Tool ---
@@ -50,6 +78,17 @@ func (t *EmailSendTool) SetMailbox(cfg *MailboxConfig) { t.cfg = cfg }
 func (t *EmailSendTool) SetSMTP(cfg *SMTPConfig) {
 	if t.cfg == nil { t.cfg = &MailboxConfig{} }
 	t.cfg.SMTP = cfg
+}
+
+// SetResolveIdentity installs the per-agent identity resolver and the pool for
+// approval gating + persistence.  Call this from the gateway whenever the mail
+// store is available, independent of whether a global SMTP is configured.
+func (t *EmailSendTool) SetResolveIdentity(pool *pgxpool.Pool, fn func(ctx context.Context, agentID, tenantID string) (*BoundIdentity, error)) {
+	if t.cfg == nil {
+		t.cfg = &MailboxConfig{}
+	}
+	t.cfg.Pool = pool
+	t.cfg.ResolveIdentity = fn
 }
 
 func (t *EmailSendTool) Name() string        { return "email_send" }
@@ -75,57 +114,152 @@ func (t *EmailSendTool) Execute(ctx context.Context, args map[string]any) *Resul
 	if to == "" || body == "" {
 		return ErrorResult("to and body are required")
 	}
-	if t.cfg == nil || t.cfg.SMTP == nil {
-		return ErrorResult("SMTP not configured")
+	if t.cfg == nil {
+		return ErrorResult("mail not configured")
 	}
 
 	agentID := AgentIDFromCtx(ctx)
 	sessionID := SessionIDFromCtx(ctx)
-	// Outbound approval gate
-	
+
+	// ── Outbound approval gate ─────────────────────────────────────────────────
+	// This gate is the autonomous-send authorization check. It MUST remain here
+	// and is never bypassed: if outbound_approval is 'none' proceed immediately;
+	// any other mode (supervisor/user/both) queues for human review first.
 	if t.cfg.Pool != nil && agentID != "" {
 		proceed, queueID, _ := CheckApproval(ctx, t.cfg.Pool, agentID, "email_send", sessionID, args)
 		if !proceed {
 			return TextResult(fmt.Sprintf("📋 Email queued for approval (ID: %s). To: %s, Subject: %s\nAwaiting %s approval before sending.", queueID[:8], to, subject, getApprovalMode(ctx, t.cfg.Pool, agentID)))
 		}
 	}
+
+	// ── Resolve sending identity ───────────────────────────────────────────────
+	// Priority: bound identity (per-agent mailbox) > global SMTP fallback.
+	// The FROM address is always locked to the bound identity — the LLM cannot
+	// supply an arbitrary from address (no spoofing).
+	tenantID := TenantIDFromCtx(ctx)
+	if tenantID == "" {
+		tenantID = "00000000-0000-0000-0000-000000000001"
+	}
+
+	if t.cfg.ResolveIdentity != nil && agentID != "" {
+		bound, err := t.cfg.ResolveIdentity(ctx, agentID, tenantID)
+		if err == nil && bound != nil {
+			return t.sendViaBoundIdentity(ctx, bound, agentID, tenantID, to, subject, body)
+		}
+		// No bound identity — fall through to global SMTP if available.
+	}
+
+	// ── Global SMTP fallback ───────────────────────────────────────────────────
+	if t.cfg.SMTP == nil {
+		return ErrorResult("no mailbox bound to this agent and no global SMTP configured — cannot send")
+	}
+	return t.sendViaGlobalSMTP(ctx, agentID, tenantID, to, subject, body)
+}
+
+// sendViaBoundIdentity sends mail as the agent's own locked identity.
+// The from address is identity.Address — it cannot be overridden.
+func (t *EmailSendTool) sendViaBoundIdentity(ctx context.Context, bound *BoundIdentity, agentID, tenantID, to, subject, body string) *Result {
+	// Apply identity signature.
+	bodyText := body
+	if bound.SignatureText != "" {
+		bodyText = bodyText + "\r\n\r\n--\r\n" + bound.SignatureText
+	}
+
+	msgID := fmt.Sprintf("<%d.qorven@%s>", time.Now().UnixNano(), domainOf(bound.Address))
+
+	var sendErr error
+	if bound.Transport == "external" && bound.ForwardURL != "" {
+		payload := fmt.Sprintf(`{"message_id":%q,"from":%q,"from_name":%q,"to":[%q],"subject":%q,"body_text":%q}`,
+			msgID, bound.Address, bound.DisplayName, to, subject, bodyText)
+		resp, err := http.Post(bound.ForwardURL, "application/json", strings.NewReader(payload)) //nolint:noctx
+		if err != nil {
+			sendErr = err
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				sendErr = fmt.Errorf("forward webhook returned %d", resp.StatusCode)
+			}
+		}
+	} else {
+		// Native SMTP — from is locked to bound.Address (cannot be forged).
+		addr := fmt.Sprintf("%s:%d", bound.SMTPHost, bound.SMTPPort)
+		auth := smtp.PlainAuth("", bound.SMTPUser, bound.SMTPPass, bound.SMTPHost)
+		var rawMsg strings.Builder
+		rawMsg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", sanitizeEmailHeader(bound.DisplayName), sanitizeEmailHeader(bound.Address)))
+		rawMsg.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeEmailHeader(to)))
+		rawMsg.WriteString(fmt.Sprintf("Subject: %s\r\n", sanitizeEmailHeader(subject)))
+		rawMsg.WriteString(fmt.Sprintf("Message-ID: %s\r\n", msgID))
+		if bound.ReplyTo != "" {
+			rawMsg.WriteString(fmt.Sprintf("Reply-To: %s\r\n", sanitizeEmailHeader(bound.ReplyTo)))
+		}
+		rawMsg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+		rawMsg.WriteString(bodyText + "\r\n")
+		if bound.SMTPPort == 465 {
+			sendErr = smtpSendTLS(addr, bound.SMTPHost, auth, bound.Address, []string{to}, rawMsg.String())
+		} else {
+			sendErr = smtp.SendMail(addr, auth, bound.Address, []string{to}, []byte(rawMsg.String()))
+		}
+	}
+
+	if sendErr != nil {
+		return ErrorResult(fmt.Sprintf("SMTP error: %v", sendErr))
+	}
+
+	// Persist to mailbox with the real identity_id and tenant.
+	if t.cfg.Pool != nil && agentID != "" {
+		t.cfg.Pool.Exec(ctx,
+			`INSERT INTO mailbox_messages (tenant_id, agent_id, identity_id, message_id, folder, direction, from_address, from_name, to_addresses, subject, body_text, send_status, is_read, created_at)
+			 VALUES ($1, $2, $3::uuid, $4, 'sent', 'outbound', $5, $6, ARRAY[$7], $8, $9, 'sent', true, NOW())`,
+			tenantID, agentID, bound.IdentityID, msgID,
+			bound.Address, bound.DisplayName, to, subject, bodyText)
+	}
+
+	return TextResult(fmt.Sprintf("✅ Email sent to %s — Subject: %s (sent as %s)", to, subject, bound.Address))
+}
+
+// sendViaGlobalSMTP is the legacy path used when no per-agent identity is bound.
+func (t *EmailSendTool) sendViaGlobalSMTP(ctx context.Context, agentID, tenantID, to, subject, body string) *Result {
 	s := t.cfg.SMTP
 
-	// Generate message ID for thread tracking
-	msgID := fmt.Sprintf("<%d.qorven@%s>", time.Now().UnixNano(), strings.Split(s.From, "@")[1])
+	msgID := fmt.Sprintf("<%d.qorven@%s>", time.Now().UnixNano(), domainOf(s.From))
 
-	// Build message
-	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", sanitizeEmailHeader(s.FromName), sanitizeEmailHeader(s.From)))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeEmailHeader(to)))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", sanitizeEmailHeader(subject)))
-	msg.WriteString(fmt.Sprintf("Message-ID: %s\r\n", msgID))
-	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	msg.WriteString(body + "\r\n")
+	var rawMsg strings.Builder
+	rawMsg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", sanitizeEmailHeader(s.FromName), sanitizeEmailHeader(s.From)))
+	rawMsg.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeEmailHeader(to)))
+	rawMsg.WriteString(fmt.Sprintf("Subject: %s\r\n", sanitizeEmailHeader(subject)))
+	rawMsg.WriteString(fmt.Sprintf("Message-ID: %s\r\n", msgID))
+	rawMsg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+	rawMsg.WriteString(body + "\r\n")
 
 	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
 	auth := smtp.PlainAuth("", s.User, s.Password, s.Host)
 
 	var err error
 	if s.Port == 465 {
-		err = smtpSendTLS(addr, s.Host, auth, s.From, []string{to}, msg.String())
+		err = smtpSendTLS(addr, s.Host, auth, s.From, []string{to}, rawMsg.String())
 	} else {
-		err = smtp.SendMail(addr, auth, s.From, []string{to}, []byte(msg.String()))
+		err = smtp.SendMail(addr, auth, s.From, []string{to}, []byte(rawMsg.String()))
 	}
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("SMTP error: %v", err))
 	}
 
-	// Store in mailbox (sent folder) for thread tracking
-	
 	if t.cfg.Pool != nil && agentID != "" {
 		t.cfg.Pool.Exec(ctx,
 			`INSERT INTO mailbox_messages (tenant_id, agent_id, message_id, folder, direction, from_address, from_name, to_addresses, subject, body_text, send_status, is_read, created_at)
-			 VALUES ('00000000-0000-0000-0000-000000000001', $1, $2, 'sent', 'outbound', $3, $4, ARRAY[$5], $6, $7, 'sent', true, NOW())`,
-			agentID, msgID, s.From, s.FromName, to, subject, body)
+			 VALUES ($1, $2, $3, 'sent', 'outbound', $4, $5, ARRAY[$6], $7, $8, 'sent', true, NOW())`,
+			tenantID, agentID, msgID, s.From, s.FromName, to, subject, body)
 	}
 
 	return TextResult(fmt.Sprintf("✅ Email sent to %s — Subject: %s (tracked in sent folder)", to, subject))
+}
+
+// domainOf extracts the domain from an email address, falling back to "qorven.ai".
+func domainOf(addr string) string {
+	if idx := strings.LastIndex(addr, "@"); idx >= 0 {
+		return addr[idx+1:]
+	}
+	return "qorven.ai"
 }
 
 func smtpSendTLS(addr, host string, auth smtp.Auth, from string, to []string, msg string) error {

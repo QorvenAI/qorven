@@ -438,6 +438,21 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 				cb.SetLearnedHints(hints)
 			}
 		}
+
+		// Inject the agent's bound mailbox address so the system prompt
+		// tells the agent it has email. "" result suppresses the section.
+		if l.agentStore != nil && l.agentStore.Pool() != nil && ag.ID != "" && l.tenantID != "" {
+			var mailAddr string
+			_ = l.agentStore.Pool().QueryRow(ctx,
+				`SELECT COALESCE(address,'') FROM soul_mail_identities
+				 WHERE agent_id = $1 AND tenant_id = $2 AND is_active = true
+				 ORDER BY created_at LIMIT 1`, ag.ID, l.tenantID,
+			).Scan(&mailAddr)
+			if mailAddr != "" {
+				cb.SetMailAddress(mailAddr)
+			}
+		}
+
 		systemPrompt = cb.BuildSystemPrompt(bulletin)
 		if systemPrompt == "" {
 			systemPrompt = "You are a helpful AI assistant."

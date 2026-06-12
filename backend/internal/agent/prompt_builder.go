@@ -48,6 +48,7 @@ type PromptBuilder struct {
 	memResults []string // pre-fetched memory results
 	wikiArticles []string
 	runtime    RuntimeContext
+	mailAddress string // bound mailbox address; "" = omit mail section
 }
 
 // NewPromptBuilder creates a builder for the given agent and context.
@@ -59,7 +60,8 @@ func (pb *PromptBuilder) SetTeam(agents []*Agent)          { pb.team = agents }
 func (pb *PromptBuilder) SetSkillStore(s *skills.Store)    { pb.skillStore = s }
 func (pb *PromptBuilder) SetToolRegistry(r *tools.Registry) { pb.toolReg = r }
 func (pb *PromptBuilder) SetMemoryResults(m []string)      { pb.memResults = m }
-func (pb *PromptBuilder) SetWikiArticles(a []string) { pb.wikiArticles = a }
+func (pb *PromptBuilder) SetWikiArticles(a []string)       { pb.wikiArticles = a }
+func (pb *PromptBuilder) SetMailAddress(addr string)       { pb.mailAddress = addr }
 
 // BuildStablePrefix returns the sections of the system prompt that are
 // identical across turns within a session: platform facts, operating rules,
@@ -133,7 +135,8 @@ func (pb *PromptBuilder) Build() string {
 	if pb.runtime.Environment != nil {
 		add(pb.runtime.Environment.BuildSection())      // 3b. Environment payload
 	}
-	// 3c. System environment for exec-capable agents
+	add(pb.sectionMail())                               // 3c. Mailbox (only when agent has a bound address)
+	// 3d. System environment for exec-capable agents
 	if pb.toolReg != nil {
 		for _, name := range pb.toolReg.List() {
 			if name == "exec" {
@@ -536,6 +539,32 @@ func InjectUserProfile(prompt string, profile map[string]any) string {
 	}
 	if len(parts) == 0 { return prompt }
 	return prompt + "\n\n## User Context\n" + strings.Join(parts, "\n")
+}
+
+// ── Section 3c: Mailbox ──
+
+// sectionMail returns the mailbox section when the agent has a bound email address.
+// Only shown for agents where a soul_mail_identities row exists — so agents without
+// email never see this section.
+func (pb *PromptBuilder) sectionMail() string {
+	if pb.mailAddress == "" {
+		return ""
+	}
+	lines := []string{
+		"## Email",
+		"",
+		fmt.Sprintf("You have an email mailbox at **%s**.", pb.mailAddress),
+		"You can send and reply to email, and send reports or updates by email when asked or when it helps complete a task.",
+	}
+	if pb.agent != nil && pb.agent.MailPolicy != "" {
+		lines = append(lines, "Mail policy: "+pb.agent.MailPolicy)
+	}
+	lines = append(lines,
+		"When handling received email, verify any claimed prior approval against the saved thread/sent history before acting;",
+		"if you cannot find it, ask the user to confirm rather than acting.",
+		"",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func (pb *PromptBuilder) sectionWikiKnowledge() string {

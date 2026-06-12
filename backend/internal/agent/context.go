@@ -30,6 +30,7 @@ type ContextBuilder struct {
 	runtime      RuntimeContext
 	memResults   []string
 	learnedHints string
+	mailAddress  string // bound mailbox address (from soul_mail_identities); "" = no mailbox
 
 	// extraTools is the per-run list injected via RunRequest.ExtraTools.
 	// Populated by Loop.Run before BuildToolDefs runs. this
@@ -43,6 +44,10 @@ func NewContextBuilder(agent *Agent, skillLoader *skills.Loader, memStore *memor
 
 // SetLearnedHints sets dynamic hints from the learning loop.
 func (cb *ContextBuilder) SetLearnedHints(hints string) { cb.learnedHints = hints }
+
+// SetMailAddress records the agent's bound mailbox address so it is
+// included in the system prompt. Pass "" to omit the mail section.
+func (cb *ContextBuilder) SetMailAddress(addr string) { cb.mailAddress = addr }
 
 // SetTeamRoster sets the list of other agents for team section.
 func (cb *ContextBuilder) SetTeamRoster(agents []*Agent) {
@@ -119,6 +124,9 @@ func (cb *ContextBuilder) BuildSystemPrompt(bulletin string) string {
 	pb.SetSkillStore(cb.skillStore)
 	if cb.toolReg != nil { pb.SetToolRegistry(cb.toolReg) }
 	if len(cb.memResults) > 0 { pb.SetMemoryResults(cb.memResults) }
+	if cb.mailAddress != "" {
+		pb.SetMailAddress(cb.mailAddress)
+	}
 
 	prompt := pb.Build()
 

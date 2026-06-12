@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,8 +19,37 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/calendar"
-	"github.com/qorvenai/qorven/internal/crypto"
+	"github.com/qorvenai/qorven/internal/channels"
+	"github.com/qorvenai/qorven/internal/mail"
 )
+
+// isLoopbackRequest reports whether the request's TCP peer is the loopback
+// interface. It checks RemoteAddr (the real socket peer), not X-Forwarded-For,
+// which a client could spoof — a reverse proxy on the same host connects from
+// loopback, so this correctly admits the documented localhost-proxy setup while
+// rejecting direct network requests.
+func isLoopbackRequest(r *http.Request) bool {
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// safeGo runs fn in a goroutine with panic recovery so a panic in detached
+// background work (inbound mail processing, etc.) logs instead of crashing the
+// process. label identifies the work site in the recovery log.
+func safeGo(label string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("safego.panic", "label", label, "panic", r)
+			}
+		}()
+		fn()
+	}()
+}
 
 func (gw *Gateway) handleListMailIdentities(w http.ResponseWriter, r *http.Request) {
 	if gw.mailStore == nil {
@@ -64,69 +94,115 @@ func (gw *Gateway) handleUpdateMailIdentity(w http.ResponseWriter, r *http.Reque
 	}
 	id := chi.URLParam(r, "id")
 	var body struct {
-		DisplayName    string `json:"display_name"`
-		SMTPHost       string `json:"smtp_host"`
-		SMTPPort       int    `json:"smtp_port"`
-		SMTPUser       string `json:"smtp_user"`
-		SMTPPass       string `json:"smtp_pass"` // plain — encrypted before storage
-		IMAPHost       string `json:"imap_host"`
-		IMAPPort       int    `json:"imap_port"`
-		IMAPUser       string `json:"imap_user"`
-		IMAPPass       string `json:"imap_pass"` // plain — encrypted before storage
-		PollInterval   int    `json:"poll_interval_seconds"`
+		// Core connection fields.
+		DisplayName  string `json:"display_name"`
+		SMTPHost     string `json:"smtp_host"`
+		SMTPPort     int    `json:"smtp_port"`
+		SMTPUser     string `json:"smtp_user"`
+		SMTPPass     string `json:"smtp_pass"` // plain — encrypted before storage
+		IMAPHost     string `json:"imap_host"`
+		IMAPPort     int    `json:"imap_port"`
+		IMAPUser     string `json:"imap_user"`
+		IMAPPass     string `json:"imap_pass"` // plain — encrypted before storage
+		PollInterval int    `json:"poll_interval_seconds"`
+		// Extended fields (Task 10).
+		IsActive          *bool  `json:"is_active"`           // pointer — omitted ≠ false
+		Transport         string `json:"transport"`
+		ForwardURL        string `json:"forward_url"`
+		ReplyTo           string `json:"reply_to"`
+		DefaultImportance string `json:"default_importance"`
+		SignatureHTML     string `json:"signature_html"`
+		SignatureText     string `json:"signature_text"`
+		InboundSecret     string `json:"inbound_secret"` // plain — encrypted before storage
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
 
-	// Encrypt passwords when provided; empty string = leave existing.
-	var smtpPassEnc, imapPassEnc string
 	encKey := gw.cfg.Auth.EncryptionKey
-	if body.SMTPPass != "" {
-		var err error
-		if smtpPassEnc, err = crypto.EncryptString(body.SMTPPass, encKey); err != nil {
-			writeJSON(w, 500, map[string]string{"error": "failed to encrypt smtp password"})
-			return
-		}
+
+	// Encrypt secret fields when provided; empty string = leave existing.
+	smtpPassEnc, err := mailEncryptIfProvided(body.SMTPPass, encKey)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to encrypt smtp password"})
+		return
 	}
-	if body.IMAPPass != "" {
-		var err error
-		if imapPassEnc, err = crypto.EncryptString(body.IMAPPass, encKey); err != nil {
-			writeJSON(w, 500, map[string]string{"error": "failed to encrypt imap password"})
-			return
-		}
+	imapPassEnc, err := mailEncryptIfProvided(body.IMAPPass, encKey)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to encrypt imap password"})
+		return
+	}
+	inboundSecretEnc, err := mailEncryptIfProvided(body.InboundSecret, encKey)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to encrypt inbound secret"})
+		return
 	}
 
-	// Build dynamic update — only overwrite encrypted pass columns if a new plaintext was supplied.
-	if smtpPassEnc != "" && imapPassEnc != "" {
-		_, err := gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities
-			 SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, smtp_pass_enc=$5,
-			     imap_host=$6, imap_port=$7, imap_user=$8, imap_pass_enc=$9, poll_interval_seconds=$10
-			 WHERE id=$11 AND tenant_id=$12`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser, smtpPassEnc,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, imapPassEnc, body.PollInterval,
-			id, defaultTenant)
-		if err != nil {
-			writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
-			return
+	// Build a dynamic SET clause so we only overwrite encrypted-pass columns when
+	// a new plaintext was supplied, and only touch is_active when the caller
+	// explicitly included the field (pointer non-nil check).
+	setClauses := []string{
+		"display_name=$1",
+		"smtp_host=$2",
+		"smtp_port=$3",
+		"smtp_user=$4",
+		"imap_host=$5",
+		"imap_port=$6",
+		"imap_user=$7",
+		"poll_interval_seconds=$8",
+		"transport=$9",
+		"forward_url=$10",
+		"reply_to=$11",
+		"default_importance=$12",
+		"signature_html=$13",
+		"signature_text=$14",
+	}
+	args := []any{
+		body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser,
+		body.IMAPHost, body.IMAPPort, body.IMAPUser, body.PollInterval,
+		body.Transport, body.ForwardURL, body.ReplyTo, body.DefaultImportance,
+		body.SignatureHTML, body.SignatureText,
+	}
+	nextParam := func() string {
+		n := len(args) + 1
+		return fmt.Sprintf("$%d", n)
+	}
+
+	if smtpPassEnc != "" {
+		setClauses = append(setClauses, "smtp_pass_enc="+nextParam())
+		args = append(args, smtpPassEnc)
+	}
+	if imapPassEnc != "" {
+		setClauses = append(setClauses, "imap_pass_enc="+nextParam())
+		args = append(args, imapPassEnc)
+	}
+	if inboundSecretEnc != "" {
+		setClauses = append(setClauses, "inbound_secret_enc="+nextParam())
+		args = append(args, inboundSecretEnc)
+	}
+	if body.IsActive != nil {
+		setClauses = append(setClauses, "is_active="+nextParam())
+		args = append(args, *body.IsActive)
+	}
+
+	// Append WHERE clause params.
+	idParam := nextParam()
+	args = append(args, id)
+	tenantParam := nextParam()
+	args = append(args, defaultTenant)
+
+	setSQL := ""
+	for i, c := range setClauses {
+		if i > 0 {
+			setSQL += ", "
 		}
-	} else if smtpPassEnc != "" {
-		gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, smtp_pass_enc=$5, imap_host=$6, imap_port=$7, imap_user=$8, poll_interval_seconds=$9 WHERE id=$10 AND tenant_id=$11`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser, smtpPassEnc,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, body.PollInterval, id, defaultTenant)
-	} else if imapPassEnc != "" {
-		gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, imap_host=$5, imap_port=$6, imap_user=$7, imap_pass_enc=$8, poll_interval_seconds=$9 WHERE id=$10 AND tenant_id=$11`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, imapPassEnc, body.PollInterval, id, defaultTenant)
-	} else {
-		gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, imap_host=$5, imap_port=$6, imap_user=$7, poll_interval_seconds=$8 WHERE id=$9 AND tenant_id=$10`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, body.PollInterval, id, defaultTenant)
+		setSQL += c
+	}
+	q := "UPDATE soul_mail_identities SET " + setSQL + " WHERE id=" + idParam + " AND tenant_id=" + tenantParam
+	if _, err := gw.mailStore.Pool().Exec(r.Context(), q, args...); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
 	}
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
@@ -262,28 +338,143 @@ func (gw *Gateway) handleSendMail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "mail not configured"})
 		return
 	}
+
 	var body struct {
 		AgentID    string   `json:"agent_id"`
 		IdentityID string   `json:"identity_id"`
 		To         []string `json:"to"`
+		Cc         []string `json:"cc"`
+		Bcc        []string `json:"bcc"`
 		Subject    string   `json:"subject"`
 		Body       string   `json:"body"`
 		BodyHTML   string   `json:"body_html"`
+		// Optional per-send overrides; identity defaults are used when absent.
+		ReplyTo    string `json:"reply_to"`
+		Importance string `json:"importance"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
 	if len(body.To) == 0 {
 		writeJSON(w, 400, map[string]string{"error": "at least one recipient required"})
 		return
 	}
-	msgID := fmt.Sprintf("<%d@qorven.ai>", time.Now().UnixNano())
-	msg, err := gw.mailStore.StoreSend(r.Context(), defaultTenant, body.AgentID, body.IdentityID, msgID, "", body.To[0], body.Subject, body.Body, body.BodyHTML, "pending_approval", body.To)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+
+	ctx := r.Context()
+
+	// --- 1. Resolve sending identity ---
+	var identity *mail.Identity
+	var err error
+	switch {
+	case body.IdentityID != "":
+		identity, err = gw.mailStore.GetIdentity(ctx, body.IdentityID)
+		if err != nil {
+			writeJSON(w, 404, map[string]string{"error": "identity not found"})
+			return
+		}
+		// Tenant ownership check.
+		if identity.TenantID != defaultTenant {
+			writeJSON(w, 403, map[string]string{"error": "identity belongs to a different tenant"})
+			return
+		}
+	case body.AgentID != "":
+		identity, err = gw.mailStore.GetIdentityForAgent(ctx, body.AgentID, defaultTenant)
+		if err != nil {
+			writeJSON(w, 404, map[string]string{"error": "no active identity bound to agent"})
+			return
+		}
+	default:
+		writeJSON(w, 400, map[string]string{"error": "identity_id or agent_id required"})
 		return
 	}
-	// Create approval
-	gw.mailStore.CreateApproval(r.Context(), defaultTenant, msg.ID, body.AgentID, nil)
-	json.NewEncoder(w).Encode(msg)
+
+	// --- 2. Apply identity signature to body ---
+	bodyText := body.Body
+	bodyHTML := body.BodyHTML
+	if identity.SignatureText != "" {
+		bodyText = bodyText + "\r\n\r\n--\r\n" + identity.SignatureText
+	}
+	if identity.SignatureHTML != "" {
+		if bodyHTML != "" {
+			bodyHTML = bodyHTML + "<br><br><div class=\"qorven-signature\">" + identity.SignatureHTML + "</div>"
+		} else {
+			// No HTML body provided — promote plain text to HTML if signature demands it.
+			bodyHTML = "<p>" + bodyText + "</p><br><div class=\"qorven-signature\">" + identity.SignatureHTML + "</div>"
+		}
+	}
+
+	msgID := fmt.Sprintf("<%d@qorven.ai>", time.Now().UnixNano())
+
+	// --- 3. Transport branch ---
+	var sendErr error
+	if identity.Transport == "external" && identity.ForwardURL != "" {
+		// Forward the message as JSON to the configured webhook URL (e.g. Pipedream, n8n).
+		payload := map[string]any{
+			"message_id": msgID,
+			"from":       identity.Address,
+			"from_name":  identity.DisplayName,
+			"to":         body.To,
+			"cc":         body.Cc,
+			"bcc":        body.Bcc,
+			"subject":    body.Subject,
+			"body_text":  bodyText,
+			"body_html":  bodyHTML,
+			"reply_to":   body.ReplyTo,
+			"importance": body.Importance,
+		}
+		payloadBytes, _ := json.Marshal(payload)
+		resp, err := http.Post(identity.ForwardURL, "application/json", strings.NewReader(string(payloadBytes))) //nolint:noctx
+		if err != nil {
+			sendErr = err
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				sendErr = fmt.Errorf("forward webhook returned %d", resp.StatusCode)
+			}
+		}
+	} else {
+		// Native SMTP send.
+		encKey := gw.cfg.Auth.EncryptionKey
+		smtpPass, err := gw.mailStore.IdentitySMTPPass(ctx, identity.ID, encKey)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "failed to retrieve SMTP credentials"})
+			return
+		}
+		opt := &mail.SendOptions{
+			Cc:         body.Cc,
+			Bcc:        body.Bcc,
+			ReplyTo:    body.ReplyTo,
+			Importance: body.Importance,
+		}
+		sendErr = mail.NewSMTPSender().Send(identity, smtpPass, body.To, body.Subject, bodyText, bodyHTML, opt)
+	}
+
+	// --- 4. Persist the message ---
+	// Cc recipients are stored alongside To in toAddrs so the full recipient
+	// list is visible in the sent folder.  Bcc is SMTP-only (not stored).
+	allVisible := append(body.To, body.Cc...)
+	status := "sent"
+	if sendErr != nil {
+		slog.Warn("mail.send.failed", "identity", identity.ID, "error", sendErr)
+		status = "failed"
+	}
+
+	msg, storeErr := gw.mailStore.StoreSend(ctx, defaultTenant, body.AgentID, identity.ID, msgID, "", body.To[0], body.Subject, bodyText, bodyHTML, status, allVisible)
+	if storeErr != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(storeErr)})
+		return
+	}
+
+	if sendErr != nil {
+		writeJSON(w, 502, map[string]any{
+			"error":   sanitizeError(sendErr),
+			"message": msg,
+		})
+		return
+	}
+
+	writeJSON(w, 200, msg)
 }
 
 func (gw *Gateway) handleMailRead(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +482,17 @@ func (gw *Gateway) handleMailRead(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		return
 	}
-	gw.mailStore.MarkRead(r.Context(), chi.URLParam(r, "id"), true)
+	// Accept optional JSON body {"read": bool}; defaults to true for backward compat.
+	read := true
+	if r.ContentLength > 0 {
+		var body struct {
+			Read *bool `json:"read"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Read != nil {
+			read = *body.Read
+		}
+	}
+	gw.mailStore.MarkRead(r.Context(), chi.URLParam(r, "id"), read)
 	w.WriteHeader(204)
 }
 
@@ -300,7 +501,17 @@ func (gw *Gateway) handleMailStar(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		return
 	}
-	gw.mailStore.MarkStarred(r.Context(), chi.URLParam(r, "id"), true)
+	// Accept optional JSON body {"starred": bool}; defaults to true for backward compat.
+	starred := true
+	if r.ContentLength > 0 {
+		var body struct {
+			Starred *bool `json:"starred"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Starred != nil {
+			starred = *body.Starred
+		}
+	}
+	gw.mailStore.MarkStarred(r.Context(), chi.URLParam(r, "id"), starred)
 	w.WriteHeader(204)
 }
 
@@ -321,6 +532,14 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
+	} else if !isLoopbackRequest(r) {
+		// No signing secret configured: this endpoint feeds the autonomous brain,
+		// so it must NOT be reachable unauthenticated from the network. Accept only
+		// loopback (the documented "reverse proxy on localhost" setup); reject
+		// everything else so an unconfigured deployment fails closed.
+		slog.Warn("mail.webhook.rejected.no_secret", "remote", r.RemoteAddr)
+		http.Error(w, "webhook authentication not configured", http.StatusUnauthorized)
+		return
 	}
 
 	var body struct {
@@ -339,7 +558,58 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 	if body.MessageID == "" {
 		body.MessageID = fmt.Sprintf("<%d@inbound>", time.Now().UnixNano())
 	}
-	gw.mailRouter.Route(r.Context(), defaultTenant, body.From, body.FromName, body.Subject, body.BodyText, body.BodyHTML, body.MessageID, body.InReplyTo, body.To)
+	targets, _ := gw.mailRouter.RouteAndResolve(r.Context(), defaultTenant, body.From, body.FromName, body.Subject, body.BodyText, body.BodyHTML, body.MessageID, body.InReplyTo, body.To)
+
+	// Fire the agent brain for each resolved target that wants a trigger.
+	// Per-identity inbound secrets are not checked here because the global
+	// MAIL_WEBHOOK_SECRET HMAC (verified above) already authenticates the
+	// payload — the identity is not known until after routing resolves it.
+	if gw.inbound != nil {
+		rawBody := body.BodyText
+		if rawBody == "" {
+			rawBody = body.BodyHTML
+		}
+		// Resolve thread ID: prefer In-Reply-To, fall back to first References entry.
+		threadID := body.InReplyTo
+		if threadID == "" && body.References != "" {
+			refs := strings.Fields(body.References)
+			if len(refs) > 0 {
+				threadID = refs[0]
+			}
+		}
+		for _, t := range targets {
+			// Build anti-fabrication context: TRUST & VERIFICATION instruction +
+			// verified thread history from the DB (not from the webhook payload).
+			// This is identical to what the channel path and IMAP poller produce.
+			verifiedContent := mail.BuildVerifiedContext(
+				r.Context(), gw.mailStore, t.AgentID, defaultTenant,
+				threadID, body.From, body.FromName, body.Subject, rawBody, body.AuthResults,
+			)
+			// Detach from the request context — it is cancelled when this webhook
+			// returns 200, which would kill the agent run mid-flight. The run is
+			// wrapped so a panic in the brain cannot crash the server: this path
+			// is reachable by any inbound email, so a single malformed message
+			// must never take the process down.
+			msg := channels.InboundMessage{
+				ChannelType: "email",
+				ChannelName: "mail",
+				AgentID:     t.AgentID,
+				SenderID:    body.From,
+				SenderName:  body.FromName,
+				Content:     verifiedContent,
+				Subject:     body.Subject,
+				ReplyTo:     body.MessageID,
+				Metadata: map[string]string{
+					"message_id":   body.MessageID,
+					"in_reply_to":  body.InReplyTo,
+					"references":   body.References,
+					"auth_results": body.AuthResults,
+				},
+			}
+			ctx := context.WithoutCancel(r.Context())
+			safeGo("mail.inbound.webhook", func() { gw.inbound.Process(ctx, msg) })
+		}
+	}
 	w.WriteHeader(200)
 }
 
@@ -361,8 +631,98 @@ func (gw *Gateway) handleApproveMailFunc(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, 503, map[string]string{"error": "mail not configured"})
 		return
 	}
-	gw.mailStore.DecideApproval(r.Context(), chi.URLParam(r, "id"), "approved", "user", "")
-	json.NewEncoder(w).Encode(map[string]string{"status": "approved"})
+	ctx := r.Context()
+	approvalID := chi.URLParam(r, "id")
+
+	// 1. Flip the DB flag first (idempotent anchor — even if send fails the decision is recorded).
+	if err := gw.mailStore.DecideApproval(ctx, approvalID, "approved", "user", ""); err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to record approval"})
+		return
+	}
+
+	// 2. Look up the linked message.
+	msgDBID, err := gw.mailStore.GetApprovalMessageID(ctx, approvalID)
+	if err != nil {
+		slog.Warn("mail.approve.no_message", "approval", approvalID, "error", err)
+		// Approval recorded; message not found — respond with flag only.
+		writeJSON(w, 200, map[string]string{"status": "approved", "warning": "message not found — not sent"})
+		return
+	}
+	msg, err := gw.mailStore.GetMessage(ctx, msgDBID)
+	if err != nil {
+		slog.Warn("mail.approve.load_failed", "msg", msgDBID, "error", err)
+		writeJSON(w, 200, map[string]string{"status": "approved", "warning": "message load failed — not sent"})
+		return
+	}
+
+	// 3. Resolve the sending identity from the message's bound identity.
+	identity, err := gw.mailStore.GetIdentity(ctx, msg.IdentityID)
+	if err != nil {
+		slog.Warn("mail.approve.identity_missing", "identity", msg.IdentityID, "error", err)
+		writeJSON(w, 200, map[string]string{"status": "approved", "warning": "identity not found — not sent"})
+		return
+	}
+
+	// 4. Apply identity signature.
+	bodyText := msg.BodyText
+	bodyHTML := msg.BodyHTML
+	if identity.SignatureText != "" {
+		bodyText = bodyText + "\r\n\r\n--\r\n" + identity.SignatureText
+	}
+	if identity.SignatureHTML != "" {
+		if bodyHTML != "" {
+			bodyHTML = bodyHTML + "<br><br><div class=\"qorven-signature\">" + identity.SignatureHTML + "</div>"
+		} else {
+			bodyHTML = "<p>" + bodyText + "</p><br><div class=\"qorven-signature\">" + identity.SignatureHTML + "</div>"
+		}
+	}
+
+	// 5. Send via the identity's transport.
+	var sendErr error
+	if identity.Transport == "external" && identity.ForwardURL != "" {
+		payload := map[string]any{
+			"message_id": msg.MessageID,
+			"from":       identity.Address,
+			"from_name":  identity.DisplayName,
+			"to":         msg.ToAddresses,
+			"subject":    msg.Subject,
+			"body_text":  bodyText,
+			"body_html":  bodyHTML,
+		}
+		payloadBytes, _ := json.Marshal(payload)
+		resp, fwErr := http.Post(identity.ForwardURL, "application/json", strings.NewReader(string(payloadBytes))) //nolint:noctx
+		if fwErr != nil {
+			sendErr = fwErr
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				sendErr = fmt.Errorf("forward webhook returned %d", resp.StatusCode)
+			}
+		}
+	} else {
+		encKey := gw.cfg.Auth.EncryptionKey
+		smtpPass, credErr := gw.mailStore.IdentitySMTPPass(ctx, identity.ID, encKey)
+		if credErr != nil {
+			writeJSON(w, 500, map[string]string{"error": "failed to retrieve SMTP credentials"})
+			return
+		}
+		sendErr = mail.NewSMTPSender().Send(identity, smtpPass, msg.ToAddresses, msg.Subject, bodyText, bodyHTML, nil)
+	}
+
+	// 6. Update send_status.
+	status := "sent"
+	if sendErr != nil {
+		slog.Warn("mail.approve.send_failed", "identity", identity.ID, "error", sendErr)
+		status = "failed"
+		gw.mailStore.UpdateMessageSendStatus(ctx, msgDBID, status)
+		writeJSON(w, 502, map[string]any{
+			"status": "approved",
+			"error":  sanitizeError(sendErr),
+		})
+		return
+	}
+	gw.mailStore.UpdateMessageSendStatus(ctx, msgDBID, status)
+	writeJSON(w, 200, map[string]string{"status": "approved", "send_status": "sent"})
 }
 
 func (gw *Gateway) handleRejectMailFunc(w http.ResponseWriter, r *http.Request) {

@@ -26,11 +26,26 @@ type Router struct {
 func NewRouter(store *Store) *Router { return &Router{store: store} }
 
 // Route processes an inbound email and delivers to the right mailbox(es).
+// It is a thin wrapper around RouteAndResolve that discards the resolved targets
+// for callers that only need storage (back-compat).
 func (r *Router) Route(ctx context.Context, tenantID string, from, fromName, subject, bodyText, bodyHTML, messageID, inReplyTo string, to []string) error {
+	_, err := r.RouteAndResolve(ctx, tenantID, from, fromName, subject, bodyText, bodyHTML, messageID, inReplyTo, to)
+	return err
+}
+
+// RouteAndResolve stores the inbound email exactly like Route and additionally
+// returns the deduplicated set of resolved targets where ShouldTriggerAgent is
+// true, so callers can fire the agent brain for each one. Targets are deduped
+// by AgentID — if the same agent appears via multiple recipient addresses only
+// one RouteTarget is returned.
+func (r *Router) RouteAndResolve(ctx context.Context, tenantID string, from, fromName, subject, bodyText, bodyHTML, messageID, inReplyTo string, to []string) ([]RouteTarget, error) {
 	threadID := inReplyTo
 	if threadID == "" {
 		threadID = messageID
 	}
+
+	seen := map[string]struct{}{}
+	var triggerTargets []RouteTarget
 
 	for _, addr := range to {
 		targets := r.resolveTargets(ctx, strings.ToLower(strings.TrimSpace(addr)), tenantID)
@@ -41,9 +56,16 @@ func (r *Router) Route(ctx context.Context, tenantID string, from, fromName, sub
 				continue
 			}
 			slog.Info("mail.routed", "to", addr, "agent", t.AgentID, "shared", t.IsSharedInbox)
+
+			if t.ShouldTriggerAgent && t.AgentID != "" {
+				if _, dup := seen[t.AgentID]; !dup {
+					seen[t.AgentID] = struct{}{}
+					triggerTargets = append(triggerTargets, t)
+				}
+			}
 		}
 	}
-	return nil
+	return triggerTargets, nil
 }
 
 func (r *Router) resolveTargets(ctx context.Context, address, tenantID string) []RouteTarget {
@@ -52,11 +74,11 @@ func (r *Router) resolveTargets(ctx context.Context, address, tenantID string) [
 		return []RouteTarget{{AgentID: *identity.AgentID, IdentityID: identity.ID, ShouldTriggerAgent: true}}
 	}
 
-	// 2. Alias match — shared inbox
+	// 2. Alias match — shared inbox: route to each mapped agent and mark for brain trigger.
 	if aliases, err := r.store.FindAliasesByAddress(ctx, address, tenantID); err == nil && len(aliases) > 0 {
 		targets := make([]RouteTarget, len(aliases))
 		for i, a := range aliases {
-			targets[i] = RouteTarget{AgentID: a.TargetAgentID, IsSharedInbox: true}
+			targets[i] = RouteTarget{AgentID: a.TargetAgentID, IsSharedInbox: true, ShouldTriggerAgent: true}
 		}
 		return targets
 	}

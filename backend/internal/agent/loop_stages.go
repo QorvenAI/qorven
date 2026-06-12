@@ -238,6 +238,21 @@ func (l *Loop) stagePrompt(ctx context.Context, s *PipelineState) error {
 		}
 	}
 
+	// Inject the agent's bound mailbox address (if any) so the system prompt
+	// tells the agent it has email. One lightweight query per run; result is
+	// "" when no active identity exists, which suppresses the mail section.
+	if l.agentStore != nil && l.agentStore.Pool() != nil && ag.ID != "" && l.tenantID != "" {
+		var mailAddr string
+		_ = l.agentStore.Pool().QueryRow(ctx,
+			`SELECT COALESCE(address,'') FROM soul_mail_identities
+			 WHERE agent_id = $1 AND tenant_id = $2 AND is_active = true
+			 ORDER BY created_at LIMIT 1`, ag.ID, l.tenantID,
+		).Scan(&mailAddr)
+		if mailAddr != "" {
+			cb.SetMailAddress(mailAddr)
+		}
+	}
+
 	s.SystemPrompt = cb.BuildSystemPrompt(bulletin)
 	if s.SystemPrompt == "" {
 		s.SystemPrompt = "You are a helpful AI assistant."
