@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { soulGradient } from '@/components/soul-card';
 import {
   HardDrive, FolderOpen, Image, FileCode, FileSpreadsheet, Upload,
-  ChevronsUpDown, Users,
+  ChevronsUpDown, Users, Building2, Share2,
 } from 'lucide-react';
 import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
@@ -18,6 +18,8 @@ export function DriveSidebar() {
   const souls = useStore((s) => s.souls);
   const driveSoulFilter = useStore((s) => s.driveSoulFilter);
   const setDriveSoulFilter = useStore((s) => s.setDriveSoulFilter);
+  const driveScope = useStore((s) => s.driveScope);
+  const setDriveScope = useStore((s) => s.setDriveScope);
   const [pickerOpen, setPickerOpen] = useState(false);
   const router = useRouter();
   const activeSoul = driveSoulFilter ? souls.find((s) => s.id === driveSoulFilter) : null;
@@ -68,6 +70,14 @@ export function DriveSidebar() {
       section2={picker}
       section3={
         <>
+          <SidebarGroupTitle>Spaces</SidebarGroupTitle>
+          <ul className="flex flex-col gap-px px-2.5">
+            <SidebarMenuItem icon={HardDrive} label="My Drive" active={driveScope === 'private'} onClick={() => setDriveScope('private')} />
+            <SidebarMenuItem icon={Building2} label="Company" active={driveScope === 'company'} onClick={() => setDriveScope('company')} />
+            <SidebarMenuItem icon={Users} label="Department" active={driveScope === 'department'} onClick={() => setDriveScope('department')} />
+            <SidebarMenuItem icon={Share2} label="Shared with me" active={driveScope === 'shared'} onClick={() => setDriveScope('shared')} />
+          </ul>
+          <SidebarDivider />
           <SidebarGroupTitle>Browse</SidebarGroupTitle>
           <ul className="flex flex-col gap-px px-2.5">
             <SidebarMenuItem icon={HardDrive} label="All Files" active onClick={() => router.push('/drive')} />

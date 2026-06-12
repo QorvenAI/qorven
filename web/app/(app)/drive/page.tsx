@@ -10,10 +10,12 @@ import {
   FolderOpen, File, Image, FileCode, FileSpreadsheet,
   Upload, MoreHorizontal, AlertTriangle,
   Loader2, CheckCircle2, AlertCircle, Clock,
-  Sparkles, X, Search, Cloud, CloudDownload, ArrowLeft, HardDrive,
+  Sparkles, X, Search, Cloud, CloudDownload, ArrowLeft, HardDrive, Share2,
 } from 'lucide-react';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE, getToken } from '@/lib/api-core';
+import { ShareDialog } from '@/components/drive/share-dialog';
+import { WorkspaceEditor } from '@/components/drive/workspace-editor';
 
 const mimeIcon = (mime: string) => {
   if (mime?.startsWith('image/')) return Image;
@@ -69,6 +71,7 @@ interface DriveFile {
   summary?: string;
   keywords?: string[];
   entities_extracted?: string[];
+  scope?: string;
 }
 
 function EnrichmentBadge({ status }: { status?: EnrichmentStatus }) {
@@ -206,6 +209,7 @@ function FileDetailModal({ file, onClose, onEnrich }: {
 
 export default function DrivePage() {
   const driveSoulFilter = useStore((s) => s.driveSoulFilter);
+  const driveScope = useStore((s) => s.driveScope);
   const souls = useStore((s) => s.souls);
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,6 +218,7 @@ export default function DrivePage() {
   const [parentId, setParentId] = useState<string | null>(null);
   const [path, setPath] = useState<{ id: string | null; name: string }[]>([{ id: null, name: 'Root' }]);
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
+  const [shareFile, setShareFile] = useState<DriveFile | null>(null);
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -226,6 +231,7 @@ export default function DrivePage() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const [driveTab, setDriveTab] = useState<'files' | 'workspace'>('files');
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -381,6 +387,17 @@ export default function DrivePage() {
     return false;
   });
 
+  // Scope view filter — backend already ACL-filtered; this narrows to the selected space
+  const visibleFiles = search.trim() ? filteredFiles : filteredFiles.filter((f) => {
+    switch (driveScope) {
+      case 'private': return f.scope === 'private';
+      case 'company': return f.scope === 'company';
+      case 'department': return f.scope === 'department';
+      case 'shared': return f.scope === 'custom';
+      default: return true; // 'all'
+    }
+  });
+
   return (
     <div className="full-bleed h-[calc(100vh-var(--header-height)-2.5rem)]">
       <div className="flex flex-col h-full">
@@ -431,6 +448,36 @@ export default function DrivePage() {
               ))
             )}
           </nav>
+
+          {/* Files | Workspace tab switcher */}
+          <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5 gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDriveTab('files')}
+              className={cn(
+                'flex items-center rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                driveTab === 'files' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Files
+            </button>
+            {driveSoulFilter ? (
+              <button
+                type="button"
+                onClick={() => setDriveTab('workspace')}
+                className={cn(
+                  'flex items-center rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                  driveTab === 'workspace' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Workspace
+              </button>
+            ) : (
+              <span className="flex items-center rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground/40 pointer-events-none" title="Select an agent to edit its workspace">
+                Workspace
+              </span>
+            )}
+          </div>
 
           {/* Remote browsing indicator */}
           {remoteProvider && activeRemote && (
@@ -516,8 +563,12 @@ export default function DrivePage() {
           </div>
         )}
 
-        {/* File list */}
-        <div className="flex-1 overflow-y-auto">
+        {/* File list / Workspace editor */}
+        <div className="flex-1 overflow-hidden">
+          {driveTab === 'workspace' && driveSoulFilter ? (
+            <WorkspaceEditor agentId={driveSoulFilter} />
+          ) : (
+          <div className="h-full overflow-y-auto">
           {remoteProvider ? (
             /* Remote file browsing mode */
             remoteLoading ? (
@@ -608,7 +659,7 @@ export default function DrivePage() {
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : filteredFiles.length === 0 ? (
+            ) : visibleFiles.length === 0 ? (
               <div className="flex items-center justify-center h-full">
                 <EmptyState
                   {...emptyStates.drive}
@@ -629,7 +680,7 @@ export default function DrivePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredFiles.map((f) => {
+                  {visibleFiles.map((f) => {
                     const Icon = f.is_folder ? FolderOpen : mimeIcon(f.mime_type ?? '');
                     const soul = f.agent_id ? soulMap[f.agent_id] : null;
                     return (
@@ -680,10 +731,21 @@ export default function DrivePage() {
                           {f.updated_at ? new Date(f.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
                         </td>
                         <td className="px-2">
-                          <button className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
-                            onClick={(e) => e.stopPropagation()}>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            {!f.is_folder && (
+                              <button
+                                title="Share"
+                                className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
+                                onClick={(e) => { e.stopPropagation(); setShareFile(f); }}
+                              >
+                                <Share2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            <button className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
+                              onClick={(e) => e.stopPropagation()}>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -691,6 +753,8 @@ export default function DrivePage() {
                 </tbody>
               </table>
             )
+          )}
+          </div>
           )}
         </div>
       </div>
@@ -713,6 +777,16 @@ export default function DrivePage() {
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
+      )}
+
+      {/* Share dialog */}
+      {shareFile && (
+        <ShareDialog
+          fileId={shareFile.id}
+          current={shareFile.scope as any}
+          onClose={() => setShareFile(null)}
+          onSaved={fetchFiles}
+        />
       )}
     </div>
   );

@@ -1058,6 +1058,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/approvals/mail/{id}/reject", gw.handleRejectMailFunc)
 
 		// Drive
+		r.Get("/drive/workspace/{agent_id}", gw.handleListWorkspaceFiles)
+		r.Get("/drive/workspace/{agent_id}/{name}", gw.handleGetWorkspaceFile)
+		r.Put("/drive/workspace/{agent_id}/{name}", gw.handlePutWorkspaceFile)
 		r.Get("/drive/files", gw.handleListDriveFiles)
 		r.Post("/drive/upload", gw.handleUploadFile)
 		r.Get("/drive/files/{id}/download", gw.handleDownloadFile)

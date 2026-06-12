@@ -183,6 +183,8 @@ interface Store {
   // Drive filter
   driveSoulFilter: string | null;
   setDriveSoulFilter: (id: string | null) => void;
+  driveScope: 'all' | 'private' | 'company' | 'department' | 'shared';
+  setDriveScope: (s: 'all' | 'private' | 'company' | 'department' | 'shared') => void;
 
   // Code IDE state (shared between sidebar + code page)
   codeProjectName: string;
@@ -543,6 +545,8 @@ export const useStore = create<Store>((set) => ({
 
   driveSoulFilter: null,
   setDriveSoulFilter: (id) => set({ driveSoulFilter: id }),
+  driveScope: 'all',
+  setDriveScope: (driveScope) => set({ driveScope }),
 
   // Code IDE state
   codeProjectName: '',
