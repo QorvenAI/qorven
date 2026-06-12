@@ -1085,6 +1085,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/calendar/events", gw.handleCreateCalendarEvent)
 		r.Put("/calendar/events/{id}", gw.handleUpdateCalendarEvent)
 		r.Delete("/calendar/events/{id}", gw.handleDeleteCalendarEvent)
+		r.Get("/calendar/timeline", gw.handleCalendarTimeline)
+		r.Post("/calendar/schedule", gw.handleCalendarSchedule)
+		r.Get("/calendar/runs/{id}", gw.handleCalendarRun)
 
 		// Pairing
 		r.Get("/pairing/pending", gw.handleListPairingRequests)
