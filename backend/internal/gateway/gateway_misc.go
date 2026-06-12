@@ -152,7 +152,7 @@ func (gw *Gateway) runSocialScheduler(store *socialqor.Store) {
 			publishPost := post
 			publishPost.Platforms = allowedPlatforms
 
-			results := publisher.PublishToAll(ctx, store, &publishPost)
+			results := publisher.PublishToAllVia(ctx, store, gw.socialRelayRouter(), &publishPost)
 			allOK := true
 			platformIDs := map[string]string{}
 			for _, r := range results {
