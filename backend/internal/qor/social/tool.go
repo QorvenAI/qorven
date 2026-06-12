@@ -20,10 +20,21 @@ type SocialTool struct {
 	store     *Store
 	publisher *Publisher
 	router    *RelayRouter
+	// gate decides the status a freshly-created agent post should hold: when an
+	// agent requires approval it returns PostPendingApproval (and routes the
+	// request to the CMO), otherwise PostScheduled. Injected at boot so the tool
+	// doesn't import the gateway/governance packages. nil → no gating (defaults
+	// to the agent's own publish, used only if the gateway didn't wire it).
+	gate func(ctx context.Context, agentID string, post *Post) PostStatus
 }
 
 func NewSocialTool(store *Store, router *RelayRouter) *SocialTool {
 	return &SocialTool{store: store, publisher: NewPublisher(), router: router}
+}
+
+// SetApprovalGate installs the CMO approval gate (wired at boot from the gateway).
+func (t *SocialTool) SetApprovalGate(fn func(ctx context.Context, agentID string, post *Post) PostStatus) {
+	t.gate = fn
 }
 
 func (t *SocialTool) Name() string { return "qorven_social" }
@@ -80,13 +91,37 @@ func (t *SocialTool) Execute(ctx context.Context, args map[string]any) *tools.Re
 		post := &Post{Content: content, Platforms: platforms, AgentID: agentID, Status: PostScheduled, ScheduledAt: &schedTime}
 		id, err := t.store.CreatePost(ctx, post)
 		if err != nil { return tools.ErrorResult("schedule failed: " + err.Error()) }
-		return tools.SuccessResult(fmt.Sprintf("📅 Post scheduled: %s for %s\nPlatforms: %v\nThe post will be automatically published at the scheduled time.", id, schedTime.Format(time.RFC3339), platforms))
+		post.ID = id
+		// Route through the CMO approval gate: an agent that requires approval
+		// has its post held pending_approval (NOT scheduled), so it never
+		// publishes until the CMO approves it.
+		if t.gate != nil {
+			status := t.gate(ctx, agentID, post)
+			if status != PostScheduled {
+				t.store.UpdatePostStatus(ctx, id, status)
+				if status == PostPendingApproval {
+					t.store.SetApprovalStatus(ctx, id, "pending")
+					return tools.SuccessResult(fmt.Sprintf("Post %s submitted for approval (held until your CMO approves it). Platforms: %v", id, platforms))
+				}
+			}
+		}
+		return tools.SuccessResult(fmt.Sprintf("Post scheduled: %s for %s\nPlatforms: %v\nThe post will be automatically published at the scheduled time.", id, schedTime.Format(time.RFC3339), platforms))
 
 	case "publish_now":
 		postID, _ := args["post_id"].(string)
 		if postID == "" { return tools.ErrorResult("post_id required") }
 		post, err := t.store.GetPost(ctx, postID)
 		if err != nil { return tools.ErrorResult("post not found: " + err.Error()) }
+		// An agent cannot publish-now around the approval gate. If this agent
+		// requires approval and the post isn't already approved, hold it for the
+		// CMO instead of publishing.
+		if t.gate != nil {
+			if status := t.gate(ctx, agentID, post); status == PostPendingApproval && post.ApprovalStatus != "approved" {
+				t.store.UpdatePostStatus(ctx, postID, PostPendingApproval)
+				t.store.SetApprovalStatus(ctx, postID, "pending")
+				return tools.SuccessResult(fmt.Sprintf("Post %s requires CMO approval before publishing — submitted for approval.", postID))
+			}
+		}
 		results := t.publisher.PublishToAllVia(ctx, t.store, t.router, post)
 		allOK := true
 		okCount := 0

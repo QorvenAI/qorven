@@ -1616,7 +1616,18 @@ func (gw *Gateway) registerTools() {
 	// Social publishing tool — lets agents create, schedule, and publish posts
 	if gw.db != nil {
 		socialStore := socialqor.NewStore(gw.db.Pool)
-		reg.Register(socialqor.NewSocialTool(socialStore, gw.socialRelayRouter()))
+		socialTool := socialqor.NewSocialTool(socialStore, gw.socialRelayRouter())
+		// Wire the CMO approval gate so agent-posted/scheduled content routes for
+		// approval (an agent acting via the tool is never a human admin → false).
+		socialTool.SetApprovalGate(func(ctx context.Context, agentID string, post *socialqor.Post) socialqor.PostStatus {
+			if post.DepartmentID == "" {
+				if dept, _ := socialStore.ResolveMarketingDepartment(ctx, defaultTenant); dept != "" {
+					post.DepartmentID = dept
+				}
+			}
+			return gw.applySocialApprovalGate(ctx, post, false)
+		})
+		reg.Register(socialTool)
 		// Social relay management tool — COO/agent can manage relay providers and accounts conversationally
 		if gw.socialRelayStore != nil {
 			reg.Register(socialqor.NewSocialRelayTool(gw.socialRelayStore, socialStore, gw.db.Pool))

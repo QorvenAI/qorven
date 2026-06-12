@@ -304,6 +304,23 @@ func (gw *Gateway) fireAutoPost(ctx context.Context, store *socialqor.Store, rss
 	}
 	post.ID = id
 
+	// Autopost content is agent-authored — route it through the CMO approval
+	// gate. If the rule's agent requires approval, hold the post
+	// pending_approval (the dispatcher publishes it once approved) rather than
+	// posting unreviewed on the cron.
+	if post.DepartmentID == "" {
+		if dept, _ := store.ResolveMarketingDepartment(ctx, defaultTenant); dept != "" {
+			post.DepartmentID = dept
+			store.SetPostDepartment(ctx, post.ID, dept)
+		}
+	}
+	if status := gw.applySocialApprovalGate(ctx, &post, false); status == socialqor.PostPendingApproval {
+		store.UpdatePostStatus(ctx, post.ID, socialqor.PostPendingApproval)
+		store.SetApprovalStatus(ctx, post.ID, "pending")
+		slog.Info("social.autopost: held for CMO approval", "rule", rule.ID, "post_id", post.ID)
+		return
+	}
+
 	results := socialqor.NewPublisher().PublishToAllVia(ctx, store, gw.socialRelayRouter(), &post)
 	allOK := true
 	for _, res := range results {

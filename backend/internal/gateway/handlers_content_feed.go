@@ -232,7 +232,13 @@ func (gw *Gateway) handleApproveContent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 5. If not scheduled, publish immediately
+	// 5. If not scheduled, publish immediately.
+	// NOTE: this path is reached only when a HUMAN approves an outbound_queue
+	// item (reviewed_by='user' above) — i.e. the content has already cleared a
+	// human-approval surface. It deliberately does NOT re-run the CMO approval
+	// gate (that would be a redundant double-approval); the human review IS the
+	// sign-off here. The CMO gate applies to agent-initiated posts (tool,
+	// autopost, scheduled create), not to human-approved outbound items.
 	if post.Status == socialqor.PostDraft {
 		publisher := socialqor.NewPublisher()
 		results := publisher.PublishToAllVia(ctx, store, gw.socialRelayRouter(), post)
