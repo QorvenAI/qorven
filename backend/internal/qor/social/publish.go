@@ -31,7 +31,14 @@ func NewPublisher() *Publisher {
 }
 
 // Publish sends a post to a specific platform using the provided access token.
+// It delegates to PublishWithMeta with a nil metadata map.
 func (p *Publisher) Publish(ctx context.Context, platform Platform, token, content string, mediaURLs []string) (*PostResult, error) {
+	return p.PublishWithMeta(ctx, platform, token, content, mediaURLs, nil)
+}
+
+// PublishWithMeta sends a post to a specific platform, with optional per-call metadata
+// (e.g. subreddit for Reddit, board_id for Pinterest). meta may be nil.
+func (p *Publisher) PublishWithMeta(ctx context.Context, platform Platform, token, content string, mediaURLs []string, meta map[string]string) (*PostResult, error) {
 	switch platform {
 	case PlatformTwitter:
 		return p.publishTwitter(ctx, token, content)
@@ -40,7 +47,7 @@ func (p *Publisher) Publish(ctx context.Context, platform Platform, token, conte
 	case PlatformFacebook:
 		return p.publishFacebook(ctx, token, content)
 	case PlatformReddit:
-		return p.publishReddit(ctx, token, content)
+		return p.publishReddit(ctx, token, content, meta)
 	case PlatformInstagram:
 		return p.publishInstagram(ctx, token, content, mediaURLs)
 	case PlatformThreads:
@@ -163,8 +170,73 @@ func (p *Publisher) publishFacebook(ctx context.Context, token, content string) 
 	return &PostResult{Platform: PlatformFacebook, Success: true, PostID: result.ID}, nil
 }
 
-func (p *Publisher) publishReddit(ctx context.Context, token, content string) (*PostResult, error) {
-	return &PostResult{Platform: PlatformReddit, Success: false, Error: "Reddit posting requires subreddit — set subreddit in post metadata"}, nil
+func (p *Publisher) publishReddit(ctx context.Context, token, content string, meta map[string]string) (*PostResult, error) {
+	subreddit := ""
+	if meta != nil {
+		subreddit = meta["subreddit"]
+	}
+	if subreddit == "" {
+		return &PostResult{Platform: PlatformReddit, Success: false, Error: "Reddit requires a subreddit — set metadata.subreddit on the post or integration"}, nil
+	}
+
+	// Split first line as title, rest as text body (self post)
+	lines := strings.SplitN(content, "\n", 2)
+	title := strings.TrimSpace(lines[0])
+	text := ""
+	if len(lines) > 1 {
+		text = strings.TrimSpace(lines[1])
+	}
+	if title == "" {
+		title = content
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"sr":       subreddit,
+		"kind":     "self",
+		"title":    title,
+		"text":     text,
+		"resubmit": true,
+	})
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://oauth.reddit.com/api/submit", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Qorven/1.0 social publisher")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &PostResult{Platform: PlatformReddit, Success: false, Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		JSON struct {
+			Errors [][]string `json:"errors"`
+			Data   struct {
+				ID  string `json:"id"`
+				URL string `json:"url"`
+			} `json:"data"`
+		} `json:"json"`
+	}
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	json.Unmarshal(respBody, &result)
+
+	if resp.StatusCode != http.StatusOK {
+		return &PostResult{Platform: PlatformReddit, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+	}
+	if len(result.JSON.Errors) > 0 {
+		errMsgs := make([]string, 0, len(result.JSON.Errors))
+		for _, e := range result.JSON.Errors {
+			if len(e) > 1 {
+				errMsgs = append(errMsgs, e[1])
+			}
+		}
+		return &PostResult{Platform: PlatformReddit, Success: false, Error: "Reddit API error: " + strings.Join(errMsgs, "; ")}, nil
+	}
+
+	postID := result.JSON.Data.ID
+	postURL := result.JSON.Data.URL
+	slog.Info("social.publish.reddit", "id", postID, "url", postURL, "subreddit", subreddit)
+	return &PostResult{Platform: PlatformReddit, Success: true, PostID: postID, PostURL: postURL}, nil
 }
 
 // ─── Instagram (Graph API) ─────────────────────────────────────────────────
@@ -617,34 +689,15 @@ func (p *Publisher) publishWordPress(ctx context.Context, token, content string)
 }
 
 // ─── Google My Business ───────────────────────────────────────────────────────
-// Posts a local post update to Google Business Profile.
+// Direct API posting to Google Business Profile requires a verified location ID
+// and the restricted Business Profile API — not available without Google approval.
+// Use a connected relay provider (Buffer/Outstand) to post to GMB.
 func (p *Publisher) publishGoogleMyBusiness(ctx context.Context, token, content string) (*PostResult, error) {
-	// Requires knowing the location ID — store in integration metadata
-	// For now publish via the local posts API once location is known
-	payload, _ := json.Marshal(map[string]any{
-		"languageCode": "en-US",
-		"summary":      content,
-		"topicType":    "STANDARD",
-	})
-	// Using accounts.locations from Business Profile API
-	req, _ := http.NewRequestWithContext(ctx, "POST",
-		"https://mybusiness.googleapis.com/v4/accounts/-/locations/-/localPosts",
-		bytes.NewReader(payload))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return &PostResult{Platform: PlatformGoogleMyBiz, Success: false, Error: err.Error()}, nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return &PostResult{Platform: PlatformGoogleMyBiz, Success: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
-	}
-	var result struct{ Name string `json:"name"` }
-	json.NewDecoder(resp.Body).Decode(&result)
-	slog.Info("social.publish.gmb", "name", result.Name)
-	return &PostResult{Platform: PlatformGoogleMyBiz, Success: true, PostID: result.Name}, nil
+	return &PostResult{
+		Platform: PlatformGoogleMyBiz,
+		Success:  false,
+		Error:    "Google My Business posting is available via a connected relay (Buffer/Outstand) — direct API posting is not supported",
+	}, nil
 }
 
 // ─── Nostr ────────────────────────────────────────────────────────────────────

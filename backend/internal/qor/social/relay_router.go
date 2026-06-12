@@ -46,7 +46,7 @@ func (r *RelayRouter) PublishToIntegration(ctx context.Context, integration *Int
 				token = plain
 			}
 		}
-		result, err := r.publisher.Publish(ctx, integration.Platform, token, content, mediaURLs)
+		result, err := r.publisher.PublishWithMeta(ctx, integration.Platform, token, content, mediaURLs, integration.RelayMetadata)
 		if err != nil {
 			return &PostResult{Platform: integration.Platform, Success: false, Error: err.Error()}
 		}
