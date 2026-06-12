@@ -205,6 +205,7 @@ type Gateway struct {
 	oauthMgr         *oauth.Manager
 	mailStore        *mail.Store
 	mailRouter       *mail.Router
+	mailPoller       *mail.IMAPPoller
 	driveStore       *drive.Store
 	sandboxStore     *sandbox.Store
 	calendarStore    *calendar.Store
@@ -1557,6 +1558,35 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			}
 			return gw.chanMgr.SendToChannel(ctx, channelName, chatID, content)
 		})
+	}
+
+	// IMAP poller — boot one IDLE goroutine per active IMAP identity.
+	// The poller's StartPolling already skips identities with empty IMAPHost
+	// or IsActive=false, so external-transport (webhook-only) identities are
+	// naturally excluded even without an explicit transport check.
+	if gw.mailStore != nil && gw.mailRouter != nil && gw.inbound != nil && gw.db != nil {
+		gw.mailPoller = mail.NewIMAPPoller(gw.mailStore, gw.mailRouter)
+		gw.mailPoller.SetAgentTrigger(func(ctx context.Context, agentID, sessionID, emailContent, subject, from string) {
+			// Route fetched mail through the classify→auto-reply/draft brain.
+			gw.inbound.Process(ctx, channels.InboundMessage{
+				ChannelType: "email",
+				ChannelName: "mail",
+				AgentID:     agentID,
+				SenderID:    from,
+				Content:     emailContent,
+				Subject:     subject,
+				Metadata:    map[string]string{},
+			})
+		})
+		encKey := gw.cfg.Auth.EncryptionKey
+		gw.mailPoller.StartPolling(context.Background(), defaultTenant, func(identityID string) string {
+			p, err := gw.mailStore.IdentityIMAPPass(context.Background(), identityID, encKey)
+			if err != nil {
+				return ""
+			}
+			return p
+		})
+		slog.Info("mail.poller.started")
 	}
 
 	// Channel manager — routes inbound messages to the right Soul's agent loop
