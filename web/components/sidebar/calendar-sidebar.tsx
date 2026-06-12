@@ -9,8 +9,7 @@ import { soulGradient } from '@/components/soul-card';
 import { CalendarDays, Clock, AlertCircle, CheckSquare, ChevronsUpDown, Users } from 'lucide-react';
 import { SidebarMenuItem, SidebarDivider, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
-
-const getToken = () => typeof window !== 'undefined' ? (localStorage.getItem('qorven_token') || '') : '';
+import { calendarApi } from '@/lib/api';
 
 export function CalendarSidebar() {
   const souls = useStore((s) => s.souls);
@@ -21,9 +20,12 @@ export function CalendarSidebar() {
   const activeSoul = calSoulFilter ? souls.find((s) => s.id === calSoulFilter) : null;
 
   useEffect(() => {
-    fetch('/api/v1/cron-jobs', { headers: { Authorization: `Bearer ${getToken()}` } })
-      .then((r) => r.json()).then((d) => setJobs(Array.isArray(d) ? d : Object.values(d).find(Array.isArray) ?? [])).catch(() => {});
-  }, []);
+    const now = new Date();
+    const end = new Date(now); end.setMonth(end.getMonth() + 1);
+    calendarApi.timeline(now.toISOString(), end.toISOString(), calSoulFilter ?? undefined)
+      .then((r) => setJobs((r.items ?? []).filter((i) => i.kind === 'future').slice(0, 8)))
+      .catch(() => setJobs([]));
+  }, [calSoulFilter]);
 
   const picker = (
     <div className="relative flex w-full items-center">
@@ -81,10 +83,10 @@ export function CalendarSidebar() {
           <SidebarDivider />
           <SidebarGroupTitle>Upcoming</SidebarGroupTitle>
           <div className="px-2.5 space-y-0.5">
-            {jobs.slice(0, 8).map((j: any) => (
+            {jobs.map((j: any) => (
               <div key={j.id} className="flex items-center gap-2.5 h-8.5 px-2.5 rounded-md text-2sm text-muted-foreground">
                 <Clock className="h-4 w-4 shrink-0" />
-                <span className="truncate">{j.task?.slice(0, 25) || 'Task'}</span>
+                <span className="truncate">{j.title?.slice(0, 25) || 'Task'}</span>
               </div>
             ))}
             {jobs.length === 0 && <p className="px-2.5 py-4 text-2sm text-muted-foreground">No upcoming</p>}
