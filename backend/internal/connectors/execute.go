@@ -7,6 +7,7 @@ package connectors
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -228,7 +229,7 @@ func (e *Executor) executeDirect(ctx context.Context, platform *Platform, action
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 	case "basic":
-		req.Header.Set("Authorization", "Basic "+token)
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(token)))
 	}
 
 	req.Header.Set("Content-Type", "application/json")

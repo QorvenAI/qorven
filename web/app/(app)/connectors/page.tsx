@@ -179,18 +179,16 @@ export default function ConnectorsPage() {
       }
     }).catch(() => { /* vault unavailable — localStorage already set */ });
   }, []);
-  const markConnected = (id: string) => {
-    const next = new Set(connected);
-    next.add(id);
-    setConnected(next);
+  const markConnected = (id: string) => setConnected(prev => {
+    const next = new Set(prev); next.add(id);
     localStorage.setItem('qorven_connected', JSON.stringify([...next]));
-  };
-  const markDisconnected = (id: string) => {
-    const next = new Set(connected);
-    next.delete(id);
-    setConnected(next);
+    return next;
+  });
+  const markDisconnected = (id: string) => setConnected(prev => {
+    const next = new Set(prev); next.delete(id);
     localStorage.setItem('qorven_connected', JSON.stringify([...next]));
-  };
+    return next;
+  });
 
   // Filter logic. Case-insensitive substring match on name/description.
   const visible = useMemo(() => {

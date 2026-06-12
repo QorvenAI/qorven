@@ -45,7 +45,7 @@ function GitHubTokenSection() {
     if (!token.trim()) return;
     setSaving(true);
     try {
-      await connections.save('github', token.trim());
+      await connections.save('github', 'bearer', token.trim());
       toast.success('GitHub token saved — agents can now use gh_* tools');
       setToken('');
       setShowInput(false);
