@@ -9,6 +9,7 @@ import {
   AlertCircle, Check, Shield, ShieldAlert, X,
   Paperclip, ChevronDown, ChevronUp, FileText,
   Archive, Trash2, ReplyAll, Forward, BookOpen,
+  CheckSquare, Square, MailOpen, MailCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { mail as mailApi, MailIdentity } from '@/lib/api';
@@ -32,6 +33,7 @@ type MailMsg = {
   read: boolean; starred: boolean; agent_id?: string;
   thread_id?: string; direction?: string;
   cc?: string[];
+  importance?: 'low' | 'normal' | 'high' | string;
   attachments?: Array<{ id?: string; name: string; content_type?: string; size?: number }>;
   // Security fields from buildOutlookContext
   auth_status?: string; // 'verified' | 'known' | 'unknown' | 'fail'
@@ -53,30 +55,92 @@ export default function MailPage() {
   const [showAccounts, setShowAccounts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<MailMsg[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkActing, setBulkActing] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Folders that are client-side filtered (no dedicated endpoint)
+  const CLIENT_FILTERED_FOLDERS = ['starred', 'important'];
 
   const load = useCallback(() => {
     setLoading(true);
-    mailApi.folder(folder)
+    setSelectedIds(new Set());
+    // starred and important are client-side: fetch inbox and filter
+    const fetchFolder = CLIENT_FILTERED_FOLDERS.includes(folder) ? 'inbox' : folder;
+    mailApi.folder(fetchFolder, agentFilter ?? undefined)
       .then(d => {
         let msgs: MailMsg[] = Array.isArray(d) ? d : [];
         if (agentFilter) msgs = msgs.filter(m => m.agent_id === agentFilter);
+        if (folder === 'starred') msgs = msgs.filter(m => m.starred);
+        if (folder === 'important') msgs = msgs.filter(m => m.importance === 'high');
         setMessages(msgs);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [folder, agentFilter]);
+  }, [folder, agentFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(); setSelected(null); }, [load]);
+  useEffect(() => { load(); setSelected(null); setSearch(''); setSearchResults(null); }, [load]);
 
-  const filtered = search
-    ? messages.filter(m =>
-        m.subject?.toLowerCase().includes(search.toLowerCase()) ||
-        m.from?.toLowerCase().includes(search.toLowerCase()) ||
-        m.body?.toLowerCase().includes(search.toLowerCase())
-      )
-    : messages;
+  // Server-side search with 300ms debounce
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!search.trim()) { setSearchResults(null); setSearching(false); return; }
+    searchDebounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await mailApi.search(search, agentFilter ?? undefined);
+        const raw: any[] = Array.isArray(results) ? results : [];
+        // Normalize API MailMessage fields to local MailMsg shape
+        const msgs: MailMsg[] = raw.map((m: any) => ({
+          ...m,
+          from: m.from_address ?? m.from ?? '',
+          to: m.to_addresses ?? m.to ?? [],
+          cc: m.cc_addresses ?? m.cc ?? [],
+          body: m.body_text ?? m.body ?? '',
+          read: m.is_read ?? m.read ?? false,
+          starred: m.is_starred ?? m.starred ?? false,
+        }));
+        setSearchResults(msgs);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [search, agentFilter]);
 
+  const displayMessages = searchResults ?? messages;
   const unread = messages.filter(m => !m.read).length;
+
+  // Multi-select helpers
+  const toggleSelectId = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setSelectedIds(new Set(displayMessages.map(m => m.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkAction = async (action: 'read' | 'star' | 'move' | 'delete', value?: unknown) => {
+    if (selectedIds.size === 0) return;
+    setBulkActing(true);
+    try {
+      await mailApi.bulk(Array.from(selectedIds), action, value);
+      const label = action === 'delete' ? 'Deleted' : action === 'move' ? `Moved to ${value}` : action === 'read' ? (value ? 'Marked read' : 'Marked unread') : (value ? 'Starred' : 'Unstarred');
+      toast.success(label);
+      clearSelection();
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setBulkActing(false);
+    }
+  };
 
   return (
     <ErrorBoundary fallbackTitle="Failed to load mail">
@@ -96,9 +160,9 @@ export default function MailPage() {
                 placeholder="Search…"
                 className="qr-input pl-8 text-xs"
               />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  <X className="h-3 w-3" />
+              {(search || searching) && (
+                <button onClick={() => { setSearch(''); setSearchResults(null); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {searching ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
                 </button>
               )}
             </div>
@@ -121,10 +185,87 @@ export default function MailPage() {
             </button>
           </div>
 
+          {/* Folder + agent + unread info row */}
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-border/50">
-            <span className="text-xs font-medium capitalize text-foreground">{folder}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium capitalize text-foreground">
+                {searchResults !== null ? `Results for "${search}"` : folder}
+              </span>
+              {searchResults !== null && (
+                <span className="text-xs text-muted-foreground">({searchResults.length})</span>
+              )}
+              {searchResults === null && unread > 0 && (
+                <span className="rounded-full bg-primary/15 text-primary text-2xs font-semibold px-1.5 py-0.5 leading-none">{unread}</span>
+              )}
+            </div>
             <span className="text-xs text-muted-foreground">{agentFilter ? souls.find(s => s.id === agentFilter)?.display_name ?? 'Agent' : 'All Agents'}</span>
           </div>
+
+          {/* Bulk action bar — appears when messages are selected */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-primary/5 shrink-0 flex-wrap">
+              <span className="text-xs text-primary font-medium mr-1">{selectedIds.size} selected</span>
+              <button
+                onClick={() => handleBulkAction('read', true)}
+                disabled={bulkActing}
+                title="Mark read"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <MailOpen className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('read', false)}
+                disabled={bulkActing}
+                title="Mark unread"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <MailCheck className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('star', true)}
+                disabled={bulkActing}
+                title="Star"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <Star className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('move', 'archive')}
+                disabled={bulkActing}
+                title="Archive"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <Archive className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleBulkAction('delete')}
+                disabled={bulkActing}
+                title="Delete"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              {bulkActing && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground ml-1" />}
+              <div className="flex-1" />
+              <button onClick={clearSelection} title="Clear selection" className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Select-all row */}
+          {displayMessages.length > 0 && selectedIds.size === 0 && (
+            <div className="flex items-center gap-2 px-3 py-1 border-b border-border/30 shrink-0">
+              <button
+                onClick={selectAll}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                title="Select all"
+              >
+                <Square className="h-3.5 w-3.5" />
+                <span>Select all</span>
+              </button>
+            </div>
+          )}
 
           {/* Message rows */}
           <div className="flex-1 overflow-y-auto">
@@ -136,15 +277,37 @@ export default function MailPage() {
                   <div className="h-2 w-20 animate-pulse rounded bg-muted" />
                 </div>
               ))
-            ) : filtered.length === 0 ? (
-              <EmptyState {...emptyStates.mail} description={`No messages in ${folder}`} className="py-10" />
-            ) : filtered.map(m => (
+            ) : displayMessages.length === 0 ? (
+              <EmptyState {...emptyStates.mail} description={searchResults !== null ? `No results for "${search}"` : `No messages in ${folder}`} className="py-10" />
+            ) : displayMessages.map(m => (
               <MessageRow
                 key={m.id}
                 msg={m}
                 selected={selected?.id === m.id}
+                checked={selectedIds.has(m.id)}
                 souls={souls}
                 onClick={() => { setSelected(m); setComposing(false); }}
+                onCheck={(e) => { e.stopPropagation(); toggleSelectId(m.id); }}
+                onStarToggle={(e) => {
+                  e.stopPropagation();
+                  mailApi.setStar(m.id, !m.starred)
+                    .then(() => setMessages(prev => prev.map(x => x.id === m.id ? { ...x, starred: !m.starred } : x)))
+                    .catch(() => toast.error('Failed to update star'));
+                }}
+                onQuickArchive={(e) => {
+                  e.stopPropagation();
+                  mailApi.archive(m.id).then(() => { toast.success('Archived'); load(); }).catch(() => toast.error('Failed'));
+                }}
+                onQuickTrash={(e) => {
+                  e.stopPropagation();
+                  mailApi.trash(m.id).then(() => { toast.success('Deleted'); load(); }).catch(() => toast.error('Failed'));
+                }}
+                onQuickRead={(e) => {
+                  e.stopPropagation();
+                  mailApi.setRead(m.id, !m.read)
+                    .then(() => { setMessages(prev => prev.map(x => x.id === m.id ? { ...x, read: !m.read } : x)); })
+                    .catch(() => toast.error('Failed'));
+                }}
               />
             ))}
           </div>
@@ -193,37 +356,70 @@ export default function MailPage() {
 
 // ─── Message Row ──────────────────────────────────────────────────────────────
 
-function MessageRow({ msg, selected, souls, onClick }: {
-  msg: MailMsg; selected: boolean; souls: any[]; onClick: () => void;
+function MessageRow({ msg, selected, checked, souls, onClick, onCheck, onStarToggle, onQuickArchive, onQuickTrash, onQuickRead }: {
+  msg: MailMsg; selected: boolean; checked: boolean; souls: any[];
+  onClick: () => void;
+  onCheck: (e: React.MouseEvent) => void;
+  onStarToggle: (e: React.MouseEvent) => void;
+  onQuickArchive: (e: React.MouseEvent) => void;
+  onQuickTrash: (e: React.MouseEvent) => void;
+  onQuickRead: (e: React.MouseEvent) => void;
 }) {
   const soul = souls.find(s => s.id === msg.agent_id);
   const date = msg.received_at || msg.created_at;
   const dateStr = date ? formatDate(date) : '';
   const preview = (msg.body_text || msg.body || '').replace(/\n/g, ' ').slice(0, 80);
+  const hasAttachments = msg.attachments && msg.attachments.length > 0;
 
   return (
-    <button
+    <div
       onClick={onClick}
       className={cn(
-        'w-full text-left px-3 py-3 border-b border-border/40 cursor-pointer transition-colors group',
+        'relative w-full text-left px-3 py-3 border-b border-border/40 cursor-pointer transition-colors group',
         selected ? 'bg-primary/5 border-l-2 border-l-primary' : 'hover:bg-accent/40',
-        !msg.read && 'bg-primary/[0.02]',
+        checked && !selected ? 'bg-primary/[0.04]' : '',
+        !msg.read && !selected && !checked ? 'bg-primary/[0.02]' : '',
       )}
     >
       <div className="flex items-start gap-2">
-        {/* Avatar */}
+        {/* Checkbox — visible on hover or when checked */}
+        <button
+          onClick={onCheck}
+          className={cn(
+            'flex shrink-0 items-center justify-center mt-1 transition-opacity',
+            checked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+          title={checked ? 'Deselect' : 'Select'}
+        >
+          {checked
+            ? <CheckSquare className="h-4 w-4 text-primary" />
+            : <Square className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {/* Avatar — hidden when checkbox is visible */}
         <div className={cn(
-          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold mt-0.5',
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold mt-0.5 transition-opacity',
+          checked ? 'opacity-0 absolute' : 'group-hover:opacity-0 group-hover:absolute',
           msg.direction === 'outbound' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-primary/10 text-primary'
         )}>
           {(msg.from || 'U').charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
-            <span className={cn('text-sm truncate', !msg.read ? 'font-semibold' : 'font-medium')}>
-              {msg.from || 'Unknown'}
-            </span>
-            <span className="text-xs text-muted-foreground shrink-0">{dateStr}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              {/* Importance indicator */}
+              {msg.importance === 'high' && (
+                <span title="High importance">
+                  <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
+                </span>
+              )}
+              <span className={cn('text-sm truncate', !msg.read ? 'font-semibold' : 'font-medium')}>
+                {msg.from || 'Unknown'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {hasAttachments && <span title="Has attachments"><Paperclip className="h-3 w-3 text-muted-foreground" /></span>}
+              <span className="text-xs text-muted-foreground">{dateStr}</span>
+            </div>
           </div>
           <p className={cn('text-xs truncate mt-0.5', !msg.read ? 'text-foreground/90 font-medium' : 'text-muted-foreground')}>
             {msg.subject || '(no subject)'}
@@ -232,13 +428,52 @@ function MessageRow({ msg, selected, souls, onClick }: {
           {soul && <p className="text-xs text-muted-foreground mt-0.5 truncate">via {soul.display_name}</p>}
         </div>
       </div>
-      {/* Unread dot */}
-      {!msg.read && (
-        <div className="flex justify-end mt-1">
-          <span className="h-2 w-2 rounded-full bg-primary inline-block" />
+
+      {/* Row-level indicators: unread dot + star */}
+      <div className="flex items-center justify-between mt-1">
+        {/* Star toggle */}
+        <button
+          onClick={onStarToggle}
+          className={cn(
+            'h-5 w-5 flex items-center justify-center rounded transition-colors',
+            msg.starred ? 'text-amber-400' : 'text-transparent group-hover:text-muted-foreground hover:text-amber-400'
+          )}
+          title={msg.starred ? 'Unstar' : 'Star'}
+        >
+          <Star className={cn('h-3.5 w-3.5', msg.starred && 'fill-current text-amber-400')} />
+        </button>
+
+        {/* Hover quick-actions (Gmail-style) */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={onQuickRead}
+            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+            title={msg.read ? 'Mark unread' : 'Mark read'}
+          >
+            {msg.read ? <MailCheck className="h-3.5 w-3.5" /> : <MailOpen className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={onQuickArchive}
+            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+            title="Archive"
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onQuickTrash}
+            className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
-      )}
-    </button>
+
+        {/* Unread dot (right side) — only shown when hover quick-actions aren't visible */}
+        {!msg.read && (
+          <span className="h-2 w-2 rounded-full bg-primary inline-block group-hover:hidden" />
+        )}
+      </div>
+    </div>
   );
 }
 
