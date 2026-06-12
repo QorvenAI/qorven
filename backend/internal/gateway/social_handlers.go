@@ -344,7 +344,27 @@ func (gw *Gateway) handleCreateSocialPost(w http.ResponseWriter, r *http.Request
 	if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
 	post.ID = id
 
-	// Fire post.scheduled webhook if the post is being scheduled
+	// Gate: only scheduled posts (not drafts) go through the approval gate.
+	// Drafts stay at PostDraft status — no gate, no department assignment needed yet.
+	if post.Status == socialqor.PostScheduled {
+		// Default department to Marketing so the CMO inbox can filter by dept.
+		if post.DepartmentID == "" {
+			if dept, _ := store.ResolveMarketingDepartment(r.Context(), defaultTenant); dept != "" {
+				post.DepartmentID = dept
+				store.SetPostDepartment(r.Context(), id, dept)
+			}
+		}
+		u := userFromContext(r.Context())
+		humanAdmin := u != nil && u.Role == "admin"
+		status := gw.applySocialApprovalGate(r.Context(), &post, humanAdmin)
+		store.UpdatePostStatus(r.Context(), id, status)
+		if status == socialqor.PostPendingApproval {
+			store.SetApprovalStatus(r.Context(), id, "pending")
+		}
+		post.Status = status
+	}
+
+	// Fire post.scheduled webhook if the post is being (or remained) scheduled
 	if post.Status == socialqor.PostScheduled {
 		user := userFromContext(r.Context())
 		if user != nil {
