@@ -33,9 +33,14 @@ func (s *Store) CreatePost(ctx context.Context, p *Post) (string, error) {
 
 	var id string
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO social_posts (content, media_urls, platforms, tags, status, scheduled_at, agent_id, team_id, metadata, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-		p.Content, media, platforms, tags, p.Status, p.ScheduledAt, p.AgentID, p.TeamID, meta, now, now).Scan(&id)
+		`INSERT INTO social_posts
+		   (content, media_urls, platforms, tags, status, scheduled_at, agent_id, team_id, metadata,
+		    created_at, updated_at, department_id, campaign_id, approval_status)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+		         NULLIF($12,'')::uuid, NULLIF($13,'')::uuid, $14)
+		 RETURNING id`,
+		p.Content, media, platforms, tags, p.Status, p.ScheduledAt, p.AgentID, p.TeamID, meta, now, now,
+		p.DepartmentID, p.CampaignID, p.ApprovalStatus).Scan(&id)
 	return id, err
 }
 
@@ -44,10 +49,12 @@ func (s *Store) GetPost(ctx context.Context, postID string) (*Post, error) {
 	var platforms, tags, media, meta []byte
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, content, media_urls, platforms, tags, status, scheduled_at, published_at,
-		 agent_id, COALESCE(team_id,''), metadata, created_at, updated_at
+		 agent_id, COALESCE(team_id,''), metadata, created_at, updated_at,
+		 COALESCE(department_id::text,''), COALESCE(campaign_id::text,''), COALESCE(approval_status,'')
 		 FROM social_posts WHERE id = $1`, postID).Scan(
 		&p.ID, &p.Content, &media, &platforms, &tags, &p.Status, &p.ScheduledAt, &p.PublishedAt,
-		&p.AgentID, &p.TeamID, &meta, &p.CreatedAt, &p.UpdatedAt)
+		&p.AgentID, &p.TeamID, &meta, &p.CreatedAt, &p.UpdatedAt,
+		&p.DepartmentID, &p.CampaignID, &p.ApprovalStatus)
 	if err != nil { return nil, err }
 	json.Unmarshal(platforms, &p.Platforms)
 	json.Unmarshal(tags, &p.Tags)
@@ -58,7 +65,8 @@ func (s *Store) GetPost(ctx context.Context, postID string) (*Post, error) {
 
 func (s *Store) ListPosts(ctx context.Context, agentID string, status PostStatus, limit, offset int) ([]Post, error) {
 	if limit <= 0 { limit = 50 }
-	query := `SELECT id, content, platforms, status, scheduled_at, published_at, agent_id, created_at
+	query := `SELECT id, content, platforms, status, scheduled_at, published_at, agent_id, created_at,
+		COALESCE(department_id::text,''), COALESCE(campaign_id::text,''), COALESCE(approval_status,'')
 		FROM social_posts WHERE agent_id = $1`
 	args := []any{agentID}
 	if status != "" {
@@ -76,7 +84,8 @@ func (s *Store) ListPosts(ctx context.Context, agentID string, status PostStatus
 	for rows.Next() {
 		var p Post
 		var platforms []byte
-		rows.Scan(&p.ID, &p.Content, &platforms, &p.Status, &p.ScheduledAt, &p.PublishedAt, &p.AgentID, &p.CreatedAt)
+		rows.Scan(&p.ID, &p.Content, &platforms, &p.Status, &p.ScheduledAt, &p.PublishedAt, &p.AgentID, &p.CreatedAt,
+			&p.DepartmentID, &p.CampaignID, &p.ApprovalStatus)
 		json.Unmarshal(platforms, &p.Platforms)
 		posts = append(posts, p)
 	}
@@ -87,6 +96,51 @@ func (s *Store) UpdatePostStatus(ctx context.Context, postID string, status Post
 	_, err := s.pool.Exec(ctx,
 		`UPDATE social_posts SET status = $1, updated_at = $2 WHERE id = $3`,
 		status, time.Now(), postID)
+	return err
+}
+
+// ListByDepartment returns posts belonging to a department, optionally filtered by status.
+// Pass status="" to return posts of any status.
+func (s *Store) ListByDepartment(ctx context.Context, tenantID, departmentID string, status PostStatus) ([]Post, error) {
+	query := `SELECT id, content, platforms, status, scheduled_at, published_at, agent_id, created_at,
+		COALESCE(department_id::text,''), COALESCE(campaign_id::text,''), COALESCE(approval_status,'')
+		FROM social_posts WHERE tenant_id = $1 AND department_id = $2::uuid`
+	args := []any{tenantID, departmentID}
+	if status != "" {
+		args = append(args, status)
+		query += ` AND status = $3`
+	}
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil { return nil, err }
+	defer rows.Close()
+
+	posts := []Post{}
+	for rows.Next() {
+		var p Post
+		var platforms []byte
+		rows.Scan(&p.ID, &p.Content, &platforms, &p.Status, &p.ScheduledAt, &p.PublishedAt, &p.AgentID, &p.CreatedAt,
+			&p.DepartmentID, &p.CampaignID, &p.ApprovalStatus)
+		json.Unmarshal(platforms, &p.Platforms)
+		posts = append(posts, p)
+	}
+	return posts, nil
+}
+
+// SetApprovalStatus updates the approval_status field of a post.
+func (s *Store) SetApprovalStatus(ctx context.Context, postID, status string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE social_posts SET approval_status = $1, updated_at = $2 WHERE id = $3`,
+		status, time.Now(), postID)
+	return err
+}
+
+// SetPostDepartment assigns a post to a department.
+func (s *Store) SetPostDepartment(ctx context.Context, postID, departmentID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE social_posts SET department_id = NULLIF($1,'')::uuid, updated_at = $2 WHERE id = $3`,
+		departmentID, time.Now(), postID)
 	return err
 }
 
