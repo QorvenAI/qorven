@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/calendar"
 	"github.com/qorvenai/qorven/internal/channels"
+	"github.com/qorvenai/qorven/internal/drive"
 	"github.com/qorvenai/qorven/internal/mail"
 )
 
@@ -782,7 +783,7 @@ func (gw *Gateway) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 	agentID := r.FormValue("agent_id")
 	parentID := r.FormValue("parent_id")
-	storagePath := fmt.Sprintf("/tmp/qorven-drive/%s/%s/%s", defaultTenant, agentID, header.Filename)
+	storagePath := drive.DriveFilePath(defaultTenant, agentID, header.Filename)
 	os.MkdirAll(filepath.Dir(storagePath), 0755)
 	dst, _ := os.Create(storagePath)
 	defer dst.Close()
@@ -811,10 +812,9 @@ func (gw *Gateway) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", 404)
 		return
 	}
-	// Validate path is within workspace directory to prevent arbitrary file reads
-	workspace := "/tmp/qorven-workspace"
+	// Validate the path is within the drive root (prevents arbitrary file reads).
 	cleanPath := filepath.Clean(path)
-	if !strings.HasPrefix(cleanPath, workspace) {
+	if err := drive.ValidateUnderRoot(cleanPath); err != nil {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
