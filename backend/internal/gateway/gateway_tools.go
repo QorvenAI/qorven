@@ -382,7 +382,10 @@ func (gw *Gateway) registerTools() {
 	if gw.driveStore != nil {
 		tools.OnFileWritten = func(ctx context.Context, agentID, name, path string, size int64) {
 			mime := agent.MimeFromExt(filepath.Ext(path))
-			gw.driveStore.CreateFile(ctx, defaultTenant, agentID, filepath.Base(name), path, mime, size, false, nil)
+			f, cerr := gw.driveStore.CreateFile(ctx, defaultTenant, agentID, filepath.Base(name), path, mime, size, false, nil)
+			if cerr == nil && f != nil {
+				gw.enqueueMirrorPush(f)
+			}
 			// Track file in session
 			if sid := tools.SessionIDFromCtx(ctx); sid != "" && gw.sessions != nil {
 				gw.sessions.TrackFile(ctx, sid, path, "modified")
