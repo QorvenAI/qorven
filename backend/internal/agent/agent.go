@@ -525,13 +525,64 @@ func (s *Store) GetAgentContextFiles(ctx context.Context, agentID string) (map[s
 	return files, nil
 }
 
+// SetAgentContextFile upserts a context file's content and snapshots the prior
+// content into agent_context_file_versions first (best-effort), so an edit is
+// recoverable. This is the file the agent loads at runtime — editing SOUL.md
+// here changes the agent's persona on its next run.
 func (s *Store) SetAgentContextFile(ctx context.Context, agentID, fileName, content string) error {
+	var prior string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT content FROM agent_context_files WHERE agent_id = $1 AND file_name = $2`,
+		agentID, fileName).Scan(&prior); err == nil && prior != "" {
+		_, _ = s.pool.Exec(ctx,
+			`INSERT INTO agent_context_file_versions (agent_id, file_name, content) VALUES ($1, $2, $3)`,
+			agentID, fileName, prior)
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO agent_context_files (agent_id, file_name, content, updated_at)
 		 VALUES ($1, $2, $3, NOW())
 		 ON CONFLICT (agent_id, file_name) DO UPDATE SET content = $3, updated_at = NOW()`,
 		agentID, fileName, content)
 	return err
+}
+
+// ContextFileVersion is a prior saved version of a context file.
+type ContextFileVersion struct {
+	ID        string `json:"id"`
+	FileName  string `json:"file_name"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+}
+
+// ListContextFileVersions returns prior versions of a file, newest first (metadata only).
+func (s *Store) ListContextFileVersions(ctx context.Context, agentID, fileName string) ([]ContextFileVersion, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, file_name, created_at::text FROM agent_context_file_versions
+		 WHERE agent_id = $1 AND file_name = $2 ORDER BY created_at DESC LIMIT 50`, agentID, fileName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ContextFileVersion{}
+	for rows.Next() {
+		var v ContextFileVersion
+		if rows.Scan(&v.ID, &v.FileName, &v.CreatedAt) == nil {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+// GetContextFileVersion returns one version's full content by id (agent-scoped).
+func (s *Store) GetContextFileVersion(ctx context.Context, agentID, versionID string) (*ContextFileVersion, error) {
+	var v ContextFileVersion
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, file_name, content, created_at::text FROM agent_context_file_versions
+		 WHERE agent_id = $1 AND id = $2`, agentID, versionID).Scan(&v.ID, &v.FileName, &v.Content, &v.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 // isValidAgentKey checks that agent keys contain only safe characters.
