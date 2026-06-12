@@ -40,6 +40,17 @@ func (gw *Gateway) pushFileToMirrors(ctx context.Context, f *drive.File) {
 	if err != nil || len(mirrors) == 0 {
 		return
 	}
+	// Cap the in-memory read+base64: a mirror push reads the whole file into
+	// memory (≈1.33x base64) in a background goroutine, per mirror. Skip
+	// oversized files and record the reason rather than risk an OOM.
+	const maxMirrorBytes = 50 * 1024 * 1024
+	if f.SizeBytes > maxMirrorBytes {
+		for _, m := range mirrors {
+			_ = gw.mirrorStore.RecordPush(ctx, f.ID, m.ID, "", "error", "file too large to mirror")
+		}
+		slog.Warn("drive.mirror.too_large", "file", f.ID, "size", f.SizeBytes)
+		return
+	}
 	content, rerr := os.ReadFile(f.Path)
 	if rerr != nil {
 		slog.Warn("drive.mirror.read_failed", "file", f.ID, "err", rerr)

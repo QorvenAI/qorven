@@ -42,6 +42,11 @@ func mirrorMatchesFile(mScope, mScopeID, mOwner, fScope, fScopeID, fOwner string
 	case ScopeDepartment:
 		return mScopeID != "" && mScopeID == fScopeID
 	case ScopeCustom:
+		// WARNING: pushes EVERY custom-scoped file in the tenant to the mirror —
+		// it does NOT intersect against the file's drive_permissions grants. The
+		// shipped UI cannot create a custom-scope mirror, so this is unreachable
+		// today; any future custom-mirror UI MUST add per-grant filtering here
+		// first, or it will over-share.
 		return true
 	}
 	return false
