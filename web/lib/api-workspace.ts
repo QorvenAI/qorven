@@ -329,6 +329,18 @@ export type DriveScope = 'private' | 'company' | 'department' | 'custom';
 
 export interface WorkspaceFileMeta { name: string; missing: boolean; editable: boolean; size: number; }
 
+export interface DriveMirror {
+  id: string;
+  scope: string;
+  scope_id?: string | null;
+  provider: string;
+  account_id: string;
+  remote_folder_id: string;
+  enabled: boolean;
+  last_synced_at?: string | null;
+  error?: string;
+}
+
 export const driveApi = {
   list: (agentId?: string, parentId?: string) => {
     const p = new URLSearchParams();
@@ -344,6 +356,11 @@ export const driveApi = {
   workspaceGet: (agentId: string, name: string) => request<{ name: string; content: string; missing: boolean }>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`),
   workspacePut: (agentId: string, name: string, content: string) =>
     request<void>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+  mirrors: () => request<{ mirrors: DriveMirror[] }>(`/drive/mirrors`),
+  createMirror: (body: { scope: string; scope_id?: string | null; owner_agent_id?: string | null; provider: string; account_id?: string; remote_folder_id?: string }) =>
+    request<{ id: string }>(`/drive/mirrors`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteMirror: (id: string) => request<void>(`/drive/mirrors/${id}`, { method: 'DELETE' }),
+  remotes: () => request<{ id: string; name: string; icon: string; connected: boolean }[]>(`/drive/remotes`),
 };
 
 // Deploy

@@ -10,11 +10,12 @@ import {
   FolderOpen, File, Image, FileCode, FileSpreadsheet,
   Upload, MoreHorizontal, AlertTriangle,
   Loader2, CheckCircle2, AlertCircle, Clock,
-  Sparkles, X, Search, Cloud, CloudDownload, ArrowLeft, HardDrive, Share2,
+  Sparkles, X, Search, Cloud, CloudDownload, CloudUpload, ArrowLeft, HardDrive, Share2,
 } from 'lucide-react';
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE, getToken } from '@/lib/api-core';
 import { ShareDialog } from '@/components/drive/share-dialog';
+import { MirrorDialog } from '@/components/drive/mirror-dialog';
 import { WorkspaceEditor } from '@/components/drive/workspace-editor';
 
 const mimeIcon = (mime: string) => {
@@ -219,6 +220,7 @@ export default function DrivePage() {
   const [path, setPath] = useState<{ id: string | null; name: string }[]>([{ id: null, name: 'Root' }]);
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
   const [shareFile, setShareFile] = useState<DriveFile | null>(null);
+  const [showMirror, setShowMirror] = useState(false);
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -539,6 +541,14 @@ export default function DrivePage() {
 
           {!remoteProvider && (
             <>
+              <button
+                onClick={() => setShowMirror(true)}
+                className="qr-btn qr-btn-ghost shrink-0 flex items-center gap-1.5"
+                title="Mirror this space to a cloud drive"
+              >
+                <CloudUpload className="h-4 w-4" />
+                Mirror to cloud
+              </button>
               <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -786,6 +796,15 @@ export default function DrivePage() {
           current={shareFile.scope as any}
           onClose={() => setShareFile(null)}
           onSaved={fetchFiles}
+        />
+      )}
+
+      {/* Mirror dialog */}
+      {showMirror && (
+        <MirrorDialog
+          scope={driveScope}
+          onClose={() => setShowMirror(false)}
+          onSaved={() => setShowMirror(false)}
         />
       )}
     </div>
