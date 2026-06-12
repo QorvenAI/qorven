@@ -61,7 +61,7 @@ func (p *Publisher) PublishWithMeta(ctx context.Context, platform Platform, toke
 	case PlatformMastodon:
 		return p.publishMastodon(ctx, token, content)
 	case PlatformPinterest:
-		return p.publishPinterest(ctx, token, content, mediaURLs)
+		return p.publishPinterest(ctx, token, content, mediaURLs, meta)
 	case PlatformDiscord:
 		return p.publishDiscord(ctx, token, content)
 	case PlatformSlack:
@@ -464,15 +464,19 @@ func (p *Publisher) publishMastodon(ctx context.Context, token, content string) 
 
 // ─── Pinterest (API v5) ────────────────────────────────────────────────────
 // Requires an image — text-only pins not supported.
-func (p *Publisher) publishPinterest(ctx context.Context, token, content string, mediaURLs []string) (*PostResult, error) {
+func (p *Publisher) publishPinterest(ctx context.Context, token, content string, mediaURLs []string, meta map[string]string) (*PostResult, error) {
 	if len(mediaURLs) == 0 {
 		return &PostResult{Platform: PlatformPinterest, Success: false, Error: "Pinterest requires an image URL"}, nil
+	}
+	boardID := meta["board_id"]
+	if boardID == "" {
+		return &PostResult{Platform: PlatformPinterest, Success: false, Error: "Pinterest requires a board — set metadata.board_id on the post"}, nil
 	}
 
 	body, _ := json.Marshal(map[string]any{
 		"title":       content[:min(len(content), 100)],
 		"description": content,
-		"board_id":    "", // must be set via metadata
+		"board_id":    boardID,
 		"media_source": map[string]any{
 			"source_type": "image_url",
 			"url":         mediaURLs[0],
@@ -824,14 +828,17 @@ func (p *Publisher) PublishToAllVia(ctx context.Context, store *Store, router *R
 			results = append(results, PostResult{Platform: platform, Success: false, Error: "no integration for " + string(platform)})
 			continue
 		}
-		// Reddit needs a subreddit from post metadata — thread it via the
-		// integration's RelayMetadata so the publisher can read it.
-		if platform == PlatformReddit && post.Metadata != nil {
-			if sr := post.Metadata["subreddit"]; sr != "" {
-				if integ.RelayMetadata == nil {
-					integ.RelayMetadata = map[string]string{}
+		// Some platforms need extra per-post fields from metadata (Reddit's
+		// subreddit, Pinterest's board_id) — thread them via the integration's
+		// RelayMetadata so the direct publisher can read them.
+		if post.Metadata != nil {
+			for _, k := range []string{"subreddit", "board_id"} {
+				if v := post.Metadata[k]; v != "" {
+					if integ.RelayMetadata == nil {
+						integ.RelayMetadata = map[string]string{}
+					}
+					integ.RelayMetadata[k] = v
 				}
-				integ.RelayMetadata["subreddit"] = sr
 			}
 		}
 		res := router.PublishToIntegration(ctx, integ, post.Content, post.MediaURLs)
