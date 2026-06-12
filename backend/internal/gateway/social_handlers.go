@@ -23,6 +23,10 @@ func (gw *Gateway) socialStore() *socialqor.Store {
 	return socialqor.NewStore(gw.db.Pool)
 }
 
+func (gw *Gateway) socialRelayRouter() *socialqor.RelayRouter {
+	return socialqor.NewRelayRouter(gw.socialRelayStore, gw.decryptIntegrationKey)
+}
+
 // startSocialAnalyticsWorker launches the background analytics polling goroutine.
 func (gw *Gateway) startSocialAnalyticsWorker(ctx context.Context) {
 	store := gw.socialStore()
@@ -86,8 +90,7 @@ func (gw *Gateway) dispatchDuePosts(ctx context.Context, store *socialqor.Store)
 	}
 	for i := range posts {
 		post := &posts[i]
-		publisher := socialqor.NewPublisher()
-		results := publisher.PublishToAll(ctx, store, post)
+		results := socialqor.NewPublisher().PublishToAllVia(ctx, store, gw.socialRelayRouter(), post)
 		allOK := true
 		platformIDs := map[string]string{}
 		for _, res := range results {
@@ -263,8 +266,7 @@ func (gw *Gateway) fireAutoPost(ctx context.Context, store *socialqor.Store, rss
 	}
 	post.ID = id
 
-	publisher := socialqor.NewPublisher()
-	results := publisher.PublishToAll(ctx, store, &post)
+	results := socialqor.NewPublisher().PublishToAllVia(ctx, store, gw.socialRelayRouter(), &post)
 	allOK := true
 	for _, res := range results {
 		if !res.Success {
@@ -357,8 +359,7 @@ func (gw *Gateway) handlePublishSocialPost(w http.ResponseWriter, r *http.Reques
 	postID := chi.URLParam(r, "id")
 	post, err := store.GetPost(r.Context(), postID)
 	if err != nil { writeJSON(w, 404, map[string]string{"error": "post not found"}); return }
-	publisher := socialqor.NewPublisher()
-	results := publisher.PublishToAll(r.Context(), store, post)
+	results := socialqor.NewPublisher().PublishToAllVia(r.Context(), store, gw.socialRelayRouter(), post)
 	allOK := true
 	platformIDs := map[string]string{}
 	for _, res := range results {
