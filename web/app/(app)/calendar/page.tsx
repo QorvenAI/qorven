@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import type { TimelineItem } from '@/lib/api-workspace';
 import { AgendaView } from '@/components/calendar/agenda-view';
+import { TimeGrid } from '@/components/calendar/time-grid';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -44,6 +45,18 @@ export default function CalendarPage() {
   const month = current.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const weekDays = (() => {
+    const base = new Date(current);
+    const dow = base.getDay();
+    const sunday = new Date(base);
+    sunday.setDate(base.getDate() - dow);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() + i);
+      return d;
+    });
+  })();
 
   const load = useCallback(() => {
     setLoading(true);
@@ -191,6 +204,14 @@ export default function CalendarPage() {
 
       {view === 'agenda' && (
         <AgendaView items={items} onSelect={setSelectedItem} />
+      )}
+
+      {view === 'week' && (
+        <TimeGrid days={weekDays} items={items} now={today} onSelect={setSelectedItem} />
+      )}
+
+      {view === 'day' && (
+        <TimeGrid days={[current]} items={items} now={today} onSelect={setSelectedItem} />
       )}
 
       {view === 'month' ? (
