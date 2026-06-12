@@ -487,6 +487,24 @@ export const social = {
       method: 'POST',
       body: JSON.stringify({ relay_key_id: relayKeyId, session_token: sessionToken, agent_id: agentId }),
     }),
+
+  // Campaigns (CMO)
+  campaigns: () =>
+    request<{ campaigns: any[] }>(`/social/campaigns`),
+  createCampaign: (body: { title: string; brief?: string; target_platforms?: string[]; created_by_agent_id?: string }) =>
+    request<{ id: string }>(`/social/campaigns`, { method: 'POST', body: JSON.stringify(body) }),
+  setCampaignStatus: (id: string, status: string) =>
+    request<void>(`/social/campaigns/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  delegateCampaign: (id: string, body: { agent_id: string; title?: string; description?: string }) =>
+    request<{ task_id: string }>(`/social/campaigns/${id}/delegate`, { method: 'POST', body: JSON.stringify(body) }),
+
+  // Approvals (CMO inbox)
+  pendingApprovals: () =>
+    request<{ posts: any[] }>(`/social/approvals`),
+  approvePost: (id: string) =>
+    request<void>(`/social/posts/${id}/approve`, { method: 'POST' }),
+  rejectPost: (id: string) =>
+    request<void>(`/social/posts/${id}/reject`, { method: 'POST' }),
 };
 
 // Research

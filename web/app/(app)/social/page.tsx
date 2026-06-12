@@ -12,6 +12,7 @@ import {
   BarChart2, TrendingUp, Eye, Heart, Share2, MessageCircle,
   CornerDownRight, CheckCheck,
   BookOpen, Edit3, Settings, Pause, Play, Webhook, PlayCircle,
+  Flag, ThumbsUp, ThumbsDown, Globe,
 } from 'lucide-react';
 import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,7 @@ import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState } from '@/components/empty-state';
 import { OfficerSetupCard } from '@/components/setup/officer-setup-card';
+import { soulGradient } from '@/components/soul-card';
 import { toast } from 'sonner';
 
 // ─── Platform config ──────────────────────────────────────────────────────────
@@ -446,6 +448,8 @@ export default function SocialPage() {
         {tab === 'analytics' && <AnalyticsTab agentId={agentFilter} />}
         {tab === 'sets'      && <SetsTab agentId={agentFilter} />}
         {tab === 'webhooks'  && <WebhooksTab agentId={agentFilter} />}
+        {tab === 'campaigns' && <CampaignsTab agentId={agentFilter} />}
+        {tab === 'approvals' && <ApprovalsTab />}
       </PageShell>
     </ErrorBoundary>
   );
@@ -1176,18 +1180,20 @@ type PlatformPublishResult = {
 
 // Status pill label + token mapping
 const POST_STATUS_LABEL: Record<string, string> = {
-  draft:     'Draft',
-  scheduled: 'Scheduled',
-  published: 'Published',
-  failed:    'Failed',
+  draft:            'Draft',
+  scheduled:        'Scheduled',
+  published:        'Published',
+  failed:           'Failed',
+  pending_approval: 'Awaiting approval',
 };
 
 // Token-based status colors (bg/text pairs using design tokens only)
 const POST_STATUS_TOKENS: Record<string, string> = {
-  draft:     'bg-muted text-muted-foreground',
-  scheduled: 'bg-primary/10 text-primary',
-  published: 'bg-soul-idle/20 text-soul-idle',
-  failed:    'bg-destructive/10 text-destructive',
+  draft:            'bg-muted text-muted-foreground',
+  scheduled:        'bg-primary/10 text-primary',
+  published:        'bg-soul-idle/20 text-soul-idle',
+  failed:           'bg-destructive/10 text-destructive',
+  pending_approval: 'bg-primary/10 text-primary',
 };
 
 function PostsTab({ agentId, status }: { agentId: string; status: string }) {
@@ -3610,6 +3616,434 @@ function AutoPostTab({ agentId }: { agentId: string }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Campaigns Tab ────────────────────────────────────────────────────────────
+
+const CAMPAIGN_STATUS_TOKENS: Record<string, string> = {
+  active:    'bg-soul-idle/20 text-soul-idle',
+  paused:    'bg-muted text-muted-foreground',
+  draft:     'bg-muted text-muted-foreground',
+  completed: 'bg-primary/10 text-primary',
+  archived:  'bg-muted text-muted-foreground',
+};
+
+function CampaignsTab({ agentId }: { agentId: string }) {
+  const souls = useStore(s => s.souls);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [delegateFor, setDelegateFor] = useState<string | null>(null);
+  const [delegateError, setDelegateError] = useState<Record<string, string>>({});
+
+  // New campaign form
+  const [form, setForm] = useState({ title: '', brief: '', target_platforms: [] as string[] });
+  const [saving, setSaving] = useState(false);
+
+  // Delegate form: per-campaign selected agent
+  const [delegateAgent, setDelegateAgent] = useState<Record<string, string>>({});
+  const [delegating, setDelegating] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    socialApi.campaigns()
+      .then(d => { setCampaigns(d?.campaigns ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const togglePlatform = (pid: string) =>
+    setForm(f => ({
+      ...f,
+      target_platforms: f.target_platforms.includes(pid)
+        ? f.target_platforms.filter(p => p !== pid)
+        : [...f.target_platforms, pid],
+    }));
+
+  const createCampaign = async () => {
+    if (!form.title.trim()) { toast.error('Title required'); return; }
+    setSaving(true);
+    try {
+      await socialApi.createCampaign({
+        title: form.title.trim(),
+        brief: form.brief.trim() || undefined,
+        target_platforms: form.target_platforms.length > 0 ? form.target_platforms : undefined,
+        created_by_agent_id: agentId || undefined,
+      });
+      toast.success('Campaign created');
+      setForm({ title: '', brief: '', target_platforms: [] });
+      setShowNew(false);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create campaign');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const delegate = async (campaignId: string) => {
+    const agent_id = delegateAgent[campaignId];
+    if (!agent_id) { toast.error('Select an agent first'); return; }
+    setDelegating(campaignId);
+    setDelegateError(prev => { const n = { ...prev }; delete n[campaignId]; return n; });
+    try {
+      await socialApi.delegateCampaign(campaignId, { agent_id });
+      toast.success('Campaign delegated');
+      setDelegateFor(null);
+      load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed';
+      // Surface department-mismatch 403 inline on the row
+      setDelegateError(prev => ({ ...prev, [campaignId]: msg }));
+      toast.error(msg);
+    } finally {
+      setDelegating(null);
+    }
+  };
+
+  if (loading) return (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-2">
+          <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-full animate-pulse rounded bg-muted" />
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* New Campaign form */}
+      {showNew ? (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
+            <p className="text-sm font-semibold">New Campaign</p>
+            <button onClick={() => setShowNew(false)} className="text-muted-foreground hover:text-foreground cursor-pointer">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="p-4 space-y-4">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Title</label>
+              <input
+                value={form.title}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="Q3 Product Launch"
+                className="qr-input"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Brief</label>
+              <textarea
+                value={form.brief}
+                onChange={e => setForm(f => ({ ...f, brief: e.target.value }))}
+                placeholder="Campaign goals, target audience, key messages…"
+                rows={3}
+                className="qr-input resize-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1.5">Target Platforms</label>
+              <div className="flex flex-wrap gap-2">
+                {PLATFORMS.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => togglePlatform(p.id)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all cursor-pointer',
+                      form.target_platforms.includes(p.id)
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
+                    )}
+                  >
+                    <span>{p.icon}</span> {p.label}
+                    {form.target_platforms.includes(p.id) && <Check className="h-3 w-3" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={createCampaign}
+                disabled={saving || !form.title.trim()}
+                className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                Create Campaign
+              </button>
+              <button
+                onClick={() => setShowNew(false)}
+                className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-accent cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowNew(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-accent/30 transition-colors cursor-pointer w-full"
+        >
+          <Plus className="h-4 w-4" /> New Campaign
+        </button>
+      )}
+
+      {/* Campaign list */}
+      {campaigns.length === 0 && !showNew ? (
+        <EmptyState
+          icon={Flag}
+          title="No campaigns yet"
+          description="Create a campaign to organise content across platforms and delegate execution to specialist agents."
+        />
+      ) : (
+        <div className="space-y-2">
+          {campaigns.map(c => {
+            const showDelegate = delegateFor === c.id;
+            const err = delegateError[c.id];
+            return (
+              <div key={c.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium', CAMPAIGN_STATUS_TOKENS[c.status] ?? 'bg-muted text-muted-foreground')}>
+                          {c.status ?? 'draft'}
+                        </span>
+                        <p className="text-sm font-medium">{c.title}</p>
+                      </div>
+                      {c.brief && (
+                        <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{c.brief}</p>
+                      )}
+                      {/* Platform chips */}
+                      {(c.target_platforms ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {(c.target_platforms as string[]).map((pid) => {
+                            const plat = PLATFORMS.find(p => p.id === pid);
+                            return (
+                              <span
+                                key={pid}
+                                className={cn('text-xs px-1.5 py-0.5 rounded font-medium', plat?.color ?? 'bg-muted text-muted-foreground')}
+                              >
+                                {plat?.icon ?? pid}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => { setDelegateFor(showDelegate ? null : c.id); setDelegateError(prev => { const n = { ...prev }; delete n[c.id]; return n; }); }}
+                        className={cn(
+                          'flex items-center gap-1.5 h-7 px-2.5 rounded text-xs font-medium transition-colors cursor-pointer',
+                          showDelegate
+                            ? 'bg-primary/10 text-primary'
+                            : 'text-muted-foreground border border-border hover:border-primary/40 hover:text-primary',
+                        )}
+                      >
+                        <Users className="h-3 w-3" /> Delegate
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Delegate panel */}
+                  {showDelegate && (
+                    <div className="mt-3 pt-3 border-t border-border space-y-2">
+                      <p className="text-xs text-muted-foreground font-medium">Assign to an agent in the marketing department</p>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={delegateAgent[c.id] ?? ''}
+                          onChange={e => setDelegateAgent(prev => ({ ...prev, [c.id]: e.target.value }))}
+                          className="qr-select flex-1"
+                        >
+                          <option value="">Select agent…</option>
+                          {souls.map(s => (
+                            <option key={s.id} value={s.id}>{s.display_name}</option>
+                          ))}
+                        </select>
+                        {/* Agent avatar chip with soulGradient */}
+                        {delegateAgent[c.id] && (() => {
+                          const s = souls.find(x => x.id === delegateAgent[c.id]);
+                          if (!s) return null;
+                          return (
+                            <span
+                              className={cn('h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0', soulGradient(s.display_name))}
+                              title={s.display_name}
+                            >
+                              {s.display_name.slice(0, 1).toUpperCase()}
+                            </span>
+                          );
+                        })()}
+                        <button
+                          onClick={() => delegate(c.id)}
+                          disabled={!delegateAgent[c.id] || delegating === c.id}
+                          className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                        >
+                          {delegating === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                          Assign
+                        </button>
+                      </div>
+                      {err && (
+                        <p className="text-xs text-destructive">{err}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Approvals Tab ────────────────────────────────────────────────────────────
+
+function ApprovalsTab() {
+  const souls = useStore(s => s.souls);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    socialApi.pendingApprovals()
+      .then(d => { setPosts(d?.posts ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (id: string, action: 'approve' | 'reject') => {
+    setActing({ id, action });
+    try {
+      if (action === 'approve') {
+        await socialApi.approvePost(id);
+        toast.success('Post approved');
+      } else {
+        await socialApi.rejectPost(id);
+        toast.success('Post rejected');
+      }
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Failed to ${action}`);
+    } finally {
+      setActing(null);
+    }
+  };
+
+  if (loading) return (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-2">
+          <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-full animate-pulse rounded bg-muted" />
+        </div>
+      ))}
+    </div>
+  );
+
+  if (posts.length === 0) return (
+    <EmptyState
+      icon={ThumbsUp}
+      title="No posts awaiting approval"
+      description="When agents submit posts for review they will appear here."
+    />
+  );
+
+  return (
+    <div className="space-y-2">
+      {posts.map(post => {
+        const soul = souls.find(s => s.id === post.agent_id);
+        const date = post.created_at;
+        const isActing = acting?.id === post.id;
+        return (
+          <div key={post.id} className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-start gap-3">
+              {/* Agent avatar */}
+              {soul ? (
+                <span
+                  className={cn('h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0', soulGradient(soul.display_name))}
+                  title={soul.display_name}
+                >
+                  {soul.display_name.slice(0, 1).toUpperCase()}
+                </span>
+              ) : (
+                <span className="h-8 w-8 rounded-full flex items-center justify-center bg-muted text-muted-foreground shrink-0">
+                  <Users className="h-4 w-4" />
+                </span>
+              )}
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  {soul && <span className="text-xs font-medium">{soul.display_name}</span>}
+                  <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-primary/10 text-primary">
+                    Awaiting approval
+                  </span>
+                  {date && (
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+
+                {/* Content preview */}
+                <p className="text-sm text-foreground/80 line-clamp-3 mb-2">{post.content}</p>
+
+                {/* Platform chips */}
+                {(post.platforms ?? []).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {(post.platforms as string[]).map((pid: string) => {
+                      const plat = PLATFORMS.find(p => p.id === pid);
+                      return (
+                        <span
+                          key={pid}
+                          className={cn('inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-medium', plat?.color ?? 'bg-muted text-muted-foreground')}
+                        >
+                          {plat?.icon ?? pid}
+                          <span className="font-mono">{pid}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Approve / Reject actions */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => act(post.id, 'approve')}
+                    disabled={isActing}
+                    className="flex items-center gap-1.5 rounded-lg bg-soul-idle/20 text-soul-idle hover:bg-soul-idle/30 px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isActing && acting?.action === 'approve'
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <ThumbsUp className="h-3 w-3" />
+                    }
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => act(post.id, 'reject')}
+                    disabled={isActing}
+                    className="flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isActing && acting?.action === 'reject'
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <ThumbsDown className="h-3 w-3" />
+                    }
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

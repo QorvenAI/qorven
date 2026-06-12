@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiBase } from '@/lib/api-url';
-import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon, BarChart2, BookOpen, Webhook } from 'lucide-react';
+import { Megaphone, Bell, Clock, CheckCircle2, FileEdit, Users, Zap, Image as ImageIcon, BarChart2, BookOpen, Webhook, Flag, ThumbsUp } from 'lucide-react';
 import { SidebarMenuItem, SidebarGroupTitle } from './sidebar-primitives';
 import { SidebarLayout } from './sidebar-layout';
 
@@ -39,6 +39,10 @@ export function SocialSidebar() {
       { label: 'Analytics', sub: '/social?tab=analytics', icon: BarChart2 },
       { label: 'Sets', sub: '/social?tab=sets', icon: BookOpen },
       { label: 'Webhooks', sub: '/social?tab=webhooks', icon: Webhook },
+    ] },
+    { title: 'CMO', views: [
+      { label: 'Campaigns', sub: '/social?tab=campaigns', icon: Flag },
+      { label: 'Approvals', sub: '/social?tab=approvals', icon: ThumbsUp },
     ] },
   ];
 
