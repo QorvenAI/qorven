@@ -8,10 +8,16 @@ import {
   MoreHorizontal, Search, Plus, Settings,
   AlertCircle, Check, Shield, ShieldAlert, X,
   Paperclip, ChevronDown, ChevronUp, FileText,
+  Archive, Trash2, ReplyAll, Forward, BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { mail as mailApi, MailIdentity } from '@/lib/api';
 import { RichTextEditor } from '@/components/mail/rich-text-editor';
+import { HtmlBody } from '@/components/mail/html-body';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { EmptyState, emptyStates } from '@/components/empty-state';
@@ -21,10 +27,12 @@ import { toast } from 'sonner';
 
 type MailMsg = {
   id: string; from: string; to: string[]; subject: string;
-  body: string; body_text?: string; status: string;
+  body: string; body_text?: string; body_html?: string; status: string;
   created_at: string; received_at?: string;
   read: boolean; starred: boolean; agent_id?: string;
   thread_id?: string; direction?: string;
+  cc?: string[];
+  attachments?: Array<{ id?: string; name: string; content_type?: string; size?: number }>;
   // Security fields from buildOutlookContext
   auth_status?: string; // 'verified' | 'known' | 'unknown' | 'fail'
   is_verified_thread?: boolean;
@@ -157,10 +165,15 @@ export default function MailPage() {
               msg={selected}
               souls={souls}
               onClose={() => setSelected(null)}
-              onReply={(to, subj) => setComposing(true)}
+              onReply={(prefill) => { setComposing(true); }}
               onStarToggle={() => {
                 setMessages(prev => prev.map(m => m.id === selected.id ? { ...m, starred: !m.starred } : m));
                 setSelected(s => s ? { ...s, starred: !s.starred } : null);
+              }}
+              onActionDone={() => { load(); setSelected(null); }}
+              onMarkUnread={() => {
+                setMessages(prev => prev.map(m => m.id === selected.id ? { ...m, read: false } : m));
+                setSelected(s => s ? { ...s, read: false } : null);
               }}
             />
           ) : (
@@ -229,17 +242,148 @@ function MessageRow({ msg, selected, souls, onClick }: {
   );
 }
 
+// ─── Thread Message Card ──────────────────────────────────────────────────────
+
+/** A single message within a thread — collapsed (sender + snippet) or expanded (full body). */
+function ThreadMessageCard({ m, expanded, onToggle, souls }: {
+  m: MailMsg;
+  expanded: boolean;
+  onToggle: () => void;
+  souls: any[];
+}) {
+  const soul = souls.find(s => s.id === m.agent_id);
+  const date = m.received_at || m.created_at;
+  const isVerified = !!(m.body?.includes('✅ DKIM verified') || m.is_verified_thread);
+  const isFailed = !!(m.body?.includes('🔴 DKIM FAILED'));
+  const isKnown = !!(m.body?.includes('📬 Known sender'));
+  const displayBody = parseDisplayBody(m.body || m.body_text || '');
+  const hasHtml = !!(m.body_html?.trim());
+
+  return (
+    <div className={cn(
+      'rounded-xl border bg-card transition-colors',
+      expanded ? 'border-border' : 'border-border/60 hover:border-border cursor-pointer',
+    )}>
+      {/* Collapsed / header row — always visible */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left"
+      >
+        <div className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+          m.direction === 'outbound' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-primary/10 text-primary',
+        )}>
+          {(m.from || 'U').charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium truncate">{m.from || 'Unknown'}</span>
+            <span className="text-xs text-muted-foreground shrink-0">
+              {date ? new Date(date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}
+            </span>
+          </div>
+          {!expanded && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              {hasHtml ? '(HTML message)' : displayBody.slice(0, 100)}
+            </p>
+          )}
+        </div>
+        {soul && !expanded && (
+          <span className="text-xs text-muted-foreground shrink-0">via {soul.display_name}</span>
+        )}
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform', expanded && 'rotate-180')} />
+      </button>
+
+      {/* Expanded body */}
+      {expanded && (
+        <div className="px-4 pb-4">
+          {/* Meta */}
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            {soul && <span className="text-xs text-muted-foreground">via {soul.display_name}</span>}
+            {m.direction === 'outbound' && (
+              <span className="rounded-full bg-emerald-500/10 text-emerald-500 px-2 py-0.5 text-xs font-medium">Sent</span>
+            )}
+          </div>
+          <SecurityBadge isVerified={isVerified} isFailed={isFailed} isKnown={isKnown} />
+          {/* Body */}
+          <HtmlBody
+            html={m.body_html}
+            text={displayBody}
+            className="text-sm leading-relaxed"
+          />
+          {/* Attachments for this message */}
+          {m.attachments && m.attachments.length > 0 && (
+            <AttachmentChips msgId={m.id} attachments={m.attachments} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Attachment Chips ─────────────────────────────────────────────────────────
+
+function AttachmentChips({ msgId, attachments }: {
+  msgId: string;
+  attachments: Array<{ id?: string; name: string; content_type?: string; size?: number }>;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-border/50">
+      {attachments.map((att, i) => {
+        const url = mailApi.attachmentUrl(msgId, att.name);
+        return (
+          <a
+            key={i}
+            href={url}
+            download={att.name}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-2.5 py-1 text-xs hover:bg-accent transition-colors"
+          >
+            <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span className="max-w-40 truncate">{att.name}</span>
+            {att.size != null && (
+              <span className="text-muted-foreground shrink-0">
+                ({att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${Math.round(att.size / 1024)}KB` : `${(att.size / 1048576).toFixed(1)}MB`})
+              </span>
+            )}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Message View ─────────────────────────────────────────────────────────────
 
-function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
+type ComposePrefill = {
+  to: string;
+  cc?: string;
+  subject: string;
+  quotedBody: string;
+  mode: 'reply' | 'reply-all' | 'forward';
+};
+
+function MessageView({ msg, souls, onClose, onReply, onStarToggle, onActionDone, onMarkUnread }: {
   msg: MailMsg; souls: any[];
   onClose: () => void;
-  onReply: (to: string, subject: string) => void;
+  onReply: (prefill: ComposePrefill) => void;
   onStarToggle: () => void;
+  onActionDone: () => void;
+  onMarkUnread: () => void;
 }) {
   const [showReply, setShowReply] = useState(false);
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+
+  // Thread state
+  const [thread, setThread] = useState<MailMsg[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  // Set of expanded message IDs — most recent starts expanded
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set([msg.id]));
+
   const soul = souls.find(s => s.id === msg.agent_id);
   const date = msg.received_at || msg.created_at;
 
@@ -250,6 +394,60 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
 
   // Extract the new message content (strip our security wrapper for display)
   const displayBody = parseDisplayBody(msg.body || msg.body_text || '');
+
+  // Fetch thread when msg.thread_id is present
+  useEffect(() => {
+    if (!msg.thread_id) {
+      setThread([msg]);
+      setExpandedIds(new Set([msg.id]));
+      return;
+    }
+    setThreadLoading(true);
+    mailApi.thread(msg.thread_id)
+      .then((msgs: any[]) => {
+        const mapped: MailMsg[] = msgs.map((m: any) => ({
+          id: m.id,
+          from: m.from_address ?? m.from ?? '',
+          to: m.to_addresses ?? m.to ?? [],
+          cc: m.cc_addresses ?? m.cc ?? [],
+          subject: m.subject ?? '',
+          body: m.body_text ?? m.body ?? '',
+          body_text: m.body_text,
+          body_html: m.body_html,
+          status: m.status ?? '',
+          created_at: m.created_at,
+          received_at: m.received_at,
+          read: m.is_read ?? m.read ?? false,
+          starred: m.is_starred ?? m.starred ?? false,
+          agent_id: m.agent_id,
+          thread_id: m.thread_id,
+          direction: m.direction,
+          attachments: m.attachments,
+          auth_status: m.auth_status,
+          is_verified_thread: m.is_verified_thread,
+        }));
+        // Sort chronologically
+        mapped.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        setThread(mapped);
+        // Expand only the most recent message by default
+        if (mapped.length > 0) {
+          setExpandedIds(new Set([mapped[mapped.length - 1]!.id]));
+        }
+      })
+      .catch(() => {
+        setThread([msg]);
+        setExpandedIds(new Set([msg.id]));
+      })
+      .finally(() => setThreadLoading(false));
+  }, [msg.id, msg.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      return next;
+    });
+  };
 
   const sendReply = async () => {
     if (!replyBody.trim()) return;
@@ -264,6 +462,42 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
     } finally { setSending(false); }
   };
 
+  // ── Message actions ──
+  const act = async (label: string, fn: () => Promise<void>, closeAfter = false) => {
+    setActing(label);
+    try {
+      await fn();
+      toast.success(label);
+      if (closeAfter) onActionDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Failed: ${label}`);
+    } finally { setActing(null); }
+  };
+
+  const handleArchive = () => act('Archived', () => mailApi.archive(msg.id), true);
+  const handleTrash   = () => act('Moved to trash', () => mailApi.trash(msg.id), true);
+  const handleMarkUnread = async () => {
+    try {
+      await mailApi.setRead(msg.id, false);
+      onMarkUnread();
+      toast.success('Marked as unread');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+  const handleStar = async () => {
+    try {
+      await mailApi.setStar(msg.id, !msg.starred);
+      onStarToggle();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const quotedBodyText = `\n\n---\nOn ${date ? new Date(date).toLocaleString() : 'a prior date'}, ${msg.from} wrote:\n${displayBody}`;
+
+  const isThreadView = thread.length > 1;
+
   return (
     <div className="flex flex-col h-full">
       {/* Top toolbar */}
@@ -272,7 +506,8 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="flex-1" />
-        <button onClick={onStarToggle}
+        {acting && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        <button onClick={handleStar}
           className={cn('h-7 w-7 flex items-center justify-center rounded-md cursor-pointer transition-colors',
             msg.starred ? 'text-amber-400' : 'text-muted-foreground hover:text-amber-400 hover:bg-accent')}>
           <Star className={cn('h-4 w-4', msg.starred && 'fill-current')} />
@@ -281,46 +516,128 @@ function MessageView({ msg, souls, onClose, onReply, onStarToggle }: {
           className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent cursor-pointer transition-colors">
           <Reply className="h-3.5 w-3.5" /> Reply
         </button>
-        <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
+
+        {/* MoreHorizontal — fully wired actions */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer">
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={() => setShowReply(true)}>
+              <Reply className="h-4 w-4" /> Reply
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => {
+              setShowReply(false);
+              onReply({ to: msg.from, cc: (msg.cc ?? []).join(', '), subject: `Re: ${msg.subject || ''}`, quotedBody: quotedBodyText, mode: 'reply-all' });
+            }}>
+              <ReplyAll className="h-4 w-4" /> Reply All
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => {
+              setShowReply(false);
+              onReply({ to: '', subject: `Fwd: ${msg.subject || ''}`, quotedBody: quotedBodyText, mode: 'forward' });
+            }}>
+              <Forward className="h-4 w-4" /> Forward
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleMarkUnread}>
+              <BookOpen className="h-4 w-4" /> Mark as unread
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleStar}>
+              <Star className="h-4 w-4" />
+              {msg.starred ? 'Unstar' : 'Star'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleArchive}>
+              <Archive className="h-4 w-4" /> Archive
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={handleTrash}>
+              <Trash2 className="h-4 w-4" /> Move to trash
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Message content */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-6 py-5 max-w-4xl">
-          {/* Subject */}
-          <h2 className="text-lg font-semibold leading-tight mb-4">
-            {msg.subject || '(no subject)'}
-          </h2>
-
-          {/* Security badge */}
-          <SecurityBadge isVerified={isVerified} isFailed={isFailed} isKnown={isKnown} />
-
-          {/* Sender info card */}
-          <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-5">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-              {(msg.from || 'U').charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold">{msg.from}</span>
-                {soul && <span className="text-xs text-muted-foreground">via {soul.display_name}</span>}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                To: {Array.isArray(msg.to) ? msg.to.join(', ') : msg.to}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">{date ? new Date(date).toLocaleString() : ''}</p>
-            </div>
-            {msg.direction === 'outbound' && (
-              <span className="rounded-full bg-emerald-500/10 text-emerald-500 px-2 py-0.5 text-xs font-medium shrink-0">Sent</span>
+          {/* Subject + thread count */}
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <h2 className="text-lg font-semibold leading-tight">
+              {msg.subject || '(no subject)'}
+            </h2>
+            {isThreadView && (
+              <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground font-medium">
+                {thread.length} messages
+              </span>
             )}
           </div>
 
-          {/* Message body */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="text-sm leading-relaxed whitespace-pre-wrap font-sans">{displayBody}</div>
-          </div>
+          {threadLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading thread…
+            </div>
+          )}
+
+          {/* ── Thread conversation view ── */}
+          {isThreadView ? (
+            <div className="space-y-2">
+              {thread.map(m => (
+                <ThreadMessageCard
+                  key={m.id}
+                  m={m}
+                  expanded={expandedIds.has(m.id)}
+                  onToggle={() => toggleExpanded(m.id)}
+                  souls={souls}
+                />
+              ))}
+            </div>
+          ) : (
+            /* ── Single message view ── */
+            <>
+              <SecurityBadge isVerified={isVerified} isFailed={isFailed} isKnown={isKnown} />
+
+              {/* Sender info card */}
+              <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
+                  {(msg.from || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold">{msg.from}</span>
+                    {soul && <span className="text-xs text-muted-foreground">via {soul.display_name}</span>}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    To: {Array.isArray(msg.to) ? msg.to.join(', ') : msg.to}
+                  </p>
+                  {msg.cc && msg.cc.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Cc: {msg.cc.join(', ')}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-0.5">{date ? new Date(date).toLocaleString() : ''}</p>
+                </div>
+                {msg.direction === 'outbound' && (
+                  <span className="rounded-full bg-emerald-500/10 text-emerald-500 px-2 py-0.5 text-xs font-medium shrink-0">Sent</span>
+                )}
+              </div>
+
+              {/* Message body — HTML or plain text */}
+              <div className="rounded-xl border border-border bg-card p-5">
+                <HtmlBody
+                  html={msg.body_html}
+                  text={displayBody}
+                  className="text-sm leading-relaxed"
+                />
+              </div>
+
+              {/* Attachments */}
+              {msg.attachments && msg.attachments.length > 0 && (
+                <AttachmentChips msgId={msg.id} attachments={msg.attachments} />
+              )}
+            </>
+          )}
         </div>
 
         {/* Reply compose box */}
