@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/calendar"
 	"github.com/qorvenai/qorven/internal/channels"
+	"github.com/qorvenai/qorven/internal/drive"
 	"github.com/qorvenai/qorven/internal/mail"
 )
 
@@ -738,12 +739,23 @@ func (gw *Gateway) handleRejectMailFunc(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]string{"status": "rejected"})
 }
 
+// driveCaller resolves the calling identity for ACL checks: the agent id the
+// request acts as (from ?agent_id=, used when a user browses an agent's drive,
+// or the agent's own id when an agent tool calls), and whether the human user
+// is an admin (admins read everything).
+func (gw *Gateway) driveCaller(r *http.Request) (callerAgent string, isAdminUser bool) {
+	callerAgent = r.URL.Query().Get("agent_id")
+	if u := userFromContext(r.Context()); u != nil && u.Role == "admin" {
+		isAdminUser = true
+	}
+	return
+}
+
 func (gw *Gateway) handleListDriveFiles(w http.ResponseWriter, r *http.Request) {
 	if gw.driveStore == nil {
 		json.NewEncoder(w).Encode([]any{})
 		return
 	}
-	agentID := r.URL.Query().Get("agent_id")
 	parentID := r.URL.Query().Get("parent_id")
 	search := r.URL.Query().Get("q")
 	var pid *string
@@ -752,7 +764,10 @@ func (gw *Gateway) handleListDriveFiles(w http.ResponseWriter, r *http.Request) 
 	}
 	// Full-text search ignores folder hierarchy — return flat matches across all files.
 	if search != "" {
-		files, err := gw.driveStore.SearchFiles(r.Context(), agentID, search)
+		// TODO(drive-s2): ACL-filter search results by scope (names/metadata only;
+		// content download is already ACL-gated). Tenant-scoped below.
+		agentID := r.URL.Query().Get("agent_id")
+		files, err := gw.driveStore.SearchFiles(r.Context(), defaultTenant, agentID, search)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -760,7 +775,8 @@ func (gw *Gateway) handleListDriveFiles(w http.ResponseWriter, r *http.Request) 
 		json.NewEncoder(w).Encode(files)
 		return
 	}
-	files, err := gw.driveStore.ListFiles(r.Context(), agentID, pid)
+	callerAgent, isAdmin := gw.driveCaller(r)
+	files, err := gw.driveStore.ListVisible(r.Context(), defaultTenant, callerAgent, isAdmin, pid)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -782,7 +798,7 @@ func (gw *Gateway) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 	agentID := r.FormValue("agent_id")
 	parentID := r.FormValue("parent_id")
-	storagePath := fmt.Sprintf("/tmp/qorven-drive/%s/%s/%s", defaultTenant, agentID, header.Filename)
+	storagePath := drive.DriveFilePath(defaultTenant, agentID, header.Filename)
 	os.MkdirAll(filepath.Dir(storagePath), 0755)
 	dst, _ := os.Create(storagePath)
 	defer dst.Close()
@@ -800,21 +816,22 @@ func (gw *Gateway) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (gw *Gateway) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
-	if gw.db == nil {
+	if gw.driveStore == nil {
 		http.Error(w, "not found", 404)
 		return
 	}
-	// Get file path from DB, serve it
-	var path string
-	gw.db.Pool.QueryRow(r.Context(), `SELECT path FROM drive_files WHERE id = $1`, chi.URLParam(r, "id")).Scan(&path)
-	if path == "" {
+	f, err := gw.driveStore.GetFile(r.Context(), defaultTenant, chi.URLParam(r, "id"))
+	if err != nil || f == nil {
 		http.Error(w, "not found", 404)
 		return
 	}
-	// Validate path is within workspace directory to prevent arbitrary file reads
-	workspace := "/tmp/qorven-workspace"
-	cleanPath := filepath.Clean(path)
-	if !strings.HasPrefix(cleanPath, workspace) {
+	callerAgent, isAdmin := gw.driveCaller(r)
+	if ok, _ := gw.driveStore.CanAccess(r.Context(), f, callerAgent, isAdmin); !ok {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	cleanPath := filepath.Clean(f.Path)
+	if err := drive.ValidateUnderRoot(cleanPath); err != nil {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -860,7 +877,53 @@ func (gw *Gateway) handleDeleteDriveFile(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(503)
 		return
 	}
-	gw.driveStore.DeleteFile(r.Context(), chi.URLParam(r, "id"))
+	f, err := gw.driveStore.GetFile(r.Context(), defaultTenant, chi.URLParam(r, "id"))
+	if err != nil || f == nil {
+		w.WriteHeader(404)
+		return
+	}
+	callerAgent, isAdmin := gw.driveCaller(r)
+	if !(isAdmin || (callerAgent != "" && f.AgentID != nil && callerAgent == *f.AgentID)) {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	gw.driveStore.DeleteFile(r.Context(), f.ID)
+	w.WriteHeader(204)
+}
+
+func (gw *Gateway) handleSetDriveScope(w http.ResponseWriter, r *http.Request) {
+	if gw.driveStore == nil {
+		writeJSON(w, 503, map[string]string{"error": "drive not configured"})
+		return
+	}
+	var body struct {
+		Scope   string  `json:"scope"`
+		ScopeID *string `json:"scope_id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	switch body.Scope {
+	case drive.ScopePrivate, drive.ScopeCompany, drive.ScopeDepartment, drive.ScopeCustom:
+	default:
+		writeJSON(w, 400, map[string]string{"error": "invalid scope"})
+		return
+	}
+	f, err := gw.driveStore.GetFile(r.Context(), defaultTenant, chi.URLParam(r, "id"))
+	if err != nil || f == nil {
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	callerAgent, isAdmin := gw.driveCaller(r)
+	if !(isAdmin || (callerAgent != "" && f.AgentID != nil && callerAgent == *f.AgentID)) {
+		writeJSON(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	if err := gw.driveStore.SetScope(r.Context(), defaultTenant, f.ID, body.Scope, body.ScopeID); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
 	w.WriteHeader(204)
 }
 
@@ -1347,8 +1410,10 @@ func (gw *Gateway) handleDownloadRemoteFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Save the downloaded content to local storage.
-	storagePath := fmt.Sprintf("/tmp/qorven-drive/%s/remote/%s", defaultTenant, body.Name)
+	// Save the downloaded content to the persistent drive root (not /tmp, which
+	// is ephemeral and would also fail the download handler's root check). The
+	// "remote" pseudo-agent segment keeps imported files in their own subtree.
+	storagePath := drive.DriveFilePath(defaultTenant, "remote", body.Name)
 	os.MkdirAll(filepath.Dir(storagePath), 0755)
 
 	if err := os.WriteFile(storagePath, []byte(result), 0644); err != nil {
