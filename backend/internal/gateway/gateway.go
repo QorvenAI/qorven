@@ -1567,6 +1567,14 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 	if gw.mailStore != nil && gw.mailRouter != nil && gw.inbound != nil && gw.db != nil {
 		gw.mailPoller = mail.NewIMAPPoller(gw.mailStore, gw.mailRouter)
 		gw.mailPoller.SetAgentTrigger(func(ctx context.Context, agentID, sessionID, emailContent, subject, from, inReplyTo, authResults string) {
+			// This callback runs in a detached goroutine launched by the poller.
+			// Recover from any panic in the brain so a single malformed message
+			// cannot crash the server.
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("mail.poller.trigger.panic", "agent", agentID, "panic", r)
+				}
+			}()
 			// Build the full anti-fabrication context before routing to the brain.
 			// BuildVerifiedContext prepends the TRUST & VERIFICATION instruction block
 			// and appends the verified thread history from the DB (not from the email body).

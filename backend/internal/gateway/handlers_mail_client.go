@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/crypto"
@@ -268,8 +269,14 @@ func (gw *Gateway) handleMailAttachment(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 			}
+			// Serve attacker-influenced bytes safely: nosniff stops the browser
+			// from re-interpreting the declared type, and the always-attachment
+			// disposition prevents inline rendering (no HTML/script execution).
+			// Strip CR/LF/quotes from the filename so it cannot break the header.
+			safeName := strings.NewReplacer("\r", "", "\n", "", `"`, "").Replace(att.Name)
 			w.Header().Set("Content-Type", ct)
-			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, att.Name))
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
 			w.Write(data) //nolint:errcheck
 			return
 		}

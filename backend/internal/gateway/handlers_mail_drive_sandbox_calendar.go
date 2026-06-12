@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +22,34 @@ import (
 	"github.com/qorvenai/qorven/internal/channels"
 	"github.com/qorvenai/qorven/internal/mail"
 )
+
+// isLoopbackRequest reports whether the request's TCP peer is the loopback
+// interface. It checks RemoteAddr (the real socket peer), not X-Forwarded-For,
+// which a client could spoof — a reverse proxy on the same host connects from
+// loopback, so this correctly admits the documented localhost-proxy setup while
+// rejecting direct network requests.
+func isLoopbackRequest(r *http.Request) bool {
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// safeGo runs fn in a goroutine with panic recovery so a panic in detached
+// background work (inbound mail processing, etc.) logs instead of crashing the
+// process. label identifies the work site in the recovery log.
+func safeGo(label string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("safego.panic", "label", label, "panic", r)
+			}
+		}()
+		fn()
+	}()
+}
 
 func (gw *Gateway) handleListMailIdentities(w http.ResponseWriter, r *http.Request) {
 	if gw.mailStore == nil {
@@ -503,6 +532,14 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
+	} else if !isLoopbackRequest(r) {
+		// No signing secret configured: this endpoint feeds the autonomous brain,
+		// so it must NOT be reachable unauthenticated from the network. Accept only
+		// loopback (the documented "reverse proxy on localhost" setup); reject
+		// everything else so an unconfigured deployment fails closed.
+		slog.Warn("mail.webhook.rejected.no_secret", "remote", r.RemoteAddr)
+		http.Error(w, "webhook authentication not configured", http.StatusUnauthorized)
+		return
 	}
 
 	var body struct {
@@ -549,8 +586,11 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 				threadID, body.From, body.FromName, body.Subject, rawBody, body.AuthResults,
 			)
 			// Detach from the request context — it is cancelled when this webhook
-			// returns 200, which would kill the agent run mid-flight.
-			go gw.inbound.Process(context.WithoutCancel(r.Context()), channels.InboundMessage{
+			// returns 200, which would kill the agent run mid-flight. The run is
+			// wrapped so a panic in the brain cannot crash the server: this path
+			// is reachable by any inbound email, so a single malformed message
+			// must never take the process down.
+			msg := channels.InboundMessage{
 				ChannelType: "email",
 				ChannelName: "mail",
 				AgentID:     t.AgentID,
@@ -565,7 +605,9 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 					"references":   body.References,
 					"auth_results": body.AuthResults,
 				},
-			})
+			}
+			ctx := context.WithoutCancel(r.Context())
+			safeGo("mail.inbound.webhook", func() { gw.inbound.Process(ctx, msg) })
 		}
 	}
 	w.WriteHeader(200)

@@ -17,6 +17,21 @@ type SMTPSender struct{}
 
 func NewSMTPSender() *SMTPSender { return &SMTPSender{} }
 
+// sanitizeHeader strips CR/LF so a caller-supplied value (recipient, subject,
+// reply-to, display name) cannot inject extra headers or body into the message.
+func sanitizeHeader(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
+// sanitizeAddrs sanitizes each address in a list.
+func sanitizeAddrs(addrs []string) []string {
+	out := make([]string, len(addrs))
+	for i, a := range addrs {
+		out[i] = sanitizeHeader(a)
+	}
+	return out
+}
+
 // SendOptions carries optional per-send overrides beyond the identity defaults.
 type SendOptions struct {
 	// Cc / Bcc are additional recipients.  Cc appears in headers; Bcc is
@@ -40,13 +55,24 @@ func (s *SMTPSender) Send(identity *Identity, smtpPass string, to []string, subj
 		opt = &SendOptions{}
 	}
 
+	// Sanitize every value that lands in a header so a malicious recipient,
+	// subject or reply-to cannot inject extra headers (e.g. a hidden Bcc) or
+	// terminate the header block early.  The SMTP envelope is sanitized too.
+	to = sanitizeAddrs(to)
+	opt.Cc = sanitizeAddrs(opt.Cc)
+	opt.Bcc = sanitizeAddrs(opt.Bcc)
+	subject = sanitizeHeader(subject)
+	opt.ReplyTo = sanitizeHeader(opt.ReplyTo)
+	displayName := sanitizeHeader(identity.DisplayName)
+	fromAddr := sanitizeHeader(identity.Address)
+
 	addr := fmt.Sprintf("%s:%d", identity.SMTPHost, identity.SMTPPort)
 	auth := smtp.PlainAuth("", identity.SMTPUser, smtpPass, identity.SMTPHost)
 
 	// Resolve Reply-To: per-send override > identity default.
 	replyTo := opt.ReplyTo
 	if replyTo == "" {
-		replyTo = identity.ReplyTo
+		replyTo = sanitizeHeader(identity.ReplyTo)
 	}
 
 	// Resolve Importance: per-send override > identity default.
@@ -63,7 +89,7 @@ func (s *SMTPSender) Send(identity *Identity, smtpPass string, to []string, subj
 
 	// Build RFC 5322 message
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", identity.DisplayName, identity.Address))
+	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", displayName, fromAddr))
 	msg.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(to, ", ")))
 	if len(opt.Cc) > 0 {
 		msg.WriteString(fmt.Sprintf("Cc: %s\r\n", strings.Join(opt.Cc, ", ")))

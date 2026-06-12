@@ -123,3 +123,33 @@ func TestFolderHelpers_Compile(t *testing.T) {
 	_ = (*Store).ListDrafts
 	_ = (*Store).BulkUpdate
 }
+
+func TestSanitizeHeader_StripsCRLF(t *testing.T) {
+	cases := map[string]string{
+		"plain subject":                 "plain subject",
+		"line1\r\nBcc: evil@x.com":      "line1Bcc: evil@x.com",
+		"a\nb\rc":                       "abc",
+		"Re: hi\r\nContent-Type: text": "Re: hiContent-Type: text",
+	}
+	for in, want := range cases {
+		if got := sanitizeHeader(in); got != want {
+			t.Errorf("sanitizeHeader(%q) = %q, want %q", in, got, want)
+		}
+		if strings.ContainsAny(sanitizeHeader(in), "\r\n") {
+			t.Errorf("sanitizeHeader(%q) still contains CR/LF", in)
+		}
+	}
+}
+
+func TestSanitizeAddrs_StripsCRLF(t *testing.T) {
+	in := []string{"ok@x.com", "evil@x.com\r\nBcc: victim@y.com"}
+	got := sanitizeAddrs(in)
+	for _, a := range got {
+		if strings.ContainsAny(a, "\r\n") {
+			t.Errorf("sanitizeAddrs left CR/LF in %q", a)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 addrs, got %d", len(got))
+	}
+}
