@@ -272,8 +272,17 @@ func (e *Executor) ExecuteSafe(ctx context.Context, platformID, actionKey string
 	return e.Execute(ctx, platformID, actionKey, params)
 }
 
+type ctxKey string
+
+const agentIDCtxKey ctxKey = "connector_agent_id"
+
+// WithAgentID returns a context carrying the agent id for connector permission checks.
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, agentIDCtxKey, agentID)
+}
+
 func agentIDFromContext(ctx context.Context) string {
-	if v := ctx.Value("agent_id"); v != nil {
+	if v := ctx.Value(agentIDCtxKey); v != nil {
 		if s, ok := v.(string); ok {
 			return s
 		}

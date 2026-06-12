@@ -47,6 +47,10 @@ func (t *ExecuteActionTool) Execute(ctx context.Context, args map[string]any) *t
 		return tools.ErrorResult("platform and action are required")
 	}
 
+	if aid := tools.AgentIDFromCtx(ctx); aid != "" {
+		ctx = WithAgentID(ctx, aid)
+	}
+
 	result, err := t.executor.Execute(ctx, platformID, actionKey, params)
 	if err != nil {
 		return tools.ErrorResult(fmt.Sprintf("Error: %v", err))
