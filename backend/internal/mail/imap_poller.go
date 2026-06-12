@@ -128,11 +128,16 @@ func (p *IMAPPoller) PollIdentity(ctx context.Context, tenantID string, id *Iden
 			toAddrs = []string{id.Address}
 		}
 
-		p.router.Route(ctx, tenantID, from, "", subject, bodyText, "", messageID, inReplyTo, toAddrs)
+		targets, _ := p.router.RouteAndResolve(ctx, tenantID, from, "", subject, bodyText, "", messageID, inReplyTo, toAddrs)
 
-		// Fix #5: Trigger agent loop when mail arrives
-		if p.agentTrigger != nil && id.AgentID != nil {
-			go p.agentTrigger(ctx, *id.AgentID, "", bodyText, subject, from)
+		// Fire the agent brain for every resolved target — covers both
+		// dedicated identities (one target = their agent) and shared-mailbox
+		// / alias mail (one or more targets = the mapped agents).
+		if p.agentTrigger != nil {
+			for _, t := range targets {
+				agentID := t.AgentID
+				go p.agentTrigger(ctx, agentID, "", bodyText, subject, from)
+			}
 		}
 
 		count++

@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/calendar"
+	"github.com/qorvenai/qorven/internal/channels"
 	"github.com/qorvenai/qorven/internal/crypto"
 )
 
@@ -339,7 +340,36 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 	if body.MessageID == "" {
 		body.MessageID = fmt.Sprintf("<%d@inbound>", time.Now().UnixNano())
 	}
-	gw.mailRouter.Route(r.Context(), defaultTenant, body.From, body.FromName, body.Subject, body.BodyText, body.BodyHTML, body.MessageID, body.InReplyTo, body.To)
+	targets, _ := gw.mailRouter.RouteAndResolve(r.Context(), defaultTenant, body.From, body.FromName, body.Subject, body.BodyText, body.BodyHTML, body.MessageID, body.InReplyTo, body.To)
+
+	// Fire the agent brain for each resolved target that wants a trigger.
+	// Per-identity inbound secrets are not checked here because the global
+	// MAIL_WEBHOOK_SECRET HMAC (verified above) already authenticates the
+	// payload — the identity is not known until after routing resolves it.
+	if gw.inbound != nil {
+		content := body.BodyText
+		if content == "" {
+			content = body.BodyHTML
+		}
+		for _, t := range targets {
+			go gw.inbound.Process(r.Context(), channels.InboundMessage{
+				ChannelType: "email",
+				ChannelName: "mail",
+				AgentID:     t.AgentID,
+				SenderID:    body.From,
+				SenderName:  body.FromName,
+				Content:     content,
+				Subject:     body.Subject,
+				ReplyTo:     body.MessageID,
+				Metadata: map[string]string{
+					"message_id":   body.MessageID,
+					"in_reply_to":  body.InReplyTo,
+					"references":   body.References,
+					"auth_results": body.AuthResults,
+				},
+			})
+		}
+	}
 	w.WriteHeader(200)
 }
 
