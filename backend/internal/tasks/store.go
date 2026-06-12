@@ -99,13 +99,22 @@ func (s *Store) Create(ctx context.Context, tenantID string, t Task) (string, er
 		t.Context = s.buildContext(ctx, *t.ParentID)
 	}
 
+	// Convert string UUID fields to *string so pgx sends NULL (not '') for uuid columns.
+	var discussionID, originSessionID *string
+	if t.DiscussionID != "" {
+		discussionID = &t.DiscussionID
+	}
+	if t.OriginSessionID != "" {
+		originSessionID = &t.OriginSessionID
+	}
+
 	var id string
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO tasks (tenant_id, parent_id, title, description, context, assigned_to, assigned_by, status, priority, due_at, discussion_id, origin_session_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), NULLIF($12, '')) RETURNING id`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
 		tenantID, t.ParentID, t.Title, t.Description, t.Context,
 		t.AssignedTo, t.AssignedBy, t.Status, t.Priority, t.DueAt,
-		t.DiscussionID, t.OriginSessionID,
+		discussionID, originSessionID,
 	).Scan(&id)
 	return id, err
 }
