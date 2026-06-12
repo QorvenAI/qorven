@@ -27,6 +27,8 @@ type File struct {
 	ParentID  *string   `json:"parent_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Scope    string  `json:"scope"`
+	ScopeID  *string `json:"scope_id"`
 }
 
 func (s *Store) ListFiles(ctx context.Context, agentID string, parentID *string) ([]File, error) {
