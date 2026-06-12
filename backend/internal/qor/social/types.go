@@ -6,6 +6,21 @@ package social
 
 import "time"
 
+// Campaign represents a marketing campaign that groups social posts.
+type Campaign struct {
+	ID               string     `json:"id"`
+	TenantID         string     `json:"tenant_id"`
+	DepartmentID     string     `json:"department_id"`
+	CreatedByAgentID string     `json:"created_by_agent_id"`
+	Title            string     `json:"title"`
+	Brief            string     `json:"brief"`
+	TargetPlatforms  []string   `json:"target_platforms"`
+	WindowStart      *time.Time `json:"window_start,omitempty"`
+	WindowEnd        *time.Time `json:"window_end,omitempty"`
+	Status           string     `json:"status"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
 // types.go — Social media management types for Qorven-Social.
 
 // Platform represents a social media platform.
@@ -35,28 +50,32 @@ const (
 
 // Post represents a social media post.
 type Post struct {
-	ID          string            `json:"id"`
-	Content     string            `json:"content"`
-	MediaURLs   []string          `json:"media_urls,omitempty"`
-	Platforms   []Platform        `json:"platforms"`
-	Tags        []string          `json:"tags,omitempty"`
-	Status      PostStatus        `json:"status"`
-	ScheduledAt *time.Time        `json:"scheduled_at,omitempty"`
-	PublishedAt *time.Time        `json:"published_at,omitempty"`
-	AgentID     string            `json:"agent_id"`
-	TeamID      string            `json:"team_id,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID             string            `json:"id"`
+	Content        string            `json:"content"`
+	MediaURLs      []string          `json:"media_urls,omitempty"`
+	Platforms      []Platform        `json:"platforms"`
+	Tags           []string          `json:"tags,omitempty"`
+	Status         PostStatus        `json:"status"`
+	ScheduledAt    *time.Time        `json:"scheduled_at,omitempty"`
+	PublishedAt    *time.Time        `json:"published_at,omitempty"`
+	AgentID        string            `json:"agent_id"`
+	TeamID         string            `json:"team_id,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	DepartmentID   string            `json:"department_id,omitempty"`
+	CampaignID     string            `json:"campaign_id,omitempty"`
+	ApprovalStatus string            `json:"approval_status,omitempty"`
 }
 
 type PostStatus string
 
 const (
-	PostDraft     PostStatus = "draft"
-	PostScheduled PostStatus = "scheduled"
-	PostPublished PostStatus = "published"
-	PostFailed    PostStatus = "failed"
+	PostDraft           PostStatus = "draft"
+	PostScheduled       PostStatus = "scheduled"
+	PostPublished       PostStatus = "published"
+	PostFailed          PostStatus = "failed"
+	PostPendingApproval PostStatus = "pending_approval"
 )
 
 // AutoPost is a recurring posting rule.
@@ -100,6 +119,9 @@ type Integration struct {
 	RelayProviderKeyID string            `json:"relay_provider_key_id,omitempty"` // FK to relay_providers
 	RelayAccountID     string            `json:"relay_account_id,omitempty"`      // account ID within the relay provider
 	RelayMetadata      map[string]string `json:"relay_metadata,omitempty"`
+
+	// Department ownership
+	DepartmentID string `json:"department_id,omitempty"`
 }
 
 // PostResult holds the outcome of publishing to a platform.
