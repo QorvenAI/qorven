@@ -16,6 +16,7 @@ import (
 	"github.com/qorvenai/qorven/internal/billing"
 	"github.com/qorvenai/qorven/internal/connectors"
 	gatewayllm "github.com/qorvenai/qorven/internal/gateway/llm"
+	"github.com/qorvenai/qorven/internal/knowledgegraph"
 	"github.com/qorvenai/qorven/internal/mcp"
 	"github.com/qorvenai/qorven/internal/config"
 	"github.com/qorvenai/qorven/internal/memory"
@@ -60,7 +61,7 @@ type Loop struct {
 	PrimeID         string                                          // Prime's agent ID for heartbeats
 	HierarchyMem    *memory.HierarchyStore                          // company > team > agent memory
 	WorkingMem      *memory.WorkingMemory                           // short-term events
-	KnowledgeGraph  *memory.KnowledgeGraph                          // entity + relationship graph
+	KnowledgeGraph  *knowledgegraph.Store                           // entity + relationship graph
 	systemKnowledge string                                          // QORVEN.md content for Prime
 	skillLearner    *skills.Learner                                 // self-improving skill creation
 	pluginMgr       *plugin.Manager                                 // plugin system

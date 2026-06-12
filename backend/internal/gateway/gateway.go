@@ -1124,7 +1124,9 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 				hierMem := memory.NewHierarchyStore(gw.memStore, defaultTenant)
 				gw.agentLoop.HierarchyMem = hierMem
 				gw.agentLoop.WorkingMem = memory.NewWorkingMemory()
-				gw.agentLoop.KnowledgeGraph = memory.NewKnowledgeGraph(gw.db.Pool)
+				if gw.kgStore != nil {
+					gw.agentLoop.KnowledgeGraph = gw.kgStore
+				}
 
 				// Gap B fix: Prime Live Digest — Prime knows what every agent is doing
 				if primeID != "" && gw.sessions != nil && gw.brain != nil {
