@@ -17,20 +17,69 @@ type SMTPSender struct{}
 
 func NewSMTPSender() *SMTPSender { return &SMTPSender{} }
 
+// SendOptions carries optional per-send overrides beyond the identity defaults.
+type SendOptions struct {
+	// Cc / Bcc are additional recipients.  Cc appears in headers; Bcc is
+	// delivered to the SMTP server but not written into any header.
+	Cc  []string
+	Bcc []string
+	// ReplyTo overrides the identity-level Reply-To if non-empty.
+	ReplyTo string
+	// Importance overrides the identity-level default_importance if non-empty.
+	// Accepted values: "high", "normal", "low".
+	Importance string
+}
+
 // Send delivers an email via the identity's SMTP server.
-func (s *SMTPSender) Send(identity *Identity, smtpPass string, to []string, subject, bodyText, bodyHTML string) error {
+// opt may be nil; supply it to set Cc, Bcc, ReplyTo or Importance.
+func (s *SMTPSender) Send(identity *Identity, smtpPass string, to []string, subject, bodyText, bodyHTML string, opt *SendOptions) error {
 	if identity.SMTPHost == "" || smtpPass == "" {
 		return fmt.Errorf("SMTP not configured for %s", identity.Address)
+	}
+	if opt == nil {
+		opt = &SendOptions{}
 	}
 
 	addr := fmt.Sprintf("%s:%d", identity.SMTPHost, identity.SMTPPort)
 	auth := smtp.PlainAuth("", identity.SMTPUser, smtpPass, identity.SMTPHost)
 
+	// Resolve Reply-To: per-send override > identity default.
+	replyTo := opt.ReplyTo
+	if replyTo == "" {
+		replyTo = identity.ReplyTo
+	}
+
+	// Resolve Importance: per-send override > identity default.
+	importance := opt.Importance
+	if importance == "" {
+		importance = identity.DefaultImportance
+	}
+
+	// SMTP envelope = To + Cc + Bcc (all must receive the message).
+	envelope := make([]string, 0, len(to)+len(opt.Cc)+len(opt.Bcc))
+	envelope = append(envelope, to...)
+	envelope = append(envelope, opt.Cc...)
+	envelope = append(envelope, opt.Bcc...)
+
 	// Build RFC 5322 message
 	var msg strings.Builder
 	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", identity.DisplayName, identity.Address))
 	msg.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(to, ", ")))
+	if len(opt.Cc) > 0 {
+		msg.WriteString(fmt.Sprintf("Cc: %s\r\n", strings.Join(opt.Cc, ", ")))
+	}
+	// Bcc is intentionally omitted from headers.
 	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	if replyTo != "" {
+		msg.WriteString(fmt.Sprintf("Reply-To: %s\r\n", replyTo))
+	}
+	if importance == "high" {
+		msg.WriteString("Importance: high\r\n")
+		msg.WriteString("X-Priority: 1\r\n")
+	} else if importance == "low" {
+		msg.WriteString("Importance: low\r\n")
+		msg.WriteString("X-Priority: 5\r\n")
+	}
 
 	if bodyHTML != "" {
 		msg.WriteString("MIME-Version: 1.0\r\n")
@@ -49,9 +98,9 @@ func (s *SMTPSender) Send(identity *Identity, smtpPass string, to []string, subj
 
 	// Try STARTTLS on port 587, direct TLS on 465
 	if identity.SMTPPort == 465 {
-		return s.sendTLS(addr, identity.SMTPHost, auth, identity.Address, to, msg.String())
+		return s.sendTLS(addr, identity.SMTPHost, auth, identity.Address, envelope, msg.String())
 	}
-	err := smtp.SendMail(addr, auth, identity.Address, to, []byte(msg.String()))
+	err := smtp.SendMail(addr, auth, identity.Address, envelope, []byte(msg.String()))
 	if err != nil {
 		slog.Warn("smtp.send.error", "identity", identity.Address, "error", err)
 	} else {

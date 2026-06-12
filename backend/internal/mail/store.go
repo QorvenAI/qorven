@@ -148,6 +148,32 @@ func (s *Store) IdentitySMTPPass(ctx context.Context, id, encKey string) (string
 	return crypto.DecryptString(enc, encKey)
 }
 
+// GetIdentityForAgent returns the first active identity bound to the given agent.
+func (s *Store) GetIdentityForAgent(ctx context.Context, agentID, tenantID string) (*Identity, error) {
+	i := &Identity{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, tenant_id, agent_id, address, display_name, identity_type, is_active,
+		        COALESCE(smtp_host,''), COALESCE(smtp_port,587), COALESCE(smtp_user,''),
+		        COALESCE(imap_host,''), COALESCE(imap_port,993), COALESCE(imap_user,''),
+		        COALESCE(poll_interval_seconds,60),
+		        COALESCE(transport,'native'), COALESCE(forward_url,''),
+		        COALESCE(signature_html,''), COALESCE(signature_text,''),
+		        COALESCE(reply_to,''), COALESCE(default_importance,'normal'),
+		        created_at
+		 FROM soul_mail_identities
+		 WHERE agent_id = $1 AND tenant_id = $2 AND is_active = true
+		 ORDER BY created_at LIMIT 1`, agentID, tenantID,
+	).Scan(&i.ID, &i.TenantID, &i.AgentID, &i.Address, &i.DisplayName, &i.IdentityType, &i.IsActive,
+		&i.SMTPHost, &i.SMTPPort, &i.SMTPUser,
+		&i.IMAPHost, &i.IMAPPort, &i.IMAPUser,
+		&i.PollInterval,
+		&i.Transport, &i.ForwardURL,
+		&i.SignatureHTML, &i.SignatureText,
+		&i.ReplyTo, &i.DefaultImportance,
+		&i.CreatedAt)
+	return i, err
+}
+
 // IdentityIMAPPass returns the decrypted IMAP password for an identity.
 func (s *Store) IdentityIMAPPass(ctx context.Context, id, encKey string) (string, error) {
 	var enc string
