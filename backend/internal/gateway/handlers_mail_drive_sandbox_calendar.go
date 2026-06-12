@@ -764,9 +764,10 @@ func (gw *Gateway) handleListDriveFiles(w http.ResponseWriter, r *http.Request) 
 	}
 	// Full-text search ignores folder hierarchy — return flat matches across all files.
 	if search != "" {
-		// TODO(drive-s2): ACL-filter search results
+		// TODO(drive-s2): ACL-filter search results by scope (names/metadata only;
+		// content download is already ACL-gated). Tenant-scoped below.
 		agentID := r.URL.Query().Get("agent_id")
-		files, err := gw.driveStore.SearchFiles(r.Context(), agentID, search)
+		files, err := gw.driveStore.SearchFiles(r.Context(), defaultTenant, agentID, search)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -1409,8 +1410,10 @@ func (gw *Gateway) handleDownloadRemoteFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Save the downloaded content to local storage.
-	storagePath := fmt.Sprintf("/tmp/qorven-drive/%s/remote/%s", defaultTenant, body.Name)
+	// Save the downloaded content to the persistent drive root (not /tmp, which
+	// is ephemeral and would also fail the download handler's root check). The
+	// "remote" pseudo-agent segment keeps imported files in their own subtree.
+	storagePath := drive.DriveFilePath(defaultTenant, "remote", body.Name)
 	os.MkdirAll(filepath.Dir(storagePath), 0755)
 
 	if err := os.WriteFile(storagePath, []byte(result), 0644); err != nil {

@@ -20,7 +20,7 @@ type File struct {
 	TenantID  string    `json:"tenant_id"`
 	AgentID   *string   `json:"agent_id"`
 	Name      string    `json:"name"`
-	Path      string    `json:"path"`
+	Path      string    `json:"-"` // server FS path — never exposed to clients
 	MimeType  string    `json:"mime_type"`
 	SizeBytes int64     `json:"size_bytes"`
 	IsFolder  bool      `json:"is_folder"`
@@ -62,16 +62,20 @@ func (s *Store) ListFiles(ctx context.Context, agentID string, parentID *string)
 	return files, nil
 }
 
-// SearchFiles returns files whose name matches the query string, across all folders.
-func (s *Store) SearchFiles(ctx context.Context, agentID, q string) ([]File, error) {
+// SearchFiles returns files whose name matches the query string, across all
+// folders, tenant-scoped. NOTE: results are NOT yet scope/ACL-filtered — that
+// is owned by Subsystem 2 (the search UI). It leaks names/metadata (not content)
+// within a tenant; content download is still ACL-gated. The tenant predicate
+// here prevents cross-tenant name leakage.
+func (s *Store) SearchFiles(ctx context.Context, tenantID, agentID, q string) ([]File, error) {
 	var rows interface{ Next() bool; Scan(...any) error; Close() }
 	var err error
 	base := `SELECT id, tenant_id, agent_id, name, path, COALESCE(mime_type,''), size_bytes, is_folder, parent_id, created_at, updated_at, scope, scope_id
-		 FROM drive_files WHERE name ILIKE '%' || $1 || '%'`
+		 FROM drive_files WHERE tenant_id = $1 AND name ILIKE '%' || $2 || '%'`
 	if agentID != "" {
-		rows, err = s.pool.Query(ctx, base+` AND agent_id = $2 ORDER BY is_folder DESC, name LIMIT 20`, q, agentID)
+		rows, err = s.pool.Query(ctx, base+` AND agent_id = $3 ORDER BY is_folder DESC, name LIMIT 20`, tenantID, q, agentID)
 	} else {
-		rows, err = s.pool.Query(ctx, base+` ORDER BY is_folder DESC, name LIMIT 20`, q)
+		rows, err = s.pool.Query(ctx, base+` ORDER BY is_folder DESC, name LIMIT 20`, tenantID, q)
 	}
 	if err != nil {
 		return nil, err
