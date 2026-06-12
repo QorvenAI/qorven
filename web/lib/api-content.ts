@@ -134,11 +134,39 @@ export const connections = {
   list: () => request<{ connections: any[] }>('/connections'),
   // config carries per-connection host placeholders (e.g. {site} for WordPress),
   // pinned + SSRF-validated server-side.
-  save: (platformId: string, token: string, label?: string, config?: Record<string, string>) =>
-    request<any>(`/connections/${platformId}`, {
+  // authType drives which body field is used: api_key platforms expect {api_key},
+  // bearer/basic platforms expect {token}. Defaults to bearer when omitted so that
+  // the existing provider-keys caller (GitHub, bearer auth) continues to work.
+  save: (platformId: string, secretOrAuthType: string, secretOrLabel?: string, labelOrConfig?: string | Record<string, string>, config?: Record<string, string>) => {
+    // Overload detection: if secretOrLabel looks like an auth type, treat as
+    // save(platformId, authType, secret, label?, config?)
+    // Otherwise fall back to legacy save(platformId, token, label?, config?).
+    const knownAuthTypes = ['api_key', 'bearer', 'basic', 'oauth2', 'none'];
+    let authType: string;
+    let secret: string;
+    let label: string | undefined;
+    let cfg: Record<string, string> | undefined;
+    if (knownAuthTypes.includes(secretOrAuthType)) {
+      authType = secretOrAuthType;
+      secret = secretOrLabel as string;
+      label = typeof labelOrConfig === 'string' ? labelOrConfig : undefined;
+      cfg = typeof labelOrConfig === 'object' ? labelOrConfig : config;
+    } else {
+      // Legacy: save(platformId, token, label?, config?)
+      authType = 'bearer';
+      secret = secretOrAuthType;
+      label = secretOrLabel as string | undefined;
+      cfg = labelOrConfig as Record<string, string> | undefined;
+    }
+    const body: Record<string, unknown> = { label: label || 'default' };
+    if (cfg) body.config = cfg;
+    if (authType === 'api_key') body.api_key = secret;
+    else body.token = secret;
+    return request<any>(`/connections/${platformId}`, {
       method: 'POST',
-      body: JSON.stringify({ token, label: label || 'default', config: config || undefined }),
-    }),
+      body: JSON.stringify(body),
+    });
+  },
   delete: (platformId: string) =>
     request<void>(`/connections/${platformId}`, { method: 'DELETE' }),
 };

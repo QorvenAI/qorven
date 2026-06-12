@@ -30,6 +30,7 @@ import { PageShell } from '@/components/layouts/page-shell';
 import { toast } from 'sonner';
 import {
   connectors,
+  connections,
   type ConnectorManifest,
   type ConnectorPlatform,
 } from '@/lib/api';
@@ -155,15 +156,28 @@ export default function ConnectorsPage() {
 
   useEffect(() => { load(); }, []);
 
-  // Keep connected-state in localStorage so the UI reflects the
-  // user's prior connections without a round-trip. Real wiring
-  // (credential store, OAuth tokens) happens via the backend.
+  // Seed connected-state from both localStorage (optimistic cache) and the
+  // backend vault (source of truth). The vault wins: any platform the vault
+  // knows about is shown as connected regardless of localStorage.
   useEffect(() => {
+    let ids: string[] = [];
     try {
-      const raw = localStorage.getItem('qorven_connected') ?? '[]';
-      const ids: string[] = JSON.parse(raw);
-      setConnected(new Set(ids));
+      ids = JSON.parse(localStorage.getItem('qorven_connected') ?? '[]');
     } catch {}
+    // Start with what localStorage says, then reconcile against the vault.
+    setConnected(new Set(ids));
+    connections.list().then((res) => {
+      const serverIds = (res.connections ?? []).map((c: any) => c.platform_id as string).filter(Boolean);
+      if (serverIds.length > 0) {
+        setConnected((prev) => {
+          const merged = new Set(prev);
+          for (const id of serverIds) merged.add(id);
+          // Persist the merged set back to localStorage so next load is fast.
+          localStorage.setItem('qorven_connected', JSON.stringify([...merged]));
+          return merged;
+        });
+      }
+    }).catch(() => { /* vault unavailable — localStorage already set */ });
   }, []);
   const markConnected = (id: string) => {
     const next = new Set(connected);
@@ -1177,6 +1191,19 @@ function ConnectSheet({
         // so the user gets an immediate pass/fail rather than
         // discovering the bad credential hours later during a run.
         await connectors.test(entry.id, values);
+      }
+      // Persist the credential to the vault so agents can read it at runtime.
+      // Skip oauth2 (handled via redirect flow) and none (no secret to store).
+      // For basic auth the backend currently expects a single token field, so
+      // we join username:password — for api_key we send the api_key field.
+      if (entry.authType !== 'oauth2' && entry.authType !== 'none' && fields.length > 0) {
+        const secret =
+          entry.authType === 'api_key' ? values.api_key :
+          entry.authType === 'basic' ? `${values.username ?? ''}:${values.password ?? ''}` :
+          values.token; // bearer / default
+        if (secret) {
+          await connections.save(entry.id, entry.authType, secret);
+        }
       }
       onConnected();
     } catch (e) {
