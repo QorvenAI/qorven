@@ -778,6 +778,36 @@ func (p *Publisher) PublishToAll(ctx context.Context, store *Store, post *Post) 
 	return results
 }
 
+// PublishToAllVia routes each target platform through the RelayRouter, which
+// publishes direct or via a relay (Buffer/Outstand/PostForMe) per the
+// integration's RelayProvider. This is the live publish path (replaces the
+// direct-only PublishToAll).
+func (p *Publisher) PublishToAllVia(ctx context.Context, store *Store, router *RelayRouter, post *Post) []PostResult {
+	results := []PostResult{}
+	for _, platform := range post.Platforms {
+		integ, err := store.GetIntegrationForPlatform(ctx, post.AgentID, platform)
+		if err != nil || integ == nil {
+			results = append(results, PostResult{Platform: platform, Success: false, Error: "no integration for " + string(platform)})
+			continue
+		}
+		// Reddit needs a subreddit from post metadata — thread it via the
+		// integration's RelayMetadata so the publisher can read it.
+		if platform == PlatformReddit && post.Metadata != nil {
+			if sr := post.Metadata["subreddit"]; sr != "" {
+				if integ.RelayMetadata == nil {
+					integ.RelayMetadata = map[string]string{}
+				}
+				integ.RelayMetadata["subreddit"] = sr
+			}
+		}
+		res := router.PublishToIntegration(ctx, integ, post.Content, post.MediaURLs)
+		if res != nil {
+			results = append(results, *res)
+		}
+	}
+	return results
+}
+
 // PublishToIntegrations publishes via specific integration IDs (multi-account aware).
 func (p *Publisher) PublishToIntegrations(ctx context.Context, store *Store, router *RelayRouter, post *Post, integrationIDs []string) []PostResult {
 	results := []PostResult{}
