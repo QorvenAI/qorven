@@ -324,6 +324,28 @@ export const projectCheckpoints = {
     request<{ restored: boolean; commit: string }>(`/projects/${encodeURIComponent(id)}/restore`, { method: 'POST', body: JSON.stringify({ commit }) }),
 };
 
+// Drive scopes + workspace
+export type DriveScope = 'private' | 'company' | 'department' | 'custom';
+
+export interface WorkspaceFileMeta { name: string; missing: boolean; editable: boolean; size: number; }
+
+export const driveApi = {
+  list: (agentId?: string, parentId?: string) => {
+    const p = new URLSearchParams();
+    if (agentId) p.set('agent_id', agentId);
+    if (parentId) p.set('parent_id', parentId);
+    return request<any[]>(`/drive/files?${p}`);
+  },
+  setScope: (id: string, scope: DriveScope, scopeId?: string | null) =>
+    request<void>(`/drive/files/${id}/scope`, { method: 'PUT', body: JSON.stringify({ scope, scope_id: scopeId ?? null }) }),
+  share: (id: string, granteeType: 'agent' | 'department', granteeId: string, permission: 'viewer' | 'editor' | 'admin') =>
+    request<void>(`/drive/files/${id}/share`, { method: 'PUT', body: JSON.stringify({ grantee_type: granteeType, grantee_id: granteeId, permission }) }),
+  workspaceFiles: (agentId: string) => request<{ files: WorkspaceFileMeta[] }>(`/drive/workspace/${agentId}`),
+  workspaceGet: (agentId: string, name: string) => request<{ name: string; content: string; missing: boolean }>(`/drive/workspace/${agentId}/${name}`),
+  workspacePut: (agentId: string, name: string, content: string) =>
+    request<void>(`/drive/workspace/${agentId}/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+};
+
 // Deploy
 export const deployApi = {
   deploy:       (id: string, target: string = 'hosted') =>
