@@ -1,6 +1,6 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
-import { request, listRequest } from './api-core';
+import { request, listRequest, BASE } from './api-core';
 
 // Workflows
 export type WorkflowStepType =
@@ -181,6 +181,13 @@ export interface MailIdentity {
   display_name: string;
   identity_type: 'dedicated' | 'shared' | string;
   is_active?: boolean;
+  transport?: 'smtp' | 'forward' | string;
+  forward_url?: string;
+  reply_to?: string;
+  default_importance?: 'low' | 'normal' | 'high' | string;
+  signature_html?: string;
+  signature_text?: string;
+  inbound_secret?: string;
   smtp_host?: string;
   smtp_port?: number;
   smtp_user?: string;
@@ -198,50 +205,178 @@ export interface MailAlias {
   can_receive: boolean;
 }
 
+export interface MailAttachment {
+  name: string;
+  content_type?: string;
+  size?: number;
+}
+
 export interface MailMessage {
   id: string;
   agent_id?: string;
   from_address: string;
   from_name?: string;
   to_addresses?: string[];
+  cc_addresses?: string[];
+  bcc_addresses?: string[];
   subject: string;
   body_text?: string;
   body_html?: string;
   direction: 'inbound' | 'outbound';
   status: string;
+  send_status?: 'queued' | 'sent' | 'failed' | 'pending_approval' | string;
+  importance?: 'low' | 'normal' | 'high' | string;
   agent_decision?: string;
   thread_id?: string;
+  folder?: string;
   is_read?: boolean;
+  is_starred?: boolean;
+  attachments?: MailAttachment[];
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface MailDraft {
+  id: string;
+  agent_id?: string;
+  identity_id?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  body_html?: string;
+  body_text?: string;
+  importance?: 'low' | 'normal' | 'high' | string;
+  reply_to_message_id?: string;
+  attachments?: MailAttachment[];
   created_at: string;
   updated_at?: string;
 }
 
 export const mail = {
-  inbox: (agentId?: string) => {
-    const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
+  // ── Inbox / folder navigation (folder is always a query param, never a path segment) ──
+  inbox: (folder?: string, agentId?: string) => {
+    const params = new URLSearchParams();
+    if (folder) params.set('folder', folder);
+    if (agentId) params.set('agent_id', agentId);
+    const qs = params.toString() ? `?${params}` : '';
     return listRequest<MailMessage>(`/mail/inbox${qs}`);
+  },
+  // folder() is the UI-facing alias used by page.tsx — calls inbox with folder as query param
+  // Returns any[] to maintain backward compatibility with page.tsx's local MailMsg type
+  folder: (folder: string, agentId?: string): Promise<any[]> => {
+    const params = new URLSearchParams();
+    params.set('folder', folder);
+    if (agentId) params.set('agent_id', agentId);
+    return listRequest<any>(`/mail/inbox?${params}`);
   },
   sent: (agentId?: string) => {
     const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
     return listRequest<MailMessage>(`/mail/sent${qs}`);
   },
-  folder: (folder: string) => listRequest<any>(`/mail/${folder}`),
-  send: (body: { to: string[]; subject: string; body: string }) =>
-    request<void>('/mail/send', { method: 'POST', body: JSON.stringify(body) }),
-  thread: (threadId: string) => listRequest<MailMessage>(`/mail/thread/${threadId}`),
-  getMessage: (id: string) => request<MailMessage>(`/mail/messages/${id}`),
+  get: (id: string) => request<MailMessage>(`/mail/${encodeURIComponent(id)}`),
+  /** @deprecated use mail.get(id) */
+  getMessage: (id: string) => request<MailMessage>(`/mail/${encodeURIComponent(id)}`),
+  thread: (threadId: string) => listRequest<MailMessage>(`/mail/thread/${encodeURIComponent(threadId)}`),
+  search: (q: string, agentId?: string) => {
+    const params = new URLSearchParams({ q });
+    if (agentId) params.set('agent_id', agentId);
+    return listRequest<MailMessage>(`/mail/search?${params}`);
+  },
+
+  // ── Send ──
+  send: (body: {
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject: string;
+    body_html?: string;
+    body_text?: string;
+    /** @deprecated use body_html / body_text */
+    body?: string;
+    importance?: string;
+    reply_to?: string;
+    identity_id?: string;
+    agent_id?: string;
+    attachments?: unknown[];
+  }) => request<void>('/mail/send', { method: 'POST', body: JSON.stringify(body) }),
+
+  // ── Message actions ──
+  setRead: (id: string, read = true) =>
+    request<void>(`/mail/${encodeURIComponent(id)}/read`, { method: 'PUT', body: JSON.stringify({ read }) }),
+  setStar: (id: string, starred = true) =>
+    request<void>(`/mail/${encodeURIComponent(id)}/star`, { method: 'PUT', body: JSON.stringify({ starred }) }),
+  /** @deprecated use mail.setRead */
   markRead: (id: string, read: boolean) =>
-    request<void>(`/mail/messages/${id}/read`, { method: 'POST', body: JSON.stringify({ read }) }),
+    request<void>(`/mail/${encodeURIComponent(id)}/read`, { method: 'PUT', body: JSON.stringify({ read }) }),
+  trash: (id: string) =>
+    request<void>(`/mail/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  archive: (id: string) =>
+    request<void>(`/mail/${encodeURIComponent(id)}/archive`, { method: 'POST' }),
+  move: (id: string, folder: string) =>
+    request<void>(`/mail/${encodeURIComponent(id)}/move`, { method: 'POST', body: JSON.stringify({ folder }) }),
+
+  // ── Bulk actions ──
+  bulk: (ids: string[], action: 'read' | 'star' | 'move' | 'delete', value?: unknown) =>
+    request<void>('/mail/bulk', { method: 'POST', body: JSON.stringify({ ids, action, value }) }),
+
+  // ── Attachments ──
+  /** Returns the URL string for use in <a> / <img> — does not fetch, just builds path. */
+  attachmentUrl: (id: string, name: string) =>
+    `${BASE}/mail/${encodeURIComponent(id)}/attachments/${encodeURIComponent(name)}`,
+
+  // ── Drafts ──
+  draftsList: (agentId?: string) => {
+    const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
+    return listRequest<MailDraft>(`/mail/drafts${qs}`);
+  },
+  draftSave: (body: Partial<MailDraft>) =>
+    request<MailDraft>('/mail/drafts', { method: 'POST', body: JSON.stringify(body) }),
+  draftUpdate: (id: string, body: Partial<MailDraft>) =>
+    request<MailDraft>(`/mail/drafts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  draftDelete: (id: string) =>
+    request<void>(`/mail/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // ── Identities ──
   identities: () => request<MailIdentity[]>('/mail/identities'),
-  createIdentity: (body: { agent_id?: string; address: string; display_name: string; identity_type?: string; smtp_host?: string; smtp_port?: number; smtp_user?: string; smtp_pass?: string; imap_host?: string; imap_port?: number; imap_user?: string; imap_pass?: string }) =>
-    request<MailIdentity>('/mail/identities', { method: 'POST', body: JSON.stringify(body) }),
+  createIdentity: (body: {
+    agent_id?: string;
+    address: string;
+    display_name: string;
+    identity_type?: string;
+    is_active?: boolean;
+    transport?: string;
+    forward_url?: string;
+    reply_to?: string;
+    default_importance?: string;
+    signature_html?: string;
+    signature_text?: string;
+    inbound_secret?: string;
+    smtp_host?: string;
+    smtp_port?: number;
+    smtp_user?: string;
+    smtp_pass?: string;
+    imap_host?: string;
+    imap_port?: number;
+    imap_user?: string;
+    imap_pass?: string;
+  }) => request<MailIdentity>('/mail/identities', { method: 'POST', body: JSON.stringify(body) }),
   updateIdentity: (id: string, body: Partial<MailIdentity> & { smtp_pass?: string; imap_pass?: string }) =>
-    request<void>(`/mail/identities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    request<void>(`/mail/identities/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  // ── Aliases ──
   aliases: () => request<MailAlias[]>('/mail/aliases'),
   createAlias: (body: { alias_address: string; target_agent_id: string; can_send_as: boolean; can_receive: boolean }) =>
     request<{ id: string }>('/mail/aliases', { method: 'POST', body: JSON.stringify(body) }),
   deleteAlias: (id: string) =>
-    request<void>(`/mail/aliases/${id}`, { method: 'DELETE' }),
+    request<void>(`/mail/aliases/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // ── Approvals ──
+  approvalsList: () => request<MailApproval[]>('/approvals/mail'),
+  approvalApprove: (id: string) =>
+    request<{ status: 'approved' }>(`/approvals/mail/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+  approvalReject: (id: string, reason?: string) =>
+    request<{ status: 'rejected' }>(`/approvals/mail/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason: reason ?? '' }) }),
 };
 
 // Social
