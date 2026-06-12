@@ -1165,10 +1165,37 @@ function CalendarTab({ agentId }: { agentId: string }) {
 
 // ─── Posts List Tab ───────────────────────────────────────────────────────────
 
+// Per-platform result from a publishNow call
+type PlatformPublishResult = {
+  platform: string;
+  success: boolean;
+  post_url?: string;
+  post_id?: string;
+  error?: string;
+};
+
+// Status pill label + token mapping
+const POST_STATUS_LABEL: Record<string, string> = {
+  draft:     'Draft',
+  scheduled: 'Scheduled',
+  published: 'Published',
+  failed:    'Failed',
+};
+
+// Token-based status colors (bg/text pairs using design tokens only)
+const POST_STATUS_TOKENS: Record<string, string> = {
+  draft:     'bg-muted text-muted-foreground',
+  scheduled: 'bg-primary/10 text-primary',
+  published: 'bg-soul-idle/20 text-soul-idle',
+  failed:    'bg-destructive/10 text-destructive',
+};
+
 function PostsTab({ agentId, status }: { agentId: string; status: string }) {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedComments, setExpandedComments] = useState<string | null>(null);
+  // Per-platform results keyed by post ID — populated when user triggers publish from this tab
+  const [publishResults, setPublishResults] = useState<Record<string, PlatformPublishResult[]>>({});
   const souls = useStore(s => s.souls);
 
   const load = useCallback(() => {
@@ -1190,8 +1217,15 @@ function PostsTab({ agentId, status }: { agentId: string; status: string }) {
   const publishPost = async (id: string) => {
     try {
       const result = await socialApi.publishNow(id) as any;
-      const ok = result?.results?.filter((r: any) => r.success).length ?? 0;
-      toast.success(`Published to ${ok} platform${ok !== 1 ? 's' : ''}`);
+      const results: PlatformPublishResult[] = result?.results ?? [];
+      const ok = results.filter(r => r.success).length;
+      const fail = results.filter(r => !r.success).length;
+      // Store per-platform results so the card can show them inline
+      if (results.length > 0) {
+        setPublishResults(prev => ({ ...prev, [id]: results }));
+      }
+      if (fail === 0) toast.success(`Published to ${ok} platform${ok !== 1 ? 's' : ''} ✓`);
+      else toast.error(`${ok} succeeded, ${fail} failed`);
       load();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
   };
@@ -1221,14 +1255,22 @@ function PostsTab({ agentId, status }: { agentId: string; status: string }) {
         const soul = souls.find(s => s.id === post.agent_id);
         const date = post.scheduled_at || post.published_at || post.created_at;
         const showComments = expandedComments === post.id;
+        const perPlatformResults = publishResults[post.id];
+        // Scheduled posts may be deferred (outside posting window) — backend keeps them as "scheduled"
+        const isScheduledPast = post.status === 'scheduled' && post.scheduled_at && new Date(post.scheduled_at) < new Date();
         return (
           <div key={post.id} className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium', STATUS_COLORS[post.status] ?? STATUS_COLORS.draft)}>
-                      {post.status}
+                    {/* Status pill */}
+                    <span
+                      className={cn('text-xs px-1.5 py-0.5 rounded font-medium', POST_STATUS_TOKENS[post.status] ?? POST_STATUS_TOKENS.draft)}
+                      title={isScheduledPast ? 'Waiting for an allowed posting window to open' : undefined}
+                    >
+                      {POST_STATUS_LABEL[post.status] ?? post.status}
+                      {isScheduledPast && ' · deferred'}
                     </span>
                     {soul && <span className="text-xs text-muted-foreground">{soul.display_name}</span>}
                     {date && (
@@ -1238,11 +1280,62 @@ function PostsTab({ agentId, status }: { agentId: string; status: string }) {
                     )}
                   </div>
                   <p className="text-sm text-foreground/80 line-clamp-2">{post.content}</p>
+
+                  {/* Per-platform status row */}
                   <div className="flex flex-wrap gap-1 mt-2">
-                    {(post.platforms || []).map((p: string) => (
-                      <span key={p} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{p}</span>
-                    ))}
+                    {perPlatformResults ? (
+                      // Show actual per-platform results from the most recent publishNow call
+                      perPlatformResults.map((r) => {
+                        const plat = PLATFORMS.find(p => p.id === r.platform);
+                        return (
+                          <span
+                            key={r.platform}
+                            title={r.success ? (r.post_url ? `Published · ${r.post_url}` : 'Published') : (r.error ?? 'Failed')}
+                            className={cn(
+                              'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-medium',
+                              r.success
+                                ? 'bg-soul-idle/20 text-soul-idle'
+                                : 'bg-destructive/10 text-destructive',
+                            )}
+                          >
+                            <span>{plat?.icon ?? r.platform}</span>
+                            {r.success ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      // No per-platform breakdown available — show platform chips coloured by overall status
+                      (post.platforms || []).map((p: string) => {
+                        const plat = PLATFORMS.find(pl => pl.id === p);
+                        return (
+                          <span
+                            key={p}
+                            className={cn(
+                              'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-medium',
+                              post.status === 'published' ? 'bg-soul-idle/20 text-soul-idle'
+                              : post.status === 'failed'    ? 'bg-destructive/10 text-destructive'
+                              : post.status === 'scheduled' ? 'bg-primary/10 text-primary'
+                              : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            <span>{plat?.icon ?? p}</span>
+                            <span className="font-mono">{p}</span>
+                          </span>
+                        );
+                      })
+                    )}
                   </div>
+
+                  {/* Show per-platform error details when any failed */}
+                  {perPlatformResults && perPlatformResults.some(r => !r.success) && (
+                    <div className="mt-2 space-y-0.5">
+                      {perPlatformResults.filter(r => !r.success).map(r => (
+                        <p key={r.platform} className="text-xs text-destructive">
+                          {r.platform}: {r.error ?? 'publish failed'}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
@@ -2199,14 +2292,25 @@ function AccountsTab({ agentId }: { agentId: string }) {
                       {i.group_name && (
                         <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{i.group_name}</span>
                       )}
-                      {i.relay_provider && i.relay_provider !== 'direct' && (
-                        <span className={cn(
-                          "text-2xs px-1.5 py-0.5 rounded font-medium",
-                          i.relay_provider === 'outstand' && "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-                          i.relay_provider === 'postforme' && "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-                          i.relay_provider === 'buffer' && "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-                        )}>
-                          {RELAY_LABELS[i.relay_provider] ?? i.relay_provider}
+                      {/* Relay-vs-direct badge */}
+                      {i.relay_provider && i.relay_provider !== 'direct' ? (
+                        <span
+                          title={`Posts via ${RELAY_LABELS[i.relay_provider] ?? i.relay_provider} relay`}
+                          className={cn(
+                            "text-2xs px-1.5 py-0.5 rounded font-medium",
+                            i.relay_provider === 'outstand' && "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+                            i.relay_provider === 'postforme' && "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                            i.relay_provider === 'buffer' && "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+                          )}
+                        >
+                          via {RELAY_LABELS[i.relay_provider] ?? i.relay_provider}
+                        </span>
+                      ) : (
+                        <span
+                          title="Posts directly via platform API"
+                          className="text-2xs px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground"
+                        >
+                          Direct
                         </span>
                       )}
                       {i.paused && <span className="text-xs text-muted-foreground">(paused)</span>}
