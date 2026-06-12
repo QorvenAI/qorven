@@ -344,8 +344,18 @@ func (cs *Service) saveUnsafe() error {
 
 // --- DB-backed Runner (for gateway integration) ---
 
+// DBRunResult is what a DB-backed cron handler reports back so the scheduler
+// can record real status (ok/error) and usage in the run history.
+type DBRunResult struct {
+	Success       bool
+	ResultSnippet string
+	Tokens        int64
+	CostCents     int64
+	Err           string
+}
+
 // DBRunHandler is the callback for DB-backed cron execution.
-type DBRunHandler func(ctx context.Context, jobName, payload, agentID string)
+type DBRunHandler func(ctx context.Context, jobName, payload, agentID string) DBRunResult
 
 // Runner is a DB-backed cron runner for gateway integration.
 type Runner struct {
@@ -385,7 +395,7 @@ func (r *Runner) Stop() {
 }
 
 func (r *Runner) tick(ctx context.Context) {
-	rows, err := r.pool.Query(ctx, `SELECT id, agent_id, name, payload, cron_expression, next_run_at
+	rows, err := r.pool.Query(ctx, `SELECT id, agent_id, name, payload, cron_expression, next_run_at, COALESCE(one_shot,false)
 		FROM cron_jobs WHERE enabled = true AND next_run_at IS NOT NULL AND next_run_at <= NOW()
 		ORDER BY next_run_at LIMIT 10`)
 	if err != nil {
@@ -396,11 +406,12 @@ func (r *Runner) tick(ctx context.Context) {
 	type dueJob struct {
 		id, agentID, name, payload, expr string
 		nextRun                          time.Time
+		oneShot                          bool
 	}
 	jobs := []dueJob{}
 	for rows.Next() {
 		var j dueJob
-		if err := rows.Scan(&j.id, &j.agentID, &j.name, &j.payload, &j.expr, &j.nextRun); err != nil {
+		if err := rows.Scan(&j.id, &j.agentID, &j.name, &j.payload, &j.expr, &j.nextRun, &j.oneShot); err != nil {
 			continue
 		}
 		jobs = append(jobs, j)
@@ -408,7 +419,15 @@ func (r *Runner) tick(ctx context.Context) {
 	rows.Close()
 
 	for _, j := range jobs {
-		// Detect missed runs (next_run is more than 2 intervals behind)
+		// Claim immediately so a slow run isn't re-selected on the next 30s tick.
+		// One-shot: disable now (it must never fire twice). Recurring: push next_run_at
+		// to the computed next time up front; the post-run UPDATE refines last_status.
+		if j.oneShot {
+			r.pool.Exec(ctx, `UPDATE cron_jobs SET enabled=false, next_run_at=NULL WHERE id=$1`, j.id)
+		} else {
+			r.pool.Exec(ctx, `UPDATE cron_jobs SET next_run_at=$1 WHERE id=$2`, computeNextRunFromExpr(j.expr), j.id)
+		}
+
 		missedDur := time.Since(j.nextRun)
 		if missedDur > 2*time.Hour {
 			slog.Warn("cron.missed_runs", "job", j.name, "missed_duration", missedDur.Round(time.Minute))
@@ -418,17 +437,20 @@ func (r *Runner) tick(ctx context.Context) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					slog.Error("cron runner panic", "job", job.name, "panic", rec)
+					r.pool.Exec(ctx, `UPDATE cron_jobs SET last_run_at=NOW(), last_status='error', run_count=COALESCE(run_count,0)+1 WHERE id=$1`, job.id)
 				}
 			}()
 
 			slog.Info("cron.execute", "job", job.name, "agent", job.agentID)
-			r.handler(ctx, job.name, job.payload, job.agentID)
+			res := r.handler(ctx, job.name, job.payload, job.agentID)
 
-			// Compute next run from cron expression, not fixed interval
-			nextRun := computeNextRunFromExpr(job.expr)
+			status := "ok"
+			if !res.Success {
+				status = "error"
+			}
 			r.pool.Exec(ctx,
-				`UPDATE cron_jobs SET last_run_at=NOW(), last_status='ok', run_count=COALESCE(run_count,0)+1, next_run_at=$1 WHERE id=$2`,
-				nextRun, job.id)
+				`UPDATE cron_jobs SET last_run_at=NOW(), last_status=$1, run_count=COALESCE(run_count,0)+1 WHERE id=$2`,
+				status, job.id)
 		}(j)
 	}
 }
@@ -436,6 +458,14 @@ func (r *Runner) tick(ctx context.Context) {
 // NextRunFromExpr parses a cron expression and returns the next run time.
 func NextRunFromExpr(expr string) time.Time {
 	return computeNextRunFromExpr(expr)
+}
+
+// IsValidExpr reports whether expr is a valid cron expression. Callers that
+// accept a user-supplied schedule MUST validate before persisting it — an
+// invalid expression silently falls back to hourly in computeNextRunFromExpr,
+// which would create a recurring job that fires (and spends) every hour forever.
+func IsValidExpr(expr string) bool {
+	return gronx.New().IsValid(expr)
 }
 
 // computeNextRunFromExpr parses a cron expression and returns the next run time.

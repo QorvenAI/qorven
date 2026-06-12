@@ -43,6 +43,47 @@ export const tasks = {
 };
 
 // Calendar
+export interface TimelineItem {
+  id: string;
+  source: 'cron' | 'task' | 'event' | 'run';
+  source_id: string;
+  agent_id: string | null;
+  agent_name: string;
+  title: string;
+  detail: string;
+  when: string;
+  end_at?: string | null;
+  status: string;
+  recurring: boolean;
+  kind: 'future' | 'past';
+  color?: string;
+}
+
+export interface ScheduledRun {
+  id: string;
+  agent_id: string | null;
+  source: string;
+  source_id: string;
+  title: string;
+  scheduled_for?: string | null;
+  started_at: string;
+  finished_at?: string | null;
+  status: string;
+  result_snippet: string;
+  tokens: number;
+  cost_cents: number;
+  error?: string;
+}
+
+export interface ScheduleInput {
+  agent_id: string;
+  instruction: string;
+  mode: 'once' | 'repeat';
+  when?: string;
+  cron_expression?: string;
+  title?: string;
+}
+
 export const calendarApi = {
   list: (start?: string, end?: string, agentId?: string) => {
     const params = new URLSearchParams();
@@ -51,6 +92,16 @@ export const calendarApi = {
     if (agentId) params.set('agent_id', agentId);
     return request<any[]>(`/calendar/events?${params}`);
   },
+  timeline: (start?: string, end?: string, agentId?: string) => {
+    const params = new URLSearchParams();
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    if (agentId) params.set('agent_id', agentId);
+    return request<{ items: TimelineItem[] }>(`/calendar/timeline?${params}`);
+  },
+  schedule: (body: ScheduleInput) =>
+    request<{ id: string; one_shot: boolean; next_run_at: string }>('/calendar/schedule', { method: 'POST', body: JSON.stringify(body) }),
+  run: (id: string) => request<ScheduledRun>(`/calendar/runs/${id}`),
   create: (body: Record<string, unknown>) => request<any>('/calendar/events', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: Record<string, unknown>) => request<void>(`/calendar/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (id: string) => request<void>(`/calendar/events/${id}`, { method: 'DELETE' }),

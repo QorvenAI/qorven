@@ -9,6 +9,11 @@ import { calendarApi, social as socialApi } from '@/lib/api';
 import { useStore } from '@/store';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+import type { TimelineItem } from '@/lib/api-workspace';
+import { AgendaView } from '@/components/calendar/agenda-view';
+import { TimeGrid } from '@/components/calendar/time-grid';
+import { ScheduleDialog } from '@/components/calendar/schedule-dialog';
+import { ItemDetail } from '@/components/calendar/item-detail';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -31,7 +36,10 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: '', start_time: '', end_time: '', description: '' });
-  const [view, setView] = useState<'month' | 'list'>('month');
+  const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda' | 'list'>('month');
+  const [items, setItems] = useState<TimelineItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<TimelineItem | null>(null);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   const calFilter = useStore(s => s.calSoulFilter);
   const souls = useStore(s => s.souls);
@@ -40,6 +48,18 @@ export default function CalendarPage() {
   const month = current.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const weekDays = (() => {
+    const base = new Date(current);
+    const dow = base.getDay();
+    const sunday = new Date(base);
+    sunday.setDate(base.getDate() - dow);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() + i);
+      return d;
+    });
+  })();
 
   const load = useCallback(() => {
     setLoading(true);
@@ -59,6 +79,11 @@ export default function CalendarPage() {
       setSocialEntries(postMap);
       setLoading(false);
     });
+
+    calendarApi
+      .timeline(start, end, calFilter ?? undefined)
+      .then((r) => setItems(r.items ?? []))
+      .catch(() => setItems([]));
   }, [year, month, calFilter]);
 
   useEffect(() => { load(); }, [load]);
@@ -123,6 +148,18 @@ export default function CalendarPage() {
               className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
               Month
             </button>
+            <button onClick={() => setView('week')}
+              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'week' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+              Week
+            </button>
+            <button onClick={() => setView('day')}
+              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'day' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+              Day
+            </button>
+            <button onClick={() => setView('agenda')}
+              className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'agenda' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+              Agenda
+            </button>
             <button onClick={() => setView('list')}
               className={cn('px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer', view === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
               List
@@ -131,6 +168,10 @@ export default function CalendarPage() {
           <button onClick={() => setShowCreate(v => !v)}
             className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 cursor-pointer">
             <Plus className="h-4 w-4" /> New Event
+          </button>
+          <button onClick={() => setShowSchedule(true)}
+            className="qr-btn qr-btn-primary">
+            + Schedule
           </button>
         </div>
       }
@@ -166,6 +207,18 @@ export default function CalendarPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {view === 'agenda' && (
+        <AgendaView items={items} onSelect={setSelectedItem} />
+      )}
+
+      {view === 'week' && (
+        <TimeGrid days={weekDays} items={items} now={today} onSelect={setSelectedItem} />
+      )}
+
+      {view === 'day' && (
+        <TimeGrid days={[current]} items={items} now={today} onSelect={setSelectedItem} />
       )}
 
       {view === 'month' ? (
@@ -339,7 +392,7 @@ export default function CalendarPage() {
             )}
           </div>
         </div>
-      ) : (
+      ) : view === 'list' ? (
         /* List view — chronological all entries */
         <div className="space-y-2">
           {[...events]
@@ -364,8 +417,10 @@ export default function CalendarPage() {
             </div>
           )}
         </div>
-      )}
+      ) : null}
       </div>
+      {showSchedule && <ScheduleDialog onClose={() => setShowSchedule(false)} onCreated={load} defaultAgentId={calFilter} />}
+      {selectedItem && <ItemDetail item={selectedItem} onClose={() => setSelectedItem(null)} onChanged={load} />}
     </PageShell>
   );
 }
