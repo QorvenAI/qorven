@@ -19,10 +19,11 @@ import (
 type SocialTool struct {
 	store     *Store
 	publisher *Publisher
+	router    *RelayRouter
 }
 
-func NewSocialTool(store *Store) *SocialTool {
-	return &SocialTool{store: store, publisher: NewPublisher()}
+func NewSocialTool(store *Store, router *RelayRouter) *SocialTool {
+	return &SocialTool{store: store, publisher: NewPublisher(), router: router}
 }
 
 func (t *SocialTool) Name() string { return "qorven_social" }
@@ -86,10 +87,25 @@ func (t *SocialTool) Execute(ctx context.Context, args map[string]any) *tools.Re
 		if postID == "" { return tools.ErrorResult("post_id required") }
 		post, err := t.store.GetPost(ctx, postID)
 		if err != nil { return tools.ErrorResult("post not found: " + err.Error()) }
-		results := t.publisher.PublishToAll(ctx, t.store, post)
-		t.store.MarkPublished(ctx, postID)
+		results := t.publisher.PublishToAllVia(ctx, t.store, t.router, post)
+		allOK := true
+		okCount := 0
+		for _, res := range results {
+			if res.Success {
+				okCount++
+			} else {
+				allOK = false
+			}
+		}
+		// Reflect reality: only mark published if every platform succeeded;
+		// otherwise mark failed so status isn't a false "published".
+		if allOK {
+			t.store.MarkPublished(ctx, postID)
+		} else {
+			t.store.UpdatePostStatus(ctx, postID, PostFailed)
+		}
 		data, _ := json.MarshalIndent(results, "", "  ")
-		return tools.SuccessResult(fmt.Sprintf("🚀 Published to %d platforms:\n%s", len(results), string(data)))
+		return tools.SuccessResult(fmt.Sprintf("Published to %d/%d platforms:\n%s", okCount, len(results), string(data)))
 
 	case "list_posts":
 		status := PostStatus(strVal(args, "status"))

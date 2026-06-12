@@ -42,7 +42,7 @@ func TestHard_Social_Publisher(t *testing.T) {
 }
 
 func TestHard_Social_Tool(t *testing.T) {
-	tool := NewSocialTool(nil)
+	tool := NewSocialTool(nil, nil)
 	if tool.Name() != "qorven_social" { t.Error("name") }
 	params := tool.Parameters()
 	props, _ := params["properties"].(map[string]any)

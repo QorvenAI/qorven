@@ -1616,14 +1616,14 @@ func (gw *Gateway) registerTools() {
 	// Social publishing tool — lets agents create, schedule, and publish posts
 	if gw.db != nil {
 		socialStore := socialqor.NewStore(gw.db.Pool)
-		reg.Register(socialqor.NewSocialTool(socialStore))
+		reg.Register(socialqor.NewSocialTool(socialStore, gw.socialRelayRouter()))
 		// Social relay management tool — COO/agent can manage relay providers and accounts conversationally
 		if gw.socialRelayStore != nil {
 			reg.Register(socialqor.NewSocialRelayTool(gw.socialRelayStore, socialStore, gw.db.Pool))
 			slog.Info("manage_social_relay tool registered")
 		}
-		// Start the social post scheduler daemon
-		go gw.runSocialScheduler(socialStore)
+		// NOTE: scheduled-post dispatcher is started in gateway_server.go
+		// (startScheduledPostDispatcher). Do NOT start a second loop here.
 	}
 	reg.Register(tools.NewQorvenFly())                            // Qorven-Fly: flight search plugin
 	reg.Register(tools.NewQorvenDownload(workspace))              // Qorven-Download: file downloader

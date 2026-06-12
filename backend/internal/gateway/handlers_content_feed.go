@@ -235,7 +235,7 @@ func (gw *Gateway) handleApproveContent(w http.ResponseWriter, r *http.Request) 
 	// 5. If not scheduled, publish immediately
 	if post.Status == socialqor.PostDraft {
 		publisher := socialqor.NewPublisher()
-		results := publisher.PublishToAll(ctx, store, post)
+		results := publisher.PublishToAllVia(ctx, store, gw.socialRelayRouter(), post)
 		allOK := true
 		for _, res := range results {
 			if !res.Success {

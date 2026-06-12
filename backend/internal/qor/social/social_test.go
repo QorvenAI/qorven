@@ -117,17 +117,17 @@ func TestTruncate_Long(t *testing.T) {
 }
 
 func TestSocialTool_Name(t *testing.T) {
-	tool := NewSocialTool(nil)
+	tool := NewSocialTool(nil, nil)
 	if tool.Name() != "qorven_social" { t.Errorf("name=%q", tool.Name()) }
 }
 
 func TestSocialTool_Description(t *testing.T) {
-	tool := NewSocialTool(nil)
+	tool := NewSocialTool(nil, nil)
 	if tool.Description() == "" { t.Error("empty description") }
 }
 
 func TestSocialTool_Parameters(t *testing.T) {
-	tool := NewSocialTool(nil)
+	tool := NewSocialTool(nil, nil)
 	params := tool.Parameters()
 	props, ok := params["properties"].(map[string]any)
 	if !ok { t.Fatal("no properties") }
