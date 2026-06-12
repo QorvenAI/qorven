@@ -812,25 +812,6 @@ func (p *Publisher) publishTelegramBot(ctx context.Context, token, content strin
 	return &PostResult{Platform: PlatformTelegramBot, Success: true, PostID: fmt.Sprint(result.Result.MessageID)}, nil
 }
 
-// PublishToAll publishes a post to all its target platforms.
-func (p *Publisher) PublishToAll(ctx context.Context, store *Store, post *Post) []PostResult {
-	results := []PostResult{}
-	for _, platform := range post.Platforms {
-		token, _, err := store.GetIntegrationToken(ctx, post.AgentID, platform)
-		if err != nil {
-			results = append(results, PostResult{Platform: platform, Success: false, Error: "no integration: " + err.Error()})
-			continue
-		}
-		result, err := p.Publish(ctx, platform, token, post.Content, post.MediaURLs)
-		if err != nil {
-			results = append(results, PostResult{Platform: platform, Success: false, Error: err.Error()})
-		} else {
-			results = append(results, *result)
-		}
-	}
-	return results
-}
-
 // PublishToAllVia routes each target platform through the RelayRouter, which
 // publishes direct or via a relay (Buffer/Outstand/PostForMe) per the
 // integration's RelayProvider. This is the live publish path (replaces the

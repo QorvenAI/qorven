@@ -1616,7 +1616,7 @@ func (gw *Gateway) registerTools() {
 	// Social publishing tool — lets agents create, schedule, and publish posts
 	if gw.db != nil {
 		socialStore := socialqor.NewStore(gw.db.Pool)
-		reg.Register(socialqor.NewSocialTool(socialStore))
+		reg.Register(socialqor.NewSocialTool(socialStore, gw.socialRelayRouter()))
 		// Social relay management tool — COO/agent can manage relay providers and accounts conversationally
 		if gw.socialRelayStore != nil {
 			reg.Register(socialqor.NewSocialRelayTool(gw.socialRelayStore, socialStore, gw.db.Pool))
