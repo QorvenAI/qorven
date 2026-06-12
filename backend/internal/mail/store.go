@@ -9,6 +9,7 @@ import (
 	"time"
 
 	emailchan "github.com/qorvenai/qorven/internal/channels/email"
+	"github.com/qorvenai/qorven/internal/crypto"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,21 +24,27 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // --- Identities ---
 
 type Identity struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	AgentID      *string   `json:"agent_id"`
-	Address      string    `json:"address"`
-	DisplayName  string    `json:"display_name"`
-	IdentityType string    `json:"identity_type"`
-	IsActive     bool      `json:"is_active"`
-	SMTPHost     string    `json:"smtp_host,omitempty"`
-	SMTPPort     int       `json:"smtp_port,omitempty"`
-	SMTPUser     string    `json:"smtp_user,omitempty"`
-	IMAPHost     string    `json:"imap_host,omitempty"`
-	IMAPPort     int       `json:"imap_port,omitempty"`
-	IMAPUser     string    `json:"imap_user,omitempty"`
-	PollInterval int       `json:"poll_interval_seconds,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	TenantID         string    `json:"tenant_id"`
+	AgentID          *string   `json:"agent_id"`
+	Address          string    `json:"address"`
+	DisplayName      string    `json:"display_name"`
+	IdentityType     string    `json:"identity_type"`
+	IsActive         bool      `json:"is_active"`
+	SMTPHost         string    `json:"smtp_host,omitempty"`
+	SMTPPort         int       `json:"smtp_port,omitempty"`
+	SMTPUser         string    `json:"smtp_user,omitempty"`
+	IMAPHost         string    `json:"imap_host,omitempty"`
+	IMAPPort         int       `json:"imap_port,omitempty"`
+	IMAPUser         string    `json:"imap_user,omitempty"`
+	PollInterval     int       `json:"poll_interval_seconds,omitempty"`
+	Transport        string    `json:"transport"`
+	ForwardURL       string    `json:"forward_url"`
+	SignatureHTML    string    `json:"signature_html"`
+	SignatureText    string    `json:"signature_text"`
+	ReplyTo          string    `json:"reply_to"`
+	DefaultImportance string   `json:"default_importance"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 func (s *Store) CreateIdentity(ctx context.Context, tenantID, agentID, address, displayName, idType string) (*Identity, error) {
@@ -52,7 +59,14 @@ func (s *Store) CreateIdentity(ctx context.Context, tenantID, agentID, address, 
 
 func (s *Store) ListIdentities(ctx context.Context, tenantID string) ([]Identity, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, agent_id, address, display_name, identity_type, is_active, created_at
+		`SELECT id, tenant_id, agent_id, address, display_name, identity_type, is_active,
+		        COALESCE(smtp_host,''), COALESCE(smtp_port,587), COALESCE(smtp_user,''),
+		        COALESCE(imap_host,''), COALESCE(imap_port,993), COALESCE(imap_user,''),
+		        COALESCE(poll_interval_seconds,60),
+		        COALESCE(transport,'native'), COALESCE(forward_url,''),
+		        COALESCE(signature_html,''), COALESCE(signature_text,''),
+		        COALESCE(reply_to,''), COALESCE(default_importance,'normal'),
+		        created_at
 		 FROM soul_mail_identities WHERE tenant_id = $1 ORDER BY created_at`, tenantID)
 	if err != nil {
 		return nil, err
@@ -61,7 +75,14 @@ func (s *Store) ListIdentities(ctx context.Context, tenantID string) ([]Identity
 	ids := []Identity{}
 	for rows.Next() {
 		var i Identity
-		rows.Scan(&i.ID, &i.TenantID, &i.AgentID, &i.Address, &i.DisplayName, &i.IdentityType, &i.IsActive, &i.CreatedAt)
+		rows.Scan(&i.ID, &i.TenantID, &i.AgentID, &i.Address, &i.DisplayName, &i.IdentityType, &i.IsActive,
+			&i.SMTPHost, &i.SMTPPort, &i.SMTPUser,
+			&i.IMAPHost, &i.IMAPPort, &i.IMAPUser,
+			&i.PollInterval,
+			&i.Transport, &i.ForwardURL,
+			&i.SignatureHTML, &i.SignatureText,
+			&i.ReplyTo, &i.DefaultImportance,
+			&i.CreatedAt)
 		ids = append(ids, i)
 	}
 	return ids, nil
@@ -70,10 +91,81 @@ func (s *Store) ListIdentities(ctx context.Context, tenantID string) ([]Identity
 func (s *Store) FindIdentityByAddress(ctx context.Context, address, tenantID string) (*Identity, error) {
 	i := &Identity{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, tenant_id, agent_id, address, display_name, identity_type, is_active, created_at
+		`SELECT id, tenant_id, agent_id, address, display_name, identity_type, is_active,
+		        COALESCE(smtp_host,''), COALESCE(smtp_port,587), COALESCE(smtp_user,''),
+		        COALESCE(imap_host,''), COALESCE(imap_port,993), COALESCE(imap_user,''),
+		        COALESCE(poll_interval_seconds,60),
+		        COALESCE(transport,'native'), COALESCE(forward_url,''),
+		        COALESCE(signature_html,''), COALESCE(signature_text,''),
+		        COALESCE(reply_to,''), COALESCE(default_importance,'normal'),
+		        created_at
 		 FROM soul_mail_identities WHERE address = $1 AND tenant_id = $2 AND is_active = true`, address, tenantID,
-	).Scan(&i.ID, &i.TenantID, &i.AgentID, &i.Address, &i.DisplayName, &i.IdentityType, &i.IsActive, &i.CreatedAt)
+	).Scan(&i.ID, &i.TenantID, &i.AgentID, &i.Address, &i.DisplayName, &i.IdentityType, &i.IsActive,
+		&i.SMTPHost, &i.SMTPPort, &i.SMTPUser,
+		&i.IMAPHost, &i.IMAPPort, &i.IMAPUser,
+		&i.PollInterval,
+		&i.Transport, &i.ForwardURL,
+		&i.SignatureHTML, &i.SignatureText,
+		&i.ReplyTo, &i.DefaultImportance,
+		&i.CreatedAt)
 	return i, err
+}
+
+// GetIdentity returns one identity by id (same columns as ListIdentities).
+func (s *Store) GetIdentity(ctx context.Context, id string) (*Identity, error) {
+	i := &Identity{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, tenant_id, agent_id, address, display_name, identity_type, is_active,
+		        COALESCE(smtp_host,''), COALESCE(smtp_port,587), COALESCE(smtp_user,''),
+		        COALESCE(imap_host,''), COALESCE(imap_port,993), COALESCE(imap_user,''),
+		        COALESCE(poll_interval_seconds,60),
+		        COALESCE(transport,'native'), COALESCE(forward_url,''),
+		        COALESCE(signature_html,''), COALESCE(signature_text,''),
+		        COALESCE(reply_to,''), COALESCE(default_importance,'normal'),
+		        created_at
+		 FROM soul_mail_identities WHERE id = $1`, id,
+	).Scan(&i.ID, &i.TenantID, &i.AgentID, &i.Address, &i.DisplayName, &i.IdentityType, &i.IsActive,
+		&i.SMTPHost, &i.SMTPPort, &i.SMTPUser,
+		&i.IMAPHost, &i.IMAPPort, &i.IMAPUser,
+		&i.PollInterval,
+		&i.Transport, &i.ForwardURL,
+		&i.SignatureHTML, &i.SignatureText,
+		&i.ReplyTo, &i.DefaultImportance,
+		&i.CreatedAt)
+	return i, err
+}
+
+// IdentitySMTPPass returns the decrypted SMTP password for an identity.
+func (s *Store) IdentitySMTPPass(ctx context.Context, id, encKey string) (string, error) {
+	var enc string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(smtp_pass_enc,'') FROM soul_mail_identities WHERE id = $1`, id,
+	).Scan(&enc); err != nil {
+		return "", err
+	}
+	return crypto.DecryptString(enc, encKey)
+}
+
+// IdentityIMAPPass returns the decrypted IMAP password for an identity.
+func (s *Store) IdentityIMAPPass(ctx context.Context, id, encKey string) (string, error) {
+	var enc string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(imap_pass_enc,'') FROM soul_mail_identities WHERE id = $1`, id,
+	).Scan(&enc); err != nil {
+		return "", err
+	}
+	return crypto.DecryptString(enc, encKey)
+}
+
+// IdentityInboundSecret returns the decrypted inbound webhook secret for an identity.
+func (s *Store) IdentityInboundSecret(ctx context.Context, id, encKey string) (string, error) {
+	var enc string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(inbound_secret_enc,'') FROM soul_mail_identities WHERE id = $1`, id,
+	).Scan(&enc); err != nil {
+		return "", err
+	}
+	return crypto.DecryptString(enc, encKey)
 }
 
 // --- Aliases ---
