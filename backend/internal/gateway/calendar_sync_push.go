@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qorvenai/qorven/internal/calendar"
+	"github.com/qorvenai/qorven/internal/connectors"
 )
 
 // runCalendarSync pushes future timeline items OUT to every enabled external
@@ -79,7 +80,11 @@ func (gw *Gateway) runCalendarSync(ctx context.Context) {
 				"description": it.Detail,
 				"event_id":    gw.calSyncStore.RemoteEventID(ctx, it.ID, sc.ID),
 			}
-			out, perr := gw.connExec.Execute(ctx, sc.Provider, "create_event", params)
+			execCtx := ctx
+			if itemAgent != "" {
+				execCtx = connectors.WithAgentID(ctx, itemAgent)
+			}
+			out, perr := gw.connExec.Execute(execCtx, sc.Provider, "create_event", params)
 			if perr != nil {
 				_ = gw.calSyncStore.RecordEventPush(ctx, it.ID, sc.ID, "", "error", perr.Error())
 				continue

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/qorvenai/qorven/internal/connectors"
 	"github.com/qorvenai/qorven/internal/drive"
 )
 
@@ -63,7 +64,11 @@ func (gw *Gateway) pushFileToMirrors(ctx context.Context, f *drive.File) {
 			"folder_id":      m.RemoteFolderID,
 			"remote_file_id": gw.mirrorStore.RemoteFileID(ctx, f.ID, m.ID),
 		}
-		out, perr := gw.connExec.Execute(ctx, m.Provider, "upload_file", params)
+		execCtx := ctx
+		if owner != "" {
+			execCtx = connectors.WithAgentID(ctx, owner)
+		}
+		out, perr := gw.connExec.Execute(execCtx, m.Provider, "upload_file", params)
 		if perr != nil {
 			slog.Warn("drive.mirror.push_failed", "file", f.ID, "provider", m.Provider, "err", perr)
 			_ = gw.mirrorStore.RecordPush(ctx, f.ID, m.ID, "", "error", perr.Error())
