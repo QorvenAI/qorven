@@ -271,6 +271,42 @@ func (gw *Gateway) registerTools() {
 	if smtpHost == "" {
 		smtpHost = os.Getenv("SMTP_HOST")
 	}
+
+	// ResolveIdentity is always wired when the mail store is available so that
+	// agents with a bound mailbox identity can send autonomously as their own
+	// address even if no global SMTP is configured.  The callback is the only
+	// path that produces a BoundIdentity — the LLM never touches the from
+	// address directly (arbitrary-from spoofing is blocked at the tool layer).
+	if gw.mailStore != nil && gw.db != nil {
+		encKey := gw.cfg.Auth.EncryptionKey
+		emailSend.SetResolveIdentity(gw.db.Pool, func(ctx context.Context, agentID, tenantID string) (*tools.BoundIdentity, error) {
+			identity, err := gw.mailStore.GetIdentityForAgent(ctx, agentID, tenantID)
+			if err != nil {
+				return nil, err
+			}
+			smtpPass, err := gw.mailStore.IdentitySMTPPass(ctx, identity.ID, encKey)
+			if err != nil {
+				return nil, err
+			}
+			return &tools.BoundIdentity{
+				IdentityID:    identity.ID,
+				Address:       identity.Address,
+				DisplayName:   identity.DisplayName,
+				SMTPHost:      identity.SMTPHost,
+				SMTPPort:      identity.SMTPPort,
+				SMTPUser:      identity.SMTPUser,
+				SMTPPass:      smtpPass,
+				Transport:     identity.Transport,
+				ForwardURL:    identity.ForwardURL,
+				SignatureText: identity.SignatureText,
+				SignatureHTML: identity.SignatureHTML,
+				ReplyTo:       identity.ReplyTo,
+				Importance:    identity.DefaultImportance,
+				TenantID:      identity.TenantID,
+			}, nil
+		})
+	}
+
 	if smtpHost != "" {
 		smtpUser := gw.cfg.Email.SMTPUser
 		if smtpUser == "" {

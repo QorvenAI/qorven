@@ -537,3 +537,19 @@ func (s *Store) DecideApproval(ctx context.Context, id, decision, reviewedBy, no
 	}
 	return err
 }
+
+// GetApprovalMessageID returns the mailbox_messages.id linked to an approval queue row.
+func (s *Store) GetApprovalMessageID(ctx context.Context, approvalID string) (string, error) {
+	var msgID string
+	err := s.pool.QueryRow(ctx,
+		`SELECT message_id FROM mail_approval_queue WHERE id = $1`, approvalID,
+	).Scan(&msgID)
+	return msgID, err
+}
+
+// UpdateMessageSendStatus sets send_status on a mailbox message by its DB id.
+func (s *Store) UpdateMessageSendStatus(ctx context.Context, id, status string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE mailbox_messages SET send_status = $1 WHERE id = $2`, status, id)
+	return err
+}

@@ -524,8 +524,98 @@ func (gw *Gateway) handleApproveMailFunc(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, 503, map[string]string{"error": "mail not configured"})
 		return
 	}
-	gw.mailStore.DecideApproval(r.Context(), chi.URLParam(r, "id"), "approved", "user", "")
-	json.NewEncoder(w).Encode(map[string]string{"status": "approved"})
+	ctx := r.Context()
+	approvalID := chi.URLParam(r, "id")
+
+	// 1. Flip the DB flag first (idempotent anchor — even if send fails the decision is recorded).
+	if err := gw.mailStore.DecideApproval(ctx, approvalID, "approved", "user", ""); err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to record approval"})
+		return
+	}
+
+	// 2. Look up the linked message.
+	msgDBID, err := gw.mailStore.GetApprovalMessageID(ctx, approvalID)
+	if err != nil {
+		slog.Warn("mail.approve.no_message", "approval", approvalID, "error", err)
+		// Approval recorded; message not found — respond with flag only.
+		writeJSON(w, 200, map[string]string{"status": "approved", "warning": "message not found — not sent"})
+		return
+	}
+	msg, err := gw.mailStore.GetMessage(ctx, msgDBID)
+	if err != nil {
+		slog.Warn("mail.approve.load_failed", "msg", msgDBID, "error", err)
+		writeJSON(w, 200, map[string]string{"status": "approved", "warning": "message load failed — not sent"})
+		return
+	}
+
+	// 3. Resolve the sending identity from the message's bound identity.
+	identity, err := gw.mailStore.GetIdentity(ctx, msg.IdentityID)
+	if err != nil {
+		slog.Warn("mail.approve.identity_missing", "identity", msg.IdentityID, "error", err)
+		writeJSON(w, 200, map[string]string{"status": "approved", "warning": "identity not found — not sent"})
+		return
+	}
+
+	// 4. Apply identity signature.
+	bodyText := msg.BodyText
+	bodyHTML := msg.BodyHTML
+	if identity.SignatureText != "" {
+		bodyText = bodyText + "\r\n\r\n--\r\n" + identity.SignatureText
+	}
+	if identity.SignatureHTML != "" {
+		if bodyHTML != "" {
+			bodyHTML = bodyHTML + "<br><br><div class=\"qorven-signature\">" + identity.SignatureHTML + "</div>"
+		} else {
+			bodyHTML = "<p>" + bodyText + "</p><br><div class=\"qorven-signature\">" + identity.SignatureHTML + "</div>"
+		}
+	}
+
+	// 5. Send via the identity's transport.
+	var sendErr error
+	if identity.Transport == "external" && identity.ForwardURL != "" {
+		payload := map[string]any{
+			"message_id": msg.MessageID,
+			"from":       identity.Address,
+			"from_name":  identity.DisplayName,
+			"to":         msg.ToAddresses,
+			"subject":    msg.Subject,
+			"body_text":  bodyText,
+			"body_html":  bodyHTML,
+		}
+		payloadBytes, _ := json.Marshal(payload)
+		resp, fwErr := http.Post(identity.ForwardURL, "application/json", strings.NewReader(string(payloadBytes))) //nolint:noctx
+		if fwErr != nil {
+			sendErr = fwErr
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				sendErr = fmt.Errorf("forward webhook returned %d", resp.StatusCode)
+			}
+		}
+	} else {
+		encKey := gw.cfg.Auth.EncryptionKey
+		smtpPass, credErr := gw.mailStore.IdentitySMTPPass(ctx, identity.ID, encKey)
+		if credErr != nil {
+			writeJSON(w, 500, map[string]string{"error": "failed to retrieve SMTP credentials"})
+			return
+		}
+		sendErr = mail.NewSMTPSender().Send(identity, smtpPass, msg.ToAddresses, msg.Subject, bodyText, bodyHTML, nil)
+	}
+
+	// 6. Update send_status.
+	status := "sent"
+	if sendErr != nil {
+		slog.Warn("mail.approve.send_failed", "identity", identity.ID, "error", sendErr)
+		status = "failed"
+		gw.mailStore.UpdateMessageSendStatus(ctx, msgDBID, status)
+		writeJSON(w, 502, map[string]any{
+			"status": "approved",
+			"error":  sanitizeError(sendErr),
+		})
+		return
+	}
+	gw.mailStore.UpdateMessageSendStatus(ctx, msgDBID, status)
+	writeJSON(w, 200, map[string]string{"status": "approved", "send_status": "sent"})
 }
 
 func (gw *Gateway) handleRejectMailFunc(w http.ResponseWriter, r *http.Request) {
