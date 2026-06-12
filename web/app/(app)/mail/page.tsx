@@ -10,9 +10,10 @@ import {
   Paperclip, ChevronDown, ChevronUp, FileText,
   Archive, Trash2, ReplyAll, Forward, BookOpen,
   CheckSquare, Square, MailOpen, MailCheck,
+  Copy, Trash, Webhook, Users, Link2 as LinkIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { mail as mailApi, MailIdentity } from '@/lib/api';
+import { mail as mailApi, MailIdentity, MailAlias } from '@/lib/api';
 import { RichTextEditor } from '@/components/mail/rich-text-editor';
 import { HtmlBody } from '@/components/mail/html-body';
 import {
@@ -1271,6 +1272,7 @@ function getProviderForIdentity(identity: MailIdentity): ProviderPreset | undefi
 }
 
 function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
+  const souls = useStore((s) => s.souls);
   const [identities, setIdentities] = useState<MailIdentity[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -1319,11 +1321,13 @@ function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
       <div className="flex-1 overflow-y-auto">
         {showForm ? (
           <AccountForm
+            souls={souls}
             onCancel={() => setShowForm(false)}
             onSaved={() => { setShowForm(false); loadIdentities(); }}
           />
         ) : editingIdentity ? (
           <AccountForm
+            souls={souls}
             identity={editingIdentity}
             onCancel={() => setEditingId(null)}
             onSaved={() => { setEditingId(null); loadIdentities(); }}
@@ -1408,21 +1412,40 @@ function EmailAccountsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ─── Account Form (Add / Edit) ───────────────────────────────────────────────
+// ─── Account Form (Add / Edit) — three-mode ──────────────────────────────────
 
-function AccountForm({ identity, onCancel, onSaved }: {
+type ConnectionMode = 'dedicated' | 'shared' | 'external';
+
+function deriveMode(identity?: MailIdentity): ConnectionMode {
+  if (!identity) return 'dedicated';
+  if (identity.transport === 'external' || identity.transport === 'forward') return 'external';
+  if (identity.identity_type === 'shared') return 'shared';
+  return 'dedicated';
+}
+
+function AccountForm({ identity, souls, onCancel, onSaved }: {
   identity?: MailIdentity;
+  souls: { id: string; display_name: string }[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const isEdit = !!identity;
+
+  // ── Mode ──
+  const [mode, setMode] = useState<ConnectionMode>(() => deriveMode(identity));
+
+  // ── Basic ──
+  const [address, setAddress] = useState(identity?.address || '');
+  const [displayName, setDisplayName] = useState(identity?.display_name || '');
+  const [agentId, setAgentId] = useState(identity?.agent_id || '');
+  const [isActive, setIsActive] = useState(identity?.is_active ?? true);
+
+  // ── Provider preset (modes dedicated + shared) ──
   const [provider, setProvider] = useState<string>(() => {
     if (!identity) return '';
     const p = getProviderForIdentity(identity);
     return p?.id || 'custom';
   });
-  const [address, setAddress] = useState(identity?.address || '');
-  const [displayName, setDisplayName] = useState(identity?.display_name || '');
   const [smtpHost, setSmtpHost] = useState(identity?.smtp_host || '');
   const [smtpPort, setSmtpPort] = useState<number>(identity?.smtp_port || 587);
   const [smtpUser, setSmtpUser] = useState(identity?.smtp_user || '');
@@ -1431,7 +1454,42 @@ function AccountForm({ identity, onCancel, onSaved }: {
   const [imapPort, setImapPort] = useState<number>(identity?.imap_port || 993);
   const [imapUser, setImapUser] = useState(identity?.imap_user || '');
   const [imapPass, setImapPass] = useState('');
+
+  // ── External mode ──
+  const [forwardUrl, setForwardUrl] = useState(identity?.forward_url || '');
+  const [inboundSecret, setInboundSecret] = useState(identity?.inbound_secret || '');
+
+  // ── Per-identity prefs ──
+  const [replyTo, setReplyTo] = useState(identity?.reply_to || '');
+  const [defaultImportance, setDefaultImportance] = useState<'high' | 'normal' | 'low'>(
+    (identity?.default_importance as 'high' | 'normal' | 'low') || 'normal'
+  );
+  const [signatureHtml, setSignatureHtml] = useState(identity?.signature_html || '');
+  const [signatureText, setSignatureText] = useState(identity?.signature_text || '');
+
+  // ── Aliases (modes shared + external) ──
+  const [aliases, setAliases] = useState<MailAlias[]>([]);
+  const [aliasesLoading, setAliasesLoading] = useState(false);
+  const [newAliasAddr, setNewAliasAddr] = useState('');
+  const [newAliasAgent, setNewAliasAgent] = useState('');
+  const [addingAlias, setAddingAlias] = useState(false);
+  const [deletingAliasId, setDeletingAliasId] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
+
+  // Load aliases when editing a shared/external identity
+  useEffect(() => {
+    if (!isEdit || (mode !== 'shared' && mode !== 'external')) return;
+    setAliasesLoading(true);
+    mailApi.aliases()
+      .then(data => {
+        const all = Array.isArray(data) ? data : [];
+        // Show all aliases — the backend associates them with the identity server-side
+        setAliases(all);
+      })
+      .catch(() => {})
+      .finally(() => setAliasesLoading(false));
+  }, [isEdit, mode, identity?.id]);
 
   const selectProvider = (id: string) => {
     setProvider(id);
@@ -1444,38 +1502,93 @@ function AccountForm({ identity, onCancel, onSaved }: {
     }
   };
 
+  const addAlias = async () => {
+    if (!newAliasAddr.trim() || !newAliasAgent) { toast.error('Alias address and target agent are required'); return; }
+    setAddingAlias(true);
+    try {
+      await mailApi.createAlias({ alias_address: newAliasAddr.trim(), target_agent_id: newAliasAgent, can_send_as: true, can_receive: true });
+      toast.success('Alias added');
+      setNewAliasAddr('');
+      setNewAliasAgent('');
+      // Reload aliases
+      const data = await mailApi.aliases();
+      setAliases(Array.isArray(data) ? data : []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add alias');
+    } finally { setAddingAlias(false); }
+  };
+
+  const deleteAlias = async (id: string) => {
+    setDeletingAliasId(id);
+    try {
+      await mailApi.deleteAlias(id);
+      setAliases(prev => prev.filter(a => a.id !== id));
+      toast.success('Alias removed');
+    } catch {
+      toast.error('Failed to remove alias');
+    } finally { setDeletingAliasId(null); }
+  };
+
   const save = async () => {
     if (!address.trim()) { toast.error('Email address is required'); return; }
     if (!displayName.trim()) { toast.error('Display name is required'); return; }
     setSaving(true);
     try {
+      const identityType = mode === 'shared' ? 'shared' : 'dedicated';
+      const transport = mode === 'external' ? 'external' : 'smtp';
+
       if (isEdit) {
         const body: Partial<MailIdentity> & { smtp_pass?: string; imap_pass?: string } = {
           display_name: displayName,
-          smtp_host: smtpHost || undefined,
-          smtp_port: smtpPort || undefined,
-          smtp_user: smtpUser || undefined,
-          imap_host: imapHost || undefined,
-          imap_port: imapPort || undefined,
-          imap_user: imapUser || undefined,
+          identity_type: identityType,
+          transport,
+          is_active: isActive,
+          reply_to: replyTo || undefined,
+          default_importance: defaultImportance,
+          signature_html: signatureHtml || undefined,
+          signature_text: signatureText || undefined,
         };
-        if (smtpPass) body.smtp_pass = smtpPass;
-        if (imapPass) body.imap_pass = imapPass;
+        if (mode !== 'external') {
+          body.smtp_host = smtpHost || undefined;
+          body.smtp_port = smtpPort || undefined;
+          body.smtp_user = smtpUser || undefined;
+          body.imap_host = imapHost || undefined;
+          body.imap_port = imapPort || undefined;
+          body.imap_user = imapUser || undefined;
+          if (smtpPass) body.smtp_pass = smtpPass;
+          if (imapPass) body.imap_pass = imapPass;
+        } else {
+          body.forward_url = forwardUrl || undefined;
+          body.inbound_secret = inboundSecret || undefined;
+        }
+        if (mode === 'dedicated') body.agent_id = agentId || undefined;
         await mailApi.updateIdentity(identity!.id, body);
         toast.success('Account updated');
       } else {
         await mailApi.createIdentity({
           address,
           display_name: displayName,
-          identity_type: 'dedicated',
-          smtp_host: smtpHost || undefined,
-          smtp_port: smtpPort || undefined,
-          smtp_user: smtpUser || undefined,
-          smtp_pass: smtpPass || undefined,
-          imap_host: imapHost || undefined,
-          imap_port: imapPort || undefined,
-          imap_user: imapUser || undefined,
-          imap_pass: imapPass || undefined,
+          identity_type: identityType,
+          transport,
+          is_active: isActive,
+          reply_to: replyTo || undefined,
+          default_importance: defaultImportance,
+          signature_html: signatureHtml || undefined,
+          signature_text: signatureText || undefined,
+          ...(mode !== 'external' ? {
+            smtp_host: smtpHost || undefined,
+            smtp_port: smtpPort || undefined,
+            smtp_user: smtpUser || undefined,
+            smtp_pass: smtpPass || undefined,
+            imap_host: imapHost || undefined,
+            imap_port: imapPort || undefined,
+            imap_user: imapUser || undefined,
+            imap_pass: imapPass || undefined,
+          } : {
+            forward_url: forwardUrl || undefined,
+            inbound_secret: inboundSecret || undefined,
+          }),
+          ...(mode === 'dedicated' ? { agent_id: agentId || undefined } : {}),
         });
         toast.success('Account added');
       }
@@ -1485,149 +1598,377 @@ function AccountForm({ identity, onCancel, onSaved }: {
     } finally { setSaving(false); }
   };
 
+  const inboundWebhookUrl = '/v1/mail/inbound-webhook';
+
   return (
-    <div className="px-6 py-5 max-w-lg">
-      <h3 className="text-sm font-semibold mb-4">{isEdit ? 'Edit Account' : 'Add Email Account'}</h3>
+    <div className="px-6 py-5 max-w-2xl space-y-6">
+      <h3 className="text-sm font-semibold">{isEdit ? 'Edit Account' : 'Add Email Account'}</h3>
 
-      {/* Provider selection (only for new accounts) */}
-      {!isEdit && (
-        <div className="mb-5">
-          <label className="text-xs font-medium text-muted-foreground mb-2 block">Provider</label>
-          <div className="grid grid-cols-2 gap-2">
-            {PROVIDER_PRESETS.map(p => (
-              <button
-                key={p.id}
-                onClick={() => selectProvider(p.id)}
-                className={cn(
-                  'flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left cursor-pointer transition-colors',
-                  provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
-                )}
-              >
-                <span className={cn(
-                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-                  p.id === 'gmail' ? 'bg-red-500/10 text-red-500' :
-                  p.id === 'outlook' ? 'bg-blue-500/10 text-blue-500' :
-                  p.id === 'zoho' ? 'bg-yellow-500/10 text-yellow-600' :
-                  'bg-muted text-muted-foreground'
-                )}>
-                  {p.icon}
-                </span>
-                <span className="text-sm font-medium">{p.name}</span>
-              </button>
-            ))}
-          </div>
-          {provider === 'gmail' && (
-            <p className="text-xs text-muted-foreground mt-2 px-1">
-              Gmail requires an App Password. Go to Google Account &gt; Security &gt; 2-Step Verification &gt; App passwords to generate one.
-            </p>
-          )}
+      {/* ── Mode selector ── */}
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-2 block">Connection mode</label>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { id: 'dedicated' as ConnectionMode, icon: Mail,    label: 'Dedicated', hint: 'One identity per agent' },
+            { id: 'shared'    as ConnectionMode, icon: Users,   label: 'Shared + aliases', hint: 'Team inbox • customer support' },
+            { id: 'external'  as ConnectionMode, icon: Webhook, label: 'External webhook', hint: 'Gmail/Zoho via Pipedream/n8n' },
+          ] as const).map(m => (
+            <button
+              key={m.id}
+              onClick={() => setMode(m.id)}
+              className={cn(
+                'flex flex-col items-start gap-1 rounded-xl border px-3 py-2.5 text-left cursor-pointer transition-colors',
+                mode === m.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <m.icon className={cn('h-4 w-4', mode === m.id ? 'text-primary' : 'text-muted-foreground')} />
+                <span className={cn('text-sm font-medium', mode === m.id && 'text-primary')}>{m.label}</span>
+              </div>
+              <span className="text-xs text-muted-foreground">{m.hint}</span>
+            </button>
+          ))}
         </div>
-      )}
+        {mode === 'shared' && (
+          <p className="text-xs text-muted-foreground mt-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+            <strong className="text-primary">Customer-support flow:</strong> one shared inbox (e.g. support@company.com) receives all mail. Alias rules below route <code className="bg-muted px-1 rounded">billing@</code>, <code className="bg-muted px-1 rounded">sales@</code>, or plus-addresses to specialist agents. Replies send as the alias address.
+          </p>
+        )}
+        {mode === 'external' && (
+          <p className="text-xs text-muted-foreground mt-2 rounded-lg bg-muted border border-border px-3 py-2">
+            Use this if you cannot register an OAuth app directly. A third-party service (Pipedream, n8n, trigger.dev) owns the Gmail/Zoho OAuth, forwards inbound mail to Qorven&apos;s webhook, and receives outbound mail at your forward URL to relay via OAuth.
+          </p>
+        )}
+      </div>
 
-      {/* Basic fields */}
-      <div className="space-y-3 mb-5">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Email Address</label>
+      {/* ── Basic fields ── */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2 sm:col-span-1">
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">
+            {mode === 'shared' ? 'Shared inbox address' : 'Email address'}
+          </label>
           <input
             value={address}
             onChange={e => setAddress(e.target.value)}
-            placeholder="you@example.com"
+            placeholder={mode === 'shared' ? 'support@company.com' : 'you@example.com'}
             className="qr-input w-full text-sm"
             disabled={isEdit}
           />
         </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Display Name</label>
+        <div className="col-span-2 sm:col-span-1">
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Display name</label>
           <input
             value={displayName}
             onChange={e => setDisplayName(e.target.value)}
-            placeholder="Your Name"
+            placeholder={mode === 'shared' ? 'Support Team' : 'Your Name'}
             className="qr-input w-full text-sm"
           />
         </div>
       </div>
 
-      {/* SMTP Settings */}
-      {(provider || isEdit) && (
-        <>
-          <div className="mb-4">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">SMTP (Outgoing)</h4>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className="col-span-2">
-                <input
-                  value={smtpHost}
-                  onChange={e => setSmtpHost(e.target.value)}
-                  placeholder="smtp.example.com"
-                  className="qr-input w-full text-sm"
-                />
-              </div>
-              <div>
-                <input
-                  type="number"
-                  value={smtpPort}
-                  onChange={e => setSmtpPort(Number(e.target.value))}
-                  placeholder="587"
-                  className="qr-input w-full text-sm"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={smtpUser}
-                onChange={e => setSmtpUser(e.target.value)}
-                placeholder="Username"
-                className="qr-input w-full text-sm"
-              />
-              <input
-                type="password"
-                value={smtpPass}
-                onChange={e => setSmtpPass(e.target.value)}
-                placeholder={isEdit ? '••••••••' : 'Password'}
-                className="qr-input w-full text-sm"
-              />
-            </div>
-          </div>
+      {/* ── Agent binding (dedicated only) ── */}
+      {mode === 'dedicated' && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Bind to agent</label>
+          <select
+            value={agentId}
+            onChange={e => setAgentId(e.target.value)}
+            className="qr-input w-full text-sm"
+          >
+            <option value="">— unbound —</option>
+            {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+          </select>
+          <p className="text-xs text-muted-foreground mt-1">This mailbox will be the exclusive inbox/outbox for the selected agent.</p>
+        </div>
+      )}
 
-          {/* IMAP Settings */}
-          <div className="mb-5">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">IMAP (Incoming)</h4>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className="col-span-2">
-                <input
-                  value={imapHost}
-                  onChange={e => setImapHost(e.target.value)}
-                  placeholder="imap.example.com"
-                  className="qr-input w-full text-sm"
-                />
+      {/* ── Mode 1 + 2: IMAP/SMTP ── */}
+      {(mode === 'dedicated' || mode === 'shared') && (
+        <>
+          {/* Provider presets */}
+          {!isEdit && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-2 block">Provider</label>
+              <div className="grid grid-cols-2 gap-2">
+                {PROVIDER_PRESETS.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => selectProvider(p.id)}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left cursor-pointer transition-colors',
+                      provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+                    )}
+                  >
+                    <span className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+                      p.id === 'gmail' ? 'bg-red-500/10 text-red-500' :
+                      p.id === 'outlook' ? 'bg-blue-500/10 text-blue-500' :
+                      p.id === 'zoho' ? 'bg-yellow-500/10 text-yellow-600' :
+                      'bg-muted text-muted-foreground'
+                    )}>
+                      {p.icon}
+                    </span>
+                    <span className="text-sm font-medium">{p.name}</span>
+                  </button>
+                ))}
               </div>
+              {provider === 'gmail' && (
+                <p className="text-xs text-muted-foreground mt-2">Gmail requires an App Password — Google Account &gt; Security &gt; 2-Step Verification &gt; App passwords.</p>
+              )}
+            </div>
+          )}
+
+          {(provider || isEdit) && (
+            <>
               <div>
-                <input
-                  type="number"
-                  value={imapPort}
-                  onChange={e => setImapPort(Number(e.target.value))}
-                  placeholder="993"
-                  className="qr-input w-full text-sm"
-                />
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">SMTP (Outgoing)</h4>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <div className="col-span-2">
+                    <input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.example.com" className="qr-input w-full text-sm" />
+                  </div>
+                  <input type="number" value={smtpPort} onChange={e => setSmtpPort(Number(e.target.value))} placeholder="587" className="qr-input w-full text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={smtpUser} onChange={e => setSmtpUser(e.target.value)} placeholder="Username" className="qr-input w-full text-sm" />
+                  <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder={isEdit ? '•••••••• (blank = keep)' : 'Password'} className="qr-input w-full text-sm" />
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={imapUser}
-                onChange={e => setImapUser(e.target.value)}
-                placeholder="Username"
-                className="qr-input w-full text-sm"
-              />
-              <input
-                type="password"
-                value={imapPass}
-                onChange={e => setImapPass(e.target.value)}
-                placeholder={isEdit ? '••••••••' : 'Password'}
-                className="qr-input w-full text-sm"
-              />
-            </div>
-          </div>
+
+              <div>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">IMAP (Incoming)</h4>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <div className="col-span-2">
+                    <input value={imapHost} onChange={e => setImapHost(e.target.value)} placeholder="imap.example.com" className="qr-input w-full text-sm" />
+                  </div>
+                  <input type="number" value={imapPort} onChange={e => setImapPort(Number(e.target.value))} placeholder="993" className="qr-input w-full text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={imapUser} onChange={e => setImapUser(e.target.value)} placeholder="Username" className="qr-input w-full text-sm" />
+                  <input type="password" value={imapPass} onChange={e => setImapPass(e.target.value)} placeholder={isEdit ? '•••••••• (blank = keep)' : 'Password'} className="qr-input w-full text-sm" />
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
+
+      {/* ── Mode 2: Alias → agent table ── */}
+      {(mode === 'shared' || mode === 'external') && isEdit && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <LinkIcon className="h-4 w-4 text-muted-foreground" />
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Alias → Agent routing</h4>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Incoming mail to each alias address is routed to its assigned agent. Replies are sent as the alias address.
+            You can also use plus-addressing (<code className="bg-muted px-1 rounded">support+billing@</code>).
+          </p>
+
+          {/* Alias table */}
+          {aliasesLoading ? (
+            <div className="space-y-1.5 mb-3">
+              {[1,2].map(i => <div key={i} className="h-9 animate-pulse rounded-lg bg-muted" />)}
+            </div>
+          ) : aliases.length > 0 ? (
+            <div className="rounded-xl border border-border overflow-hidden mb-3">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40">
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Alias address</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Routes to agent</th>
+                    <th className="px-2 py-2 w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {aliases.map(alias => {
+                    const agentName = souls.find(s => s.id === alias.target_agent_id)?.display_name ?? alias.target_agent_id;
+                    return (
+                      <tr key={alias.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30 transition-colors">
+                        <td className="px-3 py-2 font-mono text-foreground">{alias.alias_address}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{agentName}</td>
+                        <td className="px-2 py-2">
+                          <button
+                            onClick={() => deleteAlias(alias.id)}
+                            disabled={deletingAliasId === alias.id}
+                            className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors disabled:opacity-50"
+                            title="Remove alias"
+                          >
+                            {deletingAliasId === alias.id
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : <Trash className="h-3 w-3" />}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground mb-3 py-2 text-center rounded-lg border border-dashed border-border">No alias rules yet. Add one below.</p>
+          )}
+
+          {/* Add alias row */}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground mb-1 block">Alias address</label>
+              <input
+                value={newAliasAddr}
+                onChange={e => setNewAliasAddr(e.target.value)}
+                placeholder="billing@company.com"
+                className="qr-input w-full text-sm"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground mb-1 block">Route to agent</label>
+              <select
+                value={newAliasAgent}
+                onChange={e => setNewAliasAgent(e.target.value)}
+                className="qr-input w-full text-sm"
+              >
+                <option value="">— select agent —</option>
+                {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+              </select>
+            </div>
+            <button
+              onClick={addAlias}
+              disabled={addingAlias || !newAliasAddr.trim() || !newAliasAgent}
+              className="flex items-center gap-1 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-xs font-medium hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0"
+            >
+              {addingAlias ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mode 2 hint: alias table only visible after save ── */}
+      {(mode === 'shared' || mode === 'external') && !isEdit && (
+        <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+          After creating this account, open it in Edit mode to add alias → agent routing rules.
+        </div>
+      )}
+
+      {/* ── Mode 3: External webhook ── */}
+      {mode === 'external' && (
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Forward URL (outbound relay)</label>
+            <input
+              value={forwardUrl}
+              onChange={e => setForwardUrl(e.target.value)}
+              placeholder="https://hooks.pipedream.net/api/v1/workflows/…"
+              className="qr-input w-full text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Qorven POSTs outbound mail here. Your Pipedream/n8n workflow receives it and sends via Gmail/Zoho OAuth.</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Inbound HMAC secret</label>
+            <input
+              type="password"
+              value={inboundSecret}
+              onChange={e => setInboundSecret(e.target.value)}
+              placeholder={isEdit ? '•••••••• (blank = keep)' : 'Generate a random secret'}
+              className="qr-input w-full text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Used to verify the HMAC signature on inbound webhook calls.</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Inbound webhook URL (paste into your service)</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={inboundWebhookUrl}
+                readOnly
+                className="qr-input w-full text-sm text-muted-foreground cursor-default select-all"
+              />
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(inboundWebhookUrl); toast.success('Copied'); }}
+                className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-accent cursor-pointer shrink-0 transition-colors"
+                title="Copy webhook URL"
+              >
+                <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Paste this URL into the Pipedream/n8n/trigger.dev trigger that forwards inbound Gmail/Zoho mail to Qorven.</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Bind to agent (optional)</label>
+            <select value={agentId} onChange={e => setAgentId(e.target.value)} className="qr-input w-full text-sm">
+              <option value="">— unbound —</option>
+              {souls.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">Or use alias routing below to route to multiple agents.</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Per-identity prefs (all modes) ── */}
+      <div className="space-y-4 rounded-xl border border-border bg-card px-5 py-4">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Email preferences</h4>
+
+        {/* Active toggle */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm font-medium">Active</span>
+            <p className="text-xs text-muted-foreground mt-0.5">Enable or pause this account without deleting it.</p>
+          </div>
+          <button
+            onClick={() => setIsActive(v => !v)}
+            className={cn('relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors', isActive ? 'bg-primary' : 'bg-muted')}
+          >
+            <span className={cn('inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform', isActive ? 'translate-x-4' : 'translate-x-0')} />
+          </button>
+        </div>
+
+        {/* Reply-To */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Reply-To address (optional)</label>
+          <input
+            value={replyTo}
+            onChange={e => setReplyTo(e.target.value)}
+            placeholder="replies@company.com"
+            className="qr-input w-full text-sm"
+          />
+        </div>
+
+        {/* Default importance */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Default importance for outbound mail</label>
+          <div className="flex gap-2">
+            {(['high', 'normal', 'low'] as const).map(imp => (
+              <button
+                key={imp}
+                onClick={() => setDefaultImportance(imp)}
+                className={cn(
+                  'flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors capitalize',
+                  defaultImportance === imp
+                    ? imp === 'high' ? 'border-destructive bg-destructive/10 text-destructive'
+                    : imp === 'low'  ? 'border-muted-foreground bg-muted text-foreground'
+                    : 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:border-primary/30 text-muted-foreground'
+                )}
+              >
+                {imp === 'high' ? '! High' : imp === 'normal' ? 'Normal' : 'Low'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Signature */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Email signature</label>
+          <div className="rounded-xl border border-border overflow-hidden">
+            <RichTextEditor
+              value={signatureHtml}
+              onChange={(html, text) => { setSignatureHtml(html); setSignatureText(text); }}
+              placeholder="Write your email signature…"
+              minHeight={120}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">This signature is automatically appended to outbound mail from this identity.</p>
+        </div>
+      </div>
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2 border-t border-border">
