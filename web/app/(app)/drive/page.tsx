@@ -15,6 +15,7 @@ import {
 import { EmptyState, emptyStates } from '@/components/empty-state';
 import { request, BASE, getToken } from '@/lib/api-core';
 import { ShareDialog } from '@/components/drive/share-dialog';
+import { WorkspaceEditor } from '@/components/drive/workspace-editor';
 
 const mimeIcon = (mime: string) => {
   if (mime?.startsWith('image/')) return Image;
@@ -230,6 +231,7 @@ export default function DrivePage() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const [driveTab, setDriveTab] = useState<'files' | 'workspace'>('files');
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -447,6 +449,36 @@ export default function DrivePage() {
             )}
           </nav>
 
+          {/* Files | Workspace tab switcher */}
+          <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5 gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDriveTab('files')}
+              className={cn(
+                'flex items-center rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                driveTab === 'files' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Files
+            </button>
+            {driveSoulFilter ? (
+              <button
+                type="button"
+                onClick={() => setDriveTab('workspace')}
+                className={cn(
+                  'flex items-center rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                  driveTab === 'workspace' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Workspace
+              </button>
+            ) : (
+              <span className="flex items-center rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground/40 pointer-events-none" title="Select an agent to edit its workspace">
+                Workspace
+              </span>
+            )}
+          </div>
+
           {/* Remote browsing indicator */}
           {remoteProvider && activeRemote && (
             <div className="flex items-center gap-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 text-xs text-blue-400">
@@ -531,8 +563,12 @@ export default function DrivePage() {
           </div>
         )}
 
-        {/* File list */}
-        <div className="flex-1 overflow-y-auto">
+        {/* File list / Workspace editor */}
+        <div className="flex-1 overflow-hidden">
+          {driveTab === 'workspace' && driveSoulFilter ? (
+            <WorkspaceEditor agentId={driveSoulFilter} />
+          ) : (
+          <div className="h-full overflow-y-auto">
           {remoteProvider ? (
             /* Remote file browsing mode */
             remoteLoading ? (
@@ -717,6 +753,8 @@ export default function DrivePage() {
                 </tbody>
               </table>
             )
+          )}
+          </div>
           )}
         </div>
       </div>
