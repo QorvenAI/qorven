@@ -368,7 +368,9 @@ func (gw *Gateway) handleMailInboundWebhook(w http.ResponseWriter, r *http.Reque
 				r.Context(), gw.mailStore, t.AgentID, defaultTenant,
 				threadID, body.From, body.FromName, body.Subject, rawBody, body.AuthResults,
 			)
-			go gw.inbound.Process(r.Context(), channels.InboundMessage{
+			// Detach from the request context — it is cancelled when this webhook
+			// returns 200, which would kill the agent run mid-flight.
+			go gw.inbound.Process(context.WithoutCancel(r.Context()), channels.InboundMessage{
 				ChannelType: "email",
 				ChannelName: "mail",
 				AgentID:     t.AgentID,
