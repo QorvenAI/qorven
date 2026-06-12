@@ -19,7 +19,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/calendar"
 	"github.com/qorvenai/qorven/internal/channels"
-	"github.com/qorvenai/qorven/internal/crypto"
 	"github.com/qorvenai/qorven/internal/mail"
 )
 
@@ -66,69 +65,115 @@ func (gw *Gateway) handleUpdateMailIdentity(w http.ResponseWriter, r *http.Reque
 	}
 	id := chi.URLParam(r, "id")
 	var body struct {
-		DisplayName    string `json:"display_name"`
-		SMTPHost       string `json:"smtp_host"`
-		SMTPPort       int    `json:"smtp_port"`
-		SMTPUser       string `json:"smtp_user"`
-		SMTPPass       string `json:"smtp_pass"` // plain — encrypted before storage
-		IMAPHost       string `json:"imap_host"`
-		IMAPPort       int    `json:"imap_port"`
-		IMAPUser       string `json:"imap_user"`
-		IMAPPass       string `json:"imap_pass"` // plain — encrypted before storage
-		PollInterval   int    `json:"poll_interval_seconds"`
+		// Core connection fields.
+		DisplayName  string `json:"display_name"`
+		SMTPHost     string `json:"smtp_host"`
+		SMTPPort     int    `json:"smtp_port"`
+		SMTPUser     string `json:"smtp_user"`
+		SMTPPass     string `json:"smtp_pass"` // plain — encrypted before storage
+		IMAPHost     string `json:"imap_host"`
+		IMAPPort     int    `json:"imap_port"`
+		IMAPUser     string `json:"imap_user"`
+		IMAPPass     string `json:"imap_pass"` // plain — encrypted before storage
+		PollInterval int    `json:"poll_interval_seconds"`
+		// Extended fields (Task 10).
+		IsActive          *bool  `json:"is_active"`           // pointer — omitted ≠ false
+		Transport         string `json:"transport"`
+		ForwardURL        string `json:"forward_url"`
+		ReplyTo           string `json:"reply_to"`
+		DefaultImportance string `json:"default_importance"`
+		SignatureHTML     string `json:"signature_html"`
+		SignatureText     string `json:"signature_text"`
+		InboundSecret     string `json:"inbound_secret"` // plain — encrypted before storage
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
 
-	// Encrypt passwords when provided; empty string = leave existing.
-	var smtpPassEnc, imapPassEnc string
 	encKey := gw.cfg.Auth.EncryptionKey
-	if body.SMTPPass != "" {
-		var err error
-		if smtpPassEnc, err = crypto.EncryptString(body.SMTPPass, encKey); err != nil {
-			writeJSON(w, 500, map[string]string{"error": "failed to encrypt smtp password"})
-			return
-		}
+
+	// Encrypt secret fields when provided; empty string = leave existing.
+	smtpPassEnc, err := mailEncryptIfProvided(body.SMTPPass, encKey)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to encrypt smtp password"})
+		return
 	}
-	if body.IMAPPass != "" {
-		var err error
-		if imapPassEnc, err = crypto.EncryptString(body.IMAPPass, encKey); err != nil {
-			writeJSON(w, 500, map[string]string{"error": "failed to encrypt imap password"})
-			return
-		}
+	imapPassEnc, err := mailEncryptIfProvided(body.IMAPPass, encKey)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to encrypt imap password"})
+		return
+	}
+	inboundSecretEnc, err := mailEncryptIfProvided(body.InboundSecret, encKey)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "failed to encrypt inbound secret"})
+		return
 	}
 
-	// Build dynamic update — only overwrite encrypted pass columns if a new plaintext was supplied.
-	if smtpPassEnc != "" && imapPassEnc != "" {
-		_, err := gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities
-			 SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, smtp_pass_enc=$5,
-			     imap_host=$6, imap_port=$7, imap_user=$8, imap_pass_enc=$9, poll_interval_seconds=$10
-			 WHERE id=$11 AND tenant_id=$12`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser, smtpPassEnc,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, imapPassEnc, body.PollInterval,
-			id, defaultTenant)
-		if err != nil {
-			writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
-			return
+	// Build a dynamic SET clause so we only overwrite encrypted-pass columns when
+	// a new plaintext was supplied, and only touch is_active when the caller
+	// explicitly included the field (pointer non-nil check).
+	setClauses := []string{
+		"display_name=$1",
+		"smtp_host=$2",
+		"smtp_port=$3",
+		"smtp_user=$4",
+		"imap_host=$5",
+		"imap_port=$6",
+		"imap_user=$7",
+		"poll_interval_seconds=$8",
+		"transport=$9",
+		"forward_url=$10",
+		"reply_to=$11",
+		"default_importance=$12",
+		"signature_html=$13",
+		"signature_text=$14",
+	}
+	args := []any{
+		body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser,
+		body.IMAPHost, body.IMAPPort, body.IMAPUser, body.PollInterval,
+		body.Transport, body.ForwardURL, body.ReplyTo, body.DefaultImportance,
+		body.SignatureHTML, body.SignatureText,
+	}
+	nextParam := func() string {
+		n := len(args) + 1
+		return fmt.Sprintf("$%d", n)
+	}
+
+	if smtpPassEnc != "" {
+		setClauses = append(setClauses, "smtp_pass_enc="+nextParam())
+		args = append(args, smtpPassEnc)
+	}
+	if imapPassEnc != "" {
+		setClauses = append(setClauses, "imap_pass_enc="+nextParam())
+		args = append(args, imapPassEnc)
+	}
+	if inboundSecretEnc != "" {
+		setClauses = append(setClauses, "inbound_secret_enc="+nextParam())
+		args = append(args, inboundSecretEnc)
+	}
+	if body.IsActive != nil {
+		setClauses = append(setClauses, "is_active="+nextParam())
+		args = append(args, *body.IsActive)
+	}
+
+	// Append WHERE clause params.
+	idParam := nextParam()
+	args = append(args, id)
+	tenantParam := nextParam()
+	args = append(args, defaultTenant)
+
+	setSQL := ""
+	for i, c := range setClauses {
+		if i > 0 {
+			setSQL += ", "
 		}
-	} else if smtpPassEnc != "" {
-		gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, smtp_pass_enc=$5, imap_host=$6, imap_port=$7, imap_user=$8, poll_interval_seconds=$9 WHERE id=$10 AND tenant_id=$11`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser, smtpPassEnc,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, body.PollInterval, id, defaultTenant)
-	} else if imapPassEnc != "" {
-		gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, imap_host=$5, imap_port=$6, imap_user=$7, imap_pass_enc=$8, poll_interval_seconds=$9 WHERE id=$10 AND tenant_id=$11`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, imapPassEnc, body.PollInterval, id, defaultTenant)
-	} else {
-		gw.mailStore.Pool().Exec(r.Context(),
-			`UPDATE soul_mail_identities SET display_name=$1, smtp_host=$2, smtp_port=$3, smtp_user=$4, imap_host=$5, imap_port=$6, imap_user=$7, poll_interval_seconds=$8 WHERE id=$9 AND tenant_id=$10`,
-			body.DisplayName, body.SMTPHost, body.SMTPPort, body.SMTPUser,
-			body.IMAPHost, body.IMAPPort, body.IMAPUser, body.PollInterval, id, defaultTenant)
+		setSQL += c
+	}
+	q := "UPDATE soul_mail_identities SET " + setSQL + " WHERE id=" + idParam + " AND tenant_id=" + tenantParam
+	if _, err := gw.mailStore.Pool().Exec(r.Context(), q, args...); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
 	}
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
@@ -408,7 +453,17 @@ func (gw *Gateway) handleMailRead(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		return
 	}
-	gw.mailStore.MarkRead(r.Context(), chi.URLParam(r, "id"), true)
+	// Accept optional JSON body {"read": bool}; defaults to true for backward compat.
+	read := true
+	if r.ContentLength > 0 {
+		var body struct {
+			Read *bool `json:"read"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Read != nil {
+			read = *body.Read
+		}
+	}
+	gw.mailStore.MarkRead(r.Context(), chi.URLParam(r, "id"), read)
 	w.WriteHeader(204)
 }
 
@@ -417,7 +472,17 @@ func (gw *Gateway) handleMailStar(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		return
 	}
-	gw.mailStore.MarkStarred(r.Context(), chi.URLParam(r, "id"), true)
+	// Accept optional JSON body {"starred": bool}; defaults to true for backward compat.
+	starred := true
+	if r.ContentLength > 0 {
+		var body struct {
+			Starred *bool `json:"starred"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Starred != nil {
+			starred = *body.Starred
+		}
+	}
+	gw.mailStore.MarkStarred(r.Context(), chi.URLParam(r, "id"), starred)
 	w.WriteHeader(204)
 }
 
