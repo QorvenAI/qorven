@@ -207,6 +207,7 @@ type Gateway struct {
 	mailRouter       *mail.Router
 	mailPoller       *mail.IMAPPoller
 	driveStore       *drive.Store
+	mirrorStore      *drive.MirrorStore
 	sandboxStore     *sandbox.Store
 	calendarStore    *calendar.Store
 	mcpManager       *mcp.Manager
@@ -643,6 +644,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.mailStore = mail.NewStore(db.Pool)
 			gw.mailRouter = mail.NewRouter(gw.mailStore)
 			gw.driveStore = drive.NewStore(db.Pool)
+			gw.mirrorStore = drive.NewMirrorStore(db.Pool)
 			gw.rtHub.SetPresence(presence.NewStore(db.Pool))
 			gw.sandboxStore = sandbox.NewStore(db.Pool)
 			gw.appRunner = sandbox.NewAppRunner(db.Pool, cfg.Server.BaseURL)
@@ -680,6 +682,7 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			connectors.SeedPlatforms(context.Background(), gw.connKB)
 			connectors.SeedExpandedPlatforms(context.Background(), gw.connKB)
 			connectors.SeedTopConnectors(context.Background(), gw.connKB)
+			connectors.SeedStorageUploadActions(context.Background(), gw.connKB)
 			gw.mcpManager = mcp.NewManager(db.Pool, gw.mcpClient)
 			gw.loadProvidersFromDB()
 		}

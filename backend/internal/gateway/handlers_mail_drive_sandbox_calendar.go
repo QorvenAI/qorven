@@ -812,6 +812,7 @@ func (gw *Gateway) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	gw.enqueueMirrorPush(f)
 	json.NewEncoder(w).Encode(f)
 }
 
