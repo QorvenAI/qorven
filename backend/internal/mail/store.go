@@ -553,3 +553,251 @@ func (s *Store) UpdateMessageSendStatus(ctx context.Context, id, status string) 
 		`UPDATE mailbox_messages SET send_status = $1 WHERE id = $2`, status, id)
 	return err
 }
+
+// --- Folder / trash / archive ---
+
+// MoveFolder moves a message to the given folder.
+func (s *Store) MoveFolder(ctx context.Context, id, folder string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE mailbox_messages SET folder = $1 WHERE id = $2`, folder, id)
+	return err
+}
+
+// SoftDelete moves a message to the trash folder.
+func (s *Store) SoftDelete(ctx context.Context, id string) error {
+	return s.MoveFolder(ctx, id, "trash")
+}
+
+// Archive moves a message to the archived folder.
+func (s *Store) Archive(ctx context.Context, id string) error {
+	return s.MoveFolder(ctx, id, "archived")
+}
+
+// --- Star / read bool toggles ---
+
+// SetStar sets is_starred on a message by id.
+func (s *Store) SetStar(ctx context.Context, id string, starred bool) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE mailbox_messages SET is_starred = $1 WHERE id = $2`, starred, id)
+	return err
+}
+
+// SetRead sets is_read on a message by id.
+func (s *Store) SetRead(ctx context.Context, id string, read bool) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE mailbox_messages SET is_read = $1 WHERE id = $2`, read, id)
+	return err
+}
+
+// --- Full-text search ---
+
+// msgScanCols is the standard SELECT column list for mailbox_messages rows.
+// It must match the Scan call in scanMessage exactly.
+const msgScanCols = `id, agent_id, COALESCE(identity_id::text,''), COALESCE(thread_id,''), message_id, folder, direction,
+	from_address, COALESCE(from_name,''), to_addresses,
+	COALESCE(subject,''), COALESCE(body_text,''), COALESCE(body_html,''),
+	is_read, is_starred, send_status, received_at`
+
+func scanMessage(rows pgx.Rows, m *Message) error {
+	return rows.Scan(&m.ID, &m.AgentID, &m.IdentityID, &m.ThreadID, &m.MessageID,
+		&m.Folder, &m.Direction, &m.FromAddress, &m.FromName, &m.ToAddresses,
+		&m.Subject, &m.BodyText, &m.BodyHTML,
+		&m.IsRead, &m.IsStarred, &m.SendStatus, &m.ReceivedAt)
+}
+
+// SearchMessages performs a full-text search using the gin index on the messages
+// table.  agentID is optional — pass "" to search across all agents in the tenant.
+func (s *Store) SearchMessages(ctx context.Context, tenantID, agentID, query string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	base := `SELECT ` + msgScanCols + `
+		FROM mailbox_messages
+		WHERE tenant_id = $1
+		  AND to_tsvector('english', coalesce(subject,'') || ' ' || coalesce(body_text,''))
+		      @@ websearch_to_tsquery('english', $2)`
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if agentID != "" {
+		rows, err = s.pool.Query(ctx,
+			base+` AND agent_id = $3 ORDER BY received_at DESC LIMIT $4`,
+			tenantID, query, agentID, limit)
+	} else {
+		rows, err = s.pool.Query(ctx,
+			base+` ORDER BY received_at DESC LIMIT $3`,
+			tenantID, query, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	msgs := []Message{}
+	for rows.Next() {
+		var m Message
+		if err := scanMessage(rows, &m); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, nil
+}
+
+// --- Drafts ---
+
+// SaveDraft inserts a new draft message.  cc and bcc may be nil.
+func (s *Store) SaveDraft(ctx context.Context, tenantID, agentID, identityID, to, subject, bodyText, bodyHTML string, cc, bcc []string) (*Message, error) {
+	if cc == nil {
+		cc = []string{}
+	}
+	if bcc == nil {
+		bcc = []string{}
+	}
+	msgID := fmt.Sprintf("draft-%s@qorven.local", generateID())
+	threadID := fmt.Sprintf("thread-%s", generateID())
+	m := &Message{}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO mailbox_messages
+		    (tenant_id, agent_id, identity_id, message_id, thread_id,
+		     folder, direction, send_status,
+		     to_addresses, cc_addresses, bcc_addresses,
+		     subject, body_text, body_html)
+		 VALUES ($1, $2, $3, $4, $5,
+		         'drafts', 'outbound', 'draft',
+		         $6, $7, $8,
+		         $9, $10, $11)
+		 RETURNING id, agent_id,
+		           COALESCE(identity_id::text,''), COALESCE(thread_id,''), message_id,
+		           folder, direction, COALESCE(from_address,''), '',
+		           to_addresses,
+		           COALESCE(subject,''), COALESCE(body_text,''), COALESCE(body_html,''),
+		           is_read, is_starred, send_status, received_at`,
+		tenantID, agentID, identityID, msgID, threadID,
+		[]string{to}, cc, bcc,
+		subject, bodyText, bodyHTML,
+	).Scan(&m.ID, &m.AgentID, &m.IdentityID, &m.ThreadID, &m.MessageID,
+		&m.Folder, &m.Direction, &m.FromAddress, &m.FromName,
+		&m.ToAddresses,
+		&m.Subject, &m.BodyText, &m.BodyHTML,
+		&m.IsRead, &m.IsStarred, &m.SendStatus, &m.ReceivedAt)
+	return m, err
+}
+
+// UpdateDraft updates the editable fields of an existing draft (folder=drafts guard).
+func (s *Store) UpdateDraft(ctx context.Context, id, to, subject, bodyText, bodyHTML string, cc, bcc []string) error {
+	if cc == nil {
+		cc = []string{}
+	}
+	if bcc == nil {
+		bcc = []string{}
+	}
+	_, err := s.pool.Exec(ctx,
+		`UPDATE mailbox_messages
+		 SET to_addresses = $1, cc_addresses = $2, bcc_addresses = $3,
+		     subject = $4, body_text = $5, body_html = $6
+		 WHERE id = $7 AND folder = 'drafts'`,
+		[]string{to}, cc, bcc, subject, bodyText, bodyHTML, id)
+	return err
+}
+
+// ListDrafts returns all draft messages for a given tenant and agent.
+func (s *Store) ListDrafts(ctx context.Context, tenantID, agentID string) ([]Message, error) {
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	base := `SELECT ` + msgScanCols + `
+		FROM mailbox_messages
+		WHERE tenant_id = $1 AND folder = 'drafts'`
+	if agentID != "" {
+		rows, err = s.pool.Query(ctx, base+` AND agent_id = $2 ORDER BY received_at DESC`, tenantID, agentID)
+	} else {
+		rows, err = s.pool.Query(ctx, base+` ORDER BY received_at DESC`, tenantID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	msgs := []Message{}
+	for rows.Next() {
+		var m Message
+		if err := scanMessage(rows, &m); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, nil
+}
+
+// --- Bulk actions ---
+
+// validBulkActions lists the allowed BulkUpdate actions.
+var validBulkActions = map[string]struct{}{
+	"read": {}, "star": {}, "move": {}, "delete": {},
+}
+
+// BulkUpdate applies one action to a set of messages identified by their ids.
+//
+//   - read   — sets is_read to the bool parsed from value ("true"/"false")
+//   - star   — sets is_starred to the bool parsed from value
+//   - move   — sets folder to value
+//   - delete — moves to 'trash' (value is ignored)
+func (s *Store) BulkUpdate(ctx context.Context, ids []string, action, value string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, ok := validBulkActions[action]; !ok {
+		return fmt.Errorf("unknown bulk action %q: must be one of read, star, move, delete", action)
+	}
+	switch action {
+	case "read":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("bulk read: %w", err)
+		}
+		_, err = s.pool.Exec(ctx,
+			`UPDATE mailbox_messages SET is_read = $1 WHERE id = ANY($2)`, b, ids)
+		return err
+	case "star":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("bulk star: %w", err)
+		}
+		_, err = s.pool.Exec(ctx,
+			`UPDATE mailbox_messages SET is_starred = $1 WHERE id = ANY($2)`, b, ids)
+		return err
+	case "move":
+		if value == "" {
+			return fmt.Errorf("bulk move: value (folder) must not be empty")
+		}
+		_, err := s.pool.Exec(ctx,
+			`UPDATE mailbox_messages SET folder = $1 WHERE id = ANY($2)`, value, ids)
+		return err
+	case "delete":
+		_, err := s.pool.Exec(ctx,
+			`UPDATE mailbox_messages SET folder = 'trash' WHERE id = ANY($1)`, ids)
+		return err
+	}
+	return nil // unreachable
+}
+
+// parseBool accepts "true"/"1" → true, "false"/"0" → false.
+func parseBool(s string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "1":
+		return true, nil
+	case "false", "0":
+		return false, nil
+	}
+	return false, fmt.Errorf("invalid bool value %q", s)
+}
+
+// generateID returns a short random hex string suitable for generated IDs.
+func generateID() string {
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = byte(time.Now().UnixNano()>>uint(i*8)) ^ byte(i*17+3)
+	}
+	return fmt.Sprintf("%x", b)
+}
