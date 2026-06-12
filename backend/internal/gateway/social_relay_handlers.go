@@ -15,10 +15,12 @@ import (
 
 // validRelayProviders is the set of supported relay providers for key management.
 var validRelayProviders = map[string]bool{
-	"outstand":  true,
-	"postforme": true,
-	"buffer":    true,
-	"pipedream": true,
+	"outstand":   true,
+	"postforme":  true,
+	"buffer":     true,
+	"pipedream":  true,
+	"n8n":        true,
+	"triggerdev": true,
 }
 
 // newRelayClient creates a RelayClient for the given provider and API key.
@@ -84,7 +86,7 @@ func (gw *Gateway) handleAddRelayKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validRelayProviders[body.Provider] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider; must be one of: outstand, postforme, buffer, pipedream"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider; must be one of: outstand, postforme, buffer, pipedream, n8n, triggerdev"})
 		return
 	}
 	if body.APIKey == "" {

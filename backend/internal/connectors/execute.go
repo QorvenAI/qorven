@@ -7,6 +7,7 @@ package connectors
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -123,6 +124,9 @@ func (e *Executor) executePipedream(ctx context.Context, platformID string, acti
 	if e.relay == nil {
 		return "", fmt.Errorf("no relay configured — add Pipedream API key in Settings → Integrations")
 	}
+	// Relay backend is currently fixed to Pipedream for seeded actions.
+	// n8n / trigger.dev relay keys are stored for connect-your-own-instance
+	// use; per-action relay-provider selection is a planned follow-on.
 	apiKey, err := e.relay.GetRelayKey(ctx, e.tenantID, "pipedream")
 	if err != nil {
 		return "", fmt.Errorf("pipedream not configured — add API key in Settings → Integrations")
@@ -228,7 +232,7 @@ func (e *Executor) executeDirect(ctx context.Context, platform *Platform, action
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 	case "basic":
-		req.Header.Set("Authorization", "Basic "+token)
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(token)))
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -272,8 +276,17 @@ func (e *Executor) ExecuteSafe(ctx context.Context, platformID, actionKey string
 	return e.Execute(ctx, platformID, actionKey, params)
 }
 
+type ctxKey string
+
+const agentIDCtxKey ctxKey = "connector_agent_id"
+
+// WithAgentID returns a context carrying the agent id for connector permission checks.
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, agentIDCtxKey, agentID)
+}
+
 func agentIDFromContext(ctx context.Context) string {
-	if v := ctx.Value("agent_id"); v != nil {
+	if v := ctx.Value(agentIDCtxKey); v != nil {
 		if s, ok := v.(string); ok {
 			return s
 		}

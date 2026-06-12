@@ -14,6 +14,8 @@ const RELAY_PROVIDERS = [
   { id: 'postforme', name: 'PostForMe', category: 'social', description: 'Social posting API — white-label OAuth flows', pricing: '$10/mo (1000 posts)', keyPrefix: '', keyHint: 'Get key from app.postforme.dev → API Keys', docsUrl: 'https://api.postforme.dev/docs' },
   { id: 'buffer', name: 'Buffer', category: 'social', description: 'Schedule and publish via Buffer — connect accounts in Buffer dashboard', pricing: 'Free (3 channels) or $5/channel/mo', keyPrefix: '', keyHint: 'Get token from publish.buffer.com → Settings → API', docsUrl: 'https://developers.buffer.com' },
   { id: 'pipedream', name: 'Pipedream', category: 'work', description: 'Work tools — Gmail, Calendar, Slack, Notion, CRM', pricing: 'Free (100 actions/mo)', keyPrefix: 'pd_', keyHint: 'Get key from pipedream.com → Settings → API Keys', docsUrl: 'https://pipedream.com/docs' },
+  { id: 'n8n', name: 'n8n', category: 'work', description: 'Bring your own n8n instance — stored now; per-action routing coming soon (connector actions currently run via Pipedream)', pricing: 'Self-hosted (free) or n8n Cloud from $20/mo', keyPrefix: '', keyHint: 'Stored for upcoming per-action routing. Connector execution currently requires a Pipedream key. Generate an API key in your n8n instance → Settings → API Keys', docsUrl: 'https://docs.n8n.io/api/' },
+  { id: 'triggerdev', name: 'Trigger.dev', category: 'work', description: 'Bring your own Trigger.dev instance — stored now; per-action routing coming soon (connector actions currently run via Pipedream)', pricing: 'Self-hosted (free) or Cloud from $20/mo', keyPrefix: 'tr_', keyHint: 'Stored for upcoming per-action routing. Connector execution currently requires a Pipedream key. Get your secret key from Trigger.dev dashboard → Environment → API Keys', docsUrl: 'https://trigger.dev/docs' },
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -306,7 +308,7 @@ function CatalogBrowser() {
                             {entry.name}
                           </span>
                           {entry.categories.length > 0 && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                               {entry.categories[0]}
                             </span>
                           )}
@@ -560,8 +562,8 @@ export function IntegrationsSettings() {
       ))}
 
       <div className="space-y-1 mt-6 mb-2">
-        <h2 className="text-base font-semibold text-foreground">Work Tools (Pipedream)</h2>
-        <p className="text-xs text-muted-foreground">Connect work integrations — email, calendar, CRM, and collaboration tools.</p>
+        <h2 className="text-base font-semibold text-foreground">Work Relay Backends</h2>
+        <p className="text-xs text-muted-foreground">Connect work automation relay backends — email, calendar, CRM, collaboration tools, and custom workflows.</p>
       </div>
 
       {workProviders.map(provider => (

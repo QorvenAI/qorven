@@ -134,11 +134,15 @@ export const connections = {
   list: () => request<{ connections: any[] }>('/connections'),
   // config carries per-connection host placeholders (e.g. {site} for WordPress),
   // pinned + SSRF-validated server-side.
-  save: (platformId: string, token: string, label?: string, config?: Record<string, string>) =>
-    request<any>(`/connections/${platformId}`, {
-      method: 'POST',
-      body: JSON.stringify({ token, label: label || 'default', config: config || undefined }),
-    }),
+  // authType drives which body field is used: api_key platforms expect {api_key},
+  // bearer/basic platforms expect {token}.
+  save: (platformId: string, authType: string, secret: string,
+         label?: string, config?: Record<string, string>) => {
+    const body: Record<string, unknown> = { label: label || 'default' };
+    if (config) body.config = config;
+    if (authType === 'api_key') body.api_key = secret; else body.token = secret;
+    return request<any>(`/connections/${platformId}`, { method: 'POST', body: JSON.stringify(body) });
+  },
   delete: (platformId: string) =>
     request<void>(`/connections/${platformId}`, { method: 'DELETE' }),
 };
