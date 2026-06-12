@@ -286,6 +286,7 @@ func (gw *Gateway) Start() error {
 		})
 		gw.cronRunner.Start(context.Background())
 		slog.Info("cron runner started")
+		gw.startCalendarSyncTicker(context.Background())
 
 		// Self-building loop (disabled by default)
 		selfBuild := agent.NewSelfBuildLoop(gw.agentLoop, agent.SelfBuildConfig{
