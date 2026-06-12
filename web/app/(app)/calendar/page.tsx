@@ -14,6 +14,8 @@ import { AgendaView } from '@/components/calendar/agenda-view';
 import { TimeGrid } from '@/components/calendar/time-grid';
 import { ScheduleDialog } from '@/components/calendar/schedule-dialog';
 import { ItemDetail } from '@/components/calendar/item-detail';
+import { SyncDialog } from '@/components/calendar/sync-dialog';
+import { calendarApi as calendarSyncApi } from '@/lib/api-workspace';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -40,6 +42,8 @@ export default function CalendarPage() {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<TimelineItem | null>(null);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const calFilter = useStore(s => s.calSoulFilter);
   const souls = useStore(s => s.souls);
@@ -172,6 +176,19 @@ export default function CalendarPage() {
           <button onClick={() => setShowSchedule(true)}
             className="qr-btn qr-btn-primary">
             + Schedule
+          </button>
+          <button onClick={() => setShowSync(true)}
+            className="qr-btn qr-btn-ghost">
+            Sync to calendar
+          </button>
+          <button
+            onClick={async () => {
+              setSyncing(true);
+              try { await calendarSyncApi.syncNow(); } finally { setSyncing(false); }
+            }}
+            disabled={syncing}
+            className="qr-btn qr-btn-ghost">
+            {syncing ? 'Syncing…' : 'Sync now'}
           </button>
         </div>
       }
@@ -421,6 +438,7 @@ export default function CalendarPage() {
       </div>
       {showSchedule && <ScheduleDialog onClose={() => setShowSchedule(false)} onCreated={load} defaultAgentId={calFilter} />}
       {selectedItem && <ItemDetail item={selectedItem} onClose={() => setSelectedItem(null)} onChanged={load} />}
+      {showSync && <SyncDialog onClose={() => setShowSync(false)} onSaved={() => setShowSync(false)} />}
     </PageShell>
   );
 }

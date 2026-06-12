@@ -84,7 +84,18 @@ export interface ScheduleInput {
   title?: string;
 }
 
+export interface CalendarSync {
+  id: string; scope: string; scope_id?: string | null; provider: string;
+  account_id: string; remote_calendar_id: string; enabled: boolean;
+  last_synced_at?: string | null; error?: string;
+}
+
 export const calendarApi = {
+  syncs: () => request<{ syncs: CalendarSync[] }>(`/calendar/syncs`),
+  createSync: (body: { scope: string; scope_id?: string | null; owner_agent_id?: string | null; provider: string; account_id?: string; remote_calendar_id?: string }) =>
+    request<{ id: string }>(`/calendar/syncs`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteSync: (id: string) => request<void>(`/calendar/syncs/${id}`, { method: 'DELETE' }),
+  syncNow: () => request<{ status: string }>(`/calendar/syncs/run`, { method: 'POST' }),
   list: (start?: string, end?: string, agentId?: string) => {
     const params = new URLSearchParams();
     if (start) params.set('start', start);
