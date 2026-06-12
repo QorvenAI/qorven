@@ -49,6 +49,12 @@ func (gw *Gateway) handleCalendarSchedule(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cron_expression required for repeat"})
 			return
 		}
+		// Validate before persisting: an invalid expression silently falls back
+		// to hourly, creating a recurring job that spends tokens every hour forever.
+		if !cronpkg.IsValidExpr(req.CronExpression) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cron expression"})
+			return
+		}
 		expr = req.CronExpression
 		nextRun = cronpkg.NextRunFromExpr(expr)
 	default: // "once"

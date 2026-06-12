@@ -460,6 +460,14 @@ func NextRunFromExpr(expr string) time.Time {
 	return computeNextRunFromExpr(expr)
 }
 
+// IsValidExpr reports whether expr is a valid cron expression. Callers that
+// accept a user-supplied schedule MUST validate before persisting it — an
+// invalid expression silently falls back to hourly in computeNextRunFromExpr,
+// which would create a recurring job that fires (and spends) every hour forever.
+func IsValidExpr(expr string) bool {
+	return gronx.New().IsValid(expr)
+}
+
 // computeNextRunFromExpr parses a cron expression and returns the next run time.
 func computeNextRunFromExpr(expr string) time.Time {
 	now := time.Now()

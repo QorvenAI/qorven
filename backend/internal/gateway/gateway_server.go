@@ -193,6 +193,18 @@ func (gw *Gateway) Start() error {
 				runID, _ = gw.calendarStore.StartRun(ctx, defaultTenant, runAs, "cron", "", jobName, nil)
 			}
 
+			// If the agent dispatch panics, finish the run row as errored before the
+			// runner's own recovery takes over — otherwise the row is stuck 'running'
+			// forever (the runner recovery only knows the job id, not the run id).
+			defer func() {
+				if rec := recover(); rec != nil {
+					if gw.calendarStore != nil && runID != "" {
+						_ = gw.calendarStore.FinishRun(ctx, runID, calendar.RunStatusError, "", fmt.Sprintf("panic: %v", rec), 0, 0)
+					}
+					panic(rec) // re-panic so the runner's recovery still marks the job
+				}
+			}()
+
 			// Isolated session per cron run (never reuse user's chat session)
 			sess, err := gw.sessions.Create(ctx, defaultTenant, runAs, "cron", "cron")
 			var sessionID string
