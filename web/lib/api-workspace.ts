@@ -340,10 +340,10 @@ export const driveApi = {
     request<void>(`/drive/files/${id}/scope`, { method: 'PUT', body: JSON.stringify({ scope, scope_id: scopeId ?? null }) }),
   share: (id: string, granteeType: 'agent' | 'department', granteeId: string, permission: 'viewer' | 'editor' | 'admin') =>
     request<void>(`/drive/files/${id}/share`, { method: 'PUT', body: JSON.stringify({ grantee_type: granteeType, grantee_id: granteeId, permission }) }),
-  workspaceFiles: (agentId: string) => request<{ files: WorkspaceFileMeta[] }>(`/drive/workspace/${agentId}`),
-  workspaceGet: (agentId: string, name: string) => request<{ name: string; content: string; missing: boolean }>(`/drive/workspace/${agentId}/${name}`),
+  workspaceFiles: (agentId: string) => request<{ files: WorkspaceFileMeta[] }>(`/drive/workspace/${encodeURIComponent(agentId)}`),
+  workspaceGet: (agentId: string, name: string) => request<{ name: string; content: string; missing: boolean }>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`),
   workspacePut: (agentId: string, name: string, content: string) =>
-    request<void>(`/drive/workspace/${agentId}/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+    request<void>(`/drive/workspace/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
 };
 
 // Deploy

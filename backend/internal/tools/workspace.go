@@ -34,8 +34,16 @@ func WorkspaceRoot() string {
 
 // AgentWorkspace returns the workspace path for a specific agent.
 // Creates the directory if it doesn't exist.
+//
+// agentID is reduced to its base element so a crafted value (e.g. "../other")
+// cannot escape the workspace root — defense-in-depth that does not rely on an
+// upstream path-traversal middleware.
 func AgentWorkspace(agentID string) string {
-	ws := filepath.Join(WorkspaceRoot(), agentID)
+	seg := filepath.Base(agentID)
+	if seg == "." || seg == ".." || seg == string(filepath.Separator) || seg == "" {
+		seg = "_invalid"
+	}
+	ws := filepath.Join(WorkspaceRoot(), seg)
 	os.MkdirAll(ws, 0755)
 	return ws
 }

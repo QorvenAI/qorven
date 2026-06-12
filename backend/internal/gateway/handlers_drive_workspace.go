@@ -36,7 +36,21 @@ func workspaceFileEditable(name string) bool {
 	return workspaceEditableFiles[name]
 }
 
+// workspaceWriteAllowed gates the workspace endpoints. Editing an agent's
+// SOUL.md / persona files changes what the agent loads into its prompt next run,
+// so it is a privileged, behavior-altering operation. Today (single-tenant) we
+// require an admin operator; when multi-user lands this should additionally gate
+// on agent ownership.
+func (gw *Gateway) workspaceWriteAllowed(r *http.Request) bool {
+	u := userFromContext(r.Context())
+	return u != nil && u.Role == "admin"
+}
+
 func (gw *Gateway) handleListWorkspaceFiles(w http.ResponseWriter, r *http.Request) {
+	if !gw.workspaceWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
 	agentID := chi.URLParam(r, "agent_id")
 	if agentID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id required"})
@@ -60,6 +74,10 @@ func (gw *Gateway) handleListWorkspaceFiles(w http.ResponseWriter, r *http.Reque
 }
 
 func (gw *Gateway) handleGetWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	if !gw.workspaceWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
 	agentID := chi.URLParam(r, "agent_id")
 	name := chi.URLParam(r, "name")
 	if !workspaceFileEditable(name) {
@@ -81,6 +99,10 @@ func (gw *Gateway) handleGetWorkspaceFile(w http.ResponseWriter, r *http.Request
 }
 
 func (gw *Gateway) handlePutWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	if !gw.workspaceWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
 	agentID := chi.URLParam(r, "agent_id")
 	name := chi.URLParam(r, "name")
 	if !workspaceFileEditable(name) {
