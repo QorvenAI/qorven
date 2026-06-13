@@ -25,6 +25,10 @@ import (
 // startWhatsmeow initialises the whatsmeow client for QR / multi-device mode.
 // It opens the persistent device store, creates the client, then either starts
 // a QR flow (unpaired device) or reconnects directly (already paired).
+//
+// Concurrency: container and client are constructed locally, then assigned to
+// the struct fields under w.mu before any network I/O so that concurrent
+// sendWhatsmeow or stopWhatsmeow calls always see a consistent view.
 func (w *WhatsAppChannel) startWhatsmeow(ctx context.Context) error {
 	if w.cfg.DBDSN == "" {
 		return fmt.Errorf("whatsmeow: DBDSN is required for qr mode")
@@ -34,7 +38,6 @@ func (w *WhatsAppChannel) startWhatsmeow(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("whatsmeow: open device store: %w", err)
 	}
-	w.wmContainer = container
 
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil {
@@ -42,11 +45,17 @@ func (w *WhatsAppChannel) startWhatsmeow(ctx context.Context) error {
 	}
 
 	client := whatsmeow.NewClient(device, waLog.Noop)
-	w.wmClient = client
 
 	client.AddEventHandler(func(evt any) {
 		w.onWhatsmeowEvent(ctx, evt)
 	})
+
+	// Assign fields under the lock before any blocking I/O so that an early
+	// inbound event (fired by Connect) sees a non-nil client.
+	w.mu.Lock()
+	w.wmClient = client
+	w.wmContainer = container
+	w.mu.Unlock()
 
 	if client.Store.ID == nil {
 		// Device not yet paired — start QR flow.
@@ -54,18 +63,28 @@ func (w *WhatsAppChannel) startWhatsmeow(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("whatsmeow: get qr channel: %w", err)
 		}
+		// Fix 2: honour ctx so the goroutine exits when Stop is called even if
+		// qrChan is never drained.
 		go func() {
-			for item := range qrChan {
-				switch item.Event {
-				case "code":
-					w.publishQR(item.Code)
-				case "success":
-					slog.Info("whatsapp.qr.paired", "agent", w.cfg.AgentID)
-				default:
-					if item.Error != nil {
-						slog.Warn("whatsapp.qr.error", "event", item.Event, "error", item.Error)
-					} else {
-						slog.Warn("whatsapp.qr.event", "event", item.Event)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case item, ok := <-qrChan:
+					if !ok {
+						return
+					}
+					switch item.Event {
+					case "code":
+						w.publishQR(item.Code)
+					case "success":
+						slog.Info("whatsapp.qr.paired", "agent", w.cfg.AgentID)
+					default:
+						if item.Error != nil {
+							slog.Warn("whatsapp.qr.error", "event", item.Event, "error", item.Error)
+						} else {
+							slog.Warn("whatsapp.qr.event", "event", item.Event)
+						}
 					}
 				}
 			}
@@ -85,16 +104,24 @@ func (w *WhatsAppChannel) startWhatsmeow(ctx context.Context) error {
 }
 
 // stopWhatsmeow disconnects the whatsmeow client and closes its device store.
+// Concurrency: fields are swapped to nil under w.mu so that a concurrent
+// sendWhatsmeow or a second stopWhatsmeow call sees nil immediately and does
+// nothing, while this call operates on the local copies outside the lock.
 func (w *WhatsAppChannel) stopWhatsmeow() {
-	if w.wmClient != nil {
-		w.wmClient.Disconnect()
-		w.wmClient = nil
+	w.mu.Lock()
+	c := w.wmClient
+	cont := w.wmContainer
+	w.wmClient = nil
+	w.wmContainer = nil
+	w.mu.Unlock()
+
+	if c != nil {
+		c.Disconnect()
 	}
-	if w.wmContainer != nil {
-		if err := w.wmContainer.Close(); err != nil {
+	if cont != nil {
+		if err := cont.Close(); err != nil {
 			slog.Warn("whatsapp.qr.container_close", "error", err)
 		}
-		w.wmContainer = nil
 	}
 }
 
@@ -172,8 +199,14 @@ func whatsmeowMessageText(e *events.Message) string {
 }
 
 // sendWhatsmeow sends a text message via the whatsmeow client, chunking long messages.
+// Concurrency: snapshots w.wmClient under w.mu and uses the local copy so that
+// a concurrent stopWhatsmeow cannot nil the field mid-send.
 func (w *WhatsAppChannel) sendWhatsmeow(ctx context.Context, to, text string) error {
-	if w.wmClient == nil {
+	w.mu.Lock()
+	c := w.wmClient
+	w.mu.Unlock()
+
+	if c == nil {
 		return fmt.Errorf("whatsmeow: client not initialised")
 	}
 
@@ -184,7 +217,7 @@ func (w *WhatsAppChannel) sendWhatsmeow(ctx context.Context, to, text string) er
 
 	for _, chunk := range chunkText(text, 4096) {
 		msg := &waE2E.Message{Conversation: proto.String(chunk)}
-		if _, err := w.wmClient.SendMessage(ctx, jid, msg); err != nil {
+		if _, err := c.SendMessage(ctx, jid, msg); err != nil {
 			return fmt.Errorf("whatsmeow: send: %w", err)
 		}
 	}
