@@ -112,6 +112,17 @@ func (gw *Gateway) handleDecideMatrixApproval(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 503, map[string]string{"error": "governance not available"})
 		return
 	}
+	// Approving/denying a governance hold is an admin action — it is the safety
+	// control that gates require_approval. A non-admin must not be able to clear it.
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
 	var body struct {
 		Status string `json:"status"` // approved or denied
 		Reason string `json:"reason"`
@@ -120,11 +131,7 @@ func (gw *Gateway) handleDecideMatrixApproval(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
-	user := userFromContext(r.Context())
-	decider := ""
-	if user != nil {
-		decider = user.ID
-	}
+	decider := user.ID
 	id := chi.URLParam(r, "id")
 	err := gw.approvalStore.Decide(r.Context(), defaultTenant, id, decider, body.Status, body.Reason)
 	if err != nil {
