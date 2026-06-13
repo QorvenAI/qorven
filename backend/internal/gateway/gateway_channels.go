@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	discordch "github.com/qorvenai/qorven/internal/channels/discord"
 	dingtalkhch "github.com/qorvenai/qorven/internal/channels/dingtalk"
@@ -59,356 +61,405 @@ func (gw *Gateway) loadChannels() {
 			continue
 		}
 
-		switch chType {
-		case "email":
-			emailCfg := emailch.Config{
-				AgentID:     *agentID,
-				Email:       strVal(cfg, "email"),
-				Password:    strVal(cfg, "password"),
-				IMAPHost:    strVal(cfg, "imap_host"),
-				IMAPPort:    intVal(cfg, "imap_port"),
-				SMTPHost:    strVal(cfg, "smtp_host"),
-				SMTPPort:    intVal(cfg, "smtp_port"),
-				PollSeconds: intVal(cfg, "poll_seconds"),
-			}
-			if emailCfg.Email != "" && emailCfg.Password != "" {
-				ch := emailch.New(emailCfg, gw.chanMgr.Handler())
-				// Wire mail saver for GUI visibility
-				if gw.mailStore != nil {
-					ch.SetMailSaver(&mailSaverAdapter{store: gw.mailStore}, defaultTenant)
-					// Wire thread loader — enables Outlook-style verified thread history
-					// Agent reads prior conversation from its own DB records, not email body
-					ch.SetThreadLoader(gw.mailStore)
-				}
-				// Wire alias routing for shared mailbox
-				if sharedMailbox := strVal(cfg, "shared_mailbox"); sharedMailbox != "" {
-					aliases := make(map[string]string)
-					if aliasJSON := strVal(cfg, "aliases"); aliasJSON != "" {
-						json.Unmarshal([]byte(aliasJSON), &aliases)
-					}
-					ch.SetRouter(&emailch.AliasRouter{SharedMailbox: sharedMailbox, Aliases: aliases, DefaultAgent: *agentID})
-				}
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "telegram":
-			tgCfg := telegramch.Config{
-				AgentID:        *agentID,
-				BotToken:       strVal(cfg, "bot_token"),
-				BotName:        strVal(cfg, "bot_name"),
-				GroupPolicy:    strVal(cfg, "group_policy"),
-				RequireMention: cfg["require_mention"] == true || strVal(cfg, "require_mention") == "true",
-			}
-			if tgCfg.BotToken != "" {
-				ch := telegramch.New(tgCfg, gw.chanMgr.Handler())
-				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
-					ch.Transcribe = gw.voicePipeline.TranscribeAudio
-				}
-				if gw.db != nil {
-					ch.DB = gw.db.Pool
-				}
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "discord":
-			dcCfg := discordch.Config{
-				AgentID:  *agentID,
-				BotToken: strVal(cfg, "bot_token"),
-			}
-			if dcCfg.BotToken != "" {
-				ch := discordch.New(dcCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "slack":
-			slCfg := slackch.Config{
-				AgentID:  *agentID,
-				BotToken: strVal(cfg, "bot_token"),
-				AppToken: strVal(cfg, "app_token"),
-			}
-			if slCfg.BotToken != "" && slCfg.AppToken != "" {
-				ch := slackch.New(slCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "whatsapp":
-			mode := strVal(cfg, "mode")
-			if mode == "" {
-				mode = "cloud" // backward-compatible default
-			}
-			waCfg := whatsappch.Config{
-				AgentID:       *agentID,
-				Mode:          mode,
-				PhoneNumberID: strVal(cfg, "phone_number_id"),
-				AccessToken:   strVal(cfg, "access_token"),
-				VerifyToken:   strVal(cfg, "verify_token"),
-				AppSecret:     strVal(cfg, "app_secret"),
-			}
-			if mode == "cloud" {
-				if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
-					ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
-					if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
-						ch.Transcribe = gw.voicePipeline.TranscribeAudio
-					}
-					webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
-					gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
-					gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
-					slog.Info("whatsapp.webhook_route", "path", webhookPath)
-					gw.chanMgr.Register(id, ch)
-					count++
-				}
-			}
-			if mode == "qr" {
-				waCfg.DBDSN = gw.cfg.Database.DSN
-				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
-				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
-					ch.Transcribe = gw.voicePipeline.TranscribeAudio
-				}
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "zalo":
-			zaloCfg := zalo.ZaloConfig{
-				AgentID:      *agentID,
-				AppID:        strVal(cfg, "app_id"),
-				AppSecret:    strVal(cfg, "app_secret"),
-				RefreshToken: strVal(cfg, "refresh_token"),
-				AccessToken:  strVal(cfg, "access_token"),
-				PersonalMode: cfg["personal_mode"] == "true",
-				SecretKey:    strVal(cfg, "secret_key"),
-				IMEI:         strVal(cfg, "imei"),
-			}
-			if zaloCfg.AppID != "" || zaloCfg.AccessToken != "" || zaloCfg.SecretKey != "" {
-				ch := zalo.New(zaloCfg, gw.chanMgr.Handler())
-				webhookPath := fmt.Sprintf("/v1/webhooks/zalo/%s", id)
-				gw.router.Post(webhookPath, ch.HandleWebhook)
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "sms":
-			smsCfg := smsch.Config{
-				AgentID:             *agentID,
-				AccountSID:          strVal(cfg, "account_sid"),
-				AuthToken:           strVal(cfg, "auth_token"),
-				ApiKeySid:           strVal(cfg, "api_key_sid"),
-				ApiKeySecret:        strVal(cfg, "api_key_secret"),
-				FromNumber:          strVal(cfg, "from_number"),
-				MessagingServiceSid: strVal(cfg, "messaging_service_sid"),
-			}
-			if smsCfg.AccountSID != "" {
-				ch := smsch.New(smsCfg, gw.chanMgr.Handler())
-				webhookPath := fmt.Sprintf("/v1/webhooks/sms/%s", id)
-				statusPath := fmt.Sprintf("/v1/webhooks/sms/%s/status", id)
-				gw.router.Post(webhookPath, ch.HandleWebhook)
-				gw.router.Post(statusPath, ch.HandleStatusWebhook)
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "teams":
-			tmCfg := teamsch.Config{
-				AgentID:   *agentID,
-				AppID:     strVal(cfg, "app_id"),
-				AppSecret: strVal(cfg, "app_secret"),
-			}
-			if tmCfg.AppID != "" && tmCfg.AppSecret != "" {
-				ch := teamsch.New(tmCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-		case "github":
-			ghCfg := githubch.Config{
-				AgentID:       *agentID,
-				AccessToken:   strVal(cfg, "access_token"),
-				WebhookSecret: strVal(cfg, "webhook_secret"),
-				Owner:         strVal(cfg, "owner"),
-				Repo:          strVal(cfg, "repo"),
-			}
-			if ghCfg.AccessToken != "" {
-				ch := githubch.New(ghCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				// Register webhook route so GitHub can POST events
-				webhookPath := fmt.Sprintf("/v1/webhooks/github/%s", id)
-				gw.router.Post(webhookPath, ch.HandleWebhook)
-				slog.Info("github.webhook_route", "path", webhookPath)
-				count++
-			}
-		case "webchat":
-			wcCfg := webchat.Config{
-				AgentID: *agentID,
-			}
-			ch := webchat.New(wcCfg, gw.chanMgr.Handler())
-			webchat.ValidateToken = func(token string) bool {
-				if gw.authSvc == nil {
-					return true
-				}
-				_, err := gw.authSvc.ValidateToken(token)
-				return err == nil
-			}
-			gw.chanMgr.Register(id, ch)
+		if gw.buildAndRegisterChannel(id, *agentID, cfg, chType) {
 			count++
-		case "webhook":
-			whCfg := webhookch.Config{
-				AgentID:     *agentID,
-				InboundPath: strVal(cfg, "inbound_path"),
-				OutboundURL: strVal(cfg, "outbound_url"),
-			}
-			if whCfg.OutboundURL != "" {
-				ch := webhookch.New(whCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		// --- Channels previously implemented but not registered ---
-
-		case "line":
-			lineCfg := linech.Config{
-				AgentID:       *agentID,
-				ChannelSecret: strVal(cfg, "channel_secret"),
-				ChannelToken:  strVal(cfg, "channel_token"),
-				WebhookPath:   strVal(cfg, "webhook_path"),
-			}
-			if lineCfg.ChannelSecret != "" && lineCfg.ChannelToken != "" {
-				ch := linech.New(lineCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				// Register webhook route
-				path := lineCfg.WebhookPath
-				if path == "" {
-					path = fmt.Sprintf("/v1/webhooks/line/%s", id)
-				}
-				gw.router.Post(path, ch.HandleWebhook)
-				count++
-			}
-
-		case "feishu", "lark":
-			feishuCfg := feishuch.Config{
-				AgentID:     *agentID,
-				AppID:       strVal(cfg, "app_id"),
-				AppSecret:   strVal(cfg, "app_secret"),
-				BotName:     strVal(cfg, "bot_name"),
-				IsLark:      cfg["is_lark"] == true || strVal(cfg, "is_lark") == "true",
-				EncryptKey:  strVal(cfg, "encrypt_key"),
-				VerifyToken: strVal(cfg, "verify_token"),
-			}
-			if feishuCfg.AppID != "" && feishuCfg.AppSecret != "" {
-				ch := feishuch.New(feishuCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		case "dingtalk":
-			dtCfg := dingtalkhch.Config{
-				AgentID:       *agentID,
-				AppKey:        strVal(cfg, "app_key"),
-				AppSecret:     strVal(cfg, "app_secret"),
-				RobotCode:     strVal(cfg, "robot_code"),
-				WebhookURL:    strVal(cfg, "webhook_url"),
-				WebhookSecret: strVal(cfg, "webhook_secret"),
-			}
-			if dtCfg.AppKey != "" && dtCfg.AppSecret != "" {
-				ch := dingtalkhch.New(dtCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		case "wecom":
-			wcCfg := wecomch.Config{
-				AgentID:      *agentID,
-				CorpID:       strVal(cfg, "corp_id"),
-				AgentSecret:  strVal(cfg, "agent_secret"),
-				WecomAgentID: intVal(cfg, "wecom_agent_id"),
-				Token:        strVal(cfg, "token"),
-				EncodingKey:  strVal(cfg, "encoding_key"),
-			}
-			if wcCfg.CorpID != "" && wcCfg.AgentSecret != "" {
-				if ch, err := wecomch.New(wcCfg, gw.chanMgr.Handler()); err == nil {
-					gw.chanMgr.Register(id, ch)
-					count++
-				} else {
-					slog.Warn("wecom.init.failed", "error", err)
-				}
-			}
-
-		case "mattermost":
-			mmCfg := mattermostch.Config{
-				AgentID:        *agentID,
-				ServerURL:      strVal(cfg, "server_url"),
-				BotToken:       strVal(cfg, "bot_token"),
-				TeamID:         strVal(cfg, "team_id"),
-				RequireMention: cfg["require_mention"] == true || strVal(cfg, "require_mention") == "true",
-			}
-			if mmCfg.ServerURL != "" && mmCfg.BotToken != "" {
-				ch := mattermostch.New(mmCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		case "signal":
-			sigCfg := signalch.Config{
-				AgentID:      *agentID,
-				APIURL:       strVal(cfg, "api_url"),
-				PhoneNumber:  strVal(cfg, "phone_number"),
-				UseWebSocket: cfg["use_websocket"] == true || strVal(cfg, "use_websocket") == "true",
-			}
-			if sigCfg.APIURL != "" && sigCfg.PhoneNumber != "" {
-				ch := signalch.New(sigCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		case "imessage":
-			imCfg := imessagech.Config{
-				AgentID:       *agentID,
-				ServerURL:     strVal(cfg, "server_url"),
-				Password:      strVal(cfg, "password"),
-				WebhookSecret: strVal(cfg, "webhook_secret"),
-				UseWebhook:    cfg["use_webhook"] == true || strVal(cfg, "use_webhook") == "true",
-			}
-			if imCfg.ServerURL != "" && imCfg.Password != "" {
-				ch := imessagech.New(imCfg, gw.chanMgr.Handler())
-				if imCfg.UseWebhook {
-					webhookPath := fmt.Sprintf("/v1/webhooks/imessage/%s", id)
-					gw.router.Post(webhookPath, ch.HandleWebhook)
-				}
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		case "matrix":
-			mxCfg := matrixch.Config{
-				AgentID:       *agentID,
-				HomeserverURL: strVal(cfg, "homeserver_url"),
-				AccessToken:   strVal(cfg, "access_token"),
-				UserID:        strVal(cfg, "user_id"),
-			}
-			if mxCfg.HomeserverURL != "" && mxCfg.AccessToken != "" {
-				ch := matrixch.New(mxCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				count++
-			}
-
-		case "facebook", "messenger":
-			fbCfg := facebookch.Config{
-				AgentID:         *agentID,
-				PageAccessToken: strVal(cfg, "page_access_token"),
-				VerifyToken:     strVal(cfg, "verify_token"),
-				AppSecret:       strVal(cfg, "app_secret"),
-			}
-			if fbCfg.PageAccessToken != "" && fbCfg.VerifyToken != "" {
-				ch := facebookch.New(fbCfg, gw.chanMgr.Handler())
-				gw.chanMgr.Register(id, ch)
-				// Register webhook route for Facebook verification + inbound events
-				webhookPath := fmt.Sprintf("/v1/webhooks/facebook/%s", id)
-				gw.router.Get(webhookPath, ch.HandleWebhook)  // for GET verification
-				gw.router.Post(webhookPath, ch.HandleWebhook) // for POST events
-				slog.Info("facebook.webhook_route", "path", webhookPath)
-				count++
-			}
 		}
 	}
 	if count > 0 {
 		gw.chanMgr.StartAll(context.Background())
 		slog.Info("channels loaded", "count", count)
 	}
+}
+
+// buildAndRegisterChannel constructs a channel from its DB config, registers any
+// inbound webhook/WS route, and registers it with the channel manager. Returns true
+// if a channel was registered. Both loadChannels (all rows) and loadSingleChannel
+// (one row) call this, so every channel type is built in exactly one place and all
+// of them hot-reload.
+func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]any, chType string) bool {
+	switch chType {
+	case "email":
+		emailCfg := emailch.Config{
+			AgentID:     agentID,
+			Email:       strVal(cfg, "email"),
+			Password:    strVal(cfg, "password"),
+			IMAPHost:    strVal(cfg, "imap_host"),
+			IMAPPort:    intVal(cfg, "imap_port"),
+			SMTPHost:    strVal(cfg, "smtp_host"),
+			SMTPPort:    intVal(cfg, "smtp_port"),
+			PollSeconds: intVal(cfg, "poll_seconds"),
+			Folder:      strVal(cfg, "folder"),
+			SoulName:    strVal(cfg, "soul_name"),
+			SpamFilter:  cfg["spam_filter"] == true || strVal(cfg, "spam_filter") == "true",
+			AutoAck:     cfg["auto_ack"] == true || strVal(cfg, "auto_ack") == "true",
+			HTMLReply:   cfg["html_reply"] == true || strVal(cfg, "html_reply") == "true",
+		}
+		if emailCfg.Email != "" && emailCfg.Password != "" {
+			ch := emailch.New(emailCfg, gw.chanMgr.Handler())
+			// Wire mail saver for GUI visibility
+			if gw.mailStore != nil {
+				ch.SetMailSaver(&mailSaverAdapter{store: gw.mailStore}, defaultTenant)
+				// Wire thread loader — enables Outlook-style verified thread history
+				// Agent reads prior conversation from its own DB records, not email body
+				ch.SetThreadLoader(gw.mailStore)
+			}
+			// Wire alias routing for shared mailbox
+			if sharedMailbox := strVal(cfg, "shared_mailbox"); sharedMailbox != "" {
+				aliases := make(map[string]string)
+				if aliasJSON := strVal(cfg, "aliases"); aliasJSON != "" {
+					json.Unmarshal([]byte(aliasJSON), &aliases)
+				}
+				ch.SetRouter(&emailch.AliasRouter{SharedMailbox: sharedMailbox, Aliases: aliases, DefaultAgent: agentID})
+			}
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "telegram":
+		tgCfg := telegramch.Config{
+			AgentID:        agentID,
+			BotToken:       strVal(cfg, "bot_token"),
+			BotName:        strVal(cfg, "bot_name"),
+			GroupPolicy:    strVal(cfg, "group_policy"),
+			RequireMention: cfg["require_mention"] == true || strVal(cfg, "require_mention") == "true",
+		}
+		if tgCfg.BotToken != "" {
+			ch := telegramch.New(tgCfg, gw.chanMgr.Handler())
+			if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+				ch.Transcribe = gw.voicePipeline.TranscribeAudio
+			}
+			if gw.db != nil {
+				ch.DB = gw.db.Pool
+			}
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "discord":
+		dcCfg := discordch.Config{
+			AgentID:        agentID,
+			BotToken:       strVal(cfg, "bot_token"),
+			GuildID:        strVal(cfg, "guild_id"),
+			RequireMention: boolPtrVal(cfg, "require_mention"),
+			DMPolicy:       strVal(cfg, "dm_policy"),
+		}
+		if dcCfg.BotToken != "" {
+			ch := discordch.New(dcCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "slack":
+		slCfg := slackch.Config{
+			AgentID:        agentID,
+			BotToken:       strVal(cfg, "bot_token"),
+			AppToken:       strVal(cfg, "app_token"),
+			RequireMention: boolPtrVal(cfg, "require_mention"),
+			DMPolicy:       strVal(cfg, "dm_policy"),
+		}
+		if slCfg.BotToken != "" && slCfg.AppToken != "" {
+			ch := slackch.New(slCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "whatsapp":
+		mode := strVal(cfg, "mode")
+		if mode == "" {
+			mode = "cloud" // backward-compatible default
+		}
+		waCfg := whatsappch.Config{
+			AgentID:       agentID,
+			Mode:          mode,
+			PhoneNumberID: strVal(cfg, "phone_number_id"),
+			AccessToken:   strVal(cfg, "access_token"),
+			VerifyToken:   strVal(cfg, "verify_token"),
+			AppSecret:     strVal(cfg, "app_secret"),
+		}
+		if mode == "cloud" {
+			if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
+				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+					ch.Transcribe = gw.voicePipeline.TranscribeAudio
+				}
+				webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
+				gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
+				gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
+				slog.Info("whatsapp.webhook_route", "path", webhookPath)
+				gw.chanMgr.Register(id, ch)
+				return true
+			}
+		}
+		if mode == "qr" {
+			waCfg.DBDSN = gw.cfg.Database.DSN
+			ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+			if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+				ch.Transcribe = gw.voicePipeline.TranscribeAudio
+			}
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "zalo":
+		zaloCfg := zalo.ZaloConfig{
+			AgentID:      agentID,
+			AppID:        strVal(cfg, "app_id"),
+			AppSecret:    strVal(cfg, "app_secret"),
+			RefreshToken: strVal(cfg, "refresh_token"),
+			AccessToken:  strVal(cfg, "access_token"),
+			PersonalMode: cfg["personal_mode"] == "true",
+			SecretKey:    strVal(cfg, "secret_key"),
+			IMEI:         strVal(cfg, "imei"),
+		}
+		if zaloCfg.AppID != "" || zaloCfg.AccessToken != "" || zaloCfg.SecretKey != "" {
+			ch := zalo.New(zaloCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/zalo/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "sms":
+		smsCfg := smsch.Config{
+			AgentID:             agentID,
+			AccountSID:          cfgStr(cfg, "account_sid", "api_key"),
+			AuthToken:           cfgStr(cfg, "auth_token", "api_secret"),
+			ApiKeySid:           strVal(cfg, "api_key_sid"),
+			ApiKeySecret:        strVal(cfg, "api_key_secret"),
+			FromNumber:          strVal(cfg, "from_number"),
+			MessagingServiceSid: strVal(cfg, "messaging_service_sid"),
+		}
+		if smsCfg.AccountSID != "" {
+			ch := smsch.New(smsCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/sms/%s", id)
+			statusPath := fmt.Sprintf("/v1/webhooks/sms/%s/status", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			gw.router.Post(statusPath, ch.HandleStatusWebhook)
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "teams":
+		tmCfg := teamsch.Config{
+			AgentID:   agentID,
+			AppID:     strVal(cfg, "app_id"),
+			AppSecret: strVal(cfg, "app_secret"),
+			TenantID:  strVal(cfg, "tenant_id"),
+		}
+		if tmCfg.AppID != "" && tmCfg.AppSecret != "" {
+			ch := teamsch.New(tmCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/teams/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("teams.webhook_route", "path", webhookPath)
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+	case "github":
+		ghCfg := githubch.Config{
+			AgentID:       agentID,
+			AccessToken:   strVal(cfg, "access_token"),
+			WebhookSecret: strVal(cfg, "webhook_secret"),
+			Owner:         strVal(cfg, "owner"),
+			Repo:          strVal(cfg, "repo"),
+		}
+		if ghCfg.AccessToken != "" {
+			ch := githubch.New(ghCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			// Register webhook route so GitHub can POST events
+			webhookPath := fmt.Sprintf("/v1/webhooks/github/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("github.webhook_route", "path", webhookPath)
+			return true
+		}
+	case "webchat":
+		wcCfg := webchat.Config{
+			AgentID: agentID,
+		}
+		ch := webchat.New(wcCfg, gw.chanMgr.Handler())
+		webchat.ValidateToken = func(token string) bool {
+			if gw.authSvc == nil {
+				return true
+			}
+			_, err := gw.authSvc.ValidateToken(token)
+			return err == nil
+		}
+		// WS path: /v1/channels/{id}/webchat/ws — proxied by Next.js /v1/:path*/ws rewrite
+		wsPath := fmt.Sprintf("/v1/channels/%s/webchat/ws", id)
+		gw.router.Get(wsPath, ch.HandleWS)
+		slog.Info("webchat.ws_route", "path", wsPath)
+		gw.chanMgr.Register(id, ch)
+		return true
+	case "webhook":
+		whCfg := webhookch.Config{
+			AgentID:     agentID,
+			InboundPath: strVal(cfg, "inbound_path"),
+			OutboundURL: strVal(cfg, "outbound_url"),
+			Secret:      strVal(cfg, "secret"),
+		}
+		// Load when there is an inbound path (sync-mode / inbound-only) OR an outbound URL
+		if whCfg.InboundPath != "" || whCfg.OutboundURL != "" {
+			ch := webhookch.New(whCfg, gw.chanMgr.Handler())
+			inboundPath := whCfg.InboundPath
+			if inboundPath == "" {
+				inboundPath = fmt.Sprintf("/v1/webhooks/in/%s", id)
+			}
+			gw.router.Post(inboundPath, ch.HandleWebhook)
+			slog.Info("webhook.inbound_route", "path", inboundPath)
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	// --- Channels previously implemented but not registered ---
+
+	case "line":
+		lineCfg := linech.Config{
+			AgentID:       agentID,
+			ChannelSecret: strVal(cfg, "channel_secret"),
+			ChannelToken:  cfgStr(cfg, "channel_token", "channel_access_token"),
+			WebhookPath:   strVal(cfg, "webhook_path"),
+		}
+		if lineCfg.ChannelSecret != "" && lineCfg.ChannelToken != "" {
+			ch := linech.New(lineCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			// Register webhook route
+			path := lineCfg.WebhookPath
+			if path == "" {
+				path = fmt.Sprintf("/v1/webhooks/line/%s", id)
+			}
+			gw.router.Post(path, ch.HandleWebhook)
+			return true
+		}
+
+	case "feishu", "lark":
+		feishuCfg := feishuch.Config{
+			AgentID:     agentID,
+			AppID:       strVal(cfg, "app_id"),
+			AppSecret:   strVal(cfg, "app_secret"),
+			BotName:     strVal(cfg, "bot_name"),
+			IsLark:      cfg["is_lark"] == true || strVal(cfg, "is_lark") == "true",
+			EncryptKey:  strVal(cfg, "encrypt_key"),
+			VerifyToken: strVal(cfg, "verify_token"),
+		}
+		if feishuCfg.AppID != "" && feishuCfg.AppSecret != "" {
+			ch := feishuch.New(feishuCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/feishu/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("feishu.webhook_route", "path", webhookPath)
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	case "dingtalk":
+		dtCfg := dingtalkhch.Config{
+			AgentID:       agentID,
+			AppKey:        cfgStr(cfg, "app_key", "client_id"),
+			AppSecret:     cfgStr(cfg, "app_secret", "client_secret"),
+			RobotCode:     strVal(cfg, "robot_code"),
+			WebhookURL:    strVal(cfg, "webhook_url"),
+			WebhookSecret: strVal(cfg, "webhook_secret"),
+		}
+		if dtCfg.AppKey != "" && dtCfg.AppSecret != "" {
+			ch := dingtalkhch.New(dtCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/dingtalk/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("dingtalk.webhook_route", "path", webhookPath)
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	case "wecom":
+		wcCfg := wecomch.Config{
+			AgentID:      agentID,
+			CorpID:       strVal(cfg, "corp_id"),
+			AgentSecret:  cfgStr(cfg, "agent_secret", "app_secret"),
+			WecomAgentID: intVal(cfg, "wecom_agent_id"),
+			Token:        strVal(cfg, "token"),
+			EncodingKey:  cfgStr(cfg, "encoding_key", "encoding_aes_key"),
+		}
+		if wcCfg.CorpID != "" && wcCfg.AgentSecret != "" {
+			if ch, err := wecomch.New(wcCfg, gw.chanMgr.Handler()); err == nil {
+				// HandleWebhook branches on GET (echostr URL verification) and POST (events)
+				webhookPath := fmt.Sprintf("/v1/webhooks/wecom/%s", id)
+				gw.router.Get(webhookPath, ch.HandleWebhook)
+				gw.router.Post(webhookPath, ch.HandleWebhook)
+				slog.Info("wecom.webhook_route", "path", webhookPath)
+				gw.chanMgr.Register(id, ch)
+				return true
+			} else {
+				slog.Warn("wecom.init.failed", "error", err)
+			}
+		}
+
+	case "mattermost":
+		mmCfg := mattermostch.Config{
+			AgentID:        agentID,
+			ServerURL:      strVal(cfg, "server_url"),
+			BotToken:       strVal(cfg, "bot_token"),
+			TeamID:         strVal(cfg, "team_id"),
+			RequireMention: cfg["require_mention"] == true || strVal(cfg, "require_mention") == "true",
+		}
+		if mmCfg.ServerURL != "" && mmCfg.BotToken != "" {
+			ch := mattermostch.New(mmCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	case "signal":
+		sigCfg := signalch.Config{
+			AgentID:      agentID,
+			APIURL:       cfgStr(cfg, "api_url", "socket_path"),
+			PhoneNumber:  strVal(cfg, "phone_number"),
+			UseWebSocket: cfg["use_websocket"] == true || strVal(cfg, "use_websocket") == "true",
+		}
+		if sigCfg.APIURL != "" && sigCfg.PhoneNumber != "" {
+			ch := signalch.New(sigCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	case "imessage":
+		imCfg := imessagech.Config{
+			AgentID:       agentID,
+			ServerURL:     strVal(cfg, "server_url"),
+			Password:      strVal(cfg, "password"),
+			WebhookSecret: strVal(cfg, "webhook_secret"),
+			UseWebhook:    cfg["use_webhook"] == true || strVal(cfg, "use_webhook") == "true",
+		}
+		if imCfg.ServerURL != "" && imCfg.Password != "" {
+			ch := imessagech.New(imCfg, gw.chanMgr.Handler())
+			if imCfg.UseWebhook {
+				webhookPath := fmt.Sprintf("/v1/webhooks/imessage/%s", id)
+				gw.router.Post(webhookPath, ch.HandleWebhook)
+			}
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	case "matrix":
+		mxCfg := matrixch.Config{
+			AgentID:       agentID,
+			HomeserverURL: strVal(cfg, "homeserver_url"),
+			AccessToken:   strVal(cfg, "access_token"),
+			UserID:        strVal(cfg, "user_id"),
+		}
+		if mxCfg.HomeserverURL != "" && mxCfg.AccessToken != "" {
+			ch := matrixch.New(mxCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			return true
+		}
+
+	case "facebook", "messenger":
+		fbCfg := facebookch.Config{
+			AgentID:         agentID,
+			PageAccessToken: strVal(cfg, "page_access_token"),
+			VerifyToken:     strVal(cfg, "verify_token"),
+			AppSecret:       strVal(cfg, "app_secret"),
+		}
+		if fbCfg.PageAccessToken != "" && fbCfg.VerifyToken != "" {
+			ch := facebookch.New(fbCfg, gw.chanMgr.Handler())
+			gw.chanMgr.Register(id, ch)
+			// Register webhook route for Facebook verification + inbound events
+			webhookPath := fmt.Sprintf("/v1/webhooks/facebook/%s", id)
+			gw.router.Get(webhookPath, ch.HandleWebhook)  // for GET verification
+			gw.router.Post(webhookPath, ch.HandleWebhook) // for POST events
+			slog.Info("facebook.webhook_route", "path", webhookPath)
+			return true
+		}
+	}
+	return false
 }
 
 func (gw *Gateway) loadSingleChannel(ctx context.Context, id string) {
@@ -425,64 +476,7 @@ func (gw *Gateway) loadSingleChannel(ctx context.Context, id string) {
 	var cfg map[string]any
 	json.Unmarshal(configJSON, &cfg)
 
-	switch chType {
-	case "telegram":
-		tgCfg := telegramch.Config{
-			AgentID: *agentID, BotToken: strVal(cfg, "bot_token"), BotName: strVal(cfg, "bot_name"),
-			GroupPolicy: strVal(cfg, "group_policy"),
-			RequireMention: cfg["require_mention"] == true || strVal(cfg, "require_mention") == "true",
-		}
-		if tgCfg.BotToken != "" {
-			ch := telegramch.New(tgCfg, gw.chanMgr.Handler())
-			if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
-				ch.Transcribe = gw.voicePipeline.TranscribeAudio
-			}
-			gw.chanMgr.Register(id, ch)
-		}
-	case "discord":
-		dcCfg := discordch.Config{AgentID: *agentID, BotToken: strVal(cfg, "bot_token")}
-		if dcCfg.BotToken != "" {
-			ch := discordch.New(dcCfg, gw.chanMgr.Handler())
-			gw.chanMgr.Register(id, ch)
-		}
-	case "slack":
-		slCfg := slackch.Config{AgentID: *agentID, BotToken: strVal(cfg, "bot_token"), AppToken: strVal(cfg, "app_token")}
-		if slCfg.BotToken != "" {
-			ch := slackch.New(slCfg, gw.chanMgr.Handler())
-			gw.chanMgr.Register(id, ch)
-		}
-	case "whatsapp":
-		mode := strVal(cfg, "mode")
-		if mode == "" {
-			mode = "cloud" // backward-compatible default
-		}
-		waCfg := whatsappch.Config{
-			AgentID:       *agentID,
-			Mode:          mode,
-			PhoneNumberID: strVal(cfg, "phone_number_id"),
-			AccessToken:   strVal(cfg, "access_token"),
-			VerifyToken:   strVal(cfg, "verify_token"),
-			AppSecret:     strVal(cfg, "app_secret"),
-		}
-		if mode == "cloud" {
-			if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
-				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
-				webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
-				gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
-				gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
-				slog.Info("whatsapp.webhook_route", "path", webhookPath)
-				gw.chanMgr.Register(id, ch)
-			}
-		}
-		if mode == "qr" {
-			waCfg.DBDSN = gw.cfg.Database.DSN
-			ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
-			if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
-				ch.Transcribe = gw.voicePipeline.TranscribeAudio
-			}
-			gw.chanMgr.Register(id, ch)
-		}
-	}
+	gw.buildAndRegisterChannel(id, *agentID, cfg, chType)
 	slog.Info("channel.loaded_single", "id", id, "type", chType)
 }
 
@@ -550,9 +544,42 @@ func strVal(m map[string]any, key string) string {
 	return ""
 }
 
+// cfgStr returns the first non-empty config value among the given keys.
+func cfgStr(cfg map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v := strVal(cfg, k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func intVal(m map[string]any, key string) int {
-	if v, ok := m[key].(float64); ok {
+	switch v := m[key].(type) {
+	case float64:
 		return int(v)
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
 	}
 	return 0
+}
+
+// boolPtrVal returns a *bool from the config map at key if the key is present,
+// or nil if the key is absent. This preserves the three-state semantics used by
+// Discord and Slack (true / false / unset-uses-channel-default).
+func boolPtrVal(m map[string]any, key string) *bool {
+	v, ok := m[key]
+	if !ok {
+		return nil
+	}
+	switch t := v.(type) {
+	case bool:
+		return &t
+	case string:
+		b := t == "true"
+		return &b
+	}
+	return nil
 }
