@@ -945,6 +945,17 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	var lastLLMContent string
 	consecutiveToolIters := 0   // track iterations with only tool calls, no text
 	emptyAfterToolsRetries := 0 // Gemini Flash sometimes returns empty after tool results; retry up to 2x
+
+	// Fix B: suppress live text streaming when a blocking output_deliver policy is
+	// active. When true, chunkHandler and fallback closures accumulate text but do
+	// not emit TextDelta events. The resolved (possibly blocked) content is emitted
+	// as a single TextDelta AFTER the governance gate runs (see Fix A below).
+	// When false (the common case — no blocking policy) streaming is unchanged.
+	suppressLiveText := false
+	if gh := l.governanceHooks; gh != nil && gh.HasBlockingOutputPolicy != nil {
+		suppressLiveText = gh.HasBlockingOutputPolicy(l.tenantID)
+	}
+
 	for iter := 0; iter < maxIter; iter++ {
 		// Search discipline: after 5 tool-only iterations, force the agent to answer
 		// Check if request was cancelled (user stopped, timeout)
@@ -1153,7 +1164,12 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					return
 				}
 
-				onEvent(TextDelta(chunk.Content))
+				// Fix B: when a blocking output_deliver policy is active, buffer
+				// text without streaming it live. The resolved content is emitted
+				// after the governance gate runs (see Fix A in the post-loop section).
+				if !suppressLiveText {
+					onEvent(TextDelta(chunk.Content))
+				}
 			}
 			if chunk.Thinking != "" {
 				onEvent(ThinkingDelta(chunk.Thinking))
@@ -1211,7 +1227,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					slog.Info("agent.loop.key_rotated", "agent", ag.ID, "reason", reason, "model", model)
 					provider = rotatedProvider
 					llmResp, err = provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
-						if chunk.Content != "" {
+						if chunk.Content != "" && !suppressLiveText {
 							onEvent(TextDelta(chunk.Content))
 						}
 					})
@@ -1248,7 +1264,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					slog.Info("agent.loop.auto_fallback", "agent", ag.ID, "from", model, "to", fbModel, "reason", reason)
 					chatReq.Model = fbModel
 					llmResp, err = provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
-						if chunk.Content != "" {
+						if chunk.Content != "" && !suppressLiveText {
 							onEvent(TextDelta(chunk.Content))
 						}
 					})
@@ -1892,10 +1908,12 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 		}
 	}
 
-	// 9. Save messages to session
-	l.saveToSession(ctx, req, result)
-
-	// 9. Governance: policy check on output delivery
+	// 9. Governance: policy check on output delivery.
+	// Fix A: this block runs BEFORE saveToSession so the DB history row and
+	// cross-client broadcast both contain the resolved (blocked-substitute)
+	// content, never the raw PII. Fix B: when suppressLiveText is true the
+	// live stream was held back; after the gate resolves result.Content we emit
+	// a single TextDelta so the requesting user sees the approved-or-blocked text.
 	if gh := l.governanceHooks; gh != nil && gh.EvaluatePolicy != nil && result.Content != "" {
 		hasPII := "false"
 		if gh.DetectPII != nil && gh.DetectPII(result.Content) {
@@ -1912,6 +1930,14 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 			}
 		}
 	}
+	// Fix B: emit the resolved final content as a single TextDelta now that
+	// governance has run. Only fires when live streaming was suppressed.
+	if suppressLiveText && result.Content != "" {
+		onEvent(TextDelta(result.Content))
+	}
+
+	// 9b. Save messages to session — persists and broadcasts the resolved content.
+	l.saveToSession(ctx, req, result)
 
 	// 9a. Output quality gate — validate, record, self-correct if score < 4.0
 	if l.outputValidator != nil && result.Content != "" {

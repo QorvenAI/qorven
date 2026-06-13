@@ -98,10 +98,20 @@ func (gw *Gateway) buildGovernanceHooks() *agent.GovernanceHooks {
 
 	// PII Detection: run the real PII engine against agent output so the
 	// "Block PII in outputs" policy can match on has_pii == "true".
-	// Always uses pii.All so detection is independent of the user's
-	// redaction-toggle preference — governance must see everything.
+	// Scans only high-sensitivity kinds (SSN, credit card, IBAN, phone) to
+	// avoid false-positive triggers on IPs and example email addresses that
+	// commonly appear in technical output.
 	h.DetectPII = func(content string) bool {
-		return len(pii.Scan(content, pii.Config{Kinds: pii.All})) > 0
+		return len(pii.Scan(content, pii.Config{
+			Kinds: pii.KindSSN | pii.KindCreditCard | pii.KindIBAN | pii.KindPhone,
+		})) > 0
+	}
+
+	// HasBlockingOutputPolicy: check in-memory policies — no DB round-trip.
+	if gw.policyEngine != nil {
+		h.HasBlockingOutputPolicy = func(tenantID string) bool {
+			return gw.policyEngine.HasBlockingOutputPolicy(tenantID)
+		}
 	}
 
 	return h

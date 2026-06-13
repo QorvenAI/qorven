@@ -186,6 +186,28 @@ func (e *PolicyEngine) recordEvent(ctx context.Context, p Policy, agentKey strin
 	}
 }
 
+// HasBlockingOutputPolicy reports whether the engine has at least one enabled
+// output_deliver policy whose action would block or suppress output
+// (deny or require_approval). This is queried once per agent turn so the loop
+// can decide whether to buffer live text rather than streaming it directly.
+func (e *PolicyEngine) HasBlockingOutputPolicy(tenantID string) bool {
+	for _, p := range e.policies {
+		if !p.Enabled {
+			continue
+		}
+		if p.TenantID != tenantID {
+			continue
+		}
+		if p.TriggerEvent != "output_deliver" {
+			continue
+		}
+		if p.Action == "deny" || p.Action == "require_approval" {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *PolicyEngine) ListEvents(ctx context.Context, tenantID string, limit int) ([]PolicyEvent, error) {
 	if limit <= 0 {
 		limit = 50
