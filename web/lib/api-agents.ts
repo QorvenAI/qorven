@@ -192,7 +192,7 @@ export const cron = {
   list: () => listRequest<CronJob>('/cron-jobs'),
   create: (body: { agent_id: string; name: string; cron_expression: string; instruction: string; delivery_channel?: string; one_shot?: boolean }) =>
     request<{ id: string }>('/cron-jobs', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: string, body: { agent_id: string; name: string; cron_expression: string; instruction: string; delivery_channel?: string; enabled?: boolean }) =>
+  update: (id: string, body: { agent_id: string; name: string; cron_expression: string; instruction?: string; delivery_channel?: string; enabled?: boolean }) =>
     request<void>(`/cron-jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   runNow: (id: string) => request<void>(`/cron-jobs/${id}/run`, { method: 'POST' }),
   runs: (id: string) => listRequest<CronRun>(`/cron-jobs/${id}/runs`),

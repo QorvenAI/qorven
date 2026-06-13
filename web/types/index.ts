@@ -195,6 +195,7 @@ export interface CronJob {
   next_run_at: string | null;
   agent_id: string | null;
   agent_name?: string;
+  instruction?: string;
   delivery_channel?: string;
 }
 

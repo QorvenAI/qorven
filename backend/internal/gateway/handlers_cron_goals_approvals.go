@@ -22,7 +22,9 @@ func (gw *Gateway) handleListCronJobs(w http.ResponseWriter, r *http.Request) {
 		        to_char(cj.last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as last_run_at,
 		        to_char(cj.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as next_run_at,
 		        cj.agent_id::text,
-		        COALESCE(a.display_name,'') as agent_name, COALESCE(a.role,'') as agent_role
+		        COALESCE(a.display_name,'') as agent_name, COALESCE(a.role,'') as agent_role,
+		        COALESCE(cj.payload->>'instruction','') as instruction,
+		        COALESCE(cj.delivery_channel,'') as delivery_channel
 		 FROM cron_jobs cj LEFT JOIN agents a ON cj.agent_id = a.id
 		 ORDER BY cj.created_at DESC`)
 	if err != nil {
@@ -32,16 +34,17 @@ func (gw *Gateway) handleListCronJobs(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	jobs := []map[string]any{}
 	for rows.Next() {
-		var id, name, expr, agentName, agentRole string
+		var id, name, expr, agentName, agentRole, instr, dc string
 		var enabled bool
 		var lastRun, nextRun, agentID *string
-		if err := rows.Scan(&id, &name, &expr, &enabled, &lastRun, &nextRun, &agentID, &agentName, &agentRole); err != nil {
+		if err := rows.Scan(&id, &name, &expr, &enabled, &lastRun, &nextRun, &agentID, &agentName, &agentRole, &instr, &dc); err != nil {
 			continue
 		}
 		jobs = append(jobs, map[string]any{
 			"id": id, "name": name, "cron_expression": expr, "enabled": enabled,
 			"last_run_at": lastRun, "next_run_at": nextRun,
 			"agent_id": agentID, "agent_name": agentName, "agent_role": agentRole,
+			"instruction": instr, "delivery_channel": dc,
 		})
 	}
 	if jobs == nil {
@@ -305,12 +308,12 @@ func (gw *Gateway) handleUpdateCronJob(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	var req struct {
-		Name            string `json:"name"`
-		CronExpression  string `json:"cron_expression"`
-		AgentID         string `json:"agent_id"`
-		Instruction     string `json:"instruction"`
-		DeliveryChannel string `json:"delivery_channel"`
-		Enabled         *bool  `json:"enabled"`
+		Name            string  `json:"name"`
+		CronExpression  string  `json:"cron_expression"`
+		AgentID         string  `json:"agent_id"`
+		Instruction     *string `json:"instruction"`
+		DeliveryChannel *string `json:"delivery_channel"`
+		Enabled         *bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
@@ -324,11 +327,24 @@ func (gw *Gateway) handleUpdateCronJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid cron_expression"})
 		return
 	}
-	payloadJSON, _ := json.Marshal(map[string]string{"instruction": req.Instruction, "delivery_channel": req.DeliveryChannel})
+	// Read the existing payload so we only overwrite fields the caller provided.
+	var existingPayload []byte
+	gw.db.Pool.QueryRow(r.Context(),
+		`SELECT COALESCE(payload,'{}') FROM cron_jobs WHERE id=$1 AND tenant_id=$2`,
+		id, defaultTenant).Scan(&existingPayload)
+	pm := map[string]string{}
+	_ = json.Unmarshal(existingPayload, &pm)
+	if req.Instruction != nil {
+		pm["instruction"] = *req.Instruction
+	}
+	if req.DeliveryChannel != nil {
+		pm["delivery_channel"] = *req.DeliveryChannel
+	}
+	payloadJSON, _ := json.Marshal(pm)
 	nextRun := cronpkg.NextRunFromExpr(req.CronExpression)
 	ct, err := gw.db.Pool.Exec(r.Context(),
 		`UPDATE cron_jobs SET name=$1, cron_expression=$2, agent_id=COALESCE(NULLIF($3,'')::uuid, agent_id),
-		   payload=$4, delivery_channel=$5, next_run_at=$6, enabled=COALESCE($7, enabled), updated_at=NOW()
+		   payload=$4, delivery_channel=COALESCE($5, delivery_channel), next_run_at=$6, enabled=COALESCE($7, enabled), updated_at=NOW()
 		 WHERE id=$8 AND tenant_id=$9`,
 		req.Name, req.CronExpression, req.AgentID, payloadJSON, req.DeliveryChannel, nextRun, req.Enabled, id, defaultTenant)
 	if err != nil {

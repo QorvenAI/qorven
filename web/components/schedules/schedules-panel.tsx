@@ -69,7 +69,7 @@ interface DrawerFormProps {
 function DrawerForm({ mode, job, agentId, agents, onClose, onSaved }: DrawerFormProps) {
   const [fName, setFName] = useState(job?.name ?? '');
   const [fAgent, setFAgent] = useState(job?.agent_id ?? agentId ?? '');
-  const [fInstr, setFInstr] = useState('');
+  const [fInstr, setFInstr] = useState(job?.instruction ?? '');
   const [fChannel, setFChannel] = useState(job?.delivery_channel ?? '');
   const [fSched, setFSched] = useState<ScheduleValue>({
     cron_expression: job?.cron_expression ?? '0 9 * * *',
@@ -88,17 +88,23 @@ function DrawerForm({ mode, job, agentId, agents, onClose, onSaved }: DrawerForm
     if (!fName.trim() || !fAgent || !fSched.cron_expression) return;
     setSaving(true);
     try {
-      const body = {
-        agent_id: fAgent,
-        name: fName.trim(),
-        cron_expression: fSched.cron_expression,
-        instruction: fInstr.trim() || fName.trim(),
-        delivery_channel: fChannel.trim() || undefined,
-      };
       if (mode === 'create') {
-        await cronApi.create({ ...body, one_shot: fSched.one_shot });
+        await cronApi.create({
+          agent_id: fAgent,
+          name: fName.trim(),
+          cron_expression: fSched.cron_expression,
+          instruction: fInstr.trim() || fName.trim(),
+          delivery_channel: fChannel.trim() || undefined,
+          one_shot: fSched.one_shot,
+        });
       } else if (mode === 'edit' && job) {
-        await cronApi.update(job.id, body);
+        await cronApi.update(job.id, {
+          agent_id: fAgent,
+          name: fName.trim(),
+          cron_expression: fSched.cron_expression,
+          ...(fInstr.trim() ? { instruction: fInstr.trim() } : {}),
+          delivery_channel: fChannel.trim() || undefined,
+        });
       }
       toast.success(mode === 'create' ? 'Schedule created' : 'Schedule updated');
       onSaved();
