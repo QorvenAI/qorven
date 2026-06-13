@@ -15,13 +15,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 
@@ -43,7 +40,7 @@ type PairingStore interface {
 // Config for WhatsApp channel.
 type Config struct {
 	AgentID     string   `json:"agent_id"`
-	Mode        string   `json:"mode"` // "cloud", "bridge", or "qr"
+	Mode        string   `json:"mode"` // "cloud" or "qr"
 	DMPolicy    string   `json:"dm_policy"`
 	GroupPolicy string   `json:"group_policy"`
 	AllowFrom   []string `json:"allow_from"`
@@ -54,14 +51,11 @@ type Config struct {
 	VerifyToken   string `json:"verify_token"`
 	AppSecret     string `json:"app_secret"`
 
-	// Bridge mode (Baileys/whatsapp-web.js sidecar)
-	BridgeURL string `json:"bridge_url"`
-
 	// QR mode (in-process whatsmeow)
 	DBDSN string `json:"-"`
 }
 
-// WhatsAppChannel supports Cloud API, WebSocket bridge, and in-process QR modes.
+// WhatsAppChannel supports Cloud API and in-process QR modes.
 type WhatsAppChannel struct {
 	cfg             Config
 	handler         channels.InboundHandler
@@ -74,18 +68,11 @@ type WhatsAppChannel struct {
 	allowList       []string
 	dedup           sync.Map // msgID → time.Time — prevents double-fire on platform retries
 
-	// bridge mode — managed sidecar
-	bridgeProc *BridgeProcess
-
 	gate           *senderGate
 	sendOTPMessage func(ctx context.Context, to, otp string)
 
-	// Bridge mode
-	conn      *websocket.Conn
-	connMu    sync.Mutex
-	connected bool
-	ctx       context.Context
-	cancel    context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Optional STT
 	Transcribe func(ctx context.Context, audio []byte, format string) (string, error)
@@ -103,11 +90,7 @@ type WhatsAppChannel struct {
 
 func New(cfg Config, handler channels.InboundHandler) *WhatsAppChannel {
 	if cfg.Mode == "" {
-		if cfg.BridgeURL != "" {
-			cfg.Mode = "bridge"
-		} else {
-			cfg.Mode = "cloud"
-		}
+		cfg.Mode = "cloud"
 	}
 	ch := &WhatsAppChannel{
 		cfg:       cfg,
@@ -140,38 +123,6 @@ func (w *WhatsAppChannel) Start(ctx context.Context) error {
 		if err := w.startWhatsmeow(w.ctx); err != nil {
 			return fmt.Errorf("whatsapp qr start: %w", err)
 		}
-	} else if w.cfg.Mode == "bridge" {
-		if w.cfg.BridgeURL != "" {
-			// Legacy: user-provided external sidecar URL
-			if err := w.bridgeConnect(); err != nil {
-				slog.Warn("whatsapp.bridge.initial_connect_failed", "error", err)
-			}
-			go w.bridgeListenLoop()
-		} else {
-			// Managed sidecar: Qorven spawns it
-			dataDir := filepath.Join(os.TempDir(), "qorven-wa-"+w.cfg.AgentID)
-			if err := os.MkdirAll(dataDir, 0700); err != nil {
-				slog.Warn("whatsapp.bridge.mkdir_failed", "error", err)
-			}
-
-			if w.bridgeProc == nil {
-				w.bridgeProc = NewBridgeProcess(w.cfg.AgentID, dataDir, "")
-			}
-			port, err := w.bridgeProc.StartServer(w.ctx)
-			if err != nil {
-				return fmt.Errorf("whatsapp bridge server: %w", err)
-			}
-			slog.Info("whatsapp.bridge.server_started", "port", port)
-
-			w.bridgeProc.SubscribeMessages(func(m BridgeMessage) {
-				w.handleBridgeProcessMessage(w.ctx, m)
-			})
-
-			if err := w.bridgeProc.SpawnSidecar(w.ctx); err != nil {
-				slog.Warn("whatsapp.bridge.sidecar_spawn_failed", "error", err)
-				// Not fatal — sidecar can be started manually; WS server is up
-			}
-		}
 	}
 
 	w.mu.Lock()
@@ -187,20 +138,8 @@ func (w *WhatsAppChannel) Stop(_ context.Context) error {
 		w.cancel()
 	}
 
-	w.connMu.Lock()
-	if w.conn != nil {
-		w.conn.Close()
-		w.conn = nil
-	}
-	w.connected = false
-	w.connMu.Unlock()
-
 	if w.cfg.Mode == "qr" {
 		w.stopWhatsmeow()
-	}
-
-	if w.bridgeProc != nil {
-		w.bridgeProc.Stop()
 	}
 
 	w.mu.Lock()
@@ -219,9 +158,6 @@ func (w *WhatsAppChannel) Send(ctx context.Context, msg channels.OutboundMessage
 		}
 		return w.sendWhatsmeow(ctx, recipient, msg.Content)
 	}
-	if w.cfg.Mode == "bridge" {
-		return w.bridgeSend(msg)
-	}
 	return w.cloudSend(msg)
 }
 
@@ -238,224 +174,6 @@ func (w *WhatsAppChannel) IsAllowed(senderID string) bool {
 	return false
 }
 
-// ============================================================
-// BRIDGE MODE — WebSocket to Baileys/whatsapp-web.js sidecar
-// ============================================================
-
-func (w *WhatsAppChannel) bridgeConnect() error {
-	dialer := websocket.DefaultDialer
-	dialer.HandshakeTimeout = 10 * time.Second
-
-	conn, _, err := dialer.Dial(w.cfg.BridgeURL, nil)
-	if err != nil {
-		return fmt.Errorf("dial bridge %s: %w", w.cfg.BridgeURL, err)
-	}
-
-	w.connMu.Lock()
-	w.conn = conn
-	w.connected = true
-	w.connMu.Unlock()
-
-	slog.Info("whatsapp.bridge.connected", "url", w.cfg.BridgeURL)
-	return nil
-}
-
-func (w *WhatsAppChannel) bridgeListenLoop() {
-	backoff := time.Second
-
-	for {
-		select {
-		case <-w.ctx.Done():
-			return
-		default:
-		}
-
-		w.connMu.Lock()
-		conn := w.conn
-		w.connMu.Unlock()
-
-		if conn == nil {
-			slog.Info("whatsapp.bridge.reconnecting", "backoff", backoff)
-			select {
-			case <-w.ctx.Done():
-				return
-			case <-time.After(backoff):
-			}
-
-			if err := w.bridgeConnect(); err != nil {
-				slog.Warn("whatsapp.bridge.reconnect_failed", "error", err)
-				backoff = min(backoff*2, 30*time.Second)
-				continue
-			}
-			backoff = time.Second
-			continue
-		}
-
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			slog.Warn("whatsapp.bridge.read_error", "error", err)
-			w.connMu.Lock()
-			if w.conn != nil {
-				w.conn.Close()
-				w.conn = nil
-			}
-			w.connected = false
-			w.connMu.Unlock()
-			continue
-		}
-
-		var msg map[string]any
-		if err := json.Unmarshal(message, &msg); err != nil {
-			continue
-		}
-
-		msgType, _ := msg["type"].(string)
-		switch msgType {
-		case "message":
-			w.handleBridgeMessage(msg)
-		case "qr":
-			qr, _ := msg["qr"].(string)
-			slog.Info("whatsapp.qr.received", "qr_length", len(qr))
-		case "ready":
-			phone, _ := msg["phone"].(string)
-			slog.Info("whatsapp.bridge.ready", "phone", phone)
-		case "disconnected":
-			reason, _ := msg["reason"].(string)
-			slog.Warn("whatsapp.bridge.disconnected", "reason", reason)
-		}
-	}
-}
-
-func (w *WhatsAppChannel) handleBridgeMessage(msg map[string]any) {
-	ctx := w.ctx
-	senderID, _ := msg["from"].(string)
-	if senderID == "" {
-		return
-	}
-
-	// Dedup by message ID when present (bridge may reconnect and replay).
-	if msgID, ok := msg["id"].(string); ok && msgID != "" {
-		if _, already := w.dedup.LoadOrStore(msgID, time.Now()); already {
-			return
-		}
-		go func() { time.Sleep(10 * time.Minute); w.dedup.Delete(msgID) }()
-	}
-
-	chatID, _ := msg["chat"].(string)
-	if chatID == "" {
-		chatID = senderID
-	}
-
-	peerKind := "direct"
-	if strings.HasSuffix(chatID, "@g.us") {
-		peerKind = "group"
-	}
-
-	// Policy check
-	if peerKind == "direct" {
-		if !w.checkDMPolicy(ctx, senderID, chatID) {
-			return
-		}
-	} else {
-		if !w.checkGroupPolicy(ctx, senderID, chatID) {
-			return
-		}
-	}
-
-	content, _ := msg["content"].(string)
-	if content == "" {
-		content = "[empty message]"
-	}
-
-	metadata := make(map[string]string)
-	if messageID, ok := msg["id"].(string); ok {
-		metadata["message_id"] = messageID
-	}
-	if userName, ok := msg["from_name"].(string); ok {
-		metadata["user_name"] = userName
-		content = fmt.Sprintf("[From: %s]\n%s", userName, content)
-	}
-
-	slog.Debug("whatsapp.message", "from", senderID, "chat", chatID)
-
-	if w.handler != nil {
-		w.handler(ctx, channels.InboundMessage{
-			ChannelName: "whatsapp",
-			ChannelType: "whatsapp",
-			AgentID:     w.cfg.AgentID,
-			SenderID:    senderID,
-			ChatID:      chatID,
-			Content:     content,
-			PeerKind:    peerKind,
-			Metadata:    metadata,
-		})
-	}
-}
-
-// handleBridgeProcessMessage processes events from the managed BridgeProcess.
-func (w *WhatsAppChannel) handleBridgeProcessMessage(ctx context.Context, m BridgeMessage) {
-	if m.From == "" {
-		return
-	}
-
-	// OTP interception: if sender has a pending OTP and message looks like a 6-digit code
-	if w.gate != nil && w.gate.isPending(m.From) && isOTPSubmission(m.Body) {
-		result := w.gate.verify(m.From, strings.TrimSpace(m.Body))
-		switch result {
-		case otpVerifyApproved:
-			w.Send(ctx, channels.OutboundMessage{ChatID: m.From, Content: "✅ Access approved. Your original message will be processed."})
-		case otpVerifyWrong:
-			w.Send(ctx, channels.OutboundMessage{ChatID: m.From, Content: "❌ Incorrect code. Please try again."})
-		case otpVerifyLockedOut:
-			w.Send(ctx, channels.OutboundMessage{ChatID: m.From, Content: "🔒 Too many wrong attempts. Please wait 5 minutes."})
-		}
-		return
-	}
-
-	if m.ID != "" {
-		if _, already := w.dedup.LoadOrStore(m.ID, time.Now()); already {
-			return
-		}
-		go func() { time.Sleep(10 * time.Minute); w.dedup.Delete(m.ID) }()
-	}
-
-	chatID := m.Chat
-	if chatID == "" {
-		chatID = m.From
-	}
-
-	peerKind := "direct"
-	if strings.HasSuffix(chatID, "@g.us") {
-		peerKind = "group"
-	}
-
-	if peerKind == "direct" {
-		if !w.checkDMPolicy(ctx, m.From, chatID) {
-			return
-		}
-	} else {
-		if !w.checkGroupPolicy(ctx, m.From, chatID) {
-			return
-		}
-	}
-
-	if w.handler != nil {
-		w.handler(ctx, channels.InboundMessage{
-			ChannelName: "whatsapp",
-			ChannelType: "whatsapp",
-			AgentID:     w.cfg.AgentID,
-			SenderID:    m.From,
-			SenderName:  m.FromName,
-			ChatID:      chatID,
-			Content:     m.Body,
-			PeerKind:    peerKind,
-			Metadata: map[string]string{
-				"message_id": m.ID,
-				"chat_id":    chatID,
-			},
-		})
-	}
-}
 
 // SubscribeQREvents registers a callback that fires on every new QR code.
 // The callback is also fired immediately if a QR is already cached (replay for
@@ -523,98 +241,6 @@ func (w *WhatsAppChannel) ReplayMessage(ctx context.Context, senderJID, body str
 	}
 }
 
-func (w *WhatsAppChannel) bridgeSend(msg channels.OutboundMessage) error {
-	w.connMu.Lock()
-	conn := w.conn
-	w.connMu.Unlock()
-
-	if conn == nil {
-		return fmt.Errorf("bridge not connected")
-	}
-
-	chatID := msg.ChatID
-	if chatID == "" {
-		chatID = msg.RecipientID
-	}
-
-	payload, _ := json.Marshal(map[string]any{
-		"type":    "message",
-		"to":      chatID,
-		"content": msg.Content,
-	})
-
-	w.connMu.Lock()
-	err := w.conn.WriteMessage(websocket.TextMessage, payload)
-	w.connMu.Unlock()
-
-	return err
-}
-
-// GetQRCode fetches current QR code from bridge for pairing.
-func (w *WhatsAppChannel) GetQRCode() (string, error) {
-	if w.cfg.Mode != "bridge" {
-		return "", fmt.Errorf("QR code only available in bridge mode")
-	}
-
-	resp, err := w.client.Get(w.cfg.BridgeURL + "/qr")
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var qr struct {
-		QR     string `json:"qr"`
-		Status string `json:"status"`
-	}
-	json.NewDecoder(resp.Body).Decode(&qr)
-	return qr.QR, nil
-}
-
-// GetConnectionStatus checks bridge connection status.
-func (w *WhatsAppChannel) GetConnectionStatus() (string, error) {
-	if w.cfg.Mode != "bridge" {
-		return "cloud_api", nil
-	}
-
-	w.connMu.Lock()
-	connected := w.connected
-	w.connMu.Unlock()
-
-	if !connected {
-		return "disconnected", nil
-	}
-
-	resp, err := w.client.Get(w.cfg.BridgeURL + "/status")
-	if err != nil {
-		return "disconnected", err
-	}
-	defer resp.Body.Close()
-
-	var status struct {
-		Connected bool   `json:"connected"`
-		Phone     string `json:"phone"`
-	}
-	json.NewDecoder(resp.Body).Decode(&status)
-
-	if status.Connected {
-		return "connected:" + status.Phone, nil
-	}
-	return "awaiting_qr", nil
-}
-
-// RequestQRPairing initiates QR pairing flow.
-func (w *WhatsAppChannel) RequestQRPairing() error {
-	if w.cfg.Mode != "bridge" {
-		return fmt.Errorf("QR pairing only available in bridge mode")
-	}
-
-	resp, err := w.client.Post(w.cfg.BridgeURL+"/pair", "application/json", nil)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
-}
 
 // ============================================================
 // POLICY CHECKS
@@ -911,18 +537,8 @@ func (w *WhatsAppChannel) cloudAPICall(endpoint string, payload map[string]any) 
 }
 
 // SendInteractiveButtons sends a WhatsApp Cloud API interactive button message
-// (up to 3 buttons). Falls back to plain text on bridge mode.
+// (up to 3 buttons).
 func (w *WhatsAppChannel) SendInteractiveButtons(ctx context.Context, to, bodyText string, buttons []string) error {
-	if w.cfg.Mode == "bridge" {
-		// Bridge doesn't support interactive messages — send as plain text with numbered options.
-		var opts strings.Builder
-		opts.WriteString(bodyText + "\n\n")
-		for i, b := range buttons {
-			opts.WriteString(fmt.Sprintf("%d. %s\n", i+1, b))
-		}
-		return w.bridgeSend(channels.OutboundMessage{ChatID: to, Content: opts.String()})
-	}
-
 	if len(buttons) > 3 {
 		buttons = buttons[:3] // WhatsApp limits to 3 reply buttons
 	}
@@ -952,17 +568,7 @@ func (w *WhatsAppChannel) SendInteractiveButtons(ctx context.Context, to, bodyTe
 }
 
 // SendInteractiveList sends a WhatsApp Cloud API list picker (up to 10 items).
-// Falls back to plain text on bridge mode.
 func (w *WhatsAppChannel) SendInteractiveList(ctx context.Context, to, bodyText, buttonLabel string, items []string) error {
-	if w.cfg.Mode == "bridge" {
-		var opts strings.Builder
-		opts.WriteString(bodyText + "\n\n")
-		for i, item := range items {
-			opts.WriteString(fmt.Sprintf("%d. %s\n", i+1, item))
-		}
-		return w.bridgeSend(channels.OutboundMessage{ChatID: to, Content: opts.String()})
-	}
-
 	if len(items) > 10 {
 		items = items[:10]
 	}

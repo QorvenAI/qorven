@@ -36,12 +36,12 @@ func TestWhatsAppChannel_New_CloudMode(t *testing.T) {
 	if ch.IsRunning() { t.Error("should not be running") }
 }
 
-func TestWhatsAppChannel_New_BridgeMode(t *testing.T) {
+func TestWhatsAppChannel_New_QRMode(t *testing.T) {
 	ch := New(Config{
-		AgentID:   "a1",
-		BridgeURL: "ws://localhost:3000",
+		AgentID: "a1",
+		Mode:    "qr",
 	}, nil)
-	if ch.cfg.Mode != "bridge" { t.Errorf("mode=%q want bridge when BridgeURL set", ch.cfg.Mode) }
+	if ch.cfg.Mode != "qr" { t.Errorf("mode=%q want qr when explicitly set", ch.cfg.Mode) }
 }
 
 func TestWhatsAppChannel_New_ExplicitMode(t *testing.T) {
@@ -217,10 +217,10 @@ func TestWhatsAppChannel_Mode_Detection(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{Config{AgentID: "a", BridgeURL: "ws://x"}, "bridge"},
 		{Config{AgentID: "a", PhoneNumberID: "p", AccessToken: "t"}, "cloud"},
 		{Config{AgentID: "a", Mode: "cloud"}, "cloud"},
-		{Config{AgentID: "a", Mode: "bridge", BridgeURL: "ws://x"}, "bridge"},
+		{Config{AgentID: "a", Mode: "qr"}, "qr"},
+		{Config{AgentID: "a"}, "cloud"}, // default when mode is empty
 	}
 	for _, tt := range tests {
 		ch := New(tt.cfg, nil)

@@ -158,7 +158,15 @@ func (gw *Gateway) loadChannels() {
 					count++
 				}
 			}
-			// NOTE: mode == "qr" / "bridge" branch is added in a later task; those rows simply won't load yet.
+			if mode == "qr" {
+				waCfg.DBDSN = gw.cfg.Database.DSN
+				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+					ch.Transcribe = gw.voicePipeline.TranscribeAudio
+				}
+				gw.chanMgr.Register(id, ch)
+				count++
+			}
 		case "zalo":
 			zaloCfg := zalo.ZaloConfig{
 				AgentID:      *agentID,
@@ -466,7 +474,14 @@ func (gw *Gateway) loadSingleChannel(ctx context.Context, id string) {
 				gw.chanMgr.Register(id, ch)
 			}
 		}
-		// NOTE: mode == "qr" / "bridge" branch is added in a later task.
+		if mode == "qr" {
+			waCfg.DBDSN = gw.cfg.Database.DSN
+			ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+			if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+				ch.Transcribe = gw.voicePipeline.TranscribeAudio
+			}
+			gw.chanMgr.Register(id, ch)
+		}
 	}
 	slog.Info("channel.loaded_single", "id", id, "type", chType)
 }
