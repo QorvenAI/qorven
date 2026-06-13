@@ -133,7 +133,7 @@ func (gw *Gateway) buildGovernanceHooks() *agent.GovernanceHooks {
 				slog.Warn("governance.request_approval.gate_error", "error", err)
 				return false
 			}
-			_ = gw.approvalStore.CreateRequest(ctx, governance.ApprovalRequest{
+			if err := gw.approvalStore.CreateRequest(ctx, governance.ApprovalRequest{
 				TenantID:     tenantID,
 				ActionType:   actionType,
 				RequestorID:  agentID,
@@ -141,7 +141,9 @@ func (gw *Gateway) buildGovernanceHooks() *agent.GovernanceHooks {
 				ApproverRole: "admin",
 				Status:       "pending",
 				Context:      map[string]any{"gate_request_id": id, "reason": reason},
-			})
+			}); err != nil {
+				slog.Warn("governance.approval.create_error", "error", err)
+			}
 			v := wait() // blocks until Gate.Reply fires or timeout
 			return v.Allowed()
 		}
