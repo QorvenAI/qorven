@@ -61,6 +61,12 @@ type GovernanceHooks struct {
 	// governance gate can intercept it before the user sees it.
 	// nil = assume no blocking policy (live streaming proceeds as normal).
 	HasBlockingOutputPolicy func(tenantID string) bool
+
+	// RequestApproval blocks until a human approves or denies a governance hold.
+	// It writes a governance approval_requests row (carrying the permission Gate
+	// request id so the inbox can resolve it) and blocks on the permission Gate.
+	// Returns true if approved. nil = approvals disabled (treat as blocked).
+	RequestApproval func(ctx context.Context, tenantID, agentID, agentKey, actionType, reason string, args any) (approved bool)
 }
 
 // SetGovernanceHooks wires the governance engine callbacks.

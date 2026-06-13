@@ -82,6 +82,24 @@ func TestReply_EmptyID(t *testing.T) {
 	}
 }
 
+func TestNewPending_NilPool(t *testing.T) {
+	g := &Gate{}
+	_, _, err := g.NewPending(context.Background(), RequestInput{Tool: "x"})
+	if err == nil || !contains(err.Error(), "gate not configured") {
+		t.Fatalf("expected nil-pool error from NewPending, got %v", err)
+	}
+}
+
+func TestNewPending_EmptyTool(t *testing.T) {
+	// NewPending checks pool first, then tool. Both validations must reject,
+	// so confirm at least one error path fires.
+	g := &Gate{}
+	_, _, err := g.NewPending(context.Background(), RequestInput{})
+	if err == nil {
+		t.Fatalf("NewPending with nil pool+empty tool should error, got nil")
+	}
+}
+
 func TestDecodeArgsMap(t *testing.T) {
 	if got := decodeArgsMap(nil); got != nil {
 		t.Fatalf("nil → %v", got)

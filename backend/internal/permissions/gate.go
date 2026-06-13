@@ -233,6 +233,148 @@ func (g *Gate) AddTransientAllow(tenantID, userID, agentID, tool string, duratio
 	g.transientMu.Unlock()
 }
 
+// NewPending registers a pending permission request: persists the row, installs
+// the reply channel, and emits the SSE event — then returns the generated
+// request ID and a wait closure that blocks until the reply arrives (or times
+// out). The wait closure is what Request calls internally.
+//
+// Use NewPending when the caller needs the request ID before blocking (e.g. to
+// store a back-reference in a governance row so the inbox can resolve the Gate
+// later). The wait func MUST be called exactly once; it cleans up the channel.
+//
+// Note: NewPending does NOT apply policy short-circuits (auto-approve / blocked).
+// Callers that want those checks should call Request instead, which applies them
+// before delegating to NewPending.
+func (g *Gate) NewPending(ctx context.Context, in RequestInput) (id string, wait func() *Verdict, err error) {
+	if g.pool == nil {
+		return "", nil, errors.New("permissions: gate not configured (nil pool)")
+	}
+	if in.Tool == "" {
+		return "", nil, errors.New("permissions: tool required")
+	}
+
+	timeout := in.Timeout
+	if timeout == 0 {
+		timeout = g.DefaultTimeout
+	}
+	argsJSON := []byte("{}")
+	if in.Args != nil {
+		b, err := json.Marshal(in.Args)
+		if err != nil {
+			return "", nil, fmt.Errorf("permissions: marshal args: %w", err)
+		}
+		argsJSON = b
+	}
+
+	// Persist.
+	var r Request
+	var expiresAt *time.Time
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+		expiresAt = &deadline
+	}
+	tenantArg := any(nil)
+	if in.TenantID != "" {
+		tenantArg = in.TenantID
+	}
+	err = g.q(ctx).QueryRow(ctx, `
+        INSERT INTO permission_requests
+            (session_id, plan_id, node_id, agent_key, tool, args, reason,
+             state, requested_by, expires_at, tenant_id)
+        VALUES
+            (NULLIF($1,'')::uuid, NULLIF($2,'')::uuid, NULLIF($3,'')::uuid,
+             NULLIF($4,''), $5, $6, $7, 'pending', $8, $9,
+             COALESCE($10, 'default'))
+        RETURNING id, COALESCE(session_id::text,''), COALESCE(plan_id::text,''),
+                  COALESCE(node_id::text,''), COALESCE(agent_key,''),
+                  tool, args, COALESCE(reason,''), state, COALESCE(requested_by,''),
+                  COALESCE(replied_by,''), COALESCE(note,''), created_at, replied_at, expires_at
+    `,
+		in.SessionID, in.PlanID, in.NodeID, in.AgentKey, in.Tool,
+		argsJSON, in.Reason, in.RequestedBy, expiresAt, tenantArg,
+	).Scan(
+		&r.ID, &r.SessionID, &r.PlanID, &r.NodeID, &r.AgentKey,
+		&r.Tool, &r.Args, &r.Reason, &r.State, &r.RequestedBy,
+		&r.RepliedBy, &r.Note, &r.CreatedAt, &r.RepliedAt, &r.ExpiresAt,
+	)
+	if err != nil {
+		return "", nil, fmt.Errorf("permissions: persist: %w", err)
+	}
+
+	// Install a reply channel BEFORE the event fires to prevent a TOCTTOU
+	// where the reply arrives before we start listening.
+	ch := make(chan *Request, 1)
+	g.mu.Lock()
+	g.pending[r.ID] = ch
+	g.mu.Unlock()
+
+	// Emit permission.requested.
+	if g.emitter != nil {
+		_ = g.emitter.Emit(ctx, apievents.SinkAll, apievents.TypePermissionRequested,
+			apievents.PermissionRequestedProps{
+				RequestID:          r.ID,
+				SessionID:          r.SessionID,
+				AgentKey:           r.AgentKey,
+				Tool:               r.Tool,
+				Args:               decodeArgsMap(r.Args),
+				Reason:             r.Reason,
+				AutoApproveAfterMS: int(timeout / time.Millisecond),
+			})
+	}
+
+	wait = func() *Verdict {
+		defer func() {
+			g.mu.Lock()
+			delete(g.pending, r.ID)
+			g.mu.Unlock()
+		}()
+
+		var timeoutCh <-chan time.Time
+		if timeout > 0 {
+			timer := time.NewTimer(timeout)
+			defer timer.Stop()
+			timeoutCh = timer.C
+		}
+
+		select {
+		case <-ctx.Done():
+			_ = g.expire(context.Background(), r.ID)
+			return &Verdict{Decision: DecisionDeny, Request: &r, Expired: true}
+
+		case <-timeoutCh:
+			_ = g.expire(ctx, r.ID)
+			if g.emitter != nil {
+				_ = g.emitter.Emit(ctx, apievents.SinkAll, apievents.TypePermissionReplied,
+					apievents.PermissionRepliedProps{
+						RequestID: r.ID,
+						Decision:  "deny",
+						Note:      fmt.Sprintf("auto-denied after %s", timeout),
+					})
+			}
+			return &Verdict{Decision: DecisionDeny, Request: &r, Expired: true}
+
+		case reply := <-ch:
+			var verdict Verdict
+			verdict.Request = reply
+			switch reply.State {
+			case StateAllowed:
+				verdict.Decision = DecisionAllow
+			case StateDenied:
+				verdict.Decision = DecisionDeny
+			case StateExpired:
+				verdict.Decision = DecisionDeny
+				verdict.Expired = true
+			default:
+				verdict.Decision = DecisionDeny
+			}
+			return &verdict
+		}
+	}
+
+	return r.ID, wait, nil
+}
+
 // Request gates a tool execution. Returns a Verdict or an error. Behavior:
 //
 //   - persists a pending row in permission_requests
@@ -268,130 +410,16 @@ func (g *Gate) Request(ctx context.Context, in RequestInput) (*Verdict, error) {
 		}
 	}
 
-	timeout := in.Timeout
-	if timeout == 0 {
-		timeout = g.DefaultTimeout
-	}
-	argsJSON := []byte("{}")
-	if in.Args != nil {
-		b, err := json.Marshal(in.Args)
-		if err != nil {
-			return nil, fmt.Errorf("permissions: marshal args: %w", err)
-		}
-		argsJSON = b
-	}
-
-	// Persist.
-	var r Request
-	var expiresAt *time.Time
-	var deadline time.Time
-	if timeout > 0 {
-		deadline = time.Now().Add(timeout)
-		expiresAt = &deadline
-	}
-	// Fall back to the column default ('default') when TenantID is
-	// empty — preserves the single-tenant shape. Multi-tenant callers
-	// MUST set in.TenantID so the RLS policy's tenant_id::uuid cast
-	// succeeds; that plumbing lands in the wrapper (WrapLazy) which
-	// is what our orchestrator path goes through.
-	tenantArg := any(nil)
-	if in.TenantID != "" {
-		tenantArg = in.TenantID
-	}
-	err := g.q(ctx).QueryRow(ctx, `
-        INSERT INTO permission_requests
-            (session_id, plan_id, node_id, agent_key, tool, args, reason,
-             state, requested_by, expires_at, tenant_id)
-        VALUES
-            (NULLIF($1,'')::uuid, NULLIF($2,'')::uuid, NULLIF($3,'')::uuid,
-             NULLIF($4,''), $5, $6, $7, 'pending', $8, $9,
-             COALESCE($10, 'default'))
-        RETURNING id, COALESCE(session_id::text,''), COALESCE(plan_id::text,''),
-                  COALESCE(node_id::text,''), COALESCE(agent_key,''),
-                  tool, args, COALESCE(reason,''), state, COALESCE(requested_by,''),
-                  COALESCE(replied_by,''), COALESCE(note,''), created_at, replied_at, expires_at
-    `,
-		in.SessionID, in.PlanID, in.NodeID, in.AgentKey, in.Tool,
-		argsJSON, in.Reason, in.RequestedBy, expiresAt, tenantArg,
-	).Scan(
-		&r.ID, &r.SessionID, &r.PlanID, &r.NodeID, &r.AgentKey,
-		&r.Tool, &r.Args, &r.Reason, &r.State, &r.RequestedBy,
-		&r.RepliedBy, &r.Note, &r.CreatedAt, &r.RepliedAt, &r.ExpiresAt,
-	)
+	_, wait, err := g.NewPending(ctx, in)
 	if err != nil {
-		return nil, fmt.Errorf("permissions: persist: %w", err)
+		return nil, err
 	}
-
-	// Install a reply channel BEFORE the event fires to prevent a TOCTTOU
-	// where the reply arrives before we start listening.
-	ch := make(chan *Request, 1)
-	g.mu.Lock()
-	g.pending[r.ID] = ch
-	g.mu.Unlock()
-	defer func() {
-		g.mu.Lock()
-		delete(g.pending, r.ID)
-		g.mu.Unlock()
-	}()
-
-	// Emit permission.requested.
-	if g.emitter != nil {
-		_ = g.emitter.Emit(ctx, apievents.SinkAll, apievents.TypePermissionRequested,
-			apievents.PermissionRequestedProps{
-				RequestID:          r.ID,
-				SessionID:          r.SessionID,
-				AgentKey:           r.AgentKey,
-				Tool:               r.Tool,
-				Args:               decodeArgsMap(r.Args),
-				Reason:             r.Reason,
-				AutoApproveAfterMS: int(timeout / time.Millisecond),
-			})
+	v := wait()
+	// Translate timeout back to an error for callers that check IsExpired.
+	if v.Expired {
+		return v, &ExpiredError{RequestID: v.Request.ID, After: in.Timeout}
 	}
-
-	var timeoutCh <-chan time.Time
-	if timeout > 0 {
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-		timeoutCh = timer.C
-	}
-
-	select {
-	case <-ctx.Done():
-		// Context cancel: flip to expired (caller abandoned) and return ctx.Err.
-		_ = g.expire(context.Background(), r.ID)
-		return nil, ctx.Err()
-
-	case <-timeoutCh:
-		if err := g.expire(ctx, r.ID); err != nil {
-			return nil, err
-		}
-		if g.emitter != nil {
-			_ = g.emitter.Emit(ctx, apievents.SinkAll, apievents.TypePermissionReplied,
-				apievents.PermissionRepliedProps{
-					RequestID: r.ID,
-					Decision:  "deny",
-					Note:      fmt.Sprintf("auto-denied after %s", timeout),
-				})
-		}
-		return &Verdict{Decision: DecisionDeny, Request: &r, Expired: true},
-			&ExpiredError{RequestID: r.ID, After: timeout}
-
-	case reply := <-ch:
-		var verdict Verdict
-		verdict.Request = reply
-		switch reply.State {
-		case StateAllowed:
-			verdict.Decision = DecisionAllow
-		case StateDenied:
-			verdict.Decision = DecisionDeny
-		case StateExpired:
-			verdict.Decision = DecisionDeny
-			verdict.Expired = true
-		default:
-			return nil, fmt.Errorf("permissions: unexpected reply state %q", reply.State)
-		}
-		return &verdict, nil
-	}
+	return v, nil
 }
 
 // Reply resolves a pending request. Called by the HTTP handler behind

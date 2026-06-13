@@ -8,6 +8,7 @@ import (
 
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/governance"
+	"github.com/qorvenai/qorven/internal/permissions"
 	"github.com/qorvenai/qorven/internal/pii"
 )
 
@@ -111,6 +112,38 @@ func (gw *Gateway) buildGovernanceHooks() *agent.GovernanceHooks {
 	if gw.policyEngine != nil {
 		h.HasBlockingOutputPolicy = func(tenantID string) bool {
 			return gw.policyEngine.HasBlockingOutputPolicy(tenantID)
+		}
+	}
+
+	// RequestApproval: block the agent on a governance hold, writing an
+	// approval_requests row so the inbox shows it, and unblocking when the
+	// inbox's decide endpoint calls Gate.Reply. The gate_request_id stored in
+	// the context column is what links the two rows.
+	if gw.approvalStore != nil && gw.permissionGate != nil {
+		h.RequestApproval = func(ctx context.Context, tenantID, agentID, agentKey, actionType, reason string, args any) bool {
+			id, wait, err := gw.permissionGate.NewPending(ctx, permissions.RequestInput{
+				AgentKey: agentKey,
+				Tool:     actionType,
+				Args:     args,
+				Reason:   reason,
+				TenantID: tenantID,
+				AgentID:  agentID,
+			})
+			if err != nil {
+				slog.Warn("governance.request_approval.gate_error", "error", err)
+				return false
+			}
+			_ = gw.approvalStore.CreateRequest(ctx, governance.ApprovalRequest{
+				TenantID:     tenantID,
+				ActionType:   actionType,
+				RequestorID:  agentID,
+				RequestorKey: agentKey,
+				ApproverRole: "admin",
+				Status:       "pending",
+				Context:      map[string]any{"gate_request_id": id, "reason": reason},
+			})
+			v := wait() // blocks until Gate.Reply fires or timeout
+			return v.Allowed()
 		}
 	}
 

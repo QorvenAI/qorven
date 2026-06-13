@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/governance"
+	"github.com/qorvenai/qorven/internal/permissions"
 )
 
 // ─── Designations ────────────────────────────────────────────────────────────
@@ -124,11 +125,24 @@ func (gw *Gateway) handleDecideMatrixApproval(w http.ResponseWriter, r *http.Req
 	if user != nil {
 		decider = user.ID
 	}
-	err := gw.approvalStore.Decide(r.Context(), defaultTenant, chi.URLParam(r, "id"), decider, body.Status, body.Reason)
+	id := chi.URLParam(r, "id")
+	err := gw.approvalStore.Decide(r.Context(), defaultTenant, id, decider, body.Status, body.Reason)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
+
+	// Resolve the linked permission Gate so any blocked agent goroutine unblocks.
+	if req, getErr := gw.approvalStore.Get(r.Context(), defaultTenant, id); getErr == nil && gw.permissionGate != nil {
+		if gid, ok := req.Context["gate_request_id"].(string); ok && gid != "" {
+			dec := permissions.DecisionDeny
+			if body.Status == "approved" {
+				dec = permissions.DecisionAllow
+			}
+			_, _ = gw.permissionGate.Reply(r.Context(), gid, permissions.ReplyInput{Decision: dec, RepliedBy: decider})
+		}
+	}
+
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 

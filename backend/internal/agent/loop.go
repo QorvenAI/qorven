@@ -1635,8 +1635,15 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 							goto toolDone
 						}
 						if action == "require_approval" {
-							toolResult = tools.ErrorResult("⏸ Requires approval: " + reason + ". Action paused.")
-							goto toolDone
+							approved := false
+							if gh.RequestApproval != nil {
+								approved = gh.RequestApproval(ctx, l.tenantID, ag.ID, ag.AgentKey, tc.Name, reason, tc.Arguments)
+							}
+							if !approved {
+								toolResult = tools.ErrorResult("⛔ Approval denied or timed out: " + reason)
+								goto toolDone
+							}
+							// approved → fall through to SoD check then executeTool
 						}
 					}
 					if gh.CheckSoD != nil && governedAction != "" {
