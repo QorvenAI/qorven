@@ -221,7 +221,12 @@ func (gw *Gateway) Start() error {
 				UserMessage: instruction,
 				Channel:     "cron",
 				TenantID:    defaultTenant,
-				UserID:      gw.resolveTenantUserIDForChannel(ctx, defaultTenant, runAs),
+				// Cron has no human sender — gate/budget under the tenant's owner user,
+				// not the agent's own id. Passing "" makes the resolver (and the loop's
+				// own fallback) land on the tenant's first active user, matching the
+				// channel path. Passing runAs (a UUID agent id) would resolve to the
+				// agent id verbatim and miss the user's configured policies.
+				UserID:      gw.resolveTenantUserIDForChannel(ctx, defaultTenant, ""),
 			}, func(event agent.StreamEvent) {})
 
 			content := ""
