@@ -248,31 +248,146 @@ func (gw *Gateway) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 
 func (gw *Gateway) handleCreateCronJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AgentID    string `json:"agent_id"`
+		AgentID         string `json:"agent_id"`
+		Name            string `json:"name"`
+		CronExpression  string `json:"cron_expression"`
+		Instruction     string `json:"instruction"`
+		DeliveryChannel string `json:"delivery_channel"`
+		OneShot         bool   `json:"one_shot"`
+		// legacy aliases
 		Expression string `json:"expression"`
 		Task       string `json:"task"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Expression == "" || req.Task == "" {
-		writeJSON(w, 400, map[string]string{"error": "expression and task required"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	if req.CronExpression == "" {
+		req.CronExpression = req.Expression
+	}
+	if req.Name == "" {
+		req.Name = req.Task
+	}
+	if req.Instruction == "" {
+		req.Instruction = req.Name
+	}
+	if req.CronExpression == "" || req.Name == "" {
+		writeJSON(w, 400, map[string]string{"error": "name and cron_expression required"})
 		return
 	}
 	if gw.db == nil {
 		writeJSON(w, 503, map[string]string{"error": "db not available"})
 		return
 	}
-	payloadJSON, _ := json.Marshal(map[string]string{"instruction": req.Task})
-	nextRun := cronpkg.NextRunFromExpr(req.Expression)
+	payloadJSON, _ := json.Marshal(map[string]string{"instruction": req.Instruction, "delivery_channel": req.DeliveryChannel})
+	nextRun := cronpkg.NextRunFromExpr(req.CronExpression)
 	var id string
 	err := gw.db.Pool.QueryRow(r.Context(),
-		`INSERT INTO cron_jobs (tenant_id, agent_id, name, cron_expression, payload, next_run_at, enabled)
-		 VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, $6, true) RETURNING id`,
-		defaultTenant, req.AgentID, req.Task, req.Expression, payloadJSON, nextRun,
+		`INSERT INTO cron_jobs (tenant_id, agent_id, name, cron_expression, payload, delivery_channel, one_shot, next_run_at, enabled)
+		 VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7, $8, true) RETURNING id`,
+		defaultTenant, req.AgentID, req.Name, req.CronExpression, payloadJSON, req.DeliveryChannel, req.OneShot, nextRun,
 	).Scan(&id)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
 	writeJSON(w, 201, map[string]string{"id": id, "status": "created"})
+}
+
+func (gw *Gateway) handleUpdateCronJob(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 503, map[string]string{"error": "db not available"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Name            string `json:"name"`
+		CronExpression  string `json:"cron_expression"`
+		AgentID         string `json:"agent_id"`
+		Instruction     string `json:"instruction"`
+		DeliveryChannel string `json:"delivery_channel"`
+		Enabled         *bool  `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	if req.CronExpression == "" || req.Name == "" {
+		writeJSON(w, 400, map[string]string{"error": "name and cron_expression required"})
+		return
+	}
+	payloadJSON, _ := json.Marshal(map[string]string{"instruction": req.Instruction, "delivery_channel": req.DeliveryChannel})
+	nextRun := cronpkg.NextRunFromExpr(req.CronExpression)
+	ct, err := gw.db.Pool.Exec(r.Context(),
+		`UPDATE cron_jobs SET name=$1, cron_expression=$2, agent_id=NULLIF($3,'')::uuid,
+		   payload=$4, delivery_channel=$5, next_run_at=$6, enabled=COALESCE($7, enabled), updated_at=NOW()
+		 WHERE id=$8 AND tenant_id=$9`,
+		req.Name, req.CronExpression, req.AgentID, payloadJSON, req.DeliveryChannel, nextRun, req.Enabled, id, defaultTenant)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeJSON(w, 404, map[string]string{"error": "cron job not found"})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "updated"})
+}
+
+func (gw *Gateway) handleRunCronJobNow(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 503, map[string]string{"error": "db not available"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	ct, err := gw.db.Pool.Exec(r.Context(),
+		`UPDATE cron_jobs SET next_run_at = NOW(),
+		   enabled = CASE WHEN COALESCE(one_shot, false) THEN true ELSE enabled END
+		 WHERE id=$1 AND tenant_id=$2`, id, defaultTenant)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeJSON(w, 404, map[string]string{"error": "cron job not found"})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "queued"})
+}
+
+func (gw *Gateway) handleListCronJobRuns(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, 200, map[string]any{"runs": []any{}})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	rows, err := gw.db.Pool.Query(r.Context(),
+		`SELECT id::text,
+		        to_char(scheduled_for AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        status, COALESCE(result_snippet,''), COALESCE(tokens,0), COALESCE(cost_cents,0), COALESCE(error,'')
+		 FROM scheduled_runs WHERE source='cron' AND source_id=$1 AND tenant_id=$2
+		 ORDER BY scheduled_for DESC LIMIT 50`, id, defaultTenant)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	defer rows.Close()
+	runs := []map[string]any{}
+	for rows.Next() {
+		var rid, status, snippet, errStr string
+		var schedFor, finished *string
+		var tokens, cost int64
+		if rows.Scan(&rid, &schedFor, &finished, &status, &snippet, &tokens, &cost, &errStr) != nil {
+			continue
+		}
+		runs = append(runs, map[string]any{
+			"id": rid, "scheduled_for": schedFor, "finished_at": finished,
+			"status": status, "result_snippet": snippet,
+			"tokens": tokens, "cost_cents": cost, "error": errStr,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"runs": runs})
 }
 
 func (gw *Gateway) handlePauseCronJob(w http.ResponseWriter, r *http.Request) {
