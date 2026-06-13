@@ -692,6 +692,9 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/cron-jobs/{id}/resume", gw.handleResumeCronJob)
 		r.Post("/cron-jobs/{id}/toggle", gw.handleToggleCronJob)
 		r.Delete("/cron-jobs/{id}", gw.handleDeleteCronJob)
+		r.Put("/cron-jobs/{id}", gw.handleUpdateCronJob)
+		r.Post("/cron-jobs/{id}/run", gw.handleRunCronJobNow)
+		r.Get("/cron-jobs/{id}/runs", gw.handleListCronJobRuns)
 
 		// Contacts (lightweight CRM)
 		r.Get("/contacts", gw.handleListContacts)

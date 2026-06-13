@@ -31,7 +31,7 @@ import { MailTab } from '@/components/qors/mail-tab';
 import { InboxTab } from '@/components/qors/inbox-tab';
 import { WorkerMonitor } from '@/components/qors/worker-monitor';
 import { PermissionsTab } from '@/components/qors/permissions-tab';
-import { SchedulesTab } from '@/components/qors/schedules-tab';
+import { SchedulesPanel } from '@/components/schedules/schedules-panel';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { useAppAgentTabs } from '@/components/apps/app-registry-context';
 import { request as apiRequest, getToken } from '@/lib/api-core';
@@ -536,7 +536,7 @@ export default function QorDetailPage() {
           )}
           {activeTab === 'schedules' && (
             <div className="h-full overflow-y-auto p-5">
-              <SchedulesTab agentId={soul.id} />
+              <SchedulesPanel agentId={soul.id} />
             </div>
           )}
           {appAgentTabs.map((tab) =>
@@ -895,31 +895,39 @@ function ToggleRow({ label, description, icon, checked, onChange, locked }: {
 
 // Channel icon as coloured SVG emoji-style text — no external deps
 function ChannelIcon({ type, className }: { type: string; className?: string }) {
-  const map: Record<string, { bg: string; text: string; label: string }> = {
-    telegram:   { bg: 'bg-[#229ED9]/15', text: 'text-[#229ED9]', label: '✈' },
-    discord:    { bg: 'bg-[#5865F2]/15', text: 'text-[#5865F2]', label: '🎮' },
-    slack:      { bg: 'bg-[#4A154B]/15', text: 'text-[#E01E5A]', label: '#' },
-    whatsapp:   { bg: 'bg-[#25D366]/15', text: 'text-[#25D366]', label: '💬' },
-    email:      { bg: 'bg-amber-500/15', text: 'text-amber-500', label: '✉' },
-    webchat:    { bg: 'bg-primary/15',   text: 'text-primary',   label: '🌐' },
-    webhook:    { bg: 'bg-muted',        text: 'text-muted-foreground', label: '⚡' },
-    zalo:       { bg: 'bg-[#0068FF]/15', text: 'text-[#0068FF]', label: 'Z' },
-    wecom:      { bg: 'bg-[#07C160]/15', text: 'text-[#07C160]', label: '企' },
-    dingtalk:   { bg: 'bg-[#1677FF]/15', text: 'text-[#1677FF]', label: '钉' },
-    feishu:     { bg: 'bg-[#3370FF]/15', text: 'text-[#3370FF]', label: '飞' },
-    facebook:   { bg: 'bg-[#1877F2]/15', text: 'text-[#1877F2]', label: 'f' },
-    teams:      { bg: 'bg-[#6264A7]/15', text: 'text-[#6264A7]', label: 'T' },
-    line:       { bg: 'bg-[#06C755]/15', text: 'text-[#06C755]', label: 'L' },
-    sms:        { bg: 'bg-emerald-500/15', text: 'text-emerald-500', label: '📱' },
-    signal:     { bg: 'bg-[#3A76F0]/15', text: 'text-[#3A76F0]', label: '🔒' },
-    imessage:   { bg: 'bg-[#34C759]/15', text: 'text-[#34C759]', label: '' },
-    matrix:     { bg: 'bg-neutral-500/15', text: 'text-neutral-400', label: '[]' },
-    mattermost: { bg: 'bg-[#0058CC]/15', text: 'text-[#0058CC]', label: 'M' },
+  // bg/text colours use CSS channel tokens (defined in config.qorven.css) via inline style
+  const map: Record<string, { token: string; label: string }> = {
+    telegram:   { token: 'var(--channel-telegram)',  label: '✈' },
+    discord:    { token: 'var(--channel-discord)',   label: '🎮' },
+    slack:      { token: 'var(--channel-slack)',     label: '#' },
+    whatsapp:   { token: 'var(--channel-whatsapp)',  label: '💬' },
+    email:      { token: 'var(--channel-email)',     label: '✉' },
+    webchat:    { token: 'var(--channel-webchat)',   label: '🌐' },
+    webhook:    { token: 'var(--channel-webhook)',   label: '⚡' },
+    teams:      { token: 'var(--channel-teams)',     label: 'T' },
+    sms:        { token: 'var(--channel-sms)',       label: '📱' },
+    zalo:       { token: 'var(--channel-telegram)',  label: 'Z' },
+    wecom:      { token: 'var(--channel-whatsapp)',  label: '企' },
+    dingtalk:   { token: 'var(--channel-webchat)',   label: '钉' },
+    feishu:     { token: 'var(--channel-discord)',   label: '飞' },
+    facebook:   { token: 'var(--connector-google)',  label: 'f' },
+    line:       { token: 'var(--channel-whatsapp)',  label: 'L' },
+    signal:     { token: 'var(--channel-discord)',   label: '🔒' },
+    imessage:   { token: 'var(--channel-sms)',       label: '' },
+    matrix:     { token: 'var(--channel-email)',     label: '[]' },
+    mattermost: { token: 'var(--channel-teams)',     label: 'M' },
   };
-  const cfg = map[type] ?? { bg: 'bg-muted', text: 'text-muted-foreground', label: type.slice(0, 2).toUpperCase() };
+  const entry = map[type];
+  const label = entry?.label ?? type.slice(0, 2).toUpperCase();
+  const style = entry
+    ? { backgroundColor: `color-mix(in srgb, ${entry.token} 15%, transparent)`, color: entry.token }
+    : undefined;
   return (
-    <span className={cn('flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold', cfg.bg, cfg.text, className)}>
-      {cfg.label}
+    <span
+      className={cn('flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold', !entry && 'bg-muted text-muted-foreground', className)}
+      style={style}
+    >
+      {label}
     </span>
   );
 }

@@ -166,7 +166,7 @@ func (gw *Gateway) Start() error {
 	}
 	// Start cron runner
 	if gw.db != nil && gw.agentLoop != nil {
-		gw.cronRunner = cronpkg.NewRunner(gw.db.Pool, func(ctx context.Context, jobName, payload, agentID string) cronpkg.DBRunResult {
+		gw.cronRunner = cronpkg.NewRunner(gw.db.Pool, func(ctx context.Context, jobID, jobName, payload, agentID string) cronpkg.DBRunResult {
 			slog.Info("cron.execute", "job", jobName, "agent", agentID)
 			if agentID == "" || gw.agentLoop == nil {
 				return cronpkg.DBRunResult{Success: false, Err: "no agent or loop"}
@@ -185,12 +185,14 @@ func (gw *Gateway) Start() error {
 			if p["executor_agent_id"] != "" {
 				runAs = p["executor_agent_id"]
 			}
+			deliveryChannel := p["delivery_channel"] // delivery_channel carried for future routing
+			_ = deliveryChannel
 
 			// Record the run as 'running' before dispatch (calendar shows it immediately;
 			// a crash leaves an errored, not phantom, row).
 			var runID string
 			if gw.calendarStore != nil {
-				runID, _ = gw.calendarStore.StartRun(ctx, defaultTenant, runAs, "cron", "", jobName, nil)
+				runID, _ = gw.calendarStore.StartRun(ctx, defaultTenant, runAs, "cron", jobID, jobName, nil)
 			}
 
 			// If the agent dispatch panics, finish the run row as errored before the
@@ -218,6 +220,13 @@ func (gw *Gateway) Start() error {
 				SessionID:   sessionID,
 				UserMessage: instruction,
 				Channel:     "cron",
+				TenantID:    defaultTenant,
+				// Cron has no human sender — gate/budget under the tenant's owner user,
+				// not the agent's own id. Passing "" makes the resolver (and the loop's
+				// own fallback) land on the tenant's first active user, matching the
+				// channel path. Passing runAs (a UUID agent id) would resolve to the
+				// agent id verbatim and miss the user's configured policies.
+				UserID:      gw.resolveTenantUserIDForChannel(ctx, defaultTenant, ""),
 			}, func(event agent.StreamEvent) {})
 
 			content := ""

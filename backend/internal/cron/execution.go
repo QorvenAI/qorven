@@ -355,7 +355,7 @@ type DBRunResult struct {
 }
 
 // DBRunHandler is the callback for DB-backed cron execution.
-type DBRunHandler func(ctx context.Context, jobName, payload, agentID string) DBRunResult
+type DBRunHandler func(ctx context.Context, jobID, jobName, payload, agentID string) DBRunResult
 
 // Runner is a DB-backed cron runner for gateway integration.
 type Runner struct {
@@ -442,7 +442,7 @@ func (r *Runner) tick(ctx context.Context) {
 			}()
 
 			slog.Info("cron.execute", "job", job.name, "agent", job.agentID)
-			res := r.handler(ctx, job.name, job.payload, job.agentID)
+			res := r.handler(ctx, job.id, job.name, job.payload, job.agentID)
 
 			status := "ok"
 			if !res.Success {

@@ -1,7 +1,7 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { request, listRequest, BASE, STREAM_BASE, AUTH_BASE, getToken } from './api-core';
-import type { Soul, Session, Channel, Skill, CronJob, Notification, Message } from '@/types';
+import type { Soul, Session, Channel, Skill, CronJob, CronRun, Notification, Message } from '@/types';
 
 export interface Contact {
   id: string;
@@ -190,8 +190,12 @@ export const channels = {
 
 export const cron = {
   list: () => listRequest<CronJob>('/cron-jobs'),
-  create: (body: { agent_id: string; expression: string; task: string }) =>
-    request<CronJob>('/cron-jobs', { method: 'POST', body: JSON.stringify(body) }),
+  create: (body: { agent_id: string; name: string; cron_expression: string; instruction: string; delivery_channel?: string; one_shot?: boolean }) =>
+    request<{ id: string }>('/cron-jobs', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: { agent_id: string; name: string; cron_expression: string; instruction?: string; delivery_channel?: string; enabled?: boolean }) =>
+    request<void>(`/cron-jobs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  runNow: (id: string) => request<void>(`/cron-jobs/${id}/run`, { method: 'POST' }),
+  runs: (id: string) => listRequest<CronRun>(`/cron-jobs/${id}/runs`),
   pause: (id: string) => request<void>(`/cron-jobs/${id}/pause`, { method: 'POST' }),
   resume: (id: string) => request<void>(`/cron-jobs/${id}/resume`, { method: 'POST' }),
   delete: (id: string) => request<void>(`/cron-jobs/${id}`, { method: 'DELETE' }),
