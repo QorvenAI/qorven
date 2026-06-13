@@ -3,15 +3,13 @@
 // Copyright 2026 Qorven AI. Licensed under Elastic License 2.0 (ELv2).
 
 import { useEffect, useState, useCallback } from 'react';
-import { CalendarDays, Clock, Play, Pause, Plus, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { PageShell } from '@/components/layouts/page-shell';
 import { cn } from '@/lib/utils';
-import { cron as cronApi, calendarApi } from '@/lib/api';
+import { calendarApi } from '@/lib/api';
 import { useStore } from '@/store';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { EmptyState, emptyStates } from '@/components/empty-state';
-import { toast } from 'sonner';
-import type { CronJob } from '@/types';
+import { SchedulesPanel } from '@/components/schedules/schedules-panel';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -39,7 +37,6 @@ export default function SchedulePage() {
   const [today] = useState(() => new Date());
   const [current, setCurrent] = useState(() => new Date());
   const [events, setEvents] = useState<any[]>([]);
-  const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
@@ -55,31 +52,13 @@ export default function SchedulePage() {
     const start = new Date(year, month, 1).toISOString();
     const end = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
     setLoading(true);
-    Promise.all([
-      calendarApi.list(start, end, agentFilter ?? undefined).catch(() => []),
-      cronApi.list().catch(() => []),
-    ]).then(([evts, jobs]) => {
+    calendarApi.list(start, end, agentFilter ?? undefined).catch(() => []).then((evts) => {
       setEvents(Array.isArray(evts) ? evts : []);
-      setJobs(Array.isArray(jobs) ? jobs : []);
       setLoading(false);
     });
   }, [year, month, agentFilter]);
 
   useEffect(() => { loadEvents(); }, [loadEvents]);
-
-  const toggleJob = async (job: CronJob) => {
-    try {
-      if (job.status === 'active') {
-        await cronApi.pause(job.id);
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'paused' } : j));
-        toast.success(`${job.task} paused`);
-      } else {
-        await cronApi.resume(job.id);
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'active' } : j));
-        toast.success(`${job.task} resumed`);
-      }
-    } catch { toast.error('Failed to update job'); }
-  };
 
   // Group events by date key YYYY-MM-DD
   const byDate = events.reduce<Record<string, any[]>>((acc, e) => {
@@ -108,7 +87,7 @@ export default function SchedulePage() {
               <button key={t} onClick={() => setTab(t)}
                 className={cn('px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer capitalize',
                   tab === t ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground hover:text-foreground hover:bg-accent')}>
-                {t === 'cron' ? `Cron (${jobs.length})` : 'Calendar'}
+                {t === 'cron' ? 'Schedules' : 'Calendar'}
               </button>
             ))}
           </div>
@@ -256,58 +235,8 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : (
-          /* Cron tab */
-          <div className="space-y-2">
-            {loading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
-                  <div className="h-5 w-5 animate-pulse rounded bg-muted" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-4 w-48 animate-pulse rounded bg-muted" />
-                    <div className="h-3 w-32 animate-pulse rounded bg-muted" />
-                  </div>
-                </div>
-              ))
-            ) : jobs.length === 0 ? (
-              <EmptyState
-                icon={emptyStates.cron.icon}
-                title="No cron jobs"
-                description="Cron jobs let agents run tasks on a schedule. Create one from an agent's settings."
-              />
-            ) : jobs.map(j => {
-              const soul = souls.find(s => s.id === j.agent_id);
-              const isActive = j.status === 'active';
-              return (
-                <div key={j.id} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
-                  <button onClick={() => toggleJob(j)} className="cursor-pointer shrink-0">
-                    {isActive
-                      ? <Play className="h-5 w-5 text-emerald-500" />
-                      : <Pause className="h-5 w-5 text-muted-foreground" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{j.task || 'Unnamed job'}</span>
-                      {soul && (
-                        <span className="text-xs text-muted-foreground shrink-0">· {soul.display_name}</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                      <Clock className="h-3 w-3" />
-                      <code className="font-mono">{j.expression}</code>
-                    </div>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground shrink-0 space-y-0.5">
-                    {j.last_run && <div>Last: {new Date(j.last_run).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
-                    {j.next_run && <div>Next: {new Date(j.next_run).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
-                  </div>
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full shrink-0',
-                    isActive ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground')}>
-                    {isActive ? 'Active' : 'Paused'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          /* Schedules / Cron tab — unified SchedulesPanel */
+          <SchedulesPanel />
         )}
       </PageShell>
     </ErrorBoundary>

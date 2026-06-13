@@ -188,13 +188,25 @@ export interface Skill {
 // CronJob
 export interface CronJob {
   id: string;
-  agent_id: string;
-  expression: string;
-  task: string;
+  name: string;
+  cron_expression: string;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  agent_id: string | null;
+  agent_name?: string;
+  delivery_channel?: string;
+}
+
+export interface CronRun {
+  id: string;
+  scheduled_for: string | null;
+  finished_at: string | null;
   status: string;
-  last_run: string;
-  next_run: string;
-  executor_agent_id: string;
+  result_snippet: string;
+  tokens: number;
+  cost_cents: number;
+  error: string;
 }
 
 // Notification
