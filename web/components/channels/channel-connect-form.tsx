@@ -81,7 +81,7 @@ export function ChannelConnectForm({ agentId, channelType, existing, onClose, on
         const created = await channelsApi.create({ agent_id: agentId, channel_type: channelType, name: channelName, config: values, enabled: true });
         setSavedChannelId(created.id);
       }
-      if (channelType === 'whatsapp' && (values as Record<string, string>).mode === 'bridge') {
+      if (channelType === 'whatsapp' && (values as Record<string, string>).mode === 'qr') {
         setShowQR(true);
       } else {
         onConnected();

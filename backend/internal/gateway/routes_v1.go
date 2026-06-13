@@ -710,11 +710,8 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/channels/{id}/start", gw.handleStartChannel)
 		r.Post("/channels/{id}/stop", gw.handleStopChannel)
 		r.Post("/channels/{id}/test", gw.handleTestChannel)
-		// WhatsApp bridge endpoints
+		// WhatsApp QR pairing endpoint
 		r.Get("/channels/{id}/whatsapp/qr", gw.handleWhatsAppQRStream)
-		r.Get("/channels/{id}/whatsapp/pending", gw.handleWhatsAppListPending)
-		r.Post("/channels/{id}/whatsapp/pending/{pendingId}/approve", gw.handleWhatsAppApproveSender)
-		r.Post("/channels/{id}/whatsapp/pending/{pendingId}/deny", gw.handleWhatsAppDenySender)
 
 		// Rooms
 		r.Get("/rooms", gw.handleListRooms)

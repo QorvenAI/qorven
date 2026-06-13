@@ -70,6 +70,11 @@ type WhatsAppChannel struct {
 	qrNextID int
 	lastQR   string
 
+	// Connected fan-out hub — fires once when QR pairing succeeds
+	connMu     sync.Mutex
+	connSubs   map[int]func()
+	connNextID int
+
 	// whatsmeow (qr mode)
 	wmClient    *whatsmeow.Client
 	wmContainer *sqlstore.Container
@@ -207,19 +212,31 @@ func (w *WhatsAppChannel) publishQR(code string) {
 	}
 }
 
-// ReplayMessage injects a message as if it just arrived from the given sender.
-func (w *WhatsAppChannel) ReplayMessage(ctx context.Context, senderJID, body string) {
-	if w.handler != nil {
-		w.handler(ctx, channels.InboundMessage{
-			ChannelName: "whatsapp",
-			ChannelType: "whatsapp",
-			AgentID:     w.cfg.AgentID,
-			SenderID:    senderJID,
-			ChatID:      senderJID,
-			Content:     body,
-			PeerKind:    "direct",
-			Metadata:    map[string]string{"replayed": "true"},
-		})
+// SubscribeConnectedEvents registers a callback that fires once when QR pairing
+// succeeds. Returns an unsubscribe function.
+func (w *WhatsAppChannel) SubscribeConnectedEvents(fn func()) func() {
+	w.connMu.Lock()
+	if w.connSubs == nil {
+		w.connSubs = map[int]func(){}
+	}
+	id := w.connNextID
+	w.connNextID++
+	w.connSubs[id] = fn
+	w.connMu.Unlock()
+	return func() { w.connMu.Lock(); delete(w.connSubs, id); w.connMu.Unlock() }
+}
+
+// publishConnected fires all connected-event subscribers.
+// Called when whatsmeow reports a successful QR pairing.
+func (w *WhatsAppChannel) publishConnected() {
+	w.connMu.Lock()
+	subs := make([]func(), 0, len(w.connSubs))
+	for _, fn := range w.connSubs {
+		subs = append(subs, fn)
+	}
+	w.connMu.Unlock()
+	for _, fn := range subs {
+		go fn()
 	}
 }
 

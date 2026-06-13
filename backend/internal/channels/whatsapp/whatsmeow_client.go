@@ -79,6 +79,7 @@ func (w *WhatsAppChannel) startWhatsmeow(ctx context.Context) error {
 						w.publishQR(item.Code)
 					case "success":
 						slog.Info("whatsapp.qr.paired", "agent", w.cfg.AgentID)
+						w.publishConnected()
 					default:
 						if item.Error != nil {
 							slog.Warn("whatsapp.qr.error", "event", item.Event, "error", item.Error)

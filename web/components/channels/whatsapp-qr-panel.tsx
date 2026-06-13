@@ -35,7 +35,7 @@ export function WhatsAppQRPanel({ channelId }: WhatsAppQRPanelProps) {
     };
 
     es.onerror = () => {
-      setError('Connection to bridge lost. Retrying…');
+      setError('Connection lost. Retrying…');
     };
 
     return () => {
@@ -65,12 +65,12 @@ export function WhatsAppQRPanel({ channelId }: WhatsAppQRPanelProps) {
         ) : (
           <div className="flex h-56 w-56 flex-col items-center justify-center gap-2 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin" />
-            <span className="text-xs">Waiting for bridge&hellip;</span>
+            <span className="text-xs">Generating code&hellip;</span>
           </div>
         )}
       </div>
       <p className="text-center text-xs text-muted-foreground">
-        Prefer a code?{' '}
+        Prefer a pairing code?{' '}
         <code className="text-foreground">
           qorven channels whatsapp qr {channelId} --pairing-code
         </code>

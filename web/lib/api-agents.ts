@@ -56,16 +56,6 @@ export const contacts = {
     request<void>(`/contacts/${contactId}/prefs/${agentId}`, { method: 'PUT', body: JSON.stringify(body) }),
 };
 
-export interface PendingSender {
-  id: string;
-  sender_jid: string;
-  display_name: string;
-  otp_code: string;
-  attempts: number;
-  locked_until?: string;
-  created_at: string;
-}
-
 export interface DreamingConfig {
   enabled: boolean;
   interval_hours: number;
@@ -195,11 +185,6 @@ export const channels = {
   test: (id: string) => request<{ ok: boolean; error?: string; message?: string }>(`/channels/${id}/test`, { method: 'POST' }),
   whatsapp: {
     qrStreamUrl: (id: string) => `/api/v1/channels/${id}/whatsapp/qr`,
-    listPending: (id: string) => request<PendingSender[]>(`/channels/${id}/whatsapp/pending`),
-    approve: (channelId: string, pendingId: string) =>
-      request<void>(`/channels/${channelId}/whatsapp/pending/${pendingId}/approve`, { method: 'POST' }),
-    deny: (channelId: string, pendingId: string) =>
-      request<void>(`/channels/${channelId}/whatsapp/pending/${pendingId}/deny`, { method: 'POST' }),
   },
 };
 
