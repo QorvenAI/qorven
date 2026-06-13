@@ -228,6 +228,9 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		}
 		if tmCfg.AppID != "" && tmCfg.AppSecret != "" {
 			ch := teamsch.New(tmCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/teams/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("teams.webhook_route", "path", webhookPath)
 			gw.chanMgr.Register(id, ch)
 			return true
 		}
@@ -260,6 +263,10 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 			_, err := gw.authSvc.ValidateToken(token)
 			return err == nil
 		}
+		// WS path: /v1/channels/{id}/webchat/ws — proxied by Next.js /v1/:path*/ws rewrite
+		wsPath := fmt.Sprintf("/v1/channels/%s/webchat/ws", id)
+		gw.router.Get(wsPath, ch.HandleWS)
+		slog.Info("webchat.ws_route", "path", wsPath)
 		gw.chanMgr.Register(id, ch)
 		return true
 	case "webhook":
@@ -267,9 +274,17 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 			AgentID:     agentID,
 			InboundPath: strVal(cfg, "inbound_path"),
 			OutboundURL: strVal(cfg, "outbound_url"),
+			Secret:      strVal(cfg, "secret"),
 		}
-		if whCfg.OutboundURL != "" {
+		// Load when there is an inbound path (sync-mode / inbound-only) OR an outbound URL
+		if whCfg.InboundPath != "" || whCfg.OutboundURL != "" {
 			ch := webhookch.New(whCfg, gw.chanMgr.Handler())
+			inboundPath := whCfg.InboundPath
+			if inboundPath == "" {
+				inboundPath = fmt.Sprintf("/v1/webhooks/in/%s", id)
+			}
+			gw.router.Post(inboundPath, ch.HandleWebhook)
+			slog.Info("webhook.inbound_route", "path", inboundPath)
 			gw.chanMgr.Register(id, ch)
 			return true
 		}
@@ -307,6 +322,9 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		}
 		if feishuCfg.AppID != "" && feishuCfg.AppSecret != "" {
 			ch := feishuch.New(feishuCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/feishu/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("feishu.webhook_route", "path", webhookPath)
 			gw.chanMgr.Register(id, ch)
 			return true
 		}
@@ -322,6 +340,9 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		}
 		if dtCfg.AppKey != "" && dtCfg.AppSecret != "" {
 			ch := dingtalkhch.New(dtCfg, gw.chanMgr.Handler())
+			webhookPath := fmt.Sprintf("/v1/webhooks/dingtalk/%s", id)
+			gw.router.Post(webhookPath, ch.HandleWebhook)
+			slog.Info("dingtalk.webhook_route", "path", webhookPath)
 			gw.chanMgr.Register(id, ch)
 			return true
 		}
@@ -337,6 +358,11 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		}
 		if wcCfg.CorpID != "" && wcCfg.AgentSecret != "" {
 			if ch, err := wecomch.New(wcCfg, gw.chanMgr.Handler()); err == nil {
+				// HandleWebhook branches on GET (echostr URL verification) and POST (events)
+				webhookPath := fmt.Sprintf("/v1/webhooks/wecom/%s", id)
+				gw.router.Get(webhookPath, ch.HandleWebhook)
+				gw.router.Post(webhookPath, ch.HandleWebhook)
+				slog.Info("wecom.webhook_route", "path", webhookPath)
 				gw.chanMgr.Register(id, ch)
 				return true
 			} else {

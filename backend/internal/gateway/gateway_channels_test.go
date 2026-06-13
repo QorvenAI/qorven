@@ -5,6 +5,8 @@
 package gateway
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -31,6 +33,97 @@ func TestBuildAndRegisterChannel_HotReloadsAllTypes(t *testing.T) {
 	}, "facebook")
 	if !ok {
 		t.Fatal("facebook should register via the shared builder (was impossible in loadSingleChannel before)")
+	}
+}
+
+func TestBuildAndRegisterChannel_ClassB_RoutesRegistered(t *testing.T) {
+	cases := []struct {
+		name    string
+		chType  string
+		cfg     map[string]any
+		method  string
+		path    string
+	}{
+		{
+			name:   "teams inbound POST",
+			chType: "teams",
+			cfg:    map[string]any{"app_id": "aid", "app_secret": "sec"},
+			method: http.MethodPost,
+			path:   "/v1/webhooks/teams/inst-teams",
+		},
+		{
+			name:   "feishu inbound POST",
+			chType: "feishu",
+			cfg:    map[string]any{"app_id": "aid", "app_secret": "sec"},
+			method: http.MethodPost,
+			path:   "/v1/webhooks/feishu/inst-feishu",
+		},
+		{
+			name:   "dingtalk inbound POST",
+			chType: "dingtalk",
+			cfg:    map[string]any{"app_key": "key", "app_secret": "sec"},
+			method: http.MethodPost,
+			path:   "/v1/webhooks/dingtalk/inst-dingtalk",
+		},
+		{
+			name:   "wecom inbound GET (echostr verify)",
+			chType: "wecom",
+			cfg:    map[string]any{"corp_id": "corp", "agent_secret": "sec"},
+			method: http.MethodGet,
+			path:   "/v1/webhooks/wecom/inst-wecom",
+		},
+		{
+			name:   "wecom inbound POST (events)",
+			chType: "wecom",
+			cfg:    map[string]any{"corp_id": "corp", "agent_secret": "sec"},
+			method: http.MethodPost,
+			path:   "/v1/webhooks/wecom/inst-wecom",
+		},
+		{
+			// webhook with inbound_path only (sync/inbound-only, no outbound URL)
+			name:   "webhook inbound-only POST",
+			chType: "webhook",
+			cfg:    map[string]any{"inbound_path": "/v1/webhooks/in/inst-webhook"},
+			method: http.MethodPost,
+			path:   "/v1/webhooks/in/inst-webhook",
+		},
+		{
+			// webhook with default generated path (no inbound_path, no outbound_url — should NOT load)
+			// skip: guard requires at least one of inbound_path or outbound_url
+			name:   "webhook default-path inbound POST",
+			chType: "webhook",
+			cfg:    map[string]any{"outbound_url": "http://example.com/cb"},
+			method: http.MethodPost,
+			path:   "/v1/webhooks/in/inst-webhook2",
+		},
+		{
+			// webchat WS route registered as GET
+			name:   "webchat ws GET",
+			chType: "webchat",
+			cfg:    map[string]any{},
+			method: http.MethodGet,
+			path:   "/v1/channels/inst-webchat/webchat/ws",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			instID := "inst-" + tc.chType
+			if tc.name == "webhook default-path inbound POST" {
+				instID = "inst-webhook2"
+			}
+			gw := newTestGatewayForBuilder(t)
+			ok := gw.buildAndRegisterChannel(instID, "agent-1", tc.cfg, tc.chType)
+			if !ok {
+				t.Fatalf("buildAndRegisterChannel returned false for %s cfg %v", tc.name, tc.cfg)
+			}
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+			gw.router.ServeHTTP(rec, req)
+			if rec.Code == http.StatusNotFound {
+				t.Fatalf("%s: route %s %s returned 404 — not registered", tc.name, tc.method, tc.path)
+			}
+		})
 	}
 }
 
