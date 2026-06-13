@@ -61,10 +61,15 @@ func (s *SoDStore) RecordAction(ctx context.Context, tenantID, agentID, action s
 }
 
 // CheckViolation returns true if the same agent performed both conflicting
-// governed actions within the last 24 hours (same_task scope).
+// governed actions within the last 24 hours.
 // action must be a governed-action vocabulary word (e.g. "write_code"), not a
 // raw tool name. RecordAction must have been called with the complementary
 // action for a violation to be detected.
+//
+// NOTE: the SoD rule's scope column (same_task/same_session/always) is not yet
+// honored — this uses a fixed 24h/agent window. Threading task/session scope is
+// a tracked refinement; until then same_task rules are checked agent-wide over
+// 24h and always rules effectively expire after 24h.
 func (s *SoDStore) CheckViolation(ctx context.Context, tenantID, agentID, action string) (bool, string) {
 	rows, err := s.db.Query(ctx, `SELECT action_a, action_b, name FROM sod_rules WHERE tenant_id = $1 AND enabled = true AND (action_a = $2 OR action_b = $2)`, tenantID, action)
 	if err != nil {
@@ -89,7 +94,14 @@ func (s *SoDStore) CheckViolation(ctx context.Context, tenantID, agentID, action
 			  AND context->>'governed_action' = $3
 			  AND created_at > $4`,
 			tenantID, agentID, conflicting, time.Now().Add(-24*time.Hour)).Scan(&cnt)
-		if cnt > 0 {
+		// For a self-paired rule (action_a == action_b == action), the just-recorded
+		// current action would self-match — require a second occurrence so the rule
+		// only fires when the agent genuinely repeated the action.
+		threshold := 0
+		if conflicting == action {
+			threshold = 1
+		}
+		if cnt > threshold {
 			return true, name
 		}
 	}
