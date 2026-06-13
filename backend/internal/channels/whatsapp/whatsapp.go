@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 
 	"github.com/qorvenai/qorven/internal/channels"
 )
@@ -41,7 +43,7 @@ type PairingStore interface {
 // Config for WhatsApp channel.
 type Config struct {
 	AgentID     string   `json:"agent_id"`
-	Mode        string   `json:"mode"` // "cloud" or "bridge"
+	Mode        string   `json:"mode"` // "cloud", "bridge", or "qr"
 	DMPolicy    string   `json:"dm_policy"`
 	GroupPolicy string   `json:"group_policy"`
 	AllowFrom   []string `json:"allow_from"`
@@ -54,9 +56,12 @@ type Config struct {
 
 	// Bridge mode (Baileys/whatsapp-web.js sidecar)
 	BridgeURL string `json:"bridge_url"`
+
+	// QR mode (in-process whatsmeow)
+	DBDSN string `json:"-"`
 }
 
-// WhatsAppChannel supports Cloud API and WebSocket bridge modes.
+// WhatsAppChannel supports Cloud API, WebSocket bridge, and in-process QR modes.
 type WhatsAppChannel struct {
 	cfg             Config
 	handler         channels.InboundHandler
@@ -84,6 +89,16 @@ type WhatsAppChannel struct {
 
 	// Optional STT
 	Transcribe func(ctx context.Context, audio []byte, format string) (string, error)
+
+	// QR fan-out hub (mode-independent; used by the SSE endpoint)
+	qrMu     sync.Mutex
+	qrSubs   map[int]func(string)
+	qrNextID int
+	lastQR   string
+
+	// whatsmeow (qr mode)
+	wmClient    *whatsmeow.Client
+	wmContainer *sqlstore.Container
 }
 
 func New(cfg Config, handler channels.InboundHandler) *WhatsAppChannel {
@@ -121,7 +136,11 @@ func (w *WhatsAppChannel) IsRunning() bool {
 func (w *WhatsAppChannel) Start(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(ctx)
 
-	if w.cfg.Mode == "bridge" {
+	if w.cfg.Mode == "qr" {
+		if err := w.startWhatsmeow(w.ctx); err != nil {
+			return fmt.Errorf("whatsapp qr start: %w", err)
+		}
+	} else if w.cfg.Mode == "bridge" {
 		if w.cfg.BridgeURL != "" {
 			// Legacy: user-provided external sidecar URL
 			if err := w.bridgeConnect(); err != nil {
@@ -176,6 +195,10 @@ func (w *WhatsAppChannel) Stop(_ context.Context) error {
 	w.connected = false
 	w.connMu.Unlock()
 
+	if w.cfg.Mode == "qr" {
+		w.stopWhatsmeow()
+	}
+
 	if w.bridgeProc != nil {
 		w.bridgeProc.Stop()
 	}
@@ -189,6 +212,13 @@ func (w *WhatsAppChannel) Stop(_ context.Context) error {
 }
 
 func (w *WhatsAppChannel) Send(ctx context.Context, msg channels.OutboundMessage) error {
+	if w.cfg.Mode == "qr" {
+		recipient := msg.ChatID
+		if recipient == "" {
+			recipient = msg.RecipientID
+		}
+		return w.sendWhatsmeow(ctx, recipient, msg.Content)
+	}
 	if w.cfg.Mode == "bridge" {
 		return w.bridgeSend(msg)
 	}
@@ -427,29 +457,53 @@ func (w *WhatsAppChannel) handleBridgeProcessMessage(ctx context.Context, m Brid
 	}
 }
 
-// SubscribeQREvents registers a callback for QR events from the managed sidecar.
-// Returns an unsubscribe function. No-op in cloud mode.
+// SubscribeQREvents registers a callback that fires on every new QR code.
+// The callback is also fired immediately if a QR is already cached (replay for
+// late subscribers). Returns an unsubscribe function.
 func (w *WhatsAppChannel) SubscribeQREvents(fn func(string)) func() {
-	if w.bridgeProc == nil {
-		return func() {}
+	w.qrMu.Lock()
+	if w.qrSubs == nil {
+		w.qrSubs = map[int]func(string){}
 	}
-	w.bridgeProc.mu.Lock()
-	w.bridgeProc.qrSubs = append(w.bridgeProc.qrSubs, fn)
-	idx := len(w.bridgeProc.qrSubs) - 1
-	w.bridgeProc.mu.Unlock()
-	return func() {
-		w.bridgeProc.mu.Lock()
-		if idx < len(w.bridgeProc.qrSubs) {
-			w.bridgeProc.qrSubs = append(w.bridgeProc.qrSubs[:idx], w.bridgeProc.qrSubs[idx+1:]...)
-		}
-		w.bridgeProc.mu.Unlock()
+	id := w.qrNextID
+	w.qrNextID++
+	w.qrSubs[id] = fn
+	last := w.lastQR
+	w.qrMu.Unlock()
+	if last != "" {
+		go fn(last)
+	}
+	return func() { w.qrMu.Lock(); delete(w.qrSubs, id); w.qrMu.Unlock() }
+}
+
+// RequestLatestQR re-broadcasts the most-recently cached QR to all subscribers.
+func (w *WhatsAppChannel) RequestLatestQR() {
+	w.qrMu.Lock()
+	last := w.lastQR
+	subs := make([]func(string), 0, len(w.qrSubs))
+	for _, fn := range w.qrSubs {
+		subs = append(subs, fn)
+	}
+	w.qrMu.Unlock()
+	if last == "" {
+		return
+	}
+	for _, fn := range subs {
+		go fn(last)
 	}
 }
 
-// RequestLatestQR asks the sidecar to re-emit its current QR.
-func (w *WhatsAppChannel) RequestLatestQR() {
-	if w.bridgeProc != nil {
-		w.bridgeProc.RequestQR()
+// publishQR stores a new QR code and broadcasts it to all subscribers.
+func (w *WhatsAppChannel) publishQR(code string) {
+	w.qrMu.Lock()
+	w.lastQR = code
+	subs := make([]func(string), 0, len(w.qrSubs))
+	for _, fn := range w.qrSubs {
+		subs = append(subs, fn)
+	}
+	w.qrMu.Unlock()
+	for _, fn := range subs {
+		go fn(code)
 	}
 }
 
