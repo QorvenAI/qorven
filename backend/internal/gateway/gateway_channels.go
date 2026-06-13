@@ -457,7 +457,7 @@ func (gw *Gateway) loadSingleChannel(ctx context.Context, id string) {
 			AppSecret:     strVal(cfg, "app_secret"),
 		}
 		if mode == "cloud" {
-			if waCfg.AccessToken != "" {
+			if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
 				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
 				webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
 				gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
