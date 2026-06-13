@@ -8,6 +8,7 @@ import (
 
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/governance"
+	"github.com/qorvenai/qorven/internal/pii"
 )
 
 // buildGovernanceHooks creates the callback struct that bridges the governance
@@ -93,6 +94,14 @@ func (gw *Gateway) buildGovernanceHooks() *agent.GovernanceHooks {
 			}
 			return d.ModelTier, d.SkillFamily, d.CanCreateSubagents, d.ApprovalScope
 		}
+	}
+
+	// PII Detection: run the real PII engine against agent output so the
+	// "Block PII in outputs" policy can match on has_pii == "true".
+	// Always uses pii.All so detection is independent of the user's
+	// redaction-toggle preference — governance must see everything.
+	h.DetectPII = func(content string) bool {
+		return len(pii.Scan(content, pii.Config{Kinds: pii.All})) > 0
 	}
 
 	return h

@@ -49,6 +49,11 @@ type GovernanceHooks struct {
 	// RecordGovernedAction logs that an agent performed a governed action so that
 	// a later CheckViolation call can detect a conflict. nil = recording disabled.
 	RecordGovernedAction func(ctx context.Context, tenantID, agentID, action string)
+
+	// DetectPII reports whether the given text contains PII, using the real PII
+	// engine. Used to enrich the output_deliver event so the "Block PII in
+	// outputs" policy can match. nil = PII detection disabled.
+	DetectPII func(content string) bool
 }
 
 // SetGovernanceHooks wires the governance engine callbacks.

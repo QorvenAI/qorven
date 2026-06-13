@@ -1897,8 +1897,12 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 
 	// 9. Governance: policy check on output delivery
 	if gh := l.governanceHooks; gh != nil && gh.EvaluatePolicy != nil && result.Content != "" {
+		hasPII := "false"
+		if gh.DetectPII != nil && gh.DetectPII(result.Content) {
+			hasPII = "true"
+		}
 		action, reason := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "output_deliver", map[string]any{
-			"agent_key": ag.AgentKey, "content_length": len(result.Content),
+			"agent_key": ag.AgentKey, "content_length": len(result.Content), "has_pii": hasPII,
 		})
 		if action == "deny" {
 			slog.Warn("agent.output.policy_blocked", "agent", ag.AgentKey, "reason", reason)
