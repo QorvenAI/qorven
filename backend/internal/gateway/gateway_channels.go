@@ -204,8 +204,8 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 	case "sms":
 		smsCfg := smsch.Config{
 			AgentID:             agentID,
-			AccountSID:          strVal(cfg, "account_sid"),
-			AuthToken:           strVal(cfg, "auth_token"),
+			AccountSID:          cfgStr(cfg, "account_sid", "api_key"),
+			AuthToken:           cfgStr(cfg, "auth_token", "api_secret"),
 			ApiKeySid:           strVal(cfg, "api_key_sid"),
 			ApiKeySecret:        strVal(cfg, "api_key_secret"),
 			FromNumber:          strVal(cfg, "from_number"),
@@ -280,7 +280,7 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		lineCfg := linech.Config{
 			AgentID:       agentID,
 			ChannelSecret: strVal(cfg, "channel_secret"),
-			ChannelToken:  strVal(cfg, "channel_token"),
+			ChannelToken:  cfgStr(cfg, "channel_token", "channel_access_token"),
 			WebhookPath:   strVal(cfg, "webhook_path"),
 		}
 		if lineCfg.ChannelSecret != "" && lineCfg.ChannelToken != "" {
@@ -314,8 +314,8 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 	case "dingtalk":
 		dtCfg := dingtalkhch.Config{
 			AgentID:       agentID,
-			AppKey:        strVal(cfg, "app_key"),
-			AppSecret:     strVal(cfg, "app_secret"),
+			AppKey:        cfgStr(cfg, "app_key", "client_id"),
+			AppSecret:     cfgStr(cfg, "app_secret", "client_secret"),
 			RobotCode:     strVal(cfg, "robot_code"),
 			WebhookURL:    strVal(cfg, "webhook_url"),
 			WebhookSecret: strVal(cfg, "webhook_secret"),
@@ -330,10 +330,10 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		wcCfg := wecomch.Config{
 			AgentID:      agentID,
 			CorpID:       strVal(cfg, "corp_id"),
-			AgentSecret:  strVal(cfg, "agent_secret"),
+			AgentSecret:  cfgStr(cfg, "agent_secret", "app_secret"),
 			WecomAgentID: intVal(cfg, "wecom_agent_id"),
 			Token:        strVal(cfg, "token"),
-			EncodingKey:  strVal(cfg, "encoding_key"),
+			EncodingKey:  cfgStr(cfg, "encoding_key", "encoding_aes_key"),
 		}
 		if wcCfg.CorpID != "" && wcCfg.AgentSecret != "" {
 			if ch, err := wecomch.New(wcCfg, gw.chanMgr.Handler()); err == nil {
@@ -361,7 +361,7 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 	case "signal":
 		sigCfg := signalch.Config{
 			AgentID:      agentID,
-			APIURL:       strVal(cfg, "api_url"),
+			APIURL:       cfgStr(cfg, "api_url", "socket_path"),
 			PhoneNumber:  strVal(cfg, "phone_number"),
 			UseWebSocket: cfg["use_websocket"] == true || strVal(cfg, "use_websocket") == "true",
 		}
@@ -501,6 +501,16 @@ func (gw *Gateway) sendOTPViaTelegram(ctx context.Context, tenantID, otp string)
 func strVal(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
+	}
+	return ""
+}
+
+// cfgStr returns the first non-empty config value among the given keys.
+func cfgStr(cfg map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v := strVal(cfg, k); v != "" {
+			return v
+		}
 	}
 	return ""
 }
