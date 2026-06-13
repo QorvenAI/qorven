@@ -47,10 +47,20 @@ function fmtDate(s: string | null): string {
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'completed': return 'text-emerald-500';
-    case 'failed': return 'text-destructive';
+    case 'completed':
+    case 'ok': return 'text-emerald-500';
+    case 'failed':
+    case 'error': return 'text-destructive';
     case 'running': return 'text-amber-500';
     default: return 'text-muted-foreground';
+  }
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'ok': return 'OK';
+    case 'error': return 'Error';
+    default: return status.charAt(0).toUpperCase() + status.slice(1);
   }
 }
 
@@ -311,10 +321,10 @@ function RunHistory({ jobId }: { jobId: string }) {
     <div className="divide-y divide-border/50">
       {runs.map((rn) => (
         <div key={rn.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
-          <span className={cn('font-medium capitalize shrink-0', statusColor(rn.status))}>
-            {rn.status}
+          <span className={cn('font-medium shrink-0', statusColor(rn.status))}>
+            {statusLabel(rn.status)}
           </span>
-          <span className="text-muted-foreground shrink-0">{fmtDate(rn.scheduled_for)}</span>
+          <span className="text-muted-foreground shrink-0">{fmtDate(rn.started_at || rn.scheduled_for)}</span>
           {rn.error ? (
             <span className="text-destructive/70 truncate">{rn.error}</span>
           ) : rn.result_snippet ? (

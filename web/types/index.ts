@@ -203,6 +203,7 @@ export interface CronRun {
   id: string;
   scheduled_for: string | null;
   finished_at: string | null;
+  started_at?: string | null;
   status: string;
   result_snippet: string;
   tokens: number;

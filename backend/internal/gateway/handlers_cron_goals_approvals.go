@@ -365,8 +365,7 @@ func (gw *Gateway) handleRunCronJobNow(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	ct, err := gw.db.Pool.Exec(r.Context(),
-		`UPDATE cron_jobs SET next_run_at = NOW(),
-		   enabled = CASE WHEN COALESCE(one_shot, false) THEN true ELSE enabled END
+		`UPDATE cron_jobs SET next_run_at = NOW(), enabled = true
 		 WHERE id=$1 AND tenant_id=$2`, id, defaultTenant)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
@@ -389,9 +388,10 @@ func (gw *Gateway) handleListCronJobRuns(w http.ResponseWriter, r *http.Request)
 		`SELECT id::text,
 		        to_char(scheduled_for AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		        to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		        status, COALESCE(result_snippet,''), COALESCE(tokens,0), COALESCE(cost_cents,0), COALESCE(error,'')
 		 FROM scheduled_runs WHERE source='cron' AND source_id=$1 AND tenant_id=$2
-		 ORDER BY scheduled_for DESC LIMIT 50`, id, defaultTenant)
+		 ORDER BY COALESCE(started_at, scheduled_for) DESC LIMIT 50`, id, defaultTenant)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
@@ -400,13 +400,14 @@ func (gw *Gateway) handleListCronJobRuns(w http.ResponseWriter, r *http.Request)
 	runs := []map[string]any{}
 	for rows.Next() {
 		var rid, status, snippet, errStr string
-		var schedFor, finished *string
+		var schedFor, finished, startedAt *string
 		var tokens, cost int64
-		if rows.Scan(&rid, &schedFor, &finished, &status, &snippet, &tokens, &cost, &errStr) != nil {
+		if rows.Scan(&rid, &schedFor, &finished, &startedAt, &status, &snippet, &tokens, &cost, &errStr) != nil {
 			continue
 		}
 		runs = append(runs, map[string]any{
 			"id": rid, "scheduled_for": schedFor, "finished_at": finished,
+			"started_at": startedAt,
 			"status": status, "result_snippet": snippet,
 			"tokens": tokens, "cost_cents": cost, "error": errStr,
 		})
