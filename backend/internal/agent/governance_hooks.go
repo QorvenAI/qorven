@@ -40,6 +40,15 @@ type GovernanceHooks struct {
 	// Returns (modelTier, skillFamily string, canSpawn bool, approvalScope []string).
 	// nil = designation enforcement disabled.
 	LookupDesignation func(ctx context.Context, tenantID, agentKey string) (modelTier string, skillFamily string, canSpawn bool, approvalScope []string)
+
+	// ResolveGovernedAction maps a concrete tool name to the governance action
+	// vocabulary used by SoD rules (e.g. "exec" → "write_code"). Returns "" when
+	// the tool has no SoD implication. nil = taxonomy resolution disabled.
+	ResolveGovernedAction func(tool string) string
+
+	// RecordGovernedAction logs that an agent performed a governed action so that
+	// a later CheckViolation call can detect a conflict. nil = recording disabled.
+	RecordGovernedAction func(ctx context.Context, tenantID, agentID, action string)
 }
 
 // SetGovernanceHooks wires the governance engine callbacks.

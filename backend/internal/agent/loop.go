@@ -1600,9 +1600,16 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 			} else {
 				// Governance: policy + SoD enforcement before tool execution
 				if gh := l.governanceHooks; gh != nil {
+					// Resolve the tool to its governed-action vocabulary word (e.g. "exec" → "write_code").
+					// ResolveGovernedAction is wired by the gateway; "" means no SoD rule covers this tool.
+					governedAction := ""
+					if gh.ResolveGovernedAction != nil {
+						governedAction = gh.ResolveGovernedAction(tc.Name)
+					}
 					if gh.EvaluatePolicy != nil {
 						action, reason := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "tool_call", map[string]any{
 							"tool_name": tc.Name, "tool_category": toolCategory(tc.Name), "agent_key": ag.AgentKey,
+							"governed_action": governedAction,
 						})
 						if action == "deny" {
 							toolResult = tools.ErrorResult("⛔ Policy blocked: " + reason)
@@ -1616,11 +1623,16 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 							goto toolDone
 						}
 					}
-					if gh.CheckSoD != nil {
-						if violated, rule := gh.CheckSoD(ctx, l.tenantID, ag.ID, tc.Name); violated {
+					if gh.CheckSoD != nil && governedAction != "" {
+						// Record the governed action BEFORE checking for violations so that the
+						// check itself can see actions recorded by prior tool calls in this session.
+						if gh.RecordGovernedAction != nil {
+							gh.RecordGovernedAction(ctx, l.tenantID, ag.ID, governedAction)
+						}
+						if violated, rule := gh.CheckSoD(ctx, l.tenantID, ag.ID, governedAction); violated {
 							toolResult = tools.ErrorResult("⛔ Segregation of duties violation: " + rule + ". A different agent must perform this action.")
 							if gh.RecordException != nil {
-								gh.RecordException(ctx, l.tenantID, ag.ID, "sod_violation", "critical", "SoD rule violated: "+rule, map[string]any{"tool": tc.Name, "rule": rule})
+								gh.RecordException(ctx, l.tenantID, ag.ID, "sod_violation", "critical", "SoD rule violated: "+rule, map[string]any{"tool": tc.Name, "governed_action": governedAction, "rule": rule})
 							}
 							goto toolDone
 						}

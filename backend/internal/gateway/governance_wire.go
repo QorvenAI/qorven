@@ -43,6 +43,10 @@ func (gw *Gateway) buildGovernanceHooks() *agent.GovernanceHooks {
 		h.CheckSoD = func(ctx context.Context, tenantID, agentID, action string) (bool, string) {
 			return gw.sodStore.CheckViolation(ctx, tenantID, agentID, action)
 		}
+		h.ResolveGovernedAction = governance.ToolToGovernedAction
+		h.RecordGovernedAction = func(ctx context.Context, tenantID, agentID, action string) {
+			gw.sodStore.RecordAction(ctx, tenantID, agentID, action)
+		}
 	}
 
 	// Exception Recording: log governance variances and failures.
