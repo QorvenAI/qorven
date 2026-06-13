@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	cloudAPIBase  = "https://graph.facebook.com/v21.0"
+	cloudAPIBase  = "https://graph.facebook.com/v25.0"
 	maxMessageLen = 4096
 )
 

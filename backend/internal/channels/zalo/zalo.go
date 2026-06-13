@@ -28,6 +28,8 @@ import (
 // Reference: https://developers.zalo.me/docs/api/official-account-api
 
 const (
+	// oaBaseURL uses Zalo OA API v2.0. A tokenless probe of /message/cs returned 404
+	// while v3.0 responded; verify with live OA credentials before bumping to v3.0.
 	oaBaseURL   = "https://openapi.zalo.me/v2.0/oa"
 	tokenURL    = "https://oauth.zaloapp.com/v4/oa/access_token"
 	maxTextLen  = 2000 // Zalo OA text message character limit

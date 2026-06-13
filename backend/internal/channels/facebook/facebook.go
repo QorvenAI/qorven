@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	graphAPIBase  = "https://graph.facebook.com/v20.0"
+	graphAPIBase  = "https://graph.facebook.com/v25.0"
 	maxMessageLen = 2000 // Messenger hard limit: 2,000 chars per message
 )
 

@@ -25,7 +25,7 @@ import (
 // GitHub channel — webhook for issues, PRs, comments
 
 const (
-	ghAPIVersion = "2022-11-28"
+	ghAPIVersion = "2026-03-10"
 	ghUserAgent  = "Qorven.ai/1.0"
 )
 
