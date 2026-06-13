@@ -86,6 +86,11 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 			SMTPHost:    strVal(cfg, "smtp_host"),
 			SMTPPort:    intVal(cfg, "smtp_port"),
 			PollSeconds: intVal(cfg, "poll_seconds"),
+			Folder:      strVal(cfg, "folder"),
+			SoulName:    strVal(cfg, "soul_name"),
+			SpamFilter:  cfg["spam_filter"] == true || strVal(cfg, "spam_filter") == "true",
+			AutoAck:     cfg["auto_ack"] == true || strVal(cfg, "auto_ack") == "true",
+			HTMLReply:   cfg["html_reply"] == true || strVal(cfg, "html_reply") == "true",
 		}
 		if emailCfg.Email != "" && emailCfg.Password != "" {
 			ch := emailch.New(emailCfg, gw.chanMgr.Handler())
@@ -128,8 +133,11 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		}
 	case "discord":
 		dcCfg := discordch.Config{
-			AgentID:  agentID,
-			BotToken: strVal(cfg, "bot_token"),
+			AgentID:        agentID,
+			BotToken:       strVal(cfg, "bot_token"),
+			GuildID:        strVal(cfg, "guild_id"),
+			RequireMention: boolPtrVal(cfg, "require_mention"),
+			DMPolicy:       strVal(cfg, "dm_policy"),
 		}
 		if dcCfg.BotToken != "" {
 			ch := discordch.New(dcCfg, gw.chanMgr.Handler())
@@ -138,9 +146,11 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 		}
 	case "slack":
 		slCfg := slackch.Config{
-			AgentID:  agentID,
-			BotToken: strVal(cfg, "bot_token"),
-			AppToken: strVal(cfg, "app_token"),
+			AgentID:        agentID,
+			BotToken:       strVal(cfg, "bot_token"),
+			AppToken:       strVal(cfg, "app_token"),
+			RequireMention: boolPtrVal(cfg, "require_mention"),
+			DMPolicy:       strVal(cfg, "dm_policy"),
 		}
 		if slCfg.BotToken != "" && slCfg.AppToken != "" {
 			ch := slackch.New(slCfg, gw.chanMgr.Handler())
@@ -225,6 +235,7 @@ func (gw *Gateway) buildAndRegisterChannel(id, agentID string, cfg map[string]an
 			AgentID:   agentID,
 			AppID:     strVal(cfg, "app_id"),
 			AppSecret: strVal(cfg, "app_secret"),
+			TenantID:  strVal(cfg, "tenant_id"),
 		}
 		if tmCfg.AppID != "" && tmCfg.AppSecret != "" {
 			ch := teamsch.New(tmCfg, gw.chanMgr.Handler())
@@ -546,4 +557,22 @@ func intVal(m map[string]any, key string) int {
 		return int(v)
 	}
 	return 0
+}
+
+// boolPtrVal returns a *bool from the config map at key if the key is present,
+// or nil if the key is absent. This preserves the three-state semantics used by
+// Discord and Slack (true / false / unset-uses-channel-default).
+func boolPtrVal(m map[string]any, key string) *bool {
+	v, ok := m[key]
+	if !ok {
+		return nil
+	}
+	switch t := v.(type) {
+	case bool:
+		return &t
+	case string:
+		b := t == "true"
+		return &b
+	}
+	return nil
 }
