@@ -132,13 +132,34 @@ func (gw *Gateway) loadChannels() {
 				count++
 			}
 		case "whatsapp":
+			mode := strVal(cfg, "mode")
+			if mode == "" {
+				mode = "cloud" // backward-compatible default
+			}
 			waCfg := whatsappch.Config{
 				AgentID:       *agentID,
+				Mode:          mode,
 				PhoneNumberID: strVal(cfg, "phone_number_id"),
 				AccessToken:   strVal(cfg, "access_token"),
 				VerifyToken:   strVal(cfg, "verify_token"),
+				AppSecret:     strVal(cfg, "app_secret"),
 			}
-			if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
+			if mode == "cloud" {
+				if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
+					ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+					if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+						ch.Transcribe = gw.voicePipeline.TranscribeAudio
+					}
+					webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
+					gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
+					gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
+					slog.Info("whatsapp.webhook_route", "path", webhookPath)
+					gw.chanMgr.Register(id, ch)
+					count++
+				}
+			}
+			if mode == "qr" {
+				waCfg.DBDSN = gw.cfg.Database.DSN
 				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
 				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
 					ch.Transcribe = gw.voicePipeline.TranscribeAudio
@@ -431,9 +452,34 @@ func (gw *Gateway) loadSingleChannel(ctx context.Context, id string) {
 			gw.chanMgr.Register(id, ch)
 		}
 	case "whatsapp":
-		waCfg := whatsappch.Config{AgentID: *agentID, PhoneNumberID: strVal(cfg, "phone_number_id"), AccessToken: strVal(cfg, "access_token")}
-		if waCfg.AccessToken != "" {
+		mode := strVal(cfg, "mode")
+		if mode == "" {
+			mode = "cloud" // backward-compatible default
+		}
+		waCfg := whatsappch.Config{
+			AgentID:       *agentID,
+			Mode:          mode,
+			PhoneNumberID: strVal(cfg, "phone_number_id"),
+			AccessToken:   strVal(cfg, "access_token"),
+			VerifyToken:   strVal(cfg, "verify_token"),
+			AppSecret:     strVal(cfg, "app_secret"),
+		}
+		if mode == "cloud" {
+			if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
+				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+				webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
+				gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
+				gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
+				slog.Info("whatsapp.webhook_route", "path", webhookPath)
+				gw.chanMgr.Register(id, ch)
+			}
+		}
+		if mode == "qr" {
+			waCfg.DBDSN = gw.cfg.Database.DSN
 			ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+			if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+				ch.Transcribe = gw.voicePipeline.TranscribeAudio
+			}
 			gw.chanMgr.Register(id, ch)
 		}
 	}

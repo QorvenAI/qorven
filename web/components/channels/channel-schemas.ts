@@ -171,14 +171,14 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
   whatsapp: {
     label: 'WhatsApp',
     icon: '💬',
-    description: 'Connect via Meta Cloud API or self-hosted bridge',
+    description: 'Connect via Meta Cloud API or QR-linked phone',
     color: 'bg-emerald-500/10 text-emerald-400',
     officialLink: 'https://business.facebook.com',
     docsSlug: 'whatsapp',
     setupSteps: [
       'Cloud API: Meta Business → WhatsApp → API Setup → copy Phone Number ID and generate a permanent access token',
-      'Bridge: run the Baileys sidecar (see docs), paste its URL below, then scan the QR code after saving',
-      'Set a Webhook Verify Token (any string) and enter it in the Meta webhook configuration',
+      'QR Code: choose QR mode, save the channel, then scan the QR code displayed in the channel settings',
+      'Cloud API only: set a Webhook Verify Token (any string) and enter it in the Meta webhook configuration',
     ],
     fields: [
       {
@@ -188,7 +188,7 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
         required: true,
         options: [
           { value: 'cloud', label: 'Cloud API (Meta Business)' },
-          { value: 'bridge', label: 'Bridge (self-hosted Baileys — scan QR)' },
+          { value: 'qr', label: 'QR Code (link a phone)' },
         ],
       },
       // Cloud API fields
@@ -222,24 +222,14 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
         help: 'Meta App Dashboard → Basic Settings → App Secret.',
         showWhen: { key: 'mode', value: 'cloud' },
       },
-      // Bridge fields
-      {
-        key: 'bridge_url',
-        label: 'Bridge URL',
-        type: 'text',
-        placeholder: 'http://localhost:3001',
-        help: 'URL of your running Baileys/whatsapp-web.js sidecar. After saving, scan the QR code shown below.',
-        showWhen: { key: 'mode', value: 'bridge' },
-      },
+      // Shared
       {
         key: 'allowlist',
         label: 'Allowed Numbers (allowlist)',
         type: 'textarea',
         placeholder: '+15551234567\n+447700900000',
         help: 'One number per line (E.164 format). Leave empty to allow all senders. Admins can also approve numbers via the Pending Senders panel.',
-        showWhen: { key: 'mode', value: 'bridge' },
       },
-      // Shared
       {
         key: 'dm_policy',
         label: 'DM Policy',
@@ -376,7 +366,8 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
       { key: 'allowed_domains', label: 'Allowed Domains', type: 'text',
         placeholder: 'example.com, app.example.com',
         help: 'Comma-separated list of domains allowed to embed the widget. Leave blank for any.' },
-      { key: 'widget_color', label: 'Widget Accent Color', type: 'text', placeholder: '#7C3AED' },
+      { key: 'widget_color', label: 'Widget Accent Color', type: 'text', placeholder: 'CSS hex color',
+        help: 'Hex color for the chat button and widget header, e.g. a purple brand color.' },
     ],
   },
 

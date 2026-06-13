@@ -39,7 +39,11 @@ var channelDefs = []channelDef{
 		{key: "app_token", label: "App Token (xapp-)", secret: true, hint: "Basic Info → App-Level Tokens → connections:write"},
 	}},
 	{id: "whatsapp", name: "WhatsApp", fields: []channelFieldDef{
-		{key: "bridge_url", label: "Bridge URL", hint: "http://localhost:3001 — run Baileys sidecar first"},
+		{key: "mode", label: "Connection Mode", hint: "cloud = Meta Cloud API (default); qr = scan a QR code in the web UI to link a phone (no extra fields needed)"},
+		{key: "phone_number_id", label: "Phone Number ID", hint: "cloud mode — Meta Business → WhatsApp → API Setup"},
+		{key: "access_token", label: "Permanent Access Token", secret: true, hint: "cloud mode — Meta Business → System Users → Generate token"},
+		{key: "verify_token", label: "Webhook Verify Token", hint: "cloud mode — any string you choose; enter the same in Meta webhook config"},
+		{key: "app_secret", label: "App Secret", secret: true, hint: "cloud mode — Meta App Dashboard → Basic Settings → App Secret"},
 	}},
 	{id: "email", name: "Email", fields: []channelFieldDef{
 		{key: "email", label: "Email Address", hint: "e.g. agent@gmail.com"},
