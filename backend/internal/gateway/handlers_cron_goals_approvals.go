@@ -275,6 +275,10 @@ func (gw *Gateway) handleCreateCronJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "name and cron_expression required"})
 		return
 	}
+	if !cronpkg.IsValidExpr(req.CronExpression) {
+		writeJSON(w, 400, map[string]string{"error": "invalid cron_expression"})
+		return
+	}
 	if gw.db == nil {
 		writeJSON(w, 503, map[string]string{"error": "db not available"})
 		return
@@ -316,10 +320,14 @@ func (gw *Gateway) handleUpdateCronJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "name and cron_expression required"})
 		return
 	}
+	if !cronpkg.IsValidExpr(req.CronExpression) {
+		writeJSON(w, 400, map[string]string{"error": "invalid cron_expression"})
+		return
+	}
 	payloadJSON, _ := json.Marshal(map[string]string{"instruction": req.Instruction, "delivery_channel": req.DeliveryChannel})
 	nextRun := cronpkg.NextRunFromExpr(req.CronExpression)
 	ct, err := gw.db.Pool.Exec(r.Context(),
-		`UPDATE cron_jobs SET name=$1, cron_expression=$2, agent_id=NULLIF($3,'')::uuid,
+		`UPDATE cron_jobs SET name=$1, cron_expression=$2, agent_id=COALESCE(NULLIF($3,'')::uuid, agent_id),
 		   payload=$4, delivery_channel=$5, next_run_at=$6, enabled=COALESCE($7, enabled), updated_at=NOW()
 		 WHERE id=$8 AND tenant_id=$9`,
 		req.Name, req.CronExpression, req.AgentID, payloadJSON, req.DeliveryChannel, nextRun, req.Enabled, id, defaultTenant)
