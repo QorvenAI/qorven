@@ -527,7 +527,7 @@ export const channelFormSchemas: Record<ChannelType, ChannelSchema> = {
       { key: 'app_secret',     label: 'App Secret',     type: 'password', required: true },
       { key: 'encrypt_key',    label: 'Encrypt Key',    type: 'password',
         help: 'Optional — set in Feishu Event Subscriptions if you want payload encryption.' },
-      { key: 'verification_token', label: 'Verification Token', type: 'password',
+      { key: 'verify_token', label: 'Verification Token', type: 'password',
         help: 'From Feishu Event Subscriptions — used to verify webhook requests.' },
     ],
   },

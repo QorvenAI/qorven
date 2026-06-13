@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	discordch "github.com/qorvenai/qorven/internal/channels/discord"
 	dingtalkhch "github.com/qorvenai/qorven/internal/channels/dingtalk"
@@ -553,8 +555,13 @@ func cfgStr(cfg map[string]any, keys ...string) string {
 }
 
 func intVal(m map[string]any, key string) int {
-	if v, ok := m[key].(float64); ok {
+	switch v := m[key].(type) {
+	case float64:
 		return int(v)
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
 	}
 	return 0
 }
