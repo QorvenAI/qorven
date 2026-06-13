@@ -167,8 +167,12 @@ func (gw *Gateway) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.TenantID = defaultTenant
-	if p.TriggerEvent == "" || !governance.ValidPolicyAction(p.Action) {
-		writeJSON(w, 400, map[string]string{"error": "trigger_event and a valid action are required"})
+	if !governance.ValidTriggerEvent(p.TriggerEvent) {
+		writeJSON(w, 400, map[string]string{"error": "invalid trigger_event; must be one of: tool_call, model_switch, output_deliver, memory_write, agent_spawn, budget_spend, external_action, build_approve"})
+		return
+	}
+	if !governance.ValidPolicyAction(p.Action) {
+		writeJSON(w, 400, map[string]string{"error": "invalid action; must be one of: allow, deny, warn, require_approval, throttle, log, escalate"})
 		return
 	}
 	id, err := gw.policyEngine.CreatePolicy(r.Context(), p)
@@ -201,8 +205,12 @@ func (gw *Gateway) handleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	p.ID = chi.URLParam(r, "id")
 	p.TenantID = defaultTenant
-	if p.TriggerEvent == "" || !governance.ValidPolicyAction(p.Action) {
-		writeJSON(w, 400, map[string]string{"error": "trigger_event and a valid action are required"})
+	if !governance.ValidTriggerEvent(p.TriggerEvent) {
+		writeJSON(w, 400, map[string]string{"error": "invalid trigger_event; must be one of: tool_call, model_switch, output_deliver, memory_write, agent_spawn, budget_spend, external_action, build_approve"})
+		return
+	}
+	if !governance.ValidPolicyAction(p.Action) {
+		writeJSON(w, 400, map[string]string{"error": "invalid action; must be one of: allow, deny, warn, require_approval, throttle, log, escalate"})
 		return
 	}
 	if err := gw.policyEngine.UpdatePolicy(r.Context(), p); err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,6 +59,7 @@ type PolicyEvent struct {
 
 type PolicyEngine struct {
 	db       *pgxpool.Pool
+	mu       sync.RWMutex
 	policies []Policy
 }
 
@@ -93,14 +95,19 @@ func (e *PolicyEngine) LoadPolicies(ctx context.Context, tenantID string) error 
 		json.Unmarshal(paramsJSON, &p.ActionParams)
 		policies = append(policies, p)
 	}
+	e.mu.Lock()
 	e.policies = policies
+	e.mu.Unlock()
 	return nil
 }
 
 // Evaluate checks all policies against the given event context.
 // Returns the first matching policy decision (deny/require_approval/warn) or allow.
 func (e *PolicyEngine) Evaluate(ctx context.Context, triggerEvent, agentKey string, orgLevel int, eventCtx map[string]any) PolicyDecision {
-	for _, p := range e.policies {
+	e.mu.RLock()
+	ps := e.policies
+	e.mu.RUnlock()
+	for _, p := range ps {
 		if p.TriggerEvent != triggerEvent {
 			continue
 		}
@@ -168,6 +175,9 @@ func (e *PolicyEngine) matchConditions(conds []PolicyCond, ctx map[string]any) b
 			if toFloat(val) > toFloat(c.Value) {
 				return false
 			}
+		default:
+			// Unknown operator: fail closed — the condition does not match.
+			return false
 		}
 	}
 	return true
@@ -192,7 +202,10 @@ func (e *PolicyEngine) recordEvent(ctx context.Context, p Policy, agentKey strin
 // (deny or require_approval). This is queried once per agent turn so the loop
 // can decide whether to buffer live text rather than streaming it directly.
 func (e *PolicyEngine) HasBlockingOutputPolicy(tenantID string) bool {
-	for _, p := range e.policies {
+	e.mu.RLock()
+	ps := e.policies
+	e.mu.RUnlock()
+	for _, p := range ps {
 		if !p.Enabled {
 			continue
 		}
@@ -213,6 +226,17 @@ func (e *PolicyEngine) HasBlockingOutputPolicy(tenantID string) bool {
 func ValidPolicyAction(a string) bool {
 	switch a {
 	case "allow", "deny", "warn", "require_approval", "throttle", "log", "escalate":
+		return true
+	}
+	return false
+}
+
+// ValidTriggerEvent reports whether t is a recognized policy trigger event.
+func ValidTriggerEvent(t string) bool {
+	switch t {
+	case "tool_call", "model_switch", "output_deliver",
+		"memory_write", "agent_spawn", "budget_spend",
+		"external_action", "build_approve":
 		return true
 	}
 	return false
