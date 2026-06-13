@@ -132,20 +132,33 @@ func (gw *Gateway) loadChannels() {
 				count++
 			}
 		case "whatsapp":
+			mode := strVal(cfg, "mode")
+			if mode == "" {
+				mode = "cloud" // backward-compatible default
+			}
 			waCfg := whatsappch.Config{
 				AgentID:       *agentID,
+				Mode:          mode,
 				PhoneNumberID: strVal(cfg, "phone_number_id"),
 				AccessToken:   strVal(cfg, "access_token"),
 				VerifyToken:   strVal(cfg, "verify_token"),
+				AppSecret:     strVal(cfg, "app_secret"),
 			}
-			if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
-				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
-				if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
-					ch.Transcribe = gw.voicePipeline.TranscribeAudio
+			if mode == "cloud" {
+				if waCfg.PhoneNumberID != "" && waCfg.AccessToken != "" {
+					ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+					if gw.voicePipeline != nil && gw.voicePipeline.CanTranscribe() {
+						ch.Transcribe = gw.voicePipeline.TranscribeAudio
+					}
+					webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
+					gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
+					gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
+					slog.Info("whatsapp.webhook_route", "path", webhookPath)
+					gw.chanMgr.Register(id, ch)
+					count++
 				}
-				gw.chanMgr.Register(id, ch)
-				count++
 			}
+			// NOTE: mode == "qr" / "bridge" branch is added in a later task; those rows simply won't load yet.
 		case "zalo":
 			zaloCfg := zalo.ZaloConfig{
 				AgentID:      *agentID,
@@ -431,11 +444,29 @@ func (gw *Gateway) loadSingleChannel(ctx context.Context, id string) {
 			gw.chanMgr.Register(id, ch)
 		}
 	case "whatsapp":
-		waCfg := whatsappch.Config{AgentID: *agentID, PhoneNumberID: strVal(cfg, "phone_number_id"), AccessToken: strVal(cfg, "access_token")}
-		if waCfg.AccessToken != "" {
-			ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
-			gw.chanMgr.Register(id, ch)
+		mode := strVal(cfg, "mode")
+		if mode == "" {
+			mode = "cloud" // backward-compatible default
 		}
+		waCfg := whatsappch.Config{
+			AgentID:       *agentID,
+			Mode:          mode,
+			PhoneNumberID: strVal(cfg, "phone_number_id"),
+			AccessToken:   strVal(cfg, "access_token"),
+			VerifyToken:   strVal(cfg, "verify_token"),
+			AppSecret:     strVal(cfg, "app_secret"),
+		}
+		if mode == "cloud" {
+			if waCfg.AccessToken != "" {
+				ch := whatsappch.New(waCfg, gw.chanMgr.Handler())
+				webhookPath := fmt.Sprintf("/v1/webhooks/whatsapp/%s", id)
+				gw.router.Get(webhookPath, ch.HandleWebhook)  // Meta verify-token challenge
+				gw.router.Post(webhookPath, ch.HandleWebhook) // inbound events
+				slog.Info("whatsapp.webhook_route", "path", webhookPath)
+				gw.chanMgr.Register(id, ch)
+			}
+		}
+		// NOTE: mode == "qr" / "bridge" branch is added in a later task.
 	}
 	slog.Info("channel.loaded_single", "id", id, "type", chType)
 }
