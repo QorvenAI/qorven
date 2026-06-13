@@ -26,16 +26,9 @@ import (
 )
 
 const (
-	cloudAPIBase        = "https://graph.facebook.com/v21.0"
-	maxMessageLen       = 4096
-	pairingDebounceTime = 60 * time.Second
+	cloudAPIBase  = "https://graph.facebook.com/v21.0"
+	maxMessageLen = 4096
 )
-
-// PairingStore interface for pairing service integration.
-type PairingStore interface {
-	IsPaired(ctx context.Context, senderID, channelName string) (bool, error)
-	RequestPairing(ctx context.Context, senderID, channelName, chatID, agentID string, meta map[string]string) (string, error)
-}
 
 // Config for WhatsApp channel.
 type Config struct {
@@ -58,18 +51,12 @@ type Config struct {
 // WhatsAppChannel supports Cloud API and in-process QR modes.
 type WhatsAppChannel struct {
 	cfg             Config
-	handler         channels.InboundHandler
-	running         bool
-	mu              sync.Mutex
-	client          *http.Client
-	pairingService  PairingStore
-	pairingDebounce sync.Map
-	approvedGroups  sync.Map
-	allowList       []string
+	handler   channels.InboundHandler
+	running   bool
+	mu        sync.Mutex
+	client    *http.Client
+	allowList []string
 	dedup           sync.Map // msgID → time.Time — prevents double-fire on platform retries
-
-	gate           *senderGate
-	sendOTPMessage func(ctx context.Context, to, otp string)
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -97,14 +84,9 @@ func New(cfg Config, handler channels.InboundHandler) *WhatsAppChannel {
 		handler:   handler,
 		client:    &http.Client{Timeout: 30 * time.Second},
 		allowList: cfg.AllowFrom,
-		gate:      newSenderGate(),
 	}
-	ch.sendOTPMessage = ch.defaultSendOTPMessage
 	return ch
 }
-
-// SetPairingService sets the pairing store for DM/group policy.
-func (w *WhatsAppChannel) SetPairingService(ps PairingStore) { w.pairingService = ps }
 
 func (w *WhatsAppChannel) Name() string    { return "whatsapp" }
 func (w *WhatsAppChannel) Type() string    { return "whatsapp" }
@@ -241,125 +223,6 @@ func (w *WhatsAppChannel) ReplayMessage(ctx context.Context, senderJID, body str
 	}
 }
 
-
-// ============================================================
-// POLICY CHECKS
-// ============================================================
-
-func (w *WhatsAppChannel) checkDMPolicy(ctx context.Context, senderID, chatID string) bool {
-	policy := w.cfg.DMPolicy
-	if policy == "" {
-		policy = "open"
-	}
-
-	switch policy {
-	case "disabled":
-		return false
-	case "open":
-		return true
-	case "allowlist":
-		if w.IsAllowed(senderID) {
-			return true
-		}
-		// If sender is pending OTP, let the message through (it may be an OTP submission)
-		if w.gate != nil && w.gate.isPending(senderID) {
-			return true
-		}
-		// Unknown sender — issue OTP challenge
-		if w.gate != nil {
-			otp := w.gate.challenge(senderID, "", chatID)
-			if otp != "" {
-				go w.sendOTPMessage(ctx, chatID, otp)
-			}
-		}
-		return false
-	default: // "pairing"
-		if w.IsAllowed(senderID) {
-			return true
-		}
-		if w.pairingService != nil {
-			paired, err := w.pairingService.IsPaired(ctx, senderID, w.Name())
-			if err != nil {
-				slog.Warn("whatsapp.pairing_check_failed", "error", err)
-				return true // fail-open
-			}
-			if paired {
-				return true
-			}
-		}
-		w.sendPairingReply(ctx, senderID, chatID)
-		return false
-	}
-}
-
-func (w *WhatsAppChannel) checkGroupPolicy(ctx context.Context, senderID, chatID string) bool {
-	policy := w.cfg.GroupPolicy
-	if policy == "" {
-		policy = "open"
-	}
-
-	switch policy {
-	case "disabled":
-		return false
-	case "allowlist":
-		return w.IsAllowed(senderID)
-	case "pairing":
-		if w.IsAllowed(senderID) {
-			return true
-		}
-		if _, cached := w.approvedGroups.Load(chatID); cached {
-			return true
-		}
-		groupSenderID := "group:" + chatID
-		if w.pairingService != nil {
-			paired, err := w.pairingService.IsPaired(ctx, groupSenderID, w.Name())
-			if err != nil {
-				return true // fail-open
-			}
-			if paired {
-				w.approvedGroups.Store(chatID, true)
-				return true
-			}
-		}
-		w.sendPairingReply(ctx, groupSenderID, chatID)
-		return false
-	default: // "open"
-		return true
-	}
-}
-
-func (w *WhatsAppChannel) sendPairingReply(ctx context.Context, senderID, chatID string) {
-	if w.pairingService == nil {
-		return
-	}
-
-	if lastSent, ok := w.pairingDebounce.Load(senderID); ok {
-		if time.Since(lastSent.(time.Time)) < pairingDebounceTime {
-			return
-		}
-	}
-
-	code, err := w.pairingService.RequestPairing(ctx, senderID, w.Name(), chatID, w.cfg.AgentID, nil)
-	if err != nil {
-		slog.Debug("whatsapp.pairing_request_failed", "error", err)
-		return
-	}
-
-	replyText := fmt.Sprintf(
-		"Access not configured.\n\nYour WhatsApp ID: %s\n\nPairing code: %s\n\nAsk the bot owner to approve with:\n  qorven pairing approve %s",
-		senderID, code, code,
-	)
-
-	w.Send(ctx, channels.OutboundMessage{ChatID: chatID, Content: replyText})
-	w.pairingDebounce.Store(senderID, time.Now())
-	slog.Info("whatsapp.pairing_sent", "sender", senderID, "code", code)
-}
-
-func (w *WhatsAppChannel) defaultSendOTPMessage(ctx context.Context, to, otp string) {
-	msg := "To use this assistant, ask the owner for the access code.\n\n" +
-		"When you have the 6-digit code, send it here."
-	_ = w.Send(ctx, channels.OutboundMessage{ChatID: to, Content: msg})
-}
 
 // ============================================================
 // CLOUD API MODE
@@ -618,19 +481,6 @@ func isWebhookChallenge(s string) bool {
 	}
 	for _, c := range s {
 		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
-}
-
-func isOTPSubmission(text string) bool {
-	text = strings.TrimSpace(text)
-	if len(text) != 6 {
-		return false
-	}
-	for _, ch := range text {
-		if ch < '0' || ch > '9' {
 			return false
 		}
 	}
