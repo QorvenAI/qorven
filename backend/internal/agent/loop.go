@@ -945,6 +945,17 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	var lastLLMContent string
 	consecutiveToolIters := 0   // track iterations with only tool calls, no text
 	emptyAfterToolsRetries := 0 // Gemini Flash sometimes returns empty after tool results; retry up to 2x
+
+	// Fix B: suppress live text streaming when a blocking output_deliver policy is
+	// active. When true, chunkHandler and fallback closures accumulate text but do
+	// not emit TextDelta events. The resolved (possibly blocked) content is emitted
+	// as a single TextDelta AFTER the governance gate runs (see Fix A below).
+	// When false (the common case — no blocking policy) streaming is unchanged.
+	suppressLiveText := false
+	if gh := l.governanceHooks; gh != nil && gh.HasBlockingOutputPolicy != nil {
+		suppressLiveText = gh.HasBlockingOutputPolicy(l.tenantID)
+	}
+
 	for iter := 0; iter < maxIter; iter++ {
 		// Search discipline: after 5 tool-only iterations, force the agent to answer
 		// Check if request was cancelled (user stopped, timeout)
@@ -1153,7 +1164,12 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					return
 				}
 
-				onEvent(TextDelta(chunk.Content))
+				// Fix B: when a blocking output_deliver policy is active, buffer
+				// text without streaming it live. The resolved content is emitted
+				// after the governance gate runs (see Fix A in the post-loop section).
+				if !suppressLiveText {
+					onEvent(TextDelta(chunk.Content))
+				}
 			}
 			if chunk.Thinking != "" {
 				onEvent(ThinkingDelta(chunk.Thinking))
@@ -1211,7 +1227,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					slog.Info("agent.loop.key_rotated", "agent", ag.ID, "reason", reason, "model", model)
 					provider = rotatedProvider
 					llmResp, err = provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
-						if chunk.Content != "" {
+						if chunk.Content != "" && !suppressLiveText {
 							onEvent(TextDelta(chunk.Content))
 						}
 					})
@@ -1248,7 +1264,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 					slog.Info("agent.loop.auto_fallback", "agent", ag.ID, "from", model, "to", fbModel, "reason", reason)
 					chatReq.Model = fbModel
 					llmResp, err = provider.ChatStream(ctx, chatReq, func(chunk providers.StreamChunk) {
-						if chunk.Content != "" {
+						if chunk.Content != "" && !suppressLiveText {
 							onEvent(TextDelta(chunk.Content))
 						}
 					})
@@ -1600,9 +1616,16 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 			} else {
 				// Governance: policy + SoD enforcement before tool execution
 				if gh := l.governanceHooks; gh != nil {
+					// Resolve the tool to its governed-action vocabulary word (e.g. "exec" → "write_code").
+					// ResolveGovernedAction is wired by the gateway; "" means no SoD rule covers this tool.
+					governedAction := ""
+					if gh.ResolveGovernedAction != nil {
+						governedAction = gh.ResolveGovernedAction(tc.Name)
+					}
 					if gh.EvaluatePolicy != nil {
 						action, reason := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "tool_call", map[string]any{
 							"tool_name": tc.Name, "tool_category": toolCategory(tc.Name), "agent_key": ag.AgentKey,
+							"governed_action": governedAction,
 						})
 						if action == "deny" {
 							toolResult = tools.ErrorResult("⛔ Policy blocked: " + reason)
@@ -1612,15 +1635,27 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 							goto toolDone
 						}
 						if action == "require_approval" {
-							toolResult = tools.ErrorResult("⏸ Requires approval: " + reason + ". Action paused.")
-							goto toolDone
+							approved := false
+							if gh.RequestApproval != nil {
+								approved = gh.RequestApproval(ctx, l.tenantID, ag.ID, ag.AgentKey, tc.Name, reason, tc.Arguments)
+							}
+							if !approved {
+								toolResult = tools.ErrorResult("⛔ Approval denied or timed out: " + reason)
+								goto toolDone
+							}
+							// approved → fall through to SoD check then executeTool
 						}
 					}
-					if gh.CheckSoD != nil {
-						if violated, rule := gh.CheckSoD(ctx, l.tenantID, ag.ID, tc.Name); violated {
+					if gh.CheckSoD != nil && governedAction != "" {
+						// Record the governed action BEFORE checking for violations so that the
+						// check itself can see actions recorded by prior tool calls in this session.
+						if gh.RecordGovernedAction != nil {
+							gh.RecordGovernedAction(ctx, l.tenantID, ag.ID, governedAction)
+						}
+						if violated, rule := gh.CheckSoD(ctx, l.tenantID, ag.ID, governedAction); violated {
 							toolResult = tools.ErrorResult("⛔ Segregation of duties violation: " + rule + ". A different agent must perform this action.")
 							if gh.RecordException != nil {
-								gh.RecordException(ctx, l.tenantID, ag.ID, "sod_violation", "critical", "SoD rule violated: "+rule, map[string]any{"tool": tc.Name, "rule": rule})
+								gh.RecordException(ctx, l.tenantID, ag.ID, "sod_violation", "critical", "SoD rule violated: "+rule, map[string]any{"tool": tc.Name, "governed_action": governedAction, "rule": rule})
 							}
 							goto toolDone
 						}
@@ -1880,13 +1915,19 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 		}
 	}
 
-	// 9. Save messages to session
-	l.saveToSession(ctx, req, result)
-
-	// 9. Governance: policy check on output delivery
+	// 9. Governance: policy check on output delivery.
+	// Fix A: this block runs BEFORE saveToSession so the DB history row and
+	// cross-client broadcast both contain the resolved (blocked-substitute)
+	// content, never the raw PII. Fix B: when suppressLiveText is true the
+	// live stream was held back; after the gate resolves result.Content we emit
+	// a single TextDelta so the requesting user sees the approved-or-blocked text.
 	if gh := l.governanceHooks; gh != nil && gh.EvaluatePolicy != nil && result.Content != "" {
+		hasPII := "false"
+		if gh.DetectPII != nil && gh.DetectPII(result.Content) {
+			hasPII = "true"
+		}
 		action, reason := gh.EvaluatePolicy(ctx, l.tenantID, ag.ID, "output_deliver", map[string]any{
-			"agent_key": ag.AgentKey, "content_length": len(result.Content),
+			"agent_key": ag.AgentKey, "content_length": len(result.Content), "has_pii": hasPII,
 		})
 		if action == "deny" {
 			slog.Warn("agent.output.policy_blocked", "agent", ag.AgentKey, "reason", reason)
@@ -1896,6 +1937,14 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 			}
 		}
 	}
+	// Fix B: emit the resolved final content as a single TextDelta now that
+	// governance has run. Only fires when live streaming was suppressed.
+	if suppressLiveText && result.Content != "" {
+		onEvent(TextDelta(result.Content))
+	}
+
+	// 9b. Save messages to session — persists and broadcasts the resolved content.
+	l.saveToSession(ctx, req, result)
 
 	// 9a. Output quality gate — validate, record, self-correct if score < 4.0
 	if l.outputValidator != nil && result.Content != "" {

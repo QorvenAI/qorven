@@ -118,6 +118,44 @@ func (s *ApprovalStore) ListPending(ctx context.Context, tenantID string) ([]App
 	return out, nil
 }
 
+// Get returns a single ApprovalRequest by tenant and id. Returns an error if not found.
+func (s *ApprovalStore) Get(ctx context.Context, tenantID, id string) (ApprovalRequest, error) {
+	var r ApprovalRequest
+	err := s.db.QueryRow(ctx, `
+		SELECT id, tenant_id, action_type, requestor_id, COALESCE(requestor_key,''), approver_role,
+		       COALESCE(approver_id::text,''), COALESCE(matrix_rule_id::text,''), COALESCE(context,'{}'),
+		       status, COALESCE(decision_by::text,''), decision_at, COALESCE(decision_reason,''), expires_at, created_at
+		FROM approval_requests WHERE tenant_id = $1 AND id = $2
+	`, tenantID, id).Scan(&r.ID, &r.TenantID, &r.ActionType, &r.RequestorID, &r.RequestorKey,
+		&r.ApproverRole, &r.ApproverID, &r.MatrixRuleID, &r.Context, &r.Status,
+		&r.DecisionBy, &r.DecisionAt, &r.DecisionReason, &r.ExpiresAt, &r.CreatedAt)
+	if err != nil {
+		return ApprovalRequest{}, err
+	}
+	return r, nil
+}
+
+// FindByGateRequestID returns the pending approval_requests row whose
+// context column contains the given gate_request_id. Returns an error if
+// no matching pending row exists.
+func (s *ApprovalStore) FindByGateRequestID(ctx context.Context, tenantID, gateRequestID string) (ApprovalRequest, error) {
+	var r ApprovalRequest
+	err := s.db.QueryRow(ctx, `
+		SELECT id, tenant_id, action_type, requestor_id, COALESCE(requestor_key,''), approver_role,
+		       COALESCE(approver_id::text,''), COALESCE(matrix_rule_id::text,''), COALESCE(context,'{}'),
+		       status, COALESCE(decision_by::text,''), decision_at, COALESCE(decision_reason,''), expires_at, created_at
+		FROM approval_requests
+		WHERE tenant_id=$1 AND context->>'gate_request_id'=$2 AND status='pending'
+		LIMIT 1
+	`, tenantID, gateRequestID).Scan(&r.ID, &r.TenantID, &r.ActionType, &r.RequestorID, &r.RequestorKey,
+		&r.ApproverRole, &r.ApproverID, &r.MatrixRuleID, &r.Context, &r.Status,
+		&r.DecisionBy, &r.DecisionAt, &r.DecisionReason, &r.ExpiresAt, &r.CreatedAt)
+	if err != nil {
+		return ApprovalRequest{}, err
+	}
+	return r, nil
+}
+
 func (s *ApprovalStore) ListRules(ctx context.Context, tenantID string) ([]ApprovalRule, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, tenant_id, action_type, COALESCE(threshold_usd,0), approver_role, approver_level,

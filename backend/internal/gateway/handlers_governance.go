@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/qorvenai/qorven/internal/governance"
+	"github.com/qorvenai/qorven/internal/permissions"
 )
 
 // ─── Designations ────────────────────────────────────────────────────────────
@@ -111,6 +112,17 @@ func (gw *Gateway) handleDecideMatrixApproval(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 503, map[string]string{"error": "governance not available"})
 		return
 	}
+	// Approving/denying a governance hold is an admin action — it is the safety
+	// control that gates require_approval. A non-admin must not be able to clear it.
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
 	var body struct {
 		Status string `json:"status"` // approved or denied
 		Reason string `json:"reason"`
@@ -119,20 +131,148 @@ func (gw *Gateway) handleDecideMatrixApproval(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
-	user := userFromContext(r.Context())
-	decider := ""
-	if user != nil {
-		decider = user.ID
-	}
-	err := gw.approvalStore.Decide(r.Context(), defaultTenant, chi.URLParam(r, "id"), decider, body.Status, body.Reason)
+	decider := user.ID
+	id := chi.URLParam(r, "id")
+	err := gw.approvalStore.Decide(r.Context(), defaultTenant, id, decider, body.Status, body.Reason)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
+
+	// Resolve the linked permission Gate so any blocked agent goroutine unblocks.
+	if req, getErr := gw.approvalStore.Get(r.Context(), defaultTenant, id); getErr == nil && gw.permissionGate != nil {
+		if gid, ok := req.Context["gate_request_id"].(string); ok && gid != "" {
+			dec := permissions.DecisionDeny
+			if body.Status == "approved" {
+				dec = permissions.DecisionAllow
+			}
+			_, _ = gw.permissionGate.Reply(r.Context(), gid, permissions.ReplyInput{Decision: dec, RepliedBy: decider})
+		}
+	}
+
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
-// ─── Policy Engine ───────────────────────────────────────────────────────────
+// ─── Policy Engine — definitions CRUD ────────────────────────────────────────
+
+func (gw *Gateway) handleListPolicies(w http.ResponseWriter, r *http.Request) {
+	if gw.policyEngine == nil {
+		writeJSON(w, 503, map[string]string{"error": "governance not available"})
+		return
+	}
+	ps, err := gw.policyEngine.ListPolicies(r.Context(), defaultTenant)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"policies": ps})
+}
+
+func (gw *Gateway) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	if gw.policyEngine == nil {
+		writeJSON(w, 503, map[string]string{"error": "governance not available"})
+		return
+	}
+	var p governance.Policy
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	p.TenantID = defaultTenant
+	if !governance.ValidTriggerEvent(p.TriggerEvent) {
+		writeJSON(w, 400, map[string]string{"error": "invalid trigger_event; must be one of: tool_call, model_switch, output_deliver, memory_write, agent_spawn, budget_spend, external_action, build_approve"})
+		return
+	}
+	if !governance.ValidPolicyAction(p.Action) {
+		writeJSON(w, 400, map[string]string{"error": "invalid action; must be one of: allow, deny, warn, require_approval, throttle, log, escalate"})
+		return
+	}
+	id, err := gw.policyEngine.CreatePolicy(r.Context(), p)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	_ = gw.policyEngine.LoadPolicies(r.Context(), defaultTenant)
+	writeJSON(w, 201, map[string]string{"id": id})
+}
+
+func (gw *Gateway) handleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	if gw.policyEngine == nil {
+		writeJSON(w, 503, map[string]string{"error": "governance not available"})
+		return
+	}
+	var p governance.Policy
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	p.ID = chi.URLParam(r, "id")
+	p.TenantID = defaultTenant
+	if !governance.ValidTriggerEvent(p.TriggerEvent) {
+		writeJSON(w, 400, map[string]string{"error": "invalid trigger_event; must be one of: tool_call, model_switch, output_deliver, memory_write, agent_spawn, budget_spend, external_action, build_approve"})
+		return
+	}
+	if !governance.ValidPolicyAction(p.Action) {
+		writeJSON(w, 400, map[string]string{"error": "invalid action; must be one of: allow, deny, warn, require_approval, throttle, log, escalate"})
+		return
+	}
+	if err := gw.policyEngine.UpdatePolicy(r.Context(), p); err != nil {
+		if err.Error() == "policy not found" {
+			writeJSON(w, 404, map[string]string{"error": "policy not found"})
+			return
+		}
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	_ = gw.policyEngine.LoadPolicies(r.Context(), defaultTenant)
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (gw *Gateway) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if user.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+	if gw.policyEngine == nil {
+		writeJSON(w, 503, map[string]string{"error": "governance not available"})
+		return
+	}
+	if err := gw.policyEngine.DeletePolicy(r.Context(), defaultTenant, chi.URLParam(r, "id")); err != nil {
+		if err.Error() == "policy not found" {
+			writeJSON(w, 404, map[string]string{"error": "policy not found"})
+			return
+		}
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	_ = gw.policyEngine.LoadPolicies(r.Context(), defaultTenant)
+	writeJSON(w, 200, map[string]string{"status": "deleted"})
+}
+
+// ─── Policy Engine — event log ────────────────────────────────────────────────
 
 func (gw *Gateway) handleListPolicyEvents(w http.ResponseWriter, r *http.Request) {
 	if gw.policyEngine == nil {

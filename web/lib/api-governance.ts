@@ -51,6 +51,27 @@ export interface ApprovalRequest {
   created_at: string;
 }
 
+export interface PolicyCondition {
+  field: string;
+  operator: string;
+  value: string;
+}
+
+export interface Policy {
+  id: string;
+  name: string;
+  description?: string;
+  category: string;
+  trigger_event: string;
+  conditions: PolicyCondition[];
+  action: string;
+  action_params?: Record<string, unknown>;
+  applies_to_roles?: string[];
+  applies_to_levels?: number[];
+  priority?: number;
+  enabled: boolean;
+}
+
 export interface PolicyEvent {
   id: string;
   policy_id: string;
@@ -93,6 +114,10 @@ export const governanceApi = {
   listApprovalRules: () => request<{ rules: ApprovalRule[] }>('/governance/approvals/rules'),
   listPendingApprovals: () => request<{ requests: ApprovalRequest[] }>('/governance/approvals/pending'),
   decideApproval: (id: string, status: string, reason: string) => request<{ status: string }>(`/governance/approvals/${id}/decide`, { method: 'POST', body: JSON.stringify({ status, reason }) }),
+  listPolicies: () => request<{ policies: Policy[] }>('/governance/policies'),
+  createPolicy: (p: Partial<Policy>) => request<{ id: string }>('/governance/policies', { method: 'POST', body: JSON.stringify(p) }),
+  updatePolicy: (id: string, p: Partial<Policy>) => request<{ status: string }>(`/governance/policies/${id}`, { method: 'PUT', body: JSON.stringify(p) }),
+  deletePolicy: (id: string) => request<{ status: string }>(`/governance/policies/${id}`, { method: 'DELETE' }),
   listPolicyEvents: () => request<{ events: PolicyEvent[] }>('/governance/policies/events'),
   listExceptions: () => request<{ exceptions: GovException[]; stats: ExceptionStats }>('/governance/exceptions'),
   resolveException: (id: string, resolution: string) => request<{ status: string }>(`/governance/exceptions/${id}/resolve`, { method: 'POST', body: JSON.stringify({ resolution }) }),

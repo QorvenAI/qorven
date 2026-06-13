@@ -40,6 +40,33 @@ type GovernanceHooks struct {
 	// Returns (modelTier, skillFamily string, canSpawn bool, approvalScope []string).
 	// nil = designation enforcement disabled.
 	LookupDesignation func(ctx context.Context, tenantID, agentKey string) (modelTier string, skillFamily string, canSpawn bool, approvalScope []string)
+
+	// ResolveGovernedAction maps a concrete tool name to the governance action
+	// vocabulary used by SoD rules (e.g. "exec" → "write_code"). Returns "" when
+	// the tool has no SoD implication. nil = taxonomy resolution disabled.
+	ResolveGovernedAction func(tool string) string
+
+	// RecordGovernedAction logs that an agent performed a governed action so that
+	// a later CheckViolation call can detect a conflict. nil = recording disabled.
+	RecordGovernedAction func(ctx context.Context, tenantID, agentID, action string)
+
+	// DetectPII reports whether the given text contains PII, using the real PII
+	// engine. Used to enrich the output_deliver event so the "Block PII in
+	// outputs" policy can match. nil = PII detection disabled.
+	DetectPII func(content string) bool
+
+	// HasBlockingOutputPolicy reports whether any enabled output_deliver policy
+	// with action deny or require_approval exists for the given tenant. When
+	// true the agent loop buffers live text instead of streaming it so the
+	// governance gate can intercept it before the user sees it.
+	// nil = assume no blocking policy (live streaming proceeds as normal).
+	HasBlockingOutputPolicy func(tenantID string) bool
+
+	// RequestApproval blocks until a human approves or denies a governance hold.
+	// It writes a governance approval_requests row (carrying the permission Gate
+	// request id so the inbox can resolve it) and blocks on the permission Gate.
+	// Returns true if approved. nil = approvals disabled (treat as blocked).
+	RequestApproval func(ctx context.Context, tenantID, agentID, agentKey, actionType, reason string, args any) (approved bool)
 }
 
 // SetGovernanceHooks wires the governance engine callbacks.

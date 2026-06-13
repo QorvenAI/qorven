@@ -394,6 +394,22 @@ func (gw *Gateway) handlePermissionReply(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Close the linked governance approval_requests row, if any.
+	// A governance hold stores the gate request id in context.gate_request_id.
+	// When the hold is resolved via the card (not the governance inbox), the
+	// governance row would otherwise remain "pending" forever.
+	if gw.approvalStore != nil {
+		govStatus := "denied"
+		switch in.Decision {
+		case permissions.DecisionAllow, permissions.DecisionAlwaysAllow,
+			permissions.DecisionAllowSession, permissions.DecisionAllow1h:
+			govStatus = "approved"
+		}
+		if gov, err := gw.approvalStore.FindByGateRequestID(r.Context(), defaultTenant, reqID); err == nil && gov.ID != "" {
+			_ = gw.approvalStore.Decide(r.Context(), defaultTenant, gov.ID, in.RepliedBy, govStatus, "resolved via approval card")
+		}
+	}
+
 	u := userFromContext(r.Context())
 	switch in.Decision {
 	case permissions.DecisionAlwaysAllow:

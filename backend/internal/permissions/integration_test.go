@@ -201,6 +201,80 @@ func TestGate_GhPushFlow_NilGate(t *testing.T) {
 	}
 }
 
+// TestNewPending_AllowAndDeny verifies that NewPending returns a non-empty id
+// and that the wait closure unblocks correctly on both allow and deny replies.
+func TestNewPending_AllowAndDeny(t *testing.T) {
+	pool, tenantID := testutil.NewIsolatedTenant(t)
+	ctx := testutil.Ctx(t)
+
+	gate := permissions.NewGate(pool, nil)
+	gate.DefaultTimeout = 30 * time.Second
+
+	t.Run("allow", func(t *testing.T) {
+		id, wait, err := gate.NewPending(ctx, permissions.RequestInput{
+			TenantID: tenantID,
+			Tool:     "test_tool_allow",
+			Reason:   "unit-test allow",
+		})
+		if err != nil {
+			t.Fatalf("NewPending: %v", err)
+		}
+		if id == "" {
+			t.Fatal("NewPending returned empty id")
+		}
+
+		done := make(chan *permissions.Verdict, 1)
+		go func() { done <- wait() }()
+
+		if _, err := gate.Reply(ctx, id, permissions.ReplyInput{
+			Decision: permissions.DecisionAllow, RepliedBy: "test-reviewer",
+		}); err != nil {
+			t.Fatalf("Reply allow: %v", err)
+		}
+
+		select {
+		case v := <-done:
+			if !v.Allowed() {
+				t.Fatalf("expected Allowed()=true, got decision=%s expired=%v", v.Decision, v.Expired)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("wait() did not return after Reply(allow)")
+		}
+	})
+
+	t.Run("deny", func(t *testing.T) {
+		id, wait, err := gate.NewPending(ctx, permissions.RequestInput{
+			TenantID: tenantID,
+			Tool:     "test_tool_deny",
+			Reason:   "unit-test deny",
+		})
+		if err != nil {
+			t.Fatalf("NewPending: %v", err)
+		}
+		if id == "" {
+			t.Fatal("NewPending returned empty id")
+		}
+
+		done := make(chan *permissions.Verdict, 1)
+		go func() { done <- wait() }()
+
+		if _, err := gate.Reply(ctx, id, permissions.ReplyInput{
+			Decision: permissions.DecisionDeny, RepliedBy: "test-reviewer",
+		}); err != nil {
+			t.Fatalf("Reply deny: %v", err)
+		}
+
+		select {
+		case v := <-done:
+			if v.Allowed() {
+				t.Fatal("expected Allowed()=false on deny")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("wait() did not return after Reply(deny)")
+		}
+	})
+}
+
 // seedIsolatedSession creates a sessions row under the given tenant so
 // we can thread a real UUID as session_id through the wrapped tool.
 // The permission_requests table's session_id column is a UUID FK-less

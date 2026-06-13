@@ -16,6 +16,8 @@ import {
   type SkillFamily,
   type ApprovalRule,
   type ApprovalRequest,
+  type Policy,
+  type PolicyCondition,
   type PolicyEvent,
   type GovException,
   type ExceptionStats,
@@ -263,9 +265,446 @@ function ApprovalsTab() {
   );
 }
 
+// ─── Policy Form (create / edit) ────────────────────────────────────────────
+
+const CATEGORIES = ['budget', 'tool', 'output', 'memory', 'lifecycle'];
+const TRIGGER_EVENTS = [
+  'tool_call', 'model_switch', 'output_deliver', 'memory_write',
+  'agent_spawn', 'budget_spend', 'external_action', 'build_approve',
+];
+const ACTIONS = ['allow', 'deny', 'warn', 'require_approval', 'throttle', 'log', 'escalate'];
+const OPERATORS = ['equals', 'not_equals', 'contains', 'gt', 'gte', 'lt', 'lte'];
+
+function emptyDraft(): Partial<Policy> {
+  return { name: '', category: 'tool', trigger_event: 'tool_call', action: 'log', conditions: [], enabled: true };
+}
+
+function PolicyForm({ initial, onSave, onCancel }: {
+  initial?: Policy;
+  onSave: (p: Partial<Policy>) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<Partial<Policy>>(initial ? { ...initial } : emptyDraft());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const conditions: PolicyCondition[] = (draft.conditions as PolicyCondition[]) || [];
+
+  const set = (k: keyof Policy, v: unknown) => setDraft(prev => ({ ...prev, [k]: v }));
+
+  const addCondition = () => set('conditions', [...conditions, { field: '', operator: 'equals', value: '' }]);
+  const removeCondition = (i: number) => set('conditions', conditions.filter((_, idx) => idx !== i));
+  const updateCondition = (i: number, k: keyof PolicyCondition, v: string) => {
+    const next = conditions.map((c, idx) => idx === i ? { ...c, [k]: v } : c);
+    set('conditions', next);
+  };
+
+  const handleSave = async () => {
+    if (!draft.name?.trim()) { setError('Name is required'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(draft);
+    } catch {
+      setError('Save failed — check console');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Name */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-foreground">Name</label>
+        <input
+          type="text"
+          value={draft.name || ''}
+          onChange={e => set('name', e.target.value)}
+          placeholder="e.g. Block external tool calls"
+          className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+        />
+      </div>
+
+      {/* Category + Trigger Event */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">Category</label>
+          <select
+            value={draft.category || 'tool'}
+            onChange={e => set('category', e.target.value)}
+            className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+          >
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">Trigger Event</label>
+          <select
+            value={draft.trigger_event || 'tool_call'}
+            onChange={e => set('trigger_event', e.target.value)}
+            className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+          >
+            {TRIGGER_EVENTS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Action */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-foreground">Action</label>
+        <select
+          value={draft.action || 'log'}
+          onChange={e => set('action', e.target.value)}
+          className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+        >
+          {ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+      </div>
+
+      {/* Conditions */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-foreground">Conditions</label>
+          <button
+            type="button"
+            onClick={addCondition}
+            className="px-2 py-1 rounded text-2xs bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+          >
+            + Add condition
+          </button>
+        </div>
+        {conditions.length === 0 && (
+          <p className="text-2xs text-muted-foreground">No conditions — policy matches all events of the chosen trigger type.</p>
+        )}
+        {conditions.map((cond, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={cond.field}
+              onChange={e => updateCondition(i, 'field', e.target.value)}
+              placeholder="field"
+              className="flex-1 px-2 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+            />
+            <select
+              value={cond.operator}
+              onChange={e => updateCondition(i, 'operator', e.target.value)}
+              className="px-2 py-1.5 rounded-md border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+            >
+              {OPERATORS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+            <input
+              type="text"
+              value={cond.value}
+              onChange={e => updateCondition(i, 'value', e.target.value)}
+              placeholder="value"
+              className="flex-1 px-2 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+            />
+            <button
+              type="button"
+              onClick={() => removeCondition(i)}
+              className="px-2 py-1 rounded text-2xs bg-red-500/10 text-red-500 hover:bg-red-500/20"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Enabled */}
+      <div className="flex items-center gap-3">
+        <label className="text-xs font-medium text-foreground">Enabled</label>
+        <button
+          type="button"
+          onClick={() => set('enabled', !draft.enabled)}
+          className={cn(
+            'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+            draft.enabled ? 'bg-primary' : 'bg-muted-foreground/30'
+          )}
+        >
+          <span className={cn(
+            'inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform',
+            draft.enabled ? 'translate-x-4' : 'translate-x-1'
+          )} />
+        </button>
+      </div>
+
+      {error && <p className="text-2xs text-red-500">{error}</p>}
+
+      {/* Actions */}
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : initial ? 'Update Policy' : 'Create Policy'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Policy Modal ─────────────────────────────────────────────────────────────
+
+function PolicyModal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-lg rounded-lg border border-border bg-card shadow-lg flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <span className="text-sm font-medium text-foreground">{title}</span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none px-1">×</button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Policies Tab ───────────────────────────────────────────────────────────
 
+type PolicySubTab = 'definitions' | 'activity';
+
 function PoliciesTab() {
+  const [subTab, setSubTab] = useState<PolicySubTab>('definitions');
+
+  return (
+    <div className="space-y-4">
+      {/* Sub-tab toggle */}
+      <div className="flex items-center gap-1 bg-muted/30 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setSubTab('definitions')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+            subTab === 'definitions' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          )}
+        >
+          <Shield className="h-3.5 w-3.5" />
+          Policies
+        </button>
+        <button
+          onClick={() => setSubTab('activity')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+            subTab === 'activity' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          )}
+        >
+          <Clock className="h-3.5 w-3.5" />
+          Activity
+        </button>
+      </div>
+
+      {subTab === 'definitions' && <PolicyDefinitionsView />}
+      {subTab === 'activity' && <PolicyActivityView />}
+    </div>
+  );
+}
+
+function PolicyDefinitionsView() {
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<'create' | Policy | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    governanceApi.listPolicies()
+      .then(res => setPolicies(res.policies || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async (draft: Partial<Policy>) => {
+    await governanceApi.createPolicy(draft);
+    load();
+    setModal(null);
+  };
+
+  const handleUpdate = async (id: string, draft: Partial<Policy>) => {
+    await governanceApi.updatePolicy(id, draft);
+    load();
+    setModal(null);
+  };
+
+  const handleDelete = async (id: string) => {
+    await governanceApi.deletePolicy(id);
+    setDeleteTarget(null);
+    load();
+  };
+
+  const handleToggleEnabled = (policy: Policy) => {
+    governanceApi.updatePolicy(policy.id, {
+      name: policy.name,
+      category: policy.category,
+      trigger_event: policy.trigger_event,
+      conditions: policy.conditions,
+      action: policy.action,
+      action_params: policy.action_params,
+      applies_to_roles: policy.applies_to_roles,
+      applies_to_levels: policy.applies_to_levels,
+      priority: policy.priority,
+      enabled: !policy.enabled,
+    }).then(() => {
+      setPolicies(prev => prev.map(p => p.id === policy.id ? { ...p, enabled: !p.enabled } : p));
+    }).catch(() => {});
+  };
+
+  if (loading) return <div className="flex items-center justify-center p-8 text-muted-foreground text-sm">Loading policies...</div>;
+
+  const enabledCount = policies.filter(p => p.enabled).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-3 gap-4">
+        <StatCard icon={Shield} label="Total Policies" value={policies.length.toString()} color="text-blue-400" />
+        <StatCard icon={CheckCircle} label="Enabled" value={enabledCount.toString()} color="text-emerald-400" />
+        <StatCard icon={XCircle} label="Disabled" value={(policies.length - enabledCount).toString()} color="text-muted-foreground" />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Policy Definitions ({policies.length})</h3>
+          <button
+            onClick={() => setModal('create')}
+            className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            New Policy
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card/50 divide-y divide-border">
+          {policies.length === 0 ? (
+            <div className="p-6 text-center text-xs text-muted-foreground">
+              No policies defined yet.{' '}
+              <button onClick={() => setModal('create')} className="text-primary hover:underline">Create one</button>.
+            </div>
+          ) : (
+            policies.map(policy => {
+              const actionVariant = policy.action === 'deny' ? 'danger' : policy.action === 'warn' ? 'warning' : policy.action === 'require_approval' ? 'default' : 'muted';
+              return (
+                <div key={policy.id} className="flex items-center justify-between px-4 py-3 group hover:bg-muted/30">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Enabled toggle */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleEnabled(policy)}
+                      title={policy.enabled ? 'Disable policy' : 'Enable policy'}
+                      className={cn(
+                        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
+                        policy.enabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                      )}
+                    >
+                      <span className={cn(
+                        'inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform',
+                        policy.enabled ? 'translate-x-4' : 'translate-x-1'
+                      )} />
+                    </button>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-foreground truncate">{policy.name}</span>
+                        <Badge variant="muted">{policy.category}</Badge>
+                        <Badge variant={actionVariant}>{policy.action}</Badge>
+                      </div>
+                      <span className="text-2xs text-muted-foreground">{policy.trigger_event}{policy.conditions && policy.conditions.length > 0 ? ` · ${policy.conditions.length} condition${policy.conditions.length !== 1 ? 's' : ''}` : ''}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setModal(policy)}
+                      className="px-2 py-1 rounded text-2xs text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setDeleteTarget(policy)}
+                      className="px-2 py-1 rounded text-2xs text-red-500 hover:bg-red-500/10"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Create modal */}
+      {modal === 'create' && (
+        <PolicyModal title="New Policy" onClose={() => setModal(null)}>
+          <PolicyForm onSave={handleCreate} onCancel={() => setModal(null)} />
+        </PolicyModal>
+      )}
+
+      {/* Edit modal */}
+      {modal !== null && modal !== 'create' && (
+        <PolicyModal title="Edit Policy" onClose={() => setModal(null)}>
+          <PolicyForm
+            initial={modal as Policy}
+            onSave={draft => handleUpdate((modal as Policy).id, draft)}
+            onCancel={() => setModal(null)}
+          />
+        </PolicyModal>
+      )}
+
+      {/* Delete confirm */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={e => { if (e.target === e.currentTarget) setDeleteTarget(null); }}
+          role="alertdialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card shadow-lg p-5 space-y-4">
+            <p className="text-sm font-medium text-foreground">Delete policy?</p>
+            <p className="text-xs text-muted-foreground">
+              <span className="text-foreground font-medium">{deleteTarget.name}</span> will be permanently removed. This cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(deleteTarget.id)}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PolicyActivityView() {
   const [events, setEvents] = useState<PolicyEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
