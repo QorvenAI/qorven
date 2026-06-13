@@ -5,6 +5,7 @@ package governance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -207,6 +208,144 @@ func (e *PolicyEngine) HasBlockingOutputPolicy(tenantID string) bool {
 	}
 	return false
 }
+
+// ValidPolicyAction reports whether a is a recognized policy action.
+func ValidPolicyAction(a string) bool {
+	switch a {
+	case "allow", "deny", "warn", "require_approval", "throttle", "log", "escalate":
+		return true
+	}
+	return false
+}
+
+// ListPolicies returns all policy definitions for the tenant, ordered by priority.
+func (e *PolicyEngine) ListPolicies(ctx context.Context, tenantID string) ([]Policy, error) {
+	if e.db == nil {
+		return nil, nil
+	}
+	rows, err := e.db.Query(ctx, `
+		SELECT id, tenant_id, name, COALESCE(description,''), category, trigger_event,
+		       COALESCE(conditions,'[]'), action, COALESCE(action_params,'{}'),
+		       COALESCE(applies_to_roles,'{}'), COALESCE(applies_to_levels,'{}'), priority, enabled
+		FROM policies WHERE tenant_id = $1
+		ORDER BY priority ASC, created_at ASC
+	`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Policy
+	for rows.Next() {
+		var p Policy
+		var condJSON, paramsJSON []byte
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.Description, &p.Category, &p.TriggerEvent,
+			&condJSON, &p.Action, &paramsJSON, &p.AppliesToRoles, &p.AppliesToLevels, &p.Priority, &p.Enabled); err != nil {
+			continue
+		}
+		json.Unmarshal(condJSON, &p.Conditions)
+		json.Unmarshal(paramsJSON, &p.ActionParams)
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// CreatePolicy inserts a new policy and returns its generated UUID.
+func (e *PolicyEngine) CreatePolicy(ctx context.Context, p Policy) (string, error) {
+	condJSON, err := json.Marshal(p.Conditions)
+	if err != nil {
+		return "", err
+	}
+	paramsJSON, err := json.Marshal(p.ActionParams)
+	if err != nil {
+		return "", err
+	}
+	if p.Conditions == nil {
+		condJSON = []byte("[]")
+	}
+	if p.ActionParams == nil {
+		paramsJSON = []byte("{}")
+	}
+	roles := p.AppliesToRoles
+	if roles == nil {
+		roles = []string{}
+	}
+	levels := p.AppliesToLevels
+	if levels == nil {
+		levels = []int{}
+	}
+	var id string
+	err = e.db.QueryRow(ctx, `
+		INSERT INTO policies
+		  (tenant_id, name, description, category, trigger_event, conditions, action,
+		   action_params, applies_to_roles, applies_to_levels, priority, enabled)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		RETURNING id
+	`, p.TenantID, p.Name, p.Description, p.Category, p.TriggerEvent,
+		condJSON, p.Action, paramsJSON, roles, levels, p.Priority, p.Enabled,
+	).Scan(&id)
+	return id, err
+}
+
+// UpdatePolicy replaces all mutable fields of an existing policy row.
+// Returns an error wrapping "not found" when no row matched (id + tenant_id).
+func (e *PolicyEngine) UpdatePolicy(ctx context.Context, p Policy) error {
+	condJSON, err := json.Marshal(p.Conditions)
+	if err != nil {
+		return err
+	}
+	paramsJSON, err := json.Marshal(p.ActionParams)
+	if err != nil {
+		return err
+	}
+	if p.Conditions == nil {
+		condJSON = []byte("[]")
+	}
+	if p.ActionParams == nil {
+		paramsJSON = []byte("{}")
+	}
+	roles := p.AppliesToRoles
+	if roles == nil {
+		roles = []string{}
+	}
+	levels := p.AppliesToLevels
+	if levels == nil {
+		levels = []int{}
+	}
+	tag, err := e.db.Exec(ctx, `
+		UPDATE policies SET
+		  name=$1, description=$2, category=$3, trigger_event=$4, conditions=$5,
+		  action=$6, action_params=$7, applies_to_roles=$8, applies_to_levels=$9,
+		  priority=$10, enabled=$11, updated_at=now()
+		WHERE id=$12 AND tenant_id=$13
+	`, p.Name, p.Description, p.Category, p.TriggerEvent, condJSON,
+		p.Action, paramsJSON, roles, levels, p.Priority, p.Enabled,
+		p.ID, p.TenantID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errPolicyNotFound
+	}
+	return nil
+}
+
+// DeletePolicy removes a policy by id scoped to the tenant.
+// Returns errPolicyNotFound when no row matched.
+func (e *PolicyEngine) DeletePolicy(ctx context.Context, tenantID, id string) error {
+	tag, err := e.db.Exec(ctx, `DELETE FROM policies WHERE id=$1 AND tenant_id=$2`, id, tenantID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errPolicyNotFound
+	}
+	return nil
+}
+
+// sentinel so callers can test for not-found without importing errors strings
+var errPolicyNotFound = fmt.Errorf("policy not found")
 
 func (e *PolicyEngine) ListEvents(ctx context.Context, tenantID string, limit int) ([]PolicyEvent, error) {
 	if limit <= 0 {

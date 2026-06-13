@@ -1010,6 +1010,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/governance/approvals/{id}/decide", gw.handleDecideMatrixApproval)
 
 		// ERP Governance — Policy Engine
+		r.Get("/governance/policies", gw.handleListPolicies)
+		r.Post("/governance/policies", gw.handleCreatePolicy)
+		r.Put("/governance/policies/{id}", gw.handleUpdatePolicy)
+		r.Delete("/governance/policies/{id}", gw.handleDeletePolicy)
 		r.Get("/governance/policies/events", gw.handleListPolicyEvents)
 
 		// ERP Governance — Exceptions
