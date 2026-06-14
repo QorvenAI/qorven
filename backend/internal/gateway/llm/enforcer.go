@@ -273,6 +273,10 @@ func (r *pgBudgetRepo) scopedBudget(ctx context.Context, tenantID, col, id, scop
 // the raw ledger (only place carrying task_id).
 func (r *pgBudgetRepo) TaskBudget(ctx context.Context, tenantID, taskID string) (int64, int64, int, bool) {
 	var budgetCents *int64
+	// tasks.budget_cents is DEFAULT 0 NOT NULL, so 0 is the universal sentinel for
+	// "no task budget set" — NOT a deliberate zero allowance. NULLIF maps it to NULL
+	// (→ ok=false → uncapped) so the millions of default-0 tasks aren't all blocked.
+	// This intentionally diverges from the scope-level caps, where 0 means "block".
 	err := r.db.QueryRow(ctx,
 		`SELECT NULLIF(budget_cents,0) FROM tasks WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
 		taskID, tenantID).Scan(&budgetCents)

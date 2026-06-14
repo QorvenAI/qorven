@@ -56,6 +56,12 @@ func (e *BudgetEngine) Check(ctx context.Context, req GatewayRequest) error {
 			TaskID:       sc.TaskID,
 		})
 	}
+	// LEGACY fallback — dead in production: gateway.go always calls SetEnforcer
+	// when a DB pool exists, so e.enforcer is non-nil and the block above returns.
+	// This float-based path predates the DBEnforcer and still uses the old
+	// "0 = unlimited" semantic (it can't distinguish a null cap from a 0 cap).
+	// The DBEnforcer is the single source of truth for budget enforcement; do not
+	// route new callers here. Kept only as a no-enforcer safety net.
 	if req.AgentID == "" || e.db == nil {
 		return nil
 	}
