@@ -1608,9 +1608,10 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 				}
 			}
 
-			// Authoritative per-role tool gate: a role-denied tool is refused here,
-			// before executeTool is reached. executeTool itself does not re-check role.
-			// This is the single enforcement point for role-based tool access control.
+			// Secondary per-role tool gate (defense-in-depth). The primary enforcement
+			// is the offered-tool filter in context.go BuildToolDefs (tools.FilterTools on
+			// the agent's ToolsDenied), which removes denied tools before the model ever
+			// sees them. This block additionally refuses by built-in role permission class.
 			if ag.Role != nil {
 				agentPerms := permissions.DefaultPermissions(permissions.Role(*ag.Role))
 				allowed := permissions.FilterTools(permissions.Role(*ag.Role), agentPerms, []string{tc.Name})

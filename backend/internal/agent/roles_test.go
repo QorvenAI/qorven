@@ -137,6 +137,10 @@ func TestRoleToolNames_NoPhantoms(t *testing.T) {
 		"undo":        true,
 		// multi-edit tool (multi_edit.go)
 		"multi_edit": true,
+		// code_edit tool (code_edit.go)
+		"code_edit": true,
+		// app scaffolding tool (app_builder.go) — writes files to local disk
+		"scaffold_app": true,
 		// intake tools (gateway/intake_tools.go)
 		"ask_followup_question": true,
 		"produce_project_brief": true,
