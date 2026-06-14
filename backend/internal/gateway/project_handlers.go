@@ -569,7 +569,8 @@ func (gw *Gateway) proceedToBuild(ctx context.Context, projectID, planID string)
 			slog.Info("project.build: build completed", "project", projectID, "duration", buildDuration)
 			// Auto-install if this was a qorven_app build.
 			if project.ProjectType == "qorven_app" && gw.appMgr != nil {
-				if app, err := gw.appMgr.Install(context.Background(), project.Path); err != nil {
+				// Auto-install after project build: no request-scoped user; pass "" (recorded as NULL).
+				if app, err := gw.appMgr.Install(context.Background(), project.Path, ""); err != nil {
 					slog.Warn("project.build: app auto-install failed", "project", projectID, "path", project.Path, "err", err)
 				} else {
 					slog.Info("project.build: app installed", "slug", app.Slug, "id", app.ID)

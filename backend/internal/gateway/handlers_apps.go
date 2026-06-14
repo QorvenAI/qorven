@@ -78,8 +78,13 @@ func (gw *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must contain {path}"})
 		return
 	}
-	created, err := gw.appMgr.Install(r.Context(), req.Path)
+	// Reject paths outside the permitted install-root allowlist before calling Install.
+	created, err := gw.appMgr.Install(r.Context(), req.Path, user.ID)
 	if err != nil {
+		if errors.Is(err, apps.ErrInstallPathNotPermitted) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "install path not permitted"})
+			return
+		}
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}

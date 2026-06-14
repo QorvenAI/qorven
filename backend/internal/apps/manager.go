@@ -88,6 +88,11 @@ type AppManager struct {
 	appDSN     string // least-privilege DSN for qorven_app role — injected into subprocesses; "" = withhold
 	credLookup func(tenantID, slug string) string
 
+	// allowedInstallRoots is the set of parent directories from which apps may
+	// be installed. An empty slice means all paths are allowed (open/test mode).
+	// Set via SetAllowedInstallRoots after construction.
+	allowedInstallRoots []string
+
 	mu     sync.RWMutex
 	loaded map[string]*loadedApp // slug → live state
 }
@@ -166,11 +171,23 @@ func (m *AppManager) LoadAll(ctx context.Context, agentID, teamID string) error 
 
 // Install parses app.yaml from manifestDir, runs migrations, registers tools/hooks,
 // and creates the DB row. Returns the created App.
-func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, error) {
+// installedByUserID is the UUID of the authenticated admin who triggered the
+// install; it is recorded in the apps.installed_by column for provenance.
+// Pass "" when called from non-HTTP contexts (e.g. agent tool invocations).
+func (m *AppManager) Install(ctx context.Context, manifestDir string, installedByUserID string) (*App, error) {
 	absDir, err := filepath.Abs(manifestDir)
 	if err != nil {
 		return nil, err
 	}
+
+	// Allowlist check — reject paths outside permitted install roots.
+	m.mu.RLock()
+	roots := m.allowedInstallRoots
+	m.mu.RUnlock()
+	if len(roots) > 0 && !isAllowedInstallPath(absDir, roots) {
+		return nil, ErrInstallPathNotPermitted
+	}
+
 	manifest, err := LoadManifest(absDir)
 	if err != nil {
 		return nil, err
@@ -212,6 +229,21 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, err
 		return nil, fmt.Errorf("create app row: %w", err)
 	}
 
+	// Record install provenance (installed_by + source_path). These columns are
+	// nullable so we do a best-effort UPDATE; failure is logged but not fatal.
+	if m.pool != nil {
+		var installedBy *string
+		if installedByUserID != "" {
+			installedBy = &installedByUserID
+		}
+		if _, pErr := m.pool.Exec(ctx,
+			`UPDATE apps SET installed_by=$1, source_path=$2 WHERE id=$3`,
+			installedBy, absDir, created.ID,
+		); pErr != nil {
+			slog.Warn("app.install.provenance_failed", "app_id", created.ID, "err", pErr)
+		}
+	}
+
 	toolNames := m.registerTools(created, manifest)
 	m.registerHooks(created, manifest)
 
@@ -225,7 +257,7 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, err
 			"slug":   created.Slug,
 		})
 	}
-	slog.Info("app.installed", "slug", created.Slug, "path", absDir)
+	slog.Info("app.installed", "slug", created.Slug, "path", absDir, "installed_by", installedByUserID)
 	return &created, nil
 }
 
@@ -423,6 +455,16 @@ func (m *AppManager) FrontendManifests() []AppFrontendEntry {
 
 // Store returns the underlying AppStore for direct CRUD from gateway handlers.
 func (m *AppManager) Store() *AppStore { return m.store }
+
+// SetAllowedInstallRoots replaces the install-path allowlist. Each root must be
+// an absolute directory path; sub-directories of those roots are also permitted.
+// Call this after construction (e.g. from gateway startup) before any installs.
+// An empty slice disables the allowlist (useful in unit tests).
+func (m *AppManager) SetAllowedInstallRoots(roots []string) {
+	m.mu.Lock()
+	m.allowedInstallRoots = roots
+	m.mu.Unlock()
+}
 
 // Reset clears the in-memory loaded map (called after factory reset so
 // the next LoadAll starts from a clean DB).

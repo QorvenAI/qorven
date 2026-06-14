@@ -1209,6 +1209,10 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 
 			// scaffold_app / install_app — let the agent build and install apps.
 			appsDir := config.Sub("apps")
+			// Restrict installs to paths under the Qorven data directory (config.Sub("") == DataDir).
+			// This prevents an admin-API call or agent tool from installing an app
+			// from an arbitrary path such as /etc or /tmp.
+			gw.appMgr.SetAllowedInstallRoots([]string{config.DataDir()})
 			if err := os.MkdirAll(appsDir, 0755); err != nil {
 				slog.Warn("apps.dir_create_failed", "path", appsDir, "err", err)
 			}
@@ -1218,7 +1222,8 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			appMgr := gw.appMgr
 			gw.toolReg.Register(tools.NewInstallAppTool(
 				func(ctx context.Context, manifestDir string) (string, string, string, error) {
-					a, err := appMgr.Install(ctx, manifestDir)
+					// Agent-invoked install: no human user ID available; pass "" (recorded as NULL).
+					a, err := appMgr.Install(ctx, manifestDir, "")
 					if err != nil {
 						return "", "", "", err
 					}
@@ -1257,7 +1262,8 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			))
 			gw.toolReg.Register(tools.NewBuildConnectorTool(
 				func(ctx context.Context, manifestDir string) (string, string, string, error) {
-					a, err := appMgr.Install(ctx, manifestDir)
+					// Connector build tool: agent-invoked, no user ID; pass "" (recorded as NULL).
+					a, err := appMgr.Install(ctx, manifestDir, "")
 					if err != nil {
 						return "", "", "", err
 					}
