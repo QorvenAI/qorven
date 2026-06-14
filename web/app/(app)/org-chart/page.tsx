@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   Minus, Plus, Maximize2, RefreshCw, Users,
   Cpu, Building2, Code2, Megaphone, ShoppingCart, HeadphonesIcon,
-  UserCheck, Shield, BookOpen, DollarSign,
+  UserCheck, Shield, BookOpen, DollarSign, UserPlus, UserX, Network,
 } from 'lucide-react';
 import { CanvasHeader } from '@/components/layouts/canvas-header';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,30 @@ const STATUS_COLOR: Record<string, string> = {
   error:     '#f87171',
   offline:   '#71717a',
 };
+
+// Available org levels and roles for the hire form
+const ORG_LEVELS = [
+  { value: 'l1', label: 'L1 — Prime / CROO' },
+  { value: 'l2', label: 'L2 — C-Suite' },
+  { value: 'l3', label: 'L3 — Manager / Specialist' },
+  { value: 'customer_facing', label: 'Customer-Facing' },
+];
+
+const ORG_ROLES = [
+  { value: 'coo',       label: 'COO' },
+  { value: 'cto',       label: 'CTO' },
+  { value: 'cmo',       label: 'CMO' },
+  { value: 'cfo',       label: 'CFO' },
+  { value: 'cso',       label: 'CSO' },
+  { value: 'cco',       label: 'CCO' },
+  { value: 'chro',      label: 'CHRO' },
+  { value: 'ciso',      label: 'CISO' },
+  { value: 'cko',       label: 'CKO' },
+  { value: 'caio',      label: 'CAIO' },
+  { value: 'manager',   label: 'Manager' },
+  { value: 'worker',    label: 'Worker' },
+  { value: 'specialist', label: 'Specialist' },
+];
 
 // ── Tree types ──────────────────────────────────────────────────────────────────
 interface TreeNode {
@@ -228,6 +252,253 @@ function shortModel(model?: string): string {
   return model.length > 14 ? model.slice(0, 12) + '…' : model;
 }
 
+// ── Decode role from JWT (same approach as sidebar.tsx) ────────────────────────
+function getLocalUserRole(): string {
+  if (typeof window === 'undefined') return 'user';
+  try {
+    const stored = localStorage.getItem('qorven_user');
+    if (stored) {
+      const parsed = JSON.parse(stored) as { role?: string };
+      return parsed.role ?? 'user';
+    }
+    const token = localStorage.getItem('qorven_token');
+    if (token) {
+      const payload = JSON.parse(atob(token.split('.')[1]!)) as { role?: string };
+      return payload.role ?? 'user';
+    }
+  } catch {}
+  return 'user';
+}
+
+// ── ConfirmDialog ─────────────────────────────────────────────────────────────
+function ConfirmDialog({
+  title, body, confirmLabel = 'Delete', onCancel, onConfirm, loading = false,
+}: {
+  title: string; body: string; confirmLabel?: string;
+  onCancel: () => void; onConfirm: () => void; loading?: boolean;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !loading) onCancel(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onCancel, loading]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { if (!loading) onCancel(); }}>
+      <div role="alertdialog" className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+        <h2 className="text-base font-semibold">{title}</h2>
+        <p className="text-sm text-muted-foreground">{body}</p>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            className="inline-flex items-center justify-center rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            onClick={onCancel} disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex items-center justify-center rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+            onClick={onConfirm} disabled={loading}
+          >
+            {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── HireModal ─────────────────────────────────────────────────────────────────
+function HireModal({
+  agents, onClose, onSuccess,
+}: {
+  agents: OrgChartAgent[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [agentId,  setAgentId]  = useState('');
+  const [orgLevel, setOrgLevel] = useState('l3');
+  const [orgRole,  setOrgRole]  = useState('worker');
+  const [error,    setError]    = useState('');
+  const [loading,  setLoading]  = useState(false);
+
+  // Only real (non-CEO) agents can be hired
+  const hirable = agents.filter(a => a.id !== CEO_ID);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !loading) onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose, loading]);
+
+  async function handleSubmit() {
+    if (!agentId) { setError('Select an agent.'); return; }
+    setError('');
+    setLoading(true);
+    try {
+      await orgApi.hire(agentId, orgLevel, orgRole);
+      onSuccess();
+      onClose();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Hire failed';
+      setError(msg.toLowerCase().includes('403') || msg.toLowerCase().includes('admin')
+        ? 'Admin role required to hire agents.'
+        : msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const selectCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { if (!loading) onClose(); }}>
+      <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+        <h2 className="text-base font-semibold flex items-center gap-2">
+          <UserPlus className="h-4 w-4 text-primary" />
+          Hire Agent
+        </h2>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium mb-1 text-muted-foreground">Agent</label>
+            <select value={agentId} onChange={e => setAgentId(e.target.value)} className={selectCls} disabled={loading}>
+              <option value="">Select an agent…</option>
+              {hirable.map(a => (
+                <option key={a.id} value={a.id}>{a.display_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1 text-muted-foreground">Org Level</label>
+            <select value={orgLevel} onChange={e => setOrgLevel(e.target.value)} className={selectCls} disabled={loading}>
+              {ORG_LEVELS.map(l => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1 text-muted-foreground">Org Role</label>
+            <select value={orgRole} onChange={e => setOrgRole(e.target.value)} className={selectCls} disabled={loading}>
+              {ORG_ROLES.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            className="inline-flex items-center justify-center rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            onClick={onClose} disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            onClick={handleSubmit} disabled={loading || !agentId}
+          >
+            {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+            Hire
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ReassignModal ─────────────────────────────────────────────────────────────
+function ReassignModal({
+  agent, agents, onClose, onSuccess,
+}: {
+  agent: OrgChartAgent;
+  agents: OrgChartAgent[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [managerId, setManagerId] = useState<string>(agent.manager_id ?? '');
+  const [error,     setError]     = useState('');
+  const [loading,   setLoading]   = useState(false);
+
+  // Exclude the agent itself and the synthetic CEO from the manager list
+  const candidates = agents.filter(a => a.id !== agent.id && a.id !== CEO_ID);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !loading) onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose, loading]);
+
+  async function handleSubmit() {
+    setError('');
+    setLoading(true);
+    try {
+      await orgApi.reassignManager(agent.id, managerId || null);
+      onSuccess();
+      onClose();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Reassign failed';
+      if (msg.toLowerCase().includes('403') || msg.toLowerCase().includes('admin')) {
+        setError('Admin role required to reassign managers.');
+      } else if (msg.toLowerCase().includes('cycle') || msg.toLowerCase().includes('reporting cycle')) {
+        setError('Cannot reassign: this would create a reporting cycle.');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const selectCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { if (!loading) onClose(); }}>
+      <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+        <h2 className="text-base font-semibold flex items-center gap-2">
+          <Network className="h-4 w-4 text-primary" />
+          Reassign Manager
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Change who <strong>{agent.display_name}</strong> reports to.
+        </p>
+
+        <div>
+          <label className="block text-xs font-medium mb-1 text-muted-foreground">New Manager</label>
+          <select value={managerId} onChange={e => setManagerId(e.target.value)} className={selectCls} disabled={loading}>
+            <option value="">(None — top-level)</option>
+            {candidates.map(a => (
+              <option key={a.id} value={a.id}>{a.display_name}</option>
+            ))}
+          </select>
+        </div>
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            className="inline-flex items-center justify-center rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            onClick={onClose} disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            onClick={handleSubmit} disabled={loading}
+          >
+            {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+            Reassign
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function OrgChartPage() {
   const router  = useRouter();
@@ -242,6 +513,17 @@ export default function OrgChartPage() {
   const [pan,      setPan]      = useState<Point>({ x: 0, y: 0 });
   const [zoom,     setZoom]     = useState(1);
   const [dragging, setDragging] = useState(false);
+
+  // Admin gating — decoded from JWT on the client (same pattern as sidebar.tsx)
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { setIsAdmin(getLocalUserRole() === 'admin'); }, []);
+
+  // Modal state
+  const [hireOpen,      setHireOpen]      = useState(false);
+  const [terminateAgent, setTerminateAgent] = useState<OrgChartAgent | null>(null);
+  const [reassignAgent,  setReassignAgent]  = useState<OrgChartAgent | null>(null);
+  const [terminateLoading, setTerminateLoading] = useState(false);
+  const [actionError,   setActionError]   = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStart    = useRef({ mx: 0, my: 0, px: 0, py: 0 });
@@ -346,6 +628,25 @@ export default function OrgChartPage() {
     router.push(`/qors/${id}`);
   }, [router]);
 
+  async function handleTerminateConfirm() {
+    if (!terminateAgent) return;
+    setTerminateLoading(true);
+    setActionError('');
+    try {
+      await orgApi.terminate(terminateAgent.id, 'Terminated via org chart');
+      setTerminateAgent(null);
+      load();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Terminate failed';
+      setActionError(msg.toLowerCase().includes('403') || msg.toLowerCase().includes('admin')
+        ? 'Admin role required to terminate agents.'
+        : msg);
+      setTerminateAgent(null);
+    } finally {
+      setTerminateLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex flex-col px-6 py-8 gap-3 text-muted-foreground text-sm">
@@ -370,10 +671,21 @@ export default function OrgChartPage() {
         title="Org Chart"
         description={`${allNodes.length} agents across ${new Set(mergedAgents.map(a => a.org_level)).size} tiers`}
         actions={
-          <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {actionError && (
+              <span className="text-xs text-destructive px-2">{actionError}</span>
+            )}
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => { setActionError(''); setHireOpen(true); }} className="gap-1.5">
+                <UserPlus className="h-3.5 w-3.5" />
+                Hire
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" />
+              Refresh
+            </Button>
+          </div>
         }
       />
 
@@ -441,9 +753,10 @@ export default function OrgChartPage() {
             const a        = node.agent;
             const isCEO    = a.id === CEO_ID;
             const roleMeta = ROLE_META[a.org_role ?? ''];
-            const status   = isCEO ? 'idle' : ((soulStates[a.id]?.activity as string) ?? a.status ?? 'offline');
-            const dotColor = STATUS_COLOR[status] ?? STATUS_COLOR.offline;
-            const lastEvt  = soulStates[a.id]?.lastEvent;
+            const status    = isCEO ? 'idle' : ((soulStates[a.id]?.activity as string) ?? a.status ?? 'offline');
+            // dotColor and lastEvt are kept for future tooltip/status indicators
+            void (STATUS_COLOR[status] ?? STATUS_COLOR.offline);
+            void soulStates[a.id]?.lastEvent;
             const gradCls  = isCEO ? 'from-amber-400 to-yellow-500' : soulGradient(a.display_name);
             const model    = shortModel((souls.find(s => s.id === a.id) as { model?: string } | undefined)?.model);
             const isActive = status === 'thinking' || status === 'running';
@@ -454,7 +767,7 @@ export default function OrgChartPage() {
                 key={a.id}
                 data-card
                 className={cn(
-                  'absolute bg-card border rounded-xl shadow-sm transition-[border-color,box-shadow] duration-150',
+                  'absolute bg-card border rounded-xl shadow-sm transition-[border-color,box-shadow] duration-150 group',
                   isCEO
                     ? 'border-amber-500/40 shadow-[0_0_0_1px_rgba(245,158,11,0.15)] cursor-default'
                     : 'border-border cursor-pointer hover:border-primary/40 hover:shadow-md',
@@ -509,11 +822,64 @@ export default function OrgChartPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Admin action buttons — visible on hover for non-CEO nodes */}
+                {isAdmin && !isCEO && (
+                  <div
+                    className="absolute -bottom-7 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button
+                      title="Reassign manager"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shadow-sm"
+                      onClick={() => { suppressRef.current = true; setActionError(''); setReassignAgent(a); setTimeout(() => { suppressRef.current = false; }, 200); }}
+                    >
+                      <Network className="h-3 w-3" />
+                    </button>
+                    <button
+                      title="Terminate"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-destructive/30 bg-background/95 text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors shadow-sm"
+                      onClick={() => { suppressRef.current = true; setActionError(''); setTerminateAgent(a); setTimeout(() => { suppressRef.current = false; }, 200); }}
+                    >
+                      <UserX className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </div>
+
+      {/* Modals */}
+      {hireOpen && (
+        <HireModal
+          agents={mergedAgents}
+          onClose={() => setHireOpen(false)}
+          onSuccess={load}
+        />
+      )}
+
+      {terminateAgent && (
+        <ConfirmDialog
+          title={`Terminate ${terminateAgent.display_name}?`}
+          body="This agent will be marked as terminated and removed from the active roster. This cannot be undone."
+          confirmLabel="Terminate"
+          onCancel={() => setTerminateAgent(null)}
+          onConfirm={handleTerminateConfirm}
+          loading={terminateLoading}
+        />
+      )}
+
+      {reassignAgent && (
+        <ReassignModal
+          agent={reassignAgent}
+          agents={mergedAgents}
+          onClose={() => setReassignAgent(null)}
+          onSuccess={load}
+        />
+      )}
+
     </div>
   );
 }

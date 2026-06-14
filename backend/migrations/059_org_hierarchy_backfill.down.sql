@@ -1,0 +1,3 @@
+-- 059 down: no-op — the backfill is additive and idempotent.
+-- Deleting rows would risk removing legitimately-set overlay entries
+-- (e.g. custom can_delegate_to lists). The up migration is safe to re-run.

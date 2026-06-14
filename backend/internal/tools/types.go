@@ -83,17 +83,18 @@ func ToDefinition(t Tool) ToolDefinition {
 type ctxKey string
 
 const (
-	ctxWorkspace    ctxKey = "tool_workspace"
-	ctxChannel      ctxKey = "tool_channel"
-	ctxChatID       ctxKey = "tool_chat_id"
-	ctxSessionKey   ctxKey = "tool_session_key"
-	ctxAgentID      ctxKey = "tool_agent_id"
-	ctxUserID       ctxKey = "tool_user_id"
-	ctxTenantID     ctxKey = "tool_tenant_id"
-	ctxForkFunc     ctxKey = "tool_fork_func"
-	ctxSandboxKey   ctxKey = "tool_sandbox_key"
-	ctxAllowElevated ctxKey = "tool_allow_elevated"
-	ctxRoomID        ctxKey = "tool_room_id"
+	ctxWorkspace         ctxKey = "tool_workspace"
+	ctxChannel           ctxKey = "tool_channel"
+	ctxChatID            ctxKey = "tool_chat_id"
+	ctxSessionKey        ctxKey = "tool_session_key"
+	ctxAgentID           ctxKey = "tool_agent_id"
+	ctxUserID            ctxKey = "tool_user_id"
+	ctxTenantID          ctxKey = "tool_tenant_id"
+	ctxForkFunc          ctxKey = "tool_fork_func"
+	ctxSandboxKey        ctxKey = "tool_sandbox_key"
+	ctxAllowElevated     ctxKey = "tool_allow_elevated"
+	ctxRoomID            ctxKey = "tool_room_id"
+	ctxDelegationDepth   ctxKey = "tool_delegation_depth"
 )
 
 func WithWorkspace(ctx context.Context, ws string) context.Context {
@@ -192,6 +193,22 @@ func WithAllowElevated(ctx context.Context) context.Context {
 func IsElevated(ctx context.Context) bool {
 	v, _ := ctx.Value(ctxAllowElevated).(bool)
 	return v
+}
+
+// WithDelegationDepth stamps the current delegation depth onto ctx. The
+// delegate tool reads this on entry and writes depth+1 onto the outgoing ctx
+// so any agent spawned at depth N sees N+1 in its own tool calls.
+func WithDelegationDepth(ctx context.Context, depth int) context.Context {
+	return context.WithValue(ctx, ctxDelegationDepth, depth)
+}
+
+// DelegationDepthFromCtx returns the current delegation depth, defaulting to
+// 0 (top-level, no delegation hop yet) when absent.
+func DelegationDepthFromCtx(ctx context.Context) int {
+	if v, ok := ctx.Value(ctxDelegationDepth).(int); ok {
+		return v
+	}
+	return 0
 }
 
 // MimeFromExt returns MIME type for common file extensions.

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/qorvenai/qorven/internal/delegation"
 )
 
 // OnDelegateComplete is called when an async background delegation finishes.
@@ -83,18 +84,33 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *Result
 		return ErrorResult("delegation not configured")
 	}
 
+	// Guard: refuse once the cascade has reached the configured depth limit.
+	// DelegationDepthFromCtx returns 0 when absent (top-level call).
+	depth := DelegationDepthFromCtx(ctx)
+	if depth >= delegation.MaxDepth {
+		slog.Warn("delegate.depth_limit", "depth", depth, "max", delegation.MaxDepth, "to", agentKey)
+		return ErrorResult(fmt.Sprintf("delegation depth limit reached (depth %d of %d) — cannot delegate further", depth, delegation.MaxDepth))
+	}
+	// Stamp depth+1 onto the outgoing context so any agent that receives this
+	// ctx (e.g. via a future Run-based runAgent) will see the incremented depth
+	// in its own delegate tool calls.
+	outCtx := WithDelegationDepth(ctx, depth+1)
+
 	message := task
 	if extraCtx != "" {
 		message = fmt.Sprintf("%s\n\nContext:\n%s", task, extraCtx)
 	}
 
-	// Async path: fire goroutine, return immediately with a job marker
+	// Async path: fire goroutine, return immediately with a job marker.
+	// Background jobs start a fresh context (no parent cancellation), so we
+	// carry the incremented depth explicitly into it.
 	if background {
 		jobID := uuid.New().String()
-		slog.Info("delegate.background.start", "to", agentKey, "job", jobID, "task", task[:min(len(task), 80)])
+		slog.Info("delegate.background.start", "to", agentKey, "job", jobID, "depth", depth, "task", task[:min(len(task), 80)])
 		go func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
+			bgCtx = WithDelegationDepth(bgCtx, depth+1)
 			result, err := t.runAgent(bgCtx, agentKey, message)
 			if err != nil {
 				slog.Warn("delegate.background.failed", "to", agentKey, "job", jobID, "error", err)
@@ -108,9 +124,10 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *Result
 		return TextResult(fmt.Sprintf("[BACKGROUND_JOB:%s] Dispatched to %s — I'll let you know when it's done. What else can I help with?", jobID, agentKey))
 	}
 
-	// Synchronous path (original behaviour)
-	slog.Info("delegate.start", "to", agentKey, "task", task[:min(len(task), 80)])
-	result, err := t.runAgent(ctx, agentKey, message)
+	// Synchronous path — pass the depth-incremented ctx to runAgent so the
+	// spawned agent's run context inherits depth+1.
+	slog.Info("delegate.start", "to", agentKey, "depth", depth, "task", task[:min(len(task), 80)])
+	result, err := t.runAgent(outCtx, agentKey, message)
 	if err != nil {
 		slog.Warn("delegate.failed", "to", agentKey, "error", err)
 		return ErrorResult(fmt.Sprintf("Delegation to %s failed: %v", agentKey, err))
