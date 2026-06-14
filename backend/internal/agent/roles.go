@@ -65,14 +65,14 @@ var roleRegistry = map[string]AgentRole{
 	// researcher: web-focused, no code execution, no file writes.
 	"researcher": {
 		AgentKey:    "researcher",
-		ToolsDenied: []string{"code_exec", "shell_exec", "write_file", "delete_file"},
+		ToolsDenied: []string{"exec", "write_file"},
 		MaxIterations: 12,
 	},
 
 	// support: customer-facing, tight tool surface.
 	"support": {
 		AgentKey:     "support",
-		ToolsAllowed: []string{"knowledge_search", "ticket_create", "escalate", "send_message"},
+		ToolsAllowed: []string{"kb_read", "team_tasks", "delegate", "message"},
 		MaxIterations: 8,
 		PromptMode:   PromptChannel,
 	},
