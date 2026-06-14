@@ -332,29 +332,49 @@ func (gw *Gateway) handleOrgTerminateAgent(w http.ResponseWriter, r *http.Reques
 		terminatedBy = u.ID
 	}
 
-	// Reparent direct reports to the terminated agent's manager (reparent-to-grandparent).
-	// This runs BEFORE the terminate status update so that if the reparent fails we
-	// still have a consistent tree — the agent is not yet marked terminated.
+	// Reparent direct reports to the terminated agent's manager (reparent-to-grandparent),
+	// then mark the agent terminated — all in one transaction so a reparent failure
+	// aborts the termination and leaves no subordinates pointing at a terminated agent.
 	// If the terminated agent is top-level (manager_id IS NULL), reports become
 	// top-level too, which is the correct outcome.
-	var grandparentID *uuid.UUID
-	_ = gw.db.Pool.QueryRow(r.Context(),
-		`SELECT manager_id FROM agents WHERE id=$1 AND tenant_id=$2`,
-		agentID, defaultTenant).Scan(&grandparentID)
+	tx, err := gw.db.Pool.Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+	defer tx.Rollback(r.Context())
 
-	_, _ = gw.db.Pool.Exec(r.Context(),
+	var grandparentID *uuid.UUID
+	if err := tx.QueryRow(r.Context(),
+		`SELECT manager_id FROM agents WHERE id=$1 AND tenant_id=$2`,
+		agentID, defaultTenant).Scan(&grandparentID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(),
 		`UPDATE agents SET manager_id=$1 WHERE manager_id=$2 AND tenant_id=$3`,
-		grandparentID, agentID, defaultTenant)
+		grandparentID, agentID, defaultTenant); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
 
 	// Sync the overlay (org_hierarchy.reports_to) for all reparented agents in bulk.
-	_, _ = gw.db.Pool.Exec(r.Context(),
-		`UPDATE org_hierarchy SET reports_to=$1 WHERE reports_to=$2::uuid AND tenant_id=$3`,
-		grandparentID, agentID, defaultTenant)
+	if _, err := tx.Exec(r.Context(),
+		`UPDATE org_hierarchy SET reports_to=$1 WHERE reports_to=$2 AND tenant_id=$3`,
+		grandparentID, agentID, defaultTenant); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
 
-	_, err := gw.db.Pool.Exec(r.Context(),
+	if _, err := tx.Exec(r.Context(),
 		`UPDATE agents SET terminated_at=now() WHERE id=$1 AND tenant_id=$2`,
-		agentID, defaultTenant)
-	if err != nil {
+		agentID, defaultTenant); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 		return
 	}
