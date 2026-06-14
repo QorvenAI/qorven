@@ -150,6 +150,10 @@ func (l *Loop) resolveTaskProject(ctx context.Context, taskID string) string {
 		return ""
 	}
 	var projectID *string
+	// Intentionally fail-open on a DB error: an unresolved project just skips the
+	// project-level cap for this run (the agent/department/tenant caps on the same
+	// scope still enforce). Do NOT make this fail-closed — a DB blip must not block
+	// every agent run.
 	_ = l.agentStore.Pool().QueryRow(ctx,
 		`SELECT project_id::text FROM tasks WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
 		taskID, l.tenantID).Scan(&projectID)
