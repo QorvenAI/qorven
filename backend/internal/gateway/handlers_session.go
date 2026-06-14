@@ -157,7 +157,12 @@ func (gw *Gateway) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
-	gw.sessions.Delete(r.Context(), chi.URLParam(r, "id"))
+	sessionID := chi.URLParam(r, "id")
+	if err := gw.authorizeSessionID(r.Context(), sessionID); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
+	gw.sessions.Delete(r.Context(), sessionID)
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 

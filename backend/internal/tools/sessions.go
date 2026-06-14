@@ -81,8 +81,10 @@ func (t *SessionsHistoryTool) Execute(ctx context.Context, args map[string]any) 
 	lastN := 20
 	if n, ok := toInt(args["last_n"]); ok && n > 0 { lastN = n }
 
+	tenantID := TenantIDFromCtx(ctx)
 	var messagesJSON []byte
-	err := t.pool.QueryRow(ctx, `SELECT messages FROM sessions WHERE session_key = $1`, key).Scan(&messagesJSON)
+	err := t.pool.QueryRow(ctx,
+		`SELECT messages FROM sessions WHERE session_key = $1 AND tenant_id = $2`, key, tenantID).Scan(&messagesJSON)
 	if err != nil { return ErrorResult("session not found: " + key) }
 
 	var messages []struct {
@@ -225,13 +227,18 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]any) *Result {
 		jobID, _ := args["job_id"].(string)
 		if jobID == "" { return ErrorResult("job_id required") }
 		enabled := action == "enable"
-		t.pool.Exec(ctx, `UPDATE cron_jobs SET enabled = $1 WHERE id = $2`, enabled, jobID)
+		tenantID := TenantIDFromCtx(ctx)
+		t.pool.Exec(ctx,
+			`UPDATE cron_jobs SET enabled = $1 WHERE id = $2 AND tenant_id = $3 AND agent_id = $4`,
+			enabled, jobID, tenantID, agentID)
 		return TextResult(fmt.Sprintf("job %s %sd", jobID[:8], action))
 
 	case "delete":
 		jobID, _ := args["job_id"].(string)
 		if jobID == "" { return ErrorResult("job_id required") }
-		t.pool.Exec(ctx, `DELETE FROM cron_jobs WHERE id = $1`, jobID)
+		tenantID := TenantIDFromCtx(ctx)
+		t.pool.Exec(ctx, `DELETE FROM cron_jobs WHERE id = $1 AND tenant_id = $2 AND agent_id = $3`,
+			jobID, tenantID, agentID)
 		if OnCronRemove != nil {
 			OnCronRemove(jobID)
 		}
