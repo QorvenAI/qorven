@@ -163,6 +163,14 @@ func (s *Store) DecideProposal(ctx context.Context, tenantID, proposalID, decide
 			_, _ = s.db.Exec(ctx, `UPDATE budget_allocation_lines SET status='rejected' WHERE id=$1::uuid`, l.ID)
 			continue
 		}
+		if l.ProposedMonthlyUSD <= 0 {
+			anyRejected = true
+			_, _ = s.db.Exec(ctx,
+				`UPDATE budget_allocation_lines SET status='rejected', decision_note=$2 WHERE id=$1::uuid`,
+				l.ID,
+				"rejected: zero or negative amount not allowed; remove the cap explicitly to make it unlimited")
+			continue
+		}
 		if applyErr := s.SetBudget(ctx, tenantID, l.ToBudgetScope()); applyErr != nil {
 			anyRejected = true
 			note := "rejected: could not apply allocation"
