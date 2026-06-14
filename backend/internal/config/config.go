@@ -151,7 +151,11 @@ type TLSConfig struct {
 }
 
 type DatabaseConfig struct {
-	DSN string `toml:"dsn"`
+	DSN         string `toml:"dsn"`
+	// AppDBPassword is the password for the least-privilege qorven_app role used by
+	// app tool subprocesses. Set via QORVEN_APP_DB_PASSWORD env var or config file.
+	// When empty, no DB DSN is injected into app subprocesses.
+	AppDBPassword string `toml:"app_db_password"`
 }
 
 type AuthConfig struct {
@@ -228,6 +232,9 @@ func Load(path string) (*Config, error) {
 	// Environment overrides (always win)
 	if v := os.Getenv("QORVEN_POSTGRES_DSN"); v != "" {
 		cfg.Database.DSN = v
+	}
+	if v := os.Getenv("QORVEN_APP_DB_PASSWORD"); v != "" {
+		cfg.Database.AppDBPassword = v
 	}
 	if v := os.Getenv("QORVEN_TOKEN"); v != "" {
 		cfg.Auth.Token = v

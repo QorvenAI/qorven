@@ -9,6 +9,7 @@ package apps
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -57,6 +58,9 @@ func testManifest(toolCmd string, timeout int) Manifest {
 func testApp() App {
 	return App{ID: "app-1", TenantID: "tenant-1", Slug: "test-app", InstallPath: "/tmp"}
 }
+
+// parseURL is a thin wrapper so tests don't need to import net/url directly.
+func parseURL(s string) (*url.URL, error) { return url.Parse(s) }
 
 // --- tests -------------------------------------------------------------------
 
@@ -167,14 +171,37 @@ func TestRegisterTools_DSN_Injected(t *testing.T) {
 	m := &AppManager{
 		toolReg: reg,
 		loaded:  make(map[string]*loadedApp),
-		dsn:     "postgres://user:pass@localhost/db",
+		// appDSN (restricted role) is injected into subprocesses; dsn (superuser) is NOT.
+		appDSN: "postgres://qorven_app:apppass@localhost/db",
 	}
 	m.registerTools(testApp(), testManifest(scriptPath, 0))
 
 	tool := reg.tools["my_tool"]
 	result := tool.Execute(context.Background(), nil)
-	if !strings.Contains(result.ForLLM, "postgres://user:pass@localhost/db") {
-		t.Errorf("DSN not injected, got: %q", result.ForLLM)
+	// The injected DSN must be the restricted app DSN, not the superuser one.
+	if !strings.Contains(result.ForLLM, "postgres://qorven_app:apppass@localhost/db") {
+		t.Errorf("app DSN not injected, got: %q", result.ForLLM)
+	}
+}
+
+func TestRegisterTools_DSN_Withheld_WhenEmpty(t *testing.T) {
+	scriptPath := t.TempDir() + "/env.sh"
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\necho \"DSN=$QORVEN_DB_DSN\""), 0755)
+
+	reg := &fakeToolReg{}
+	m := &AppManager{
+		toolReg: reg,
+		loaded:  make(map[string]*loadedApp),
+		// appDSN empty — no DB DSN should appear in subprocess env.
+		appDSN: "",
+	}
+	m.registerTools(testApp(), testManifest(scriptPath, 0))
+
+	tool := reg.tools["my_tool"]
+	result := tool.Execute(context.Background(), nil)
+	// QORVEN_DB_DSN must not be set — output should show empty value.
+	if strings.Contains(result.ForLLM, "postgres://") {
+		t.Errorf("unexpected DSN in subprocess env when appDSN is empty, got: %q", result.ForLLM)
 	}
 }
 
@@ -286,5 +313,84 @@ func TestRunTool_Timeout(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true on timeout")
+	}
+}
+
+// --- buildAppDSN pure-function tests (no DB required) ---
+
+func TestBuildAppDSN_SwapsUserAndPassword(t *testing.T) {
+	superDSN := "postgres://super:supersecret@localhost:5432/qorven_dev"
+	appDSN, err := buildAppDSN(superDSN, "apppassword")
+	if err != nil {
+		t.Fatalf("buildAppDSN error: %v", err)
+	}
+	// Must contain qorven_app as the user.
+	if !strings.Contains(appDSN, "qorven_app") {
+		t.Errorf("expected qorven_app user in DSN, got: %q", appDSN)
+	}
+	// Must contain the app password.
+	if !strings.Contains(appDSN, "apppassword") {
+		t.Errorf("expected app password in DSN, got: %q", appDSN)
+	}
+	// Must NOT contain the superuser password.
+	if strings.Contains(appDSN, "supersecret") {
+		t.Errorf("superuser password must not appear in app DSN, got: %q", appDSN)
+	}
+	// Must NOT be equal to the superuser DSN.
+	if appDSN == superDSN {
+		t.Errorf("app DSN must differ from superuser DSN, got: %q", appDSN)
+	}
+	// Host, port, and database must be preserved.
+	if !strings.Contains(appDSN, "localhost:5432") {
+		t.Errorf("expected host:port in DSN, got: %q", appDSN)
+	}
+	if !strings.Contains(appDSN, "qorven_dev") {
+		t.Errorf("expected database name in DSN, got: %q", appDSN)
+	}
+}
+
+func TestBuildAppDSN_SpecialCharsInPassword(t *testing.T) {
+	superDSN := "postgres://super:supersecret@localhost:5432/qorven_dev"
+	// Password contains characters that must be percent-encoded in a URL.
+	appDSN, err := buildAppDSN(superDSN, "p@ss!w0rd#%")
+	if err != nil {
+		t.Fatalf("buildAppDSN error: %v", err)
+	}
+	// The raw password must not appear literally (it must be percent-encoded).
+	if strings.Contains(appDSN, "p@ss!w0rd#%") {
+		t.Errorf("password should be percent-encoded in DSN, got: %q", appDSN)
+	}
+	// The DSN must still be parseable and round-trip back to the original password.
+	u, err2 := parseURL(appDSN)
+	if err2 != nil {
+		t.Fatalf("resulting DSN not parseable: %v", err2)
+	}
+	pw, _ := u.User.Password()
+	if pw != "p@ss!w0rd#%" {
+		t.Errorf("password round-trip: got %q, want %q", pw, "p@ss!w0rd#%")
+	}
+}
+
+func TestBuildAppDSN_InvalidScheme(t *testing.T) {
+	_, err := buildAppDSN("mysql://root:pass@localhost/db", "pw")
+	if err == nil {
+		t.Error("expected error for non-postgres scheme")
+	}
+}
+
+func TestDbNameFromConnStr(t *testing.T) {
+	cases := []struct {
+		connStr string
+		want    string
+	}{
+		{"postgres://u:p@host:5432/mydb", "mydb"},
+		{"postgres://u:p@host:5432/mydb?sslmode=disable", "mydb"},
+		{"postgresql://u:p@host/otherdb", "otherdb"},
+	}
+	for _, tc := range cases {
+		got := dbNameFromConnStr(tc.connStr)
+		if got != tc.want {
+			t.Errorf("dbNameFromConnStr(%q) = %q, want %q", tc.connStr, got, tc.want)
+		}
 	}
 }

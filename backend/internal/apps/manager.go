@@ -84,7 +84,8 @@ type AppManager struct {
 	pluginMgr  *plugin.Manager
 	pool       *pgxpool.Pool
 	tenantID   string
-	dsn        string // extracted from pool at construction for env injection
+	dsn        string // superuser DSN — used ONLY for manager's own privileged ops (migrations, pool)
+	appDSN     string // least-privilege DSN for qorven_app role — injected into subprocesses; "" = withhold
 	credLookup func(tenantID, slug string) string
 
 	mu     sync.RWMutex
@@ -101,10 +102,19 @@ type loadedApp struct {
 // ("00000000-0000-0000-0000-000000000001") used for all DB operations.
 // credLookup is called to retrieve a credential key for a connector app at
 // tool registration and execution time; it may be nil (no injection).
-func NewAppManager(store *AppStore, toolReg *tools.Registry, pluginMgr *plugin.Manager, pool *pgxpool.Pool, tenantID string, credLookup func(tenantID, slug string) string) *AppManager {
+// appPassword is the password for the least-privilege qorven_app DB role that
+// app subprocesses receive. When empty, no DB DSN is injected into subprocesses.
+func NewAppManager(store *AppStore, toolReg *tools.Registry, pluginMgr *plugin.Manager, pool *pgxpool.Pool, tenantID string, credLookup func(tenantID, slug string) string, appPassword string) *AppManager {
 	var dsn string
 	if pool != nil {
 		dsn = pool.Config().ConnString()
+	}
+	// Provision the restricted role and build the app-subprocess DSN.
+	// If provisioning fails or appPassword is empty, appDSN stays "" and
+	// subprocesses get NO DB access at all — never the superuser DSN.
+	var appDSN string
+	if pool != nil && dsn != "" {
+		appDSN = ensureAppRole(context.Background(), pool, dsn, appPassword)
 	}
 	return &AppManager{
 		store:      store,
@@ -113,6 +123,7 @@ func NewAppManager(store *AppStore, toolReg *tools.Registry, pluginMgr *plugin.M
 		pool:       pool,
 		tenantID:   tenantID,
 		dsn:        dsn,
+		appDSN:     appDSN,
 		credLookup: credLookup,
 		loaded:     make(map[string]*loadedApp),
 	}
@@ -465,7 +476,7 @@ func (m *AppManager) registerTools(a App, manifest Manifest) []string {
 		if timeoutSec <= 0 {
 			timeoutSec = 30
 		}
-		dsn := m.dsn
+		appDSN := m.appDSN
 		t := &appTool{
 			name:        td.Name,
 			description: td.Description,
@@ -484,7 +495,11 @@ func (m *AppManager) registerTools(a App, manifest Manifest) []string {
 					"QORVEN_TENANT_ID=" + a.TenantID,
 					"QORVEN_APP_ID=" + a.ID,
 					"QORVEN_AGENT_ID=" + tools.AgentIDFromCtx(ctx),
-					"QORVEN_DB_DSN=" + dsn,
+				}
+				// Inject the restricted app DSN only when available.
+				// Never inject the superuser DSN.
+				if appDSN != "" {
+					toolEnv = append(toolEnv, "QORVEN_DB_DSN="+appDSN)
 				}
 				for k, v := range a.Config {
 					envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
@@ -708,8 +723,10 @@ func (m *AppManager) runTool(ctx context.Context, slug, toolName string, args ma
 	// Public-bridge tools get the DB DSN ONLY if the app explicitly declared the
 	// db_write permission (opt-in by the author). Connector credentials are
 	// NEVER given to public tools. Internal callers always get the DSN.
-	if !public || HasPermission(la.manifest, "db_write") {
-		baseEnv = append(baseEnv, "QORVEN_DB_DSN="+m.dsn)
+	// In all cases we inject the restricted app DSN (never the superuser DSN);
+	// if no app DSN is available the variable is omitted entirely.
+	if (!public || HasPermission(la.manifest, "db_write")) && m.appDSN != "" {
+		baseEnv = append(baseEnv, "QORVEN_DB_DSN="+m.appDSN)
 	}
 	for k, v := range la.app.Config {
 		envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
