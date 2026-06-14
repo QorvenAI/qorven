@@ -135,6 +135,8 @@ func TestRoleToolNames_NoPhantoms(t *testing.T) {
 		"grep":        true,
 		"apply_patch": true,
 		"undo":        true,
+		// multi-edit tool (multi_edit.go)
+		"multi_edit": true,
 		// intake tools (gateway/intake_tools.go)
 		"ask_followup_question": true,
 		"produce_project_brief": true,

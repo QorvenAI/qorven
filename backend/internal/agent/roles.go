@@ -62,10 +62,10 @@ var roleRegistry = map[string]AgentRole{
 		MaxIterations: 25,
 	},
 
-	// researcher: web-focused, no code execution, no file writes.
+	// researcher: web-focused, no code execution, no file writes or mutations.
 	"researcher": {
 		AgentKey:    "researcher",
-		ToolsDenied: []string{"exec", "write_file"},
+		ToolsDenied: []string{"exec", "write_file", "apply_patch", "edit", "multi_edit"},
 		MaxIterations: 12,
 	},
 
