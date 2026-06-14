@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	socialqor "github.com/qorvenai/qorven/internal/qor/social"
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/drive"
@@ -541,6 +542,23 @@ func (gw *Gateway) registerTools() {
 			if orgLevel == "l1" || orgLevel == "l2" {
 				_, _ = gw.db.Pool.Exec(ctx,
 					`UPDATE agents SET can_delegate=true WHERE id=$1`, a.ID)
+			}
+			// Write org_hierarchy overlay so delegation checks have a row immediately.
+			// Non-fatal: the migration-059 backfill recovers on the next deploy.
+			if gw.db != nil && gw.orgChartStore != nil {
+				if tenantUID, tErr := uuid.Parse(defaultTenant); tErr == nil {
+					if agentUID, aErr := uuid.Parse(a.ID); aErr == nil {
+						var mgr *uuid.UUID
+						if managerAgentID != "" {
+							if mid, parseErr := uuid.Parse(managerAgentID); parseErr == nil {
+								mgr = &mid
+							}
+						}
+						if syncErr := gw.orgChartStore.SyncFromAgent(ctx, tenantUID, agentUID, mgr, orgLevel, orgRole, monthlyBudgetUSD); syncErr != nil {
+							slog.Warn("hire.org_hierarchy_sync.failed", "agent_id", a.ID, "err", syncErr)
+						}
+					}
+				}
 			}
 			// Seed archetype soul + defaults
 			if gw.bundleStore != nil {

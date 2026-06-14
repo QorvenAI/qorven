@@ -114,6 +114,33 @@ func (s *OrgChartStore) Upsert(ctx context.Context, node OrgNode) error {
 	return err
 }
 
+// SyncFromAgent writes (or updates) the org_hierarchy overlay row for a single agent
+// using the values already stored on the agents table. Call this after every hire or
+// manager-reassignment so the overlay never drifts from the live reporting tree.
+//
+// orgLevelStr is the TEXT value stored in agents.org_level ("l1", "l2", "l3", "").
+// managerID may be nil for top-of-tree agents (no reports_to).
+func (s *OrgChartStore) SyncFromAgent(ctx context.Context, tenantID, agentID uuid.UUID, managerID *uuid.UUID, orgLevelStr, orgRole string, budgetUSD float64) error {
+	orgLevel := 0
+	switch orgLevelStr {
+	case "l1":
+		orgLevel = 1
+	case "l2":
+		orgLevel = 2
+	case "l3":
+		orgLevel = 3
+	}
+	return s.Upsert(ctx, OrgNode{
+		TenantID:      tenantID,
+		AgentID:       agentID,
+		ReportsTo:     managerID,
+		OrgLevel:      orgLevel,
+		OrgRole:       orgRole,
+		CanDelegateTo: []uuid.UUID{},
+		MaxBudgetUSD:  budgetUSD,
+	})
+}
+
 // ValidateDelegation checks that delegator can delegate to delegatee per org hierarchy rules.
 func (s *OrgChartStore) ValidateDelegation(ctx context.Context, tenantID, delegatorID, delegateeID uuid.UUID) error {
 	if s.db == nil {
