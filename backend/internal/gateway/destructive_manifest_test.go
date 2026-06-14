@@ -126,24 +126,69 @@ func registerDestructiveToolsForTest(t *testing.T, gw *Gateway) {
 	if gw.toolReg == nil {
 		gw.toolReg = tools.NewRegistry()
 	}
-	// gh_push_file — wrapped, mirroring gateway.go:~1274.
 	tokenGetter := func() string { return "" }
+	workspace := "/tmp/qorven-workspace-test"
+
+	// gh_push_file
 	gw.toolReg.Register(permissions.WrapLazy(
 		func() *permissions.Gate { return gw.permissionGate },
 		tools.NewGhPushFileToolWithToken(tokenGetter),
 		permissions.GatedToolOptions{
-			Reason:      "writes a file to a user-owned GitHub repository",
+			Reason:      "Writes a file to a user-owned GitHub repository",
 			RequestedBy: "agent",
 		},
 	))
-	// Other destructive tools that are currently NOT yet wrapped at
-	// the gateway bootstrap (exec, apply_patch, write_file, undo,
-	// gh_merge_pr) are intentionally NOT registered here. When they
-	// are wired in gateway.go with permissions.WrapLazy, they'll show
-	// up in the real toolReg and the main test above will enforce
-	// them. Until then, the IsDestructive list in the manifest is the
-	// tripwire — adding a new tool to the list without wrapping it in
-	// production still fails CI the moment the bootstrap registers it.
+	// gh_merge_pr
+	gw.toolReg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewGhMergePRToolWithToken(tokenGetter),
+		permissions.GatedToolOptions{
+			Reason:      "Merge a pull request",
+			RequestedBy: "agent",
+		},
+	))
+	// exec
+	gw.toolReg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewExecTool(workspace, true),
+		permissions.GatedToolOptions{
+			Reason:      "Run a shell command on the host",
+			RequestedBy: "agent",
+		},
+	))
+	// write_file
+	writeTool := tools.NewWriteFileTool(workspace)
+	gw.toolReg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		writeTool,
+		permissions.GatedToolOptions{
+			Reason:      "Write a file to the workspace",
+			RequestedBy: "agent",
+		},
+	))
+	// apply_patch
+	fileHistory := tools.NewFileHistory()
+	gw.toolReg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewApplyPatchTool(workspace, fileHistory),
+		permissions.GatedToolOptions{
+			Reason:      "Apply a code patch to workspace files",
+			RequestedBy: "agent",
+		},
+	))
+	// undo
+	gw.toolReg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewUndoTool(fileHistory),
+		permissions.GatedToolOptions{
+			Reason:      "Undo a previous file change",
+			RequestedBy: "agent",
+		},
+	))
+	// cron is intentionally NOT wrapped: it runs in headless/unattended
+	// channel sessions where no human approver is present. The gate
+	// fails closed (returns "gate not configured") when the gate is nil,
+	// which would deadlock autonomous scheduling entirely.
 }
 
 // stubBareTool is an unwrapped Tool used for the regression test.

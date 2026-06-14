@@ -50,7 +50,14 @@ func (gw *Gateway) registerTools() {
 	reg.Register(readTool)
 	writeTool := tools.NewWriteFileTool(workspace)
 	writeTool.AllowPaths(dataDir, "/tmp")
-	reg.Register(writeTool)
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		writeTool,
+		permissions.GatedToolOptions{
+			Reason:      "Write a file to the workspace",
+			RequestedBy: "agent",
+		},
+	))
 	listTool := tools.NewListFilesTool(workspace)
 	listTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(listTool)
@@ -59,7 +66,14 @@ func (gw *Gateway) registerTools() {
 	reg.Register(editTool)
 
 	// Runtime
-	reg.Register(tools.NewExecTool(workspace, true))
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewExecTool(workspace, true),
+		permissions.GatedToolOptions{
+			Reason:      "Run a shell command on the host",
+			RequestedBy: "agent",
+		},
+	))
 	// System operations — structured tool for privileged agent roles (sysops).
 	// Only executes when the tool context has AllowElevated set (see loop.go).
 	reg.Register(tools.NewSystemOpsTool())
@@ -1720,7 +1734,14 @@ func (gw *Gateway) registerTools() {
 		reg.Register(tools.NewGhSubmitReviewToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhPostCommentToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhListPRChecksToolWithToken(ghGetToken))
-		reg.Register(tools.NewGhMergePRToolWithToken(ghGetToken))
+		reg.Register(permissions.WrapLazy(
+			func() *permissions.Gate { return gw.permissionGate },
+			tools.NewGhMergePRToolWithToken(ghGetToken),
+			permissions.GatedToolOptions{
+				Reason:      "Merge a pull request",
+				RequestedBy: "agent",
+			},
+		))
 		reg.Register(tools.NewGhCreateRepoToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhCreateReleaseToolWithToken(ghGetToken))
 
@@ -1946,8 +1967,22 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewGlobTool(workspace))
 	reg.Register(tools.NewGrepTool(workspace))
 	reg.Register(tools.NewDiagnosticsTool())
-	reg.Register(tools.NewApplyPatchTool(workspace, fileHistory))
-	reg.Register(tools.NewUndoTool(fileHistory))
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewApplyPatchTool(workspace, fileHistory),
+		permissions.GatedToolOptions{
+			Reason:      "Apply a code patch to workspace files",
+			RequestedBy: "agent",
+		},
+	))
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewUndoTool(fileHistory),
+		permissions.GatedToolOptions{
+			Reason:      "Undo a previous file change",
+			RequestedBy: "agent",
+		},
+	))
 	reg.Register(tools.NewProjectManagerTool(projectReg))
 	slog.Info("coding tools registered", "tools", "glob,grep,diagnostics,apply_patch,undo,project_manager")
 
