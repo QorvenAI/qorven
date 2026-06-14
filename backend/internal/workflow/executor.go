@@ -327,10 +327,13 @@ func (e *Executor) execCollect(_ context.Context, step Step, vars map[string]any
 	}
 	if step.SaveAs != "" {
 		vars[step.SaveAs] = collected
-	} else {
-		for k, v := range collected {
-			vars[k] = v
-		}
+		// Return an empty result string: the run loop writes result into
+		// vars[SaveAs] when result != "", which would clobber the map we
+		// just stored. We've already done the SaveAs write ourselves.
+		return "", "", nil
+	}
+	for k, v := range collected {
+		vars[k] = v
 	}
 	return fmt.Sprintf("Collected %d field(s)", len(collected)), "", nil
 }

@@ -6,9 +6,38 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+// TestRun_CollectSurvivesRunLoop is the regression for the run-loop overwrite:
+// execCollect stores a map under SaveAs, and the run loop must NOT clobber it
+// with the step's string result. Exercises the real Run() path (not executeStep
+// directly) so the loop's SaveAs write is in play.
+func TestRun_CollectSurvivesRunLoop(t *testing.T) {
+	e := &Executor{store: NewStore(nil), tenantID: "t1"}
+	steps := []Step{{ID: "s1", Type: StepCollect, Fields: []string{"name", "email"}, SaveAs: "collected"}}
+	raw, _ := json.Marshal(steps)
+	wf := &Workflow{ID: "wf1", TenantID: "t1", Steps: raw}
+	run, err := e.Run(context.Background(), wf, map[string]any{"name": "Ada", "email": "ada@x.com"})
+	if err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+	// Run persists the final vars as JSON in Run.Context — unmarshal and confirm
+	// "collected" is still the captured map, not the step's string result.
+	var vars map[string]any
+	if err := json.Unmarshal(run.Context, &vars); err != nil {
+		t.Fatalf("unmarshal run context: %v", err)
+	}
+	got, ok := vars["collected"].(map[string]any)
+	if !ok {
+		t.Fatalf("collected was clobbered — not a map: %T = %v", vars["collected"], vars["collected"])
+	}
+	if got["name"] != "Ada" || got["email"] != "ada@x.com" {
+		t.Fatalf("collect lost fields after Run: %+v", got)
+	}
+}
 
 func TestExecCollect_CapturesFields(t *testing.T) {
 	e := &Executor{}
