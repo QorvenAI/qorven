@@ -89,6 +89,22 @@
   --graph-node-pr:         #0284c7;   /* sky-600    */
   --graph-node-file:       #374151;   /* gray-700   */
   --graph-edge:            #a1a1aa;   /* zinc-400   */
+
+  /* workflow step-type node colors — consumed by workflows/[id]/client.tsx */
+  --wf-step-prompt:        #8b5cf6;   /* violet-500  */
+  --wf-step-tool:          #06b6d4;   /* cyan-500    */
+  --wf-step-condition:     #f59e0b;   /* amber-500   */
+  --wf-step-collect:       #10b981;   /* emerald-500 */
+  --wf-step-api:           #ef4444;   /* red-500     */
+  --wf-step-delegate:      #a855f7;   /* purple-500  */
+  --wf-step-notify:        #ec4899;   /* pink-500    */
+  --wf-step-wait:          #64748b;   /* slate-500   */
+  --wf-step-default:       #64748b;   /* slate-500   */
+  --wf-edge-default:       #71717a;   /* zinc-500    */
+  --wf-edge-condition:     #f59e0b;   /* amber-500   */
+  --wf-bg:                 #52525b;   /* zinc-600    */
+  --wf-label-fill:         #18181b;   /* zinc-950    */
+  --wf-label-text:         #a1a1aa;   /* zinc-400    */
 }
 
 .dark {
@@ -153,6 +169,22 @@
   --graph-node-pr:         #0ea5e9;   /* sky-500    */
   --graph-node-file:       #9ca3af;   /* gray-400   */
   --graph-edge:            #52525b;   /* zinc-600   */
+
+  /* workflow step-type node colors — dark mode (same hue, slightly brighter) */
+  --wf-step-prompt:        #a78bfa;   /* violet-400  */
+  --wf-step-tool:          #22d3ee;   /* cyan-400    */
+  --wf-step-condition:     #fbbf24;   /* amber-400   */
+  --wf-step-collect:       #34d399;   /* emerald-400 */
+  --wf-step-api:           #f87171;   /* red-400     */
+  --wf-step-delegate:      #c084fc;   /* purple-400  */
+  --wf-step-notify:        #f472b6;   /* pink-400    */
+  --wf-step-wait:          #94a3b8;   /* slate-400   */
+  --wf-step-default:       #94a3b8;   /* slate-400   */
+  --wf-edge-default:       #a1a1aa;   /* zinc-400    */
+  --wf-edge-condition:     #fbbf24;   /* amber-400   */
+  --wf-bg:                 #3f3f46;   /* zinc-700    */
+  --wf-label-fill:         #09090b;   /* zinc-950    */
+  --wf-label-text:         #d4d4d8;   /* zinc-300    */
 }
 
 /** Theme presets — full palettes selectable in Settings → Appearance.
