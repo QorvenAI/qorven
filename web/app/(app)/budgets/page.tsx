@@ -291,6 +291,111 @@ function ReportsCard({ eff }: { eff: Effective | null }) {
   );
 }
 
+// ─── Project caps ───────────────────────────────────────────────────────────────
+
+interface Project {
+  id: string;
+  tenant_id: string;
+  name: string;
+  status: string;
+}
+
+function ProjectCapsCard() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [projectId, setProjectId] = useState('');
+  const [monthlyCap, setMonthlyCap] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = (await budgetsApi.listProjects()) as { projects: Project[] };
+      setProjects(res.projects ?? []);
+      const first = res.projects?.[0];
+      if (first && !projectId) {
+        setProjectId(first.id);
+      }
+    } catch { /* no projects yet */ }
+    finally { setLoading(false); }
+  }, [projectId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    if (!projectId) { toast.error('Select a project'); return; }
+    const n = parseFloat(monthlyCap);
+    if (monthlyCap.trim() && (isNaN(n) || n < 0)) {
+      toast.error('Enter a valid non-negative amount');
+      return;
+    }
+    const monthly_usd = monthlyCap.trim() ? n : undefined;
+    setSaving(true);
+    try {
+      await budgetsApi.setScope({
+        scope: 'project',
+        scope_id: projectId,
+        monthly_usd,
+        allocation_mode: 'fresh',
+      });
+      toast.success('Project cap saved');
+      setMonthlyCap('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save project cap');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-4">
+      <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Project caps</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Set an enforced monthly spend cap for a specific project.
+      </p>
+
+      {loading ? (
+        <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading projects…
+        </div>
+      ) : projects.length === 0 ? (
+        <p className="mt-4 text-sm text-muted-foreground">No projects found. Create a project first.</p>
+      ) : (
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Project</label>
+            <select
+              value={projectId}
+              onChange={e => setProjectId(e.target.value)}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Monthly cap ($)</label>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              value={monthlyCap}
+              onChange={e => setMonthlyCap(e.target.value)}
+              placeholder="e.g. 50.00 (blank = remove cap)"
+              className="w-52"
+            />
+          </div>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Save cap
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────────
 
 export default function BudgetsPage() {
@@ -332,7 +437,10 @@ export default function BudgetsPage() {
       {/* 1. CFO authority */}
       <CfoAuthorityCard />
 
-      {/* 2. Pending proposals */}
+      {/* 2. Project caps */}
+      <ProjectCapsCard />
+
+      {/* 4. Pending proposals */}
       <div className="space-y-3">
         <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium px-1">Pending proposals</p>
         {loading && proposals.length === 0 ? (
@@ -348,7 +456,7 @@ export default function BudgetsPage() {
         )}
       </div>
 
-      {/* 3. Reports */}
+      {/* 5. Reports */}
       <ReportsCard eff={eff} />
       </div>
     </PageShell>

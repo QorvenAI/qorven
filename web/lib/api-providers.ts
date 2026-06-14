@@ -139,6 +139,23 @@ export const budgets = {
       body: JSON.stringify({ scope: 'tenant', ...body }),
     }),
 
+  // Set a budget for any scope (department, project, agent, etc.).
+  setScope: (body: {
+    scope: string;
+    scope_id?: string;
+    monthly_usd?: number;
+    allocation_mode?: string;
+    allow_zero?: boolean;
+  }) =>
+    request<{ status: string }>('/budgets/scope', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // List projects for project-cap management.
+  listProjects: () =>
+    request<{ projects: Array<{ id: string; tenant_id: string; name: string; status: string }> }>('/budgets/projects'),
+
   // Declare a provider key's funding type + prepaid balance.
   setKeyFunding: (keyId: string, body: { budget_type: string; balance_usd?: number }) =>
     request<{ status: string }>(`/providers/keys/${keyId}/funding`, {

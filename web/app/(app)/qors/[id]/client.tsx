@@ -814,7 +814,7 @@ function BudgetSection({ soul, onSaved }: { soul: Soul; onSaved: (s: Soul) => vo
 
       <div className="grid gap-4 sm:grid-cols-2 items-end">
         <div>
-          <label className="text-xs text-muted-foreground">Monthly budget (USD)</label>
+          <label className="text-xs text-muted-foreground">Session credit (USD)</label>
           <div className="relative mt-1">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
             <input
@@ -827,7 +827,7 @@ function BudgetSection({ soul, onSaved }: { soul: Soul; onSaved: (s: Soul) => vo
               className="qr-input pl-6"
             />
           </div>
-          <p className="mt-1 text-2xs text-muted-foreground">Leave blank for no limit.</p>
+          <p className="mt-1 text-2xs text-muted-foreground">Per-session credit limit for this agent. Separate from the enforced monthly cap set in Gateway Budgets.</p>
         </div>
         <button
           onClick={handleSave}
