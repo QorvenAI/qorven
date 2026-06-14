@@ -84,8 +84,14 @@ type AppManager struct {
 	pluginMgr  *plugin.Manager
 	pool       *pgxpool.Pool
 	tenantID   string
-	dsn        string // extracted from pool at construction for env injection
+	dsn        string // superuser DSN — used ONLY for manager's own privileged ops (migrations, pool)
+	appDSN     string // least-privilege DSN for qorven_app role — injected into subprocesses; "" = withhold
 	credLookup func(tenantID, slug string) string
+
+	// allowedInstallRoots is the set of parent directories from which apps may
+	// be installed. An empty slice means NO install is allowed (fail-closed).
+	// Set via SetAllowedInstallRoots after construction before any installs.
+	allowedInstallRoots []string
 
 	mu     sync.RWMutex
 	loaded map[string]*loadedApp // slug → live state
@@ -101,10 +107,19 @@ type loadedApp struct {
 // ("00000000-0000-0000-0000-000000000001") used for all DB operations.
 // credLookup is called to retrieve a credential key for a connector app at
 // tool registration and execution time; it may be nil (no injection).
-func NewAppManager(store *AppStore, toolReg *tools.Registry, pluginMgr *plugin.Manager, pool *pgxpool.Pool, tenantID string, credLookup func(tenantID, slug string) string) *AppManager {
+// appPassword is the password for the least-privilege qorven_app DB role that
+// app subprocesses receive. When empty, no DB DSN is injected into subprocesses.
+func NewAppManager(store *AppStore, toolReg *tools.Registry, pluginMgr *plugin.Manager, pool *pgxpool.Pool, tenantID string, credLookup func(tenantID, slug string) string, appPassword string) *AppManager {
 	var dsn string
 	if pool != nil {
 		dsn = pool.Config().ConnString()
+	}
+	// Provision the restricted role and build the app-subprocess DSN.
+	// If provisioning fails or appPassword is empty, appDSN stays "" and
+	// subprocesses get NO DB access at all — never the superuser DSN.
+	var appDSN string
+	if pool != nil && dsn != "" {
+		appDSN = ensureAppRole(context.Background(), pool, dsn, appPassword)
 	}
 	return &AppManager{
 		store:      store,
@@ -113,6 +128,7 @@ func NewAppManager(store *AppStore, toolReg *tools.Registry, pluginMgr *plugin.M
 		pool:       pool,
 		tenantID:   tenantID,
 		dsn:        dsn,
+		appDSN:     appDSN,
 		credLookup: credLookup,
 		loaded:     make(map[string]*loadedApp),
 	}
@@ -155,21 +171,42 @@ func (m *AppManager) LoadAll(ctx context.Context, agentID, teamID string) error 
 
 // Install parses app.yaml from manifestDir, runs migrations, registers tools/hooks,
 // and creates the DB row. Returns the created App.
-func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, error) {
+// installedByUserID is the UUID of the authenticated admin who triggered the
+// install; it is recorded in the apps.installed_by column for provenance.
+// Pass "" when called from non-HTTP contexts (e.g. agent tool invocations).
+func (m *AppManager) Install(ctx context.Context, manifestDir string, installedByUserID string) (*App, error) {
 	absDir, err := filepath.Abs(manifestDir)
 	if err != nil {
 		return nil, err
 	}
+
+	// Allowlist check — fail CLOSED: reject unless the path is explicitly allowed.
+	// When allowedInstallRoots is empty (no roots configured), ALL installs are
+	// rejected. Production startup always calls SetAllowedInstallRoots before
+	// any install; tests must do the same or use AllowAnyInstallPathForTesting.
+	m.mu.RLock()
+	roots := m.allowedInstallRoots
+	m.mu.RUnlock()
+	if !isAllowedInstallPath(absDir, roots) {
+		return nil, ErrInstallPathNotPermitted
+	}
+
 	manifest, err := LoadManifest(absDir)
 	if err != nil {
 		return nil, err
 	}
-	// Run app-owned migrations if db_write permission granted.
+	// Run app-owned migrations if db_write permission granted, then grant the
+	// qorven_app role write access to any NEW tables the migrations created.
+	// We snapshot the table set before and after so we grant only on the app's
+	// own tables — never on Qorven core tables that already existed.
 	if HasPermission(manifest, "db_write") {
 		migrDir := filepath.Join(absDir, manifest.MigrationsDir)
+		tablesBefore := publicTableNames(ctx, m.pool)
 		if err := RunAppMigrations(ctx, m.pool, manifest.Slug, m.tenantID, migrDir); err != nil {
 			return nil, fmt.Errorf("app migrations: %w", err)
 		}
+		tablesAfter := publicTableNames(ctx, m.pool)
+		grantAppWriteOnNewTables(ctx, m.pool, manifest.Slug, tablesBefore, tablesAfter)
 	}
 
 	scope := manifest.Scope
@@ -201,6 +238,21 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, err
 		return nil, fmt.Errorf("create app row: %w", err)
 	}
 
+	// Record install provenance (installed_by + source_path). These columns are
+	// nullable so we do a best-effort UPDATE; failure is logged but not fatal.
+	if m.pool != nil {
+		var installedBy *string
+		if installedByUserID != "" {
+			installedBy = &installedByUserID
+		}
+		if _, pErr := m.pool.Exec(ctx,
+			`UPDATE apps SET installed_by=$1, source_path=$2 WHERE id=$3`,
+			installedBy, absDir, created.ID,
+		); pErr != nil {
+			slog.Warn("app.install.provenance_failed", "app_id", created.ID, "err", pErr)
+		}
+	}
+
 	toolNames := m.registerTools(created, manifest)
 	m.registerHooks(created, manifest)
 
@@ -214,7 +266,7 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string) (*App, err
 			"slug":   created.Slug,
 		})
 	}
-	slog.Info("app.installed", "slug", created.Slug, "path", absDir)
+	slog.Info("app.installed", "slug", created.Slug, "path", absDir, "installed_by", installedByUserID)
 	return &created, nil
 }
 
@@ -413,6 +465,16 @@ func (m *AppManager) FrontendManifests() []AppFrontendEntry {
 // Store returns the underlying AppStore for direct CRUD from gateway handlers.
 func (m *AppManager) Store() *AppStore { return m.store }
 
+// SetAllowedInstallRoots replaces the install-path allowlist. Each root must be
+// an absolute directory path; sub-directories of those roots are also permitted.
+// Call this after construction (e.g. from gateway startup) before any installs.
+// Passing an empty slice means NO install will be permitted (fail-closed default).
+func (m *AppManager) SetAllowedInstallRoots(roots []string) {
+	m.mu.Lock()
+	m.allowedInstallRoots = roots
+	m.mu.Unlock()
+}
+
 // Reset clears the in-memory loaded map (called after factory reset so
 // the next LoadAll starts from a clean DB).
 func (m *AppManager) Reset() {
@@ -465,7 +527,7 @@ func (m *AppManager) registerTools(a App, manifest Manifest) []string {
 		if timeoutSec <= 0 {
 			timeoutSec = 30
 		}
-		dsn := m.dsn
+		appDSN := m.appDSN
 		t := &appTool{
 			name:        td.Name,
 			description: td.Description,
@@ -484,7 +546,11 @@ func (m *AppManager) registerTools(a App, manifest Manifest) []string {
 					"QORVEN_TENANT_ID=" + a.TenantID,
 					"QORVEN_APP_ID=" + a.ID,
 					"QORVEN_AGENT_ID=" + tools.AgentIDFromCtx(ctx),
-					"QORVEN_DB_DSN=" + dsn,
+				}
+				// Inject the restricted app DSN only when available.
+				// Never inject the superuser DSN.
+				if appDSN != "" {
+					toolEnv = append(toolEnv, "QORVEN_DB_DSN="+appDSN)
 				}
 				for k, v := range a.Config {
 					envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))
@@ -708,8 +774,10 @@ func (m *AppManager) runTool(ctx context.Context, slug, toolName string, args ma
 	// Public-bridge tools get the DB DSN ONLY if the app explicitly declared the
 	// db_write permission (opt-in by the author). Connector credentials are
 	// NEVER given to public tools. Internal callers always get the DSN.
-	if !public || HasPermission(la.manifest, "db_write") {
-		baseEnv = append(baseEnv, "QORVEN_DB_DSN="+m.dsn)
+	// In all cases we inject the restricted app DSN (never the superuser DSN);
+	// if no app DSN is available the variable is omitted entirely.
+	if (!public || HasPermission(la.manifest, "db_write")) && m.appDSN != "" {
+		baseEnv = append(baseEnv, "QORVEN_DB_DSN="+m.appDSN)
 	}
 	for k, v := range la.app.Config {
 		envKey := "QORVEN_APP_" + strings.ToUpper(strings.ReplaceAll(k, "-", "_"))

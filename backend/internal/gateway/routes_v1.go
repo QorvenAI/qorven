@@ -211,8 +211,6 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Delete("/gateway/cache", gw.handleGatewayCacheFlush)
 		r.Get("/gateway/pricing", gw.handleGatewayPricingList)
 		r.Get("/gateway/pricing/gaps", gw.handleGatewayPricingGaps)
-		r.Post("/gateway/pricing/backfill", gw.handleGatewayPricingBackfill)
-		r.Put("/gateway/pricing/{modelId}", gw.handleGatewayPricingSet)
 
 		// OAuth provider flows (Claude Code, GitHub Copilot, Google Vertex AI)
 		r.Get("/providers/oauth", gw.handleOAuthProvidersList)
@@ -225,10 +223,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/providers/oauth/{provider}/app", gw.handleOAuthProviderAppSet)
 		r.Delete("/providers/oauth/{provider}/app", gw.handleOAuthProviderAppDelete)
 		r.Get("/providers", gw.handleListProviders)
-		r.Post("/providers", gw.handleCreateProviderDB)
 		r.Get("/providers/{id}", gw.handleGetProvider)
-		r.Put("/providers/{id}", gw.handleUpdateProvider)
-		r.Delete("/providers/{id}", gw.handleDeleteProvider)
 		r.Post("/providers/{id}/verify", gw.handleVerifyProvider)
 		r.Patch("/providers/{id}/capabilities", gw.handleUpdateProviderCapabilities)
 		r.Post("/providers/test", gw.handleTestProvider)
@@ -237,19 +232,11 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/providers/model-registry", gw.handleModelRegistry)
 		r.Post("/providers/probe-models", gw.handleProbeModels)
 		r.Get("/providers/{provider_id}/keys", gw.handleListProviderKeys)
-		r.Post("/providers/{provider_id}/keys", gw.handleAddProviderKey)
 		r.Post("/providers/keys/{key_id}/verify", gw.handleVerifyProviderKey)
-		r.Delete("/providers/keys/{key_id}", gw.handleRetireProviderKey)
-		r.Put("/providers/keys/{key_id}/budget", gw.handleSetKeyBudget)
-		r.Post("/providers/keys/{key_id}/topup", gw.handleMarkPrepaidTopUp)
-		r.Post("/providers/keys/{key_id}/funding", gw.handleSetKeyFunding)
-		r.Post("/providers/keys/{key_id}/window", gw.handleSetKeyWindow)
 		r.Post("/providers/keys/{key_id}/test", gw.handleTestKeyAndFetchModels)
 		r.Get("/providers/{provider_id}/pool", gw.handleGetPoolConfig)
-		r.Put("/providers/{provider_id}/pool", gw.handleSavePoolConfig)
 		r.Get("/providers/{provider_id}/usage", gw.handleKeyUsageLogs)
 		r.Get("/providers/{provider_id}/budget", gw.handleGetProviderBudget)
-		r.Put("/providers/{provider_id}/budget", gw.handleSetProviderBudget)
 		r.Get("/providers/spend/summary", gw.handleGetProviderSpendSummary)
 		r.Get("/providers/{provider_id}/live-models", gw.handleFetchLiveModels)
 		r.Get("/models/catalog", gw.handleModelCatalog)
@@ -651,8 +638,6 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/org/roster", gw.handleGetOrgRoster)
 		r.Get("/org/finance/summary", gw.handleGetOrgFinanceSummary)
 		r.Get("/org/finance/daily", gw.handleGetOrgFinanceDaily)
-		r.Post("/org/roster/hire", gw.handleOrgHireAgent)
-		r.Post("/org/roster/{id}/terminate", gw.handleOrgTerminateAgent)
 
 		// Budget tracking (P4.1)
 		r.Get("/budgets", gw.handleGetBudgets)
@@ -957,9 +942,6 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/admin/update/check", gw.handleAdminUpdateCheck)
 		r.Post("/admin/update/install", gw.handleAdminUpdateInstall)
 		r.Get("/admin/install-analytics", gw.handleInstallAnalytics)
-		r.Get("/admin/system/check-port", gw.handleCheckPort)
-		r.Get("/admin/server-settings", gw.handleGetServerSettings)
-		r.Patch("/admin/server-settings", gw.handlePatchServerSettings)
 
 		// Service accounts
 		r.Get("/service-accounts", gw.handleListServiceAccounts)
@@ -1129,8 +1111,6 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Get("/system/info", gw.handleSystemSpecs)
 		r.Post("/system/install", gw.handleSystemInstall)
 		r.Get("/system/install/status", gw.handleInstallStatus)
-		r.Get("/network/status", gw.handleNetworkStatus)
-		r.Post("/network/tailscale", gw.handleNetworkTailscale)
 		r.Get("/voice/config", gw.handleGetVoiceConfig)
 		r.Put("/voice/config", gw.handlePutVoiceConfig)
 
@@ -1264,6 +1244,51 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 			d.Get("/plans/{id}", gw.handleDaemonGetPlan)
 			d.Post("/plans/{id}/approve", gw.handleDaemonApprovePlan)
 			d.Post("/plans/{id}/reject", gw.handleDaemonRejectPlan)
+		})
+
+		// Admin-only routes — RequireAdmin runs after Auth + TenantScope so every
+		// request inside this group is both authenticated and admin-gated.
+		// Adding a route here automatically inherits the gate; no per-handler check needed.
+		r.Group(func(ar chi.Router) {
+			ar.Use(gw.RequireAdmin)
+
+			// Network ops
+			ar.Get("/network/status", gw.handleNetworkStatus)
+			ar.Post("/network/tailscale", gw.handleNetworkTailscale)
+
+			// Server settings (includes BaseURL and other operator knobs)
+			ar.Get("/admin/server-settings", gw.handleGetServerSettings)
+			ar.Patch("/admin/server-settings", gw.handlePatchServerSettings)
+
+			// System port probe
+			ar.Get("/admin/system/check-port", gw.handleCheckPort)
+
+			// Provider + key creation
+			ar.Post("/providers", gw.handleCreateProviderDB)
+			ar.Post("/providers/{provider_id}/keys", gw.handleAddProviderKey)
+
+			// Provider mutations
+			ar.Put("/providers/{id}", gw.handleUpdateProvider)
+			ar.Delete("/providers/{id}", gw.handleDeleteProvider)
+
+			// Provider-key mutations
+			ar.Delete("/providers/keys/{key_id}", gw.handleRetireProviderKey)
+			ar.Put("/providers/keys/{key_id}/budget", gw.handleSetKeyBudget)
+			ar.Post("/providers/keys/{key_id}/topup", gw.handleMarkPrepaidTopUp)
+			ar.Post("/providers/keys/{key_id}/funding", gw.handleSetKeyFunding)
+			ar.Post("/providers/keys/{key_id}/window", gw.handleSetKeyWindow)
+
+			// Provider pool + budget mutations
+			ar.Put("/providers/{provider_id}/pool", gw.handleSavePoolConfig)
+			ar.Put("/providers/{provider_id}/budget", gw.handleSetProviderBudget)
+
+			// Gateway pricing
+			ar.Put("/gateway/pricing/{modelId}", gw.handleGatewayPricingSet)
+			ar.Post("/gateway/pricing/backfill", gw.handleGatewayPricingBackfill)
+
+			// Org roster mutations
+			ar.Post("/org/roster/hire", gw.handleOrgHireAgent)
+			ar.Post("/org/roster/{id}/terminate", gw.handleOrgTerminateAgent)
 		})
 
 	})

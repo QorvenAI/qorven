@@ -23,6 +23,7 @@ func (c *Config) MaskedCopy() *Config {
 	maskNonEmpty(&cp.Auth.Token)
 	maskNonEmpty(&cp.Auth.EncryptionKey)
 	maskNonEmpty(&cp.Database.DSN)
+	maskNonEmpty(&cp.Database.AppDBPassword)
 	for i := range cp.Providers {
 		maskNonEmpty(&cp.Providers[i].APIKey)
 	}
@@ -35,6 +36,7 @@ func (c *Config) StripSecrets() {
 	c.Auth.Token = ""
 	c.Auth.EncryptionKey = ""
 	c.Database.DSN = ""
+	c.Database.AppDBPassword = ""
 	for i := range c.Providers {
 		c.Providers[i].APIKey = ""
 	}
@@ -46,6 +48,7 @@ func (c *Config) StripMaskedSecrets() {
 	stripIfMasked(&c.Auth.Token)
 	stripIfMasked(&c.Auth.EncryptionKey)
 	stripIfMasked(&c.Database.DSN)
+	stripIfMasked(&c.Database.AppDBPassword)
 	for i := range c.Providers {
 		stripIfMasked(&c.Providers[i].APIKey)
 	}

@@ -23,6 +23,10 @@ import (
 // 429 → inject queue is full (8 messages in-flight max)
 func (gw *Gateway) handleInjectMessage(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
+	if err := gw.authorizeSessionID(r.Context(), sessionID); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
 
 	var body struct {
 		Message   string `json:"message"`

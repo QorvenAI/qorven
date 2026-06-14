@@ -116,3 +116,65 @@ func TestApplyRole_UnknownKey(t *testing.T) {
 		t.Errorf("unexpected mutation of agent without a role")
 	}
 }
+
+func TestRoleToolNames_NoPhantoms(t *testing.T) {
+	// Known-real registered tool names that role lists may reference.
+	// Source of truth: the tool registry built in gateway_tools.go plus
+	// tools registered in gateway/intake_tools.go and qor/social/tool.go.
+	// Only names verified as actually registered (via Name() returns) belong here.
+	real := map[string]bool{
+		// filesystem tools (filesystem.go)
+		"read_file":  true,
+		"write_file": true,
+		"list_files": true,
+		"edit":       true,
+		// execution (exec.go / exec_windows.go)
+		"exec": true,
+		// coding tools (coding.go)
+		"glob":        true,
+		"grep":        true,
+		"apply_patch": true,
+		"undo":        true,
+		// multi-edit tool (multi_edit.go)
+		"multi_edit": true,
+		// code_edit tool (code_edit.go)
+		"code_edit": true,
+		// app scaffolding tool (app_builder.go) — writes files to local disk
+		"scaffold_app": true,
+		// intake tools (gateway/intake_tools.go)
+		"ask_followup_question": true,
+		"produce_project_brief": true,
+		// social (qor/social/tool.go)
+		"qorven_social": true,
+		// workspace builder (workspace_builder.go)
+		"workspace_builder": true,
+		// knowledge / memory (memory.go, kb_read.go)
+		"knowledge_graph_search": true,
+		"memory_search":          true,
+		"memory_get":             true,
+		"kb_read":                true,
+		// messaging (media.go, sessions.go)
+		"message": true,
+		"send_dm": true,
+		// delegation / escalation (delegate.go, delegate_work.go)
+		"delegate":      true,
+		"delegate_work": true,
+		"list_agents":   true,
+		// task management (gateway/task_tools.go, tools/media.go)
+		"team_tasks": true,
+		// web / research tools
+		"web_search": true,
+		"web_fetch":  true,
+		"crawl":      true,
+		"research":   true,
+		// social monitor (social_monitor.go)
+		"social_monitor": true,
+	}
+	for name, role := range roleRegistry {
+		for _, tn := range append(append([]string{}, role.ToolsAllowed...), role.ToolsDenied...) {
+			if !real[tn] {
+				t.Errorf("role %q references unknown tool %q (phantom name — will not filter)", name, tn)
+			}
+		}
+	}
+}

@@ -54,6 +54,10 @@ type timelineMsg struct {
 
 func (gw *Gateway) handleGetSessionMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if err := gw.authorizeSessionID(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
 	if gw.sessions == nil {
 		writeJSON(w, 200, map[string]any{"messages": []any{}, "total": 0})
 		return
@@ -89,6 +93,10 @@ func (gw *Gateway) handleGetSessionMessages(w http.ResponseWriter, r *http.Reque
 
 func (gw *Gateway) handleAddSessionMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if err := gw.authorizeSessionID(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
 	var req struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
@@ -387,6 +395,10 @@ func (gw *Gateway) handleDeleteSessionMessage(w http.ResponseWriter, r *http.Req
 		return
 	}
 	sessionID := chi.URLParam(r, "id")
+	if err := gw.authorizeSessionID(r.Context(), sessionID); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
 
 	// ?n=N — trim the last N user+assistant message pairs
 	if nStr := r.URL.Query().Get("n"); nStr != "" {

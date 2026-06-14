@@ -395,3 +395,72 @@ func TestBrowserTool_StatusJSON(t *testing.T) {
 	result := tool.Execute(context.Background(), map[string]any{"action": "status"})
 	if !strings.Contains(result.ForLLM, "running") { t.Logf("status: %q", result.ForLLM) }
 }
+
+// === SSRF guard tests — no browser required, guard fires before chromedp ===
+
+func TestBrowserTool_Navigate_BlocksInternalURLs(t *testing.T) {
+	tool := NewBrowserTool(New(DefaultConfig()))
+	internalURLs := []string{
+		"http://169.254.169.254/",
+		"http://localhost:8486/",
+		"http://127.0.0.1/",
+		"http://10.0.0.1/",
+		"http://192.168.0.1/",
+		"file:///etc/passwd",
+		"ftp://example.com/",
+	}
+	for _, bad := range internalURLs {
+		result := tool.Execute(context.Background(), map[string]any{"action": "navigate", "url": bad})
+		if !result.IsError {
+			t.Errorf("navigate to %q should be blocked but was allowed", bad)
+		}
+	}
+}
+
+func TestBrowserTool_Open_BlocksInternalURLs(t *testing.T) {
+	tool := NewBrowserTool(New(DefaultConfig()))
+	internalURLs := []string{
+		"http://169.254.169.254/",
+		"http://localhost:8486/",
+		"http://127.0.0.1/",
+		"http://10.0.0.1/",
+	}
+	for _, bad := range internalURLs {
+		result := tool.Execute(context.Background(), map[string]any{"action": "open", "url": bad})
+		if !result.IsError {
+			t.Errorf("open tab to %q should be blocked but was allowed", bad)
+		}
+	}
+}
+
+func TestManager_Navigate_BlocksInternalURLs(t *testing.T) {
+	m := New(DefaultConfig())
+	internalURLs := []string{
+		"http://169.254.169.254/",
+		"http://localhost:8486/",
+		"http://127.0.0.1/",
+		"http://10.0.0.1/",
+	}
+	for _, bad := range internalURLs {
+		err := m.Navigate(context.Background(), bad)
+		if err == nil {
+			t.Errorf("Manager.Navigate(%q) should be blocked but was allowed", bad)
+		}
+	}
+}
+
+func TestManager_OpenTab_BlocksInternalURLs(t *testing.T) {
+	m := New(DefaultConfig())
+	internalURLs := []string{
+		"http://169.254.169.254/",
+		"http://localhost:8486/",
+		"http://127.0.0.1/",
+		"http://10.0.0.1/",
+	}
+	for _, bad := range internalURLs {
+		_, err := m.OpenTab(context.Background(), bad)
+		if err == nil {
+			t.Errorf("Manager.OpenTab(%q) should be blocked but was allowed", bad)
+		}
+	}
+}

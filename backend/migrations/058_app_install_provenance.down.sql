@@ -1,0 +1,2 @@
+ALTER TABLE apps DROP COLUMN IF EXISTS installed_by;
+ALTER TABLE apps DROP COLUMN IF EXISTS source_path;

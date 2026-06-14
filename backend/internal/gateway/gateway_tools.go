@@ -48,9 +48,7 @@ func (gw *Gateway) registerTools() {
 	readTool := tools.NewReadFileTool(workspace)
 	readTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(readTool)
-	writeTool := tools.NewWriteFileTool(workspace)
-	writeTool.AllowPaths(dataDir, "/tmp")
-	reg.Register(writeTool)
+	// write_file and exec are destructive — registered via registerDestructiveTools below.
 	listTool := tools.NewListFilesTool(workspace)
 	listTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(listTool)
@@ -58,8 +56,6 @@ func (gw *Gateway) registerTools() {
 	editTool.AllowPaths(dataDir, "/tmp")
 	reg.Register(editTool)
 
-	// Runtime
-	reg.Register(tools.NewExecTool(workspace, true))
 	// System operations — structured tool for privileged agent roles (sysops).
 	// Only executes when the tool context has AllowElevated set (see loop.go).
 	reg.Register(tools.NewSystemOpsTool())
@@ -243,12 +239,7 @@ func (gw *Gateway) registerTools() {
 		reg.Register(tools.NewSessionsListTool(gw.db.Pool))
 		reg.Register(tools.NewSessionsHistoryTool(gw.db.Pool))
 		reg.Register(tools.NewSessionStatusTool(gw.db.Pool))
-		// cron is NOT wrapped with a permission gate: it is a core autonomous capability.
-		// Every role that should have scheduling access sets cron=auto_approved in
-		// roleDefaults (defaults.go). A blocking per-call gate causes context deadline
-		// timeouts for channel sessions (Telegram etc.) where no human is present to
-		// approve, trips the circuit breaker, and breaks the feature entirely.
-		reg.Register(tools.NewCronTool(gw.db.Pool))
+		// cron is registered (without a permission gate) via registerDestructiveTools below.
 		dmTool := tools.NewSendDMTool(gw.db.Pool, &chanAdapter{gw: gw})
 		reg.Register(dmTool)
 		reg.Register(tools.NewSendTelegramTool(dmTool))
@@ -1657,8 +1648,15 @@ func (gw *Gateway) registerTools() {
 	reg.Register(tools.NewTeamTasksTool(teamTasksBackend, defaultTenant))
 	reg.Register(tools.NewTeamMessageTool(teamTasksBackend, teamMsgRuntime))
 
+	// fileHistory is declared here so both the coding tools block and
+	// registerDestructiveTools (called at the end) share the same undo chain.
+	destructiveFileHistory := tools.NewFileHistory()
+
 	// ── GitHub Tools — autonomous dev loop ──────────────────────────────────
 	// Token lookup: env GITHUB_TOKEN → vault credential "github" → empty (tools return helpful error).
+	// ghGetToken is hoisted out of the block so registerDestructiveTools (called at the
+	// end of this function) can reference it.
+	var ghGetToken func() string
 	{
 		ghToken := os.Getenv("GITHUB_TOKEN")
 		if ghToken == "" && gw.vault != nil {
@@ -1679,7 +1677,8 @@ func (gw *Gateway) registerTools() {
 			slog.Info("github.tools.no_token — set GITHUB_TOKEN or add via Settings → Provider Keys")
 		}
 		// Register the token getter so tools can read it at call time (supports hot-reload).
-		ghGetToken := func() string {
+		// Assigned to the outer ghGetToken var so registerDestructiveTools can use it.
+		ghGetToken = func() string {
 			// Re-read each call so vault updates take effect without restart.
 			if t := os.Getenv("GITHUB_TOKEN"); t != "" {
 				return t
@@ -1701,26 +1700,11 @@ func (gw *Gateway) registerTools() {
 		reg.Register(tools.NewGhReadIssueToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhCreateIssueToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhCreateBranchToolWithToken(ghGetToken))
-		// gh_push_file writes code to a user's GitHub repo — the single
-		// most destructive tool in the GH tool family. Wrap it with the
-		// permission gate so every call requires explicit user consent.
-		// WrapLazy defers the gate lookup to Execute-time because the
-		// gate is constructed in ensureProtocolSurfaces (later in boot).
-		reg.Register(permissions.WrapLazy(
-			func() *permissions.Gate { return gw.permissionGate },
-			tools.NewGhPushFileToolWithToken(ghGetToken),
-			permissions.GatedToolOptions{
-				Reason:      "Writes a file to a user-owned GitHub repository",
-				RequestedBy: "agent",
-				// SessionIDFromArgs defaults to args["session_id"]; tool
-				// runner must populate it. Default suffices today.
-			},
-		))
+		// gh_push_file and gh_merge_pr are destructive — registered via registerDestructiveTools below.
 		reg.Register(tools.NewGhOpenPRToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhSubmitReviewToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhPostCommentToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhListPRChecksToolWithToken(ghGetToken))
-		reg.Register(tools.NewGhMergePRToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhCreateRepoToolWithToken(ghGetToken))
 		reg.Register(tools.NewGhCreateReleaseToolWithToken(ghGetToken))
 
@@ -1940,14 +1924,13 @@ func (gw *Gateway) registerTools() {
 	slog.Info("carrier tools registered", "tools", "build_carrier,list_carriers")
 
 	// Coding tools.
-	fileHistory := tools.NewFileHistory()
+	// apply_patch and undo are destructive — registered via registerDestructiveTools
+	// (called below) using the shared destructiveFileHistory so the undo chain works.
 	projectReg := tools.NewProjectRegistry(config.DataDir())
 	gw.projectReg = projectReg
 	reg.Register(tools.NewGlobTool(workspace))
 	reg.Register(tools.NewGrepTool(workspace))
 	reg.Register(tools.NewDiagnosticsTool())
-	reg.Register(tools.NewApplyPatchTool(workspace, fileHistory))
-	reg.Register(tools.NewUndoTool(fileHistory))
 	reg.Register(tools.NewProjectManagerTool(projectReg))
 	slog.Info("coding tools registered", "tools", "glob,grep,diagnostics,apply_patch,undo,project_manager")
 
@@ -2066,6 +2049,114 @@ func (gw *Gateway) registerTools() {
 		reg.Register(tools.NewSetMailRuleTool(gw.db.Pool))
 		reg.Register(tools.NewSetMailPolicyTool(gw.db.Pool))
 		slog.Info("mail tools registered")
+	}
+
+	// ── Destructive tools — single canonical registration path ──────────────
+	// All tools in tools.DestructiveTools are registered here and nowhere else.
+	// The CI test (TestDestructiveManifest_AllWrapped) calls this same method on
+	// a minimal Gateway so the check walks the real registration code, not a mirror.
+	gw.registerDestructiveTools(reg, workspace, dataDir, ghGetToken, destructiveFileHistory)
+}
+
+// registerDestructiveTools is the single canonical registration point for every
+// tool in tools.DestructiveTools. It is called by registerTools() during normal
+// gateway boot AND by the CI test TestDestructiveManifest_AllWrapped so the test
+// exercises real production code rather than a hand-maintained mirror.
+//
+// All destructive tools except cron are wrapped with permissions.WrapLazy so every
+// call routes through the permission gate. cron is intentionally NOT wrapped: it
+// runs in headless/unattended channel sessions where no human approver is present.
+// The gate fails closed ("gate not configured") when nil, which would deadlock
+// autonomous scheduling entirely. Per-role cron access is controlled via
+// roleDefaults (defaults.go); the CI test asserts this exception explicitly.
+//
+// Parameters:
+//
+//	reg          — the tool registry to register into (gw.toolReg in production).
+//	workspace    — base path for file-writing tools.
+//	dataDir      — additional allowed path for write_file (config.DataDir() in prod).
+//	ghGetToken   — lazy GitHub token getter; pass func()string{return ""} in tests.
+//	fileHistory  — shared FileHistory for apply_patch + undo so undo tracks patches.
+func (gw *Gateway) registerDestructiveTools(reg *tools.Registry, workspace, dataDir string, ghGetToken func() string, fileHistory *tools.FileHistory) {
+	if ghGetToken == nil {
+		ghGetToken = func() string { return "" }
+	}
+	if fileHistory == nil {
+		fileHistory = tools.NewFileHistory()
+	}
+
+	// write_file — creates or overwrites workspace files.
+	writeTool := tools.NewWriteFileTool(workspace)
+	if dataDir != "" {
+		writeTool.AllowPaths(dataDir, "/tmp")
+	}
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		writeTool,
+		permissions.GatedToolOptions{
+			Reason:      "Write a file to the workspace",
+			RequestedBy: "agent",
+		},
+	))
+
+	// exec — executes arbitrary shell commands on the host.
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewExecTool(workspace, true),
+		permissions.GatedToolOptions{
+			Reason:      "Run a shell command on the host",
+			RequestedBy: "agent",
+		},
+	))
+
+	// apply_patch — mutates workspace files in-place.
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewApplyPatchTool(workspace, fileHistory),
+		permissions.GatedToolOptions{
+			Reason:      "Apply a code patch to workspace files",
+			RequestedBy: "agent",
+		},
+	))
+
+	// undo — applies snapshot reverts; can discard user work.
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewUndoTool(fileHistory),
+		permissions.GatedToolOptions{
+			Reason:      "Undo a previous file change",
+			RequestedBy: "agent",
+		},
+	))
+
+	// gh_push_file — writes code to a user-owned GitHub repository.
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewGhPushFileToolWithToken(ghGetToken),
+		permissions.GatedToolOptions{
+			Reason:      "Writes a file to a user-owned GitHub repository",
+			RequestedBy: "agent",
+		},
+	))
+
+	// gh_merge_pr — merges a pull request (irreversible on protected branches).
+	reg.Register(permissions.WrapLazy(
+		func() *permissions.Gate { return gw.permissionGate },
+		tools.NewGhMergePRToolWithToken(ghGetToken),
+		permissions.GatedToolOptions{
+			Reason:      "Merge a pull request",
+			RequestedBy: "agent",
+		},
+	))
+
+	// cron — intentionally NOT wrapped with a permission gate.
+	// Cron runs in headless/unattended channel sessions where no human
+	// approver is present; a blocking gate would deadlock autonomous
+	// scheduling. Per-role access is enforced via roleDefaults (defaults.go).
+	// The CI manifest test asserts this exception explicitly so it cannot
+	// be silently removed.
+	if gw.db != nil {
+		reg.Register(tools.NewCronTool(gw.db.Pool))
 	}
 }
 

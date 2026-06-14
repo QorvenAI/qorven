@@ -1608,7 +1608,10 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 				}
 			}
 
-			// Permission check: verify agent role allows this tool
+			// Secondary per-role tool gate (defense-in-depth). The primary enforcement
+			// is the offered-tool filter in context.go BuildToolDefs (tools.FilterTools on
+			// the agent's ToolsDenied), which removes denied tools before the model ever
+			// sees them. This block additionally refuses by built-in role permission class.
 			if ag.Role != nil {
 				agentPerms := permissions.DefaultPermissions(permissions.Role(*ag.Role))
 				allowed := permissions.FilterTools(permissions.Role(*ag.Role), agentPerms, []string{tc.Name})
