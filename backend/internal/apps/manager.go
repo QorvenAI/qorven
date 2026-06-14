@@ -195,12 +195,18 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string, installedB
 	if err != nil {
 		return nil, err
 	}
-	// Run app-owned migrations if db_write permission granted.
+	// Run app-owned migrations if db_write permission granted, then grant the
+	// qorven_app role write access to any NEW tables the migrations created.
+	// We snapshot the table set before and after so we grant only on the app's
+	// own tables — never on Qorven core tables that already existed.
 	if HasPermission(manifest, "db_write") {
 		migrDir := filepath.Join(absDir, manifest.MigrationsDir)
+		tablesBefore := publicTableNames(ctx, m.pool)
 		if err := RunAppMigrations(ctx, m.pool, manifest.Slug, m.tenantID, migrDir); err != nil {
 			return nil, fmt.Errorf("app migrations: %w", err)
 		}
+		tablesAfter := publicTableNames(ctx, m.pool)
+		grantAppWriteOnNewTables(ctx, m.pool, manifest.Slug, tablesBefore, tablesAfter)
 	}
 
 	scope := manifest.Scope

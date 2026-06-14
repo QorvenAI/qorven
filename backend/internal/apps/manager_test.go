@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -375,6 +376,97 @@ func TestBuildAppDSN_InvalidScheme(t *testing.T) {
 	_, err := buildAppDSN("mysql://root:pass@localhost/db", "pw")
 	if err == nil {
 		t.Error("expected error for non-postgres scheme")
+	}
+}
+
+// TestBuildAppDSN_SocketURL verifies that a socket URL with a user= query param
+// (the default prod DSN form) is correctly rewritten so qorven_app wins.
+func TestBuildAppDSN_SocketURL_QueryParamUser(t *testing.T) {
+	superDSN := "postgres:///qorven?host=/var/run/postgresql&user=qorven&sslmode=disable"
+	appDSN, err := buildAppDSN(superDSN, "apppassword")
+	if err != nil {
+		t.Fatalf("buildAppDSN error: %v", err)
+	}
+	// The user= query param must be gone — it would override the URL userinfo.
+	if strings.Contains(appDSN, "user=qorven") {
+		t.Errorf("old user= query param must be stripped, got: %q", appDSN)
+	}
+	// qorven_app must appear in the result (as URL userinfo).
+	if !strings.Contains(appDSN, "qorven_app") {
+		t.Errorf("expected qorven_app in DSN, got: %q", appDSN)
+	}
+	// Must NOT contain the superuser name 'qorven' as a bare user.
+	// (it may still appear in the path /qorven or host, but not as a user= param)
+	u, parseErr := parseURL(appDSN)
+	if parseErr != nil {
+		t.Fatalf("result not parseable: %v", parseErr)
+	}
+	if u.User.Username() != appRoleName {
+		t.Errorf("URL userinfo username = %q, want %q", u.User.Username(), appRoleName)
+	}
+	pw, _ := u.User.Password()
+	if pw != "apppassword" {
+		t.Errorf("URL userinfo password = %q, want 'apppassword'", pw)
+	}
+	// user= query param must be absent from the query string.
+	if u.Query().Get("user") != "" {
+		t.Errorf("user= query param must be absent, found: %q", u.Query().Get("user"))
+	}
+	// password= query param must be absent too.
+	if u.Query().Get("password") != "" {
+		t.Errorf("password= query param must be absent, found: %q", u.Query().Get("password"))
+	}
+	// sslmode and host params must still be preserved.
+	if u.Query().Get("sslmode") != "disable" {
+		t.Errorf("sslmode must be preserved, got: %q", u.Query().Get("sslmode"))
+	}
+}
+
+// TestBuildAppDSN_KeywordDSN verifies that a libpq keyword DSN is correctly
+// rewritten so qorven_app is the connecting user.
+func TestBuildAppDSN_KeywordDSN(t *testing.T) {
+	superDSN := "host=/var/run/postgresql user=qorven dbname=qorven sslmode=disable"
+	appDSN, err := buildAppDSN(superDSN, "apppassword")
+	if err != nil {
+		t.Fatalf("buildAppDSN error: %v", err)
+	}
+	// user=qorven_app must be present.
+	if !strings.Contains(appDSN, "user=qorven_app") {
+		t.Errorf("expected user=qorven_app in keyword DSN, got: %q", appDSN)
+	}
+	// user=qorven (original superuser) must not remain.
+	// Note: "qorven" appears in dbname=qorven too, so check specifically for "user=qorven".
+	// After rewrite, user=qorven becomes user=qorven_app, so the standalone "user=qorven"
+	// (without the _app suffix) must not exist.
+	if regexp.MustCompile(`\buser=qorven\b`).MatchString(appDSN) {
+		t.Errorf("old user=qorven must be gone, got: %q", appDSN)
+	}
+	// host and dbname must be preserved.
+	if !strings.Contains(appDSN, "host=/var/run/postgresql") {
+		t.Errorf("host must be preserved, got: %q", appDSN)
+	}
+	if !strings.Contains(appDSN, "dbname=qorven") {
+		t.Errorf("dbname must be preserved, got: %q", appDSN)
+	}
+}
+
+// TestDbNameFromConnStr_SocketURL verifies that dbNameFromConnStr correctly
+// extracts the database name from a socket URL (no path-based dbname).
+func TestDbNameFromConnStr_SocketURL(t *testing.T) {
+	// The prod default DSN puts the dbname in the URL path and also uses dbname= in params.
+	cases := []struct {
+		connStr string
+		want    string
+	}{
+		{"postgres:///qorven?host=/var/run/postgresql&user=qorven&sslmode=disable", "qorven"},
+		{"postgres:///qorven_dev?host=/tmp&user=dev", "qorven_dev"},
+		{"host=/var/run/postgresql user=qorven dbname=qorven_prod sslmode=disable", "qorven_prod"},
+	}
+	for _, tc := range cases {
+		got := dbNameFromConnStr(tc.connStr)
+		if got != tc.want {
+			t.Errorf("dbNameFromConnStr(%q) = %q, want %q", tc.connStr, got, tc.want)
+		}
 	}
 }
 

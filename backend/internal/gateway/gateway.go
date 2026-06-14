@@ -1201,7 +1201,7 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 					}
 					return ""
 				},
-				gw.cfg.Database.AppDBPassword,
+				apps.ResolveAppDBPassword(gw.cfg.Database.AppDBPassword),
 			)
 			if err := gw.appMgr.LoadAll(context.Background(), "", ""); err != nil {
 				slog.Warn("apps.load_all_failed", "err", err)
