@@ -290,6 +290,12 @@ function BudgetsSection({ budgets, agentList, onSave, onReload }: {
       toast.error('Enter valid non-negative amounts');
       return;
     }
+    // A 0 cap blocks the agent entirely (it's an enforced hard limit). Leave a
+    // field blank to mean "unlimited"; a 0 is almost always a mistake here.
+    if (m === 0 || d === 0) {
+      toast.error('A cap of 0 blocks the agent. Leave blank for unlimited, or enter a positive amount.');
+      return;
+    }
     setSaving(true);
     await onSave(agentId, m, d);
     setSaving(false);
@@ -327,7 +333,7 @@ function BudgetsSection({ budgets, agentList, onSave, onReload }: {
           )}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Monthly cap (USD)</label>
+              <label className="text-xs text-muted-foreground">Enforced monthly cap (USD)</label>
               <input
                 value={monthly}
                 onChange={e => setMonthly(e.target.value)}
@@ -335,9 +341,10 @@ function BudgetsSection({ budgets, agentList, onSave, onReload }: {
                 type="number" step="0.01" min="0"
                 className="qr-input text-xs py-1.5 w-full"
               />
+              <p className="text-2xs text-muted-foreground/70">Hard limit — agent is blocked when spend reaches this.</p>
             </div>
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Daily cap (USD)</label>
+              <label className="text-xs text-muted-foreground">Enforced daily cap (USD)</label>
               <input
                 value={daily}
                 onChange={e => setDaily(e.target.value)}
@@ -345,6 +352,7 @@ function BudgetsSection({ budgets, agentList, onSave, onReload }: {
                 type="number" step="0.01" min="0"
                 className="qr-input text-xs py-1.5 w-full"
               />
+              <p className="text-2xs text-muted-foreground/70">Hard limit — resets each calendar day.</p>
             </div>
           </div>
           <div className="flex items-center gap-2 justify-end">

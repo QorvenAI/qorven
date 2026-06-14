@@ -275,10 +275,28 @@ func (gw *Gateway) handleGatewayBudgetsUpsert(w http.ResponseWriter, r *http.Req
 	var body struct {
 		MonthlyUSD *float64 `json:"monthly_usd"`
 		DailyUSD   *float64 `json:"daily_usd"`
+		AllowZero  bool     `json:"allow_zero"`
 	}
 	if err := decodeGatewayAdminJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
+	}
+	// A stored 0 cap means "block all spend" (unlimited is a NULL/absent value).
+	// Reject a negative cap, and an incidental 0 unless explicitly intended, so an
+	// admin can't silently disable an agent by typing 0. Send null to make a cap
+	// unlimited. Mirrors the guard in budgets.SetBudget.
+	for _, v := range []*float64{body.MonthlyUSD, body.DailyUSD} {
+		if v == nil {
+			continue
+		}
+		if *v < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "budget cap cannot be negative"})
+			return
+		}
+		if *v == 0 && !body.AllowZero {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "a zero cap blocks all spend; pass allow_zero to set it deliberately, or send null to make it unlimited", "code": "invalid_budget"})
+			return
+		}
 	}
 	// Upsert: try UPDATE first; if no row matched, INSERT.
 	tag, err := gw.db.Pool.Exec(r.Context(), `

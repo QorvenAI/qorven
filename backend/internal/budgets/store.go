@@ -17,6 +17,11 @@ import (
 // parent pool's available budget.
 var ErrOverAllocated = errors.New("allocation exceeds the parent budget's available pool")
 
+// ErrInvalidBudget is returned when a SetBudget call carries an invalid cap
+// value (negative or zero without AllowZero). The caller should surface this
+// as a 400 Bad Request — it is never a server fault.
+var ErrInvalidBudget = errors.New("invalid budget cap")
+
 // validateAllocation enforces the carved-vs-fresh rule. For "fresh" the child
 // is additive (no draw-down). For "carved" the sum of carved children must not
 // exceed the parent cap; a parent cap of 0 means unlimited.
@@ -130,6 +135,7 @@ type BudgetScope struct {
 	ParentScopeID  string  `json:"parent_scope_id"`
 	FundingMode    string  `json:"funding_mode"`    // tenant only: prepaid_fixed | monthly_recurring
 	LifetimeUSD    float64 `json:"lifetime_usd"`    // tenant prepaid_fixed cap
+	AllowZero      bool    `json:"allow_zero,omitempty"` // permit a deliberate 0 cap (blocks all spend); without it a 0 is rejected
 }
 
 // scopeColumn maps a scope to its id column on gateway_budgets ("" for tenant).
@@ -153,6 +159,12 @@ func (s *Store) SetBudget(ctx context.Context, tenantID string, b BudgetScope) e
 	mode := b.AllocationMode
 	if mode == "" {
 		mode = "carved"
+	}
+	if b.MonthlyUSD < 0 {
+		return fmt.Errorf("%w: budget cap cannot be negative", ErrInvalidBudget)
+	}
+	if b.MonthlyUSD == 0 && !b.AllowZero {
+		return fmt.Errorf("%w: a zero cap blocks all spend; pass allow_zero to set it deliberately, or remove the cap to make it unlimited", ErrInvalidBudget)
 	}
 	if mode == "carved" && b.Scope != "tenant" && b.ParentScope == "" {
 		return fmt.Errorf("carved allocation requires a parent_scope")
@@ -200,6 +212,19 @@ func (s *Store) SetBudget(ctx context.Context, tenantID string, b BudgetScope) e
 		`INSERT INTO gateway_budgets (tenant_id, scope, %s, monthly_usd, allocation_mode, parent_scope, parent_scope_id)
 		 VALUES ($1, $2, $3::uuid, $4, $5, NULLIF($6,''), NULLIF($7,'')::uuid)`, col),
 		tenantID, b.Scope, b.ScopeID, b.MonthlyUSD, mode, b.ParentScope, b.ParentScopeID)
+	return err
+}
+
+// RemoveBudget deletes a scope's budget row, making that scope unlimited again.
+func (s *Store) RemoveBudget(ctx context.Context, tenantID, scope, scopeID string) error {
+	col := scopeColumn(scope)
+	if col == "" {
+		_, err := s.db.Exec(ctx, `DELETE FROM gateway_budgets WHERE tenant_id = $1 AND scope = 'tenant'`, tenantID)
+		return err
+	}
+	_, err := s.db.Exec(ctx, fmt.Sprintf(
+		`DELETE FROM gateway_budgets WHERE tenant_id = $1 AND scope = $2 AND %s = $3::uuid`, col),
+		tenantID, scope, scopeID)
 	return err
 }
 

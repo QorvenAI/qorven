@@ -142,6 +142,27 @@ func (l *Loop) resolveTenantAdminUserID(ctx context.Context) string {
 	return userID
 }
 
+// resolveTaskProject returns the project_id for a task, or "" if the task has no
+// project / can't be resolved. Cheap single-row lookup, called once per run so the
+// project-level budget cap can see the agent's spend.
+func (l *Loop) resolveTaskProject(ctx context.Context, taskID string) string {
+	if taskID == "" || l.agentStore == nil || l.agentStore.Pool() == nil || l.tenantID == "" {
+		return ""
+	}
+	var projectID *string
+	// Intentionally fail-open on a DB error: an unresolved project just skips the
+	// project-level cap for this run (the agent/department/tenant caps on the same
+	// scope still enforce). Do NOT make this fail-closed — a DB blip must not block
+	// every agent run.
+	_ = l.agentStore.Pool().QueryRow(ctx,
+		`SELECT project_id::text FROM tasks WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+		taskID, l.tenantID).Scan(&projectID)
+	if projectID != nil {
+		return *projectID
+	}
+	return ""
+}
+
 var errNoProvider = fmt.Errorf("no provider configured")
 
 type providerError struct{ msg string }
@@ -870,12 +891,16 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 	// makes — including the failover / model-fallback / self-heal paths that
 	// bypass the pipeline — is enforced and recorded against this agent. The
 	// pipeline path sets its own bypass flag, so this never double-counts.
+	// Resolve the task's project once per run (not per LLM call) so the
+	// project-level budget cap receives the agent's spend.
+	projectID := l.resolveTaskProject(ctx, req.TaskID)
 	ctx = providers.WithMeterScope(ctx, providers.MeterScope{
 		TenantID:     l.tenantID,
 		AgentID:      ag.ID,
 		SessionID:    req.SessionID,
 		Origin:       providers.OriginAgent,
 		DepartmentID: ag.DepartmentID,
+		ProjectID:    projectID,
 		TaskID:       req.TaskID,
 	})
 

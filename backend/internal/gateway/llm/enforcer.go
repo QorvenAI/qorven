@@ -70,7 +70,7 @@ func (e *DBEnforcer) Check(ctx context.Context, scope providers.MeterScope) erro
 		return nil
 	}
 	if scope.TaskID != "" {
-		if cap, spent, warnPct, ok := e.repo.TaskBudget(ctx, scope.TenantID, scope.TaskID); ok && cap > 0 {
+		if cap, spent, warnPct, ok := e.repo.TaskBudget(ctx, scope.TenantID, scope.TaskID); ok {
 			if spent >= cap {
 				return ErrBudgetExceeded
 			}
@@ -78,7 +78,7 @@ func (e *DBEnforcer) Check(ctx context.Context, scope providers.MeterScope) erro
 		}
 	}
 	if !scope.IsOverhead() {
-		if cap, spent, warnPct, ok := e.repo.AgentBudget(ctx, scope.TenantID, scope.AgentID); ok && cap > 0 {
+		if cap, spent, warnPct, ok := e.repo.AgentBudget(ctx, scope.TenantID, scope.AgentID); ok {
 			if spent >= cap {
 				return ErrBudgetExceeded
 			}
@@ -86,7 +86,7 @@ func (e *DBEnforcer) Check(ctx context.Context, scope providers.MeterScope) erro
 		}
 	}
 	if scope.ProjectID != "" {
-		if cap, spent, warnPct, ok := e.repo.ProjectBudget(ctx, scope.TenantID, scope.ProjectID); ok && cap > 0 {
+		if cap, spent, warnPct, ok := e.repo.ProjectBudget(ctx, scope.TenantID, scope.ProjectID); ok {
 			if spent >= cap {
 				return ErrBudgetExceeded
 			}
@@ -94,14 +94,14 @@ func (e *DBEnforcer) Check(ctx context.Context, scope providers.MeterScope) erro
 		}
 	}
 	if scope.DepartmentID != "" {
-		if cap, spent, warnPct, ok := e.repo.DepartmentBudget(ctx, scope.TenantID, scope.DepartmentID); ok && cap > 0 {
+		if cap, spent, warnPct, ok := e.repo.DepartmentBudget(ctx, scope.TenantID, scope.DepartmentID); ok {
 			if spent >= cap {
 				return ErrBudgetExceeded
 			}
 			e.maybeWarn("department:"+scope.DepartmentID, spent, cap, warnPct)
 		}
 	}
-	if cap, spent, warnPct, ok := e.repo.TenantBudget(ctx, scope.TenantID); ok && cap > 0 {
+	if cap, spent, warnPct, ok := e.repo.TenantBudget(ctx, scope.TenantID); ok {
 		if spent >= cap {
 			return ErrBudgetExceeded
 		}
@@ -185,16 +185,17 @@ func (r *pgBudgetRepo) TenantBudget(ctx context.Context, tenantID string) (int64
 	if fundingMode != nil {
 		mode = *fundingMode
 	}
+	// If the cap pointer for the active mode is nil (NULL in DB), treat as uncapped.
+	// A non-nil pointer — including a stored 0 — is a real cap and must be enforced.
+	if (mode == "prepaid_fixed" && lifetimeUSD == nil) || (mode != "prepaid_fixed" && monthlyUSD == nil) {
+		return 0, 0, 0, false
+	}
 	var mUSD, lUSD float64
 	if monthlyUSD != nil {
 		mUSD = *monthlyUSD
 	}
 	if lifetimeUSD != nil {
 		lUSD = *lifetimeUSD
-	}
-	// If the cap for the active mode is unset, treat as uncapped.
-	if (mode == "prepaid_fixed" && lUSD <= 0) || (mode != "prepaid_fixed" && mUSD <= 0) {
-		return 0, 0, 0, false
 	}
 
 	// Month-to-date and all-time spend (latter for prepaid_fixed deplete) in one read.
@@ -217,9 +218,6 @@ func (r *pgBudgetRepo) TenantBudget(ctx context.Context, tenantID string) (int64
 	wp := 80
 	if warnPct != nil {
 		wp = *warnPct
-	}
-	if capUUSD <= 0 {
-		return 0, 0, 0, false
 	}
 	return capUUSD, spentUUSD, wp, true
 }
@@ -275,6 +273,10 @@ func (r *pgBudgetRepo) scopedBudget(ctx context.Context, tenantID, col, id, scop
 // the raw ledger (only place carrying task_id).
 func (r *pgBudgetRepo) TaskBudget(ctx context.Context, tenantID, taskID string) (int64, int64, int, bool) {
 	var budgetCents *int64
+	// tasks.budget_cents is DEFAULT 0 NOT NULL, so 0 is the universal sentinel for
+	// "no task budget set" — NOT a deliberate zero allowance. NULLIF maps it to NULL
+	// (→ ok=false → uncapped) so the millions of default-0 tasks aren't all blocked.
+	// This intentionally diverges from the scope-level caps, where 0 means "block".
 	err := r.db.QueryRow(ctx,
 		`SELECT NULLIF(budget_cents,0) FROM tasks WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
 		taskID, tenantID).Scan(&budgetCents)

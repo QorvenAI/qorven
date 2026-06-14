@@ -147,6 +147,10 @@ func (gw *Gateway) handleSetScopeBudget(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "code": "over_allocated"})
 			return
 		}
+		if errors.Is(err, budgets.ErrInvalidBudget) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "code": "invalid_budget"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
 		return
 	}
