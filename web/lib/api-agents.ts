@@ -380,6 +380,8 @@ export const orgApi = {
     request<{ status: string }>('/org/roster/hire', { method: 'POST', body: JSON.stringify({ agent_id: agentId, org_level: orgLevel, org_role: orgRole }) }),
   terminate: (id: string, reason: string) =>
     request<{ status: string }>(`/org/roster/${id}/terminate`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  reassignManager: (agentId: string, managerId: string | null) =>
+    request<{ status: string }>(`/org/roster/${agentId}/manager`, { method: 'PATCH', body: JSON.stringify({ manager_id: managerId }) }),
 };
 
 export const teamsApi = {
