@@ -7,13 +7,13 @@ package gateway_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qorvenai/qorven/internal/agent"
 	"github.com/qorvenai/qorven/internal/store"
+	"github.com/qorvenai/qorven/internal/testsupport"
 )
 
 // TestSeedCSuite_FreshTenant verifies that the seedCSuite logic creates 4 C-suite
@@ -26,10 +26,7 @@ func TestSeedCSuite_FreshTenant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skip DB test in short mode")
 	}
-	dsn := os.Getenv("QORVEN_POSTGRES_URL")
-	if dsn == "" {
-		dsn = "postgres://postgres@localhost:5432/qorven_dev"
-	}
+	dsn := testsupport.DSN()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -50,8 +47,8 @@ func TestSeedCSuite_FreshTenant(t *testing.T) {
 
 	// Ensure tenant row exists (some tables FK on tenant_id).
 	_, err = pool.Exec(ctx,
-		`INSERT INTO tenants (id, name, plan, created_at, updated_at)
-		 VALUES ($1::uuid, 'test-csuite', 'free', now(), now())
+		`INSERT INTO tenants (id, name, slug, plan, created_at, updated_at)
+		 VALUES ($1::uuid, 'test-csuite', 'test-csuite-'||$1, 'free', now(), now())
 		 ON CONFLICT DO NOTHING`,
 		scratchTenant)
 	if err != nil {
