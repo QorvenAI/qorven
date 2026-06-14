@@ -6,10 +6,14 @@ package drive
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrNotFound is returned when a file is not found for the given tenant.
+var ErrNotFound = errors.New("file not found")
 
 type Store struct{ pool *pgxpool.Pool }
 
@@ -101,9 +105,15 @@ func (s *Store) CreateFile(ctx context.Context, tenantID, agentID, name, path, m
 	return f, err
 }
 
-func (s *Store) DeleteFile(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM drive_files WHERE id = $1`, id)
-	return err
+func (s *Store) DeleteFile(ctx context.Context, tenantID, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM drive_files WHERE id = $1 AND tenant_id = $2`, id, tenantID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) ShareFile(ctx context.Context, fileID, granteeType, granteeID, permission string) error {

@@ -932,7 +932,10 @@ func (gw *Gateway) handleDeleteDriveFile(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	gw.driveStore.DeleteFile(r.Context(), f.ID)
+	if err := gw.driveStore.DeleteFile(r.Context(), defaultTenant, f.ID); err != nil {
+		w.WriteHeader(500)
+		return
+	}
 	w.WriteHeader(204)
 }
 
