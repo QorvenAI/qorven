@@ -34,15 +34,21 @@ func TestIsSubordinate(t *testing.T) {
 }
 
 func TestCanDelegate(t *testing.T) {
-	const maxDepth = 1
-	if !CanDelegate(0, maxDepth, true) {
-		t.Errorf("depth 0 within maxDepth and budget ok → allowed")
+	// Verify the four-level cascade semantics (CEO→COO→officer→worker→sub-task).
+	// Depths 0–3 must be allowed; depth 4 must be refused.
+	for depth := 0; depth < MaxDelegationDepth; depth++ {
+		if !CanDelegate(depth, MaxDelegationDepth, true) {
+			t.Errorf("depth %d should be allowed (< MaxDelegationDepth %d)", depth, MaxDelegationDepth)
+		}
 	}
-	if CanDelegate(1, maxDepth, true) {
-		t.Errorf("depth 1 == maxDepth → denied (no deeper delegation)")
+	if CanDelegate(MaxDelegationDepth, MaxDelegationDepth, true) {
+		t.Errorf("depth %d == MaxDelegationDepth → must be refused", MaxDelegationDepth)
 	}
-	if CanDelegate(0, maxDepth, false) {
-		t.Errorf("budget not ok → denied")
+	if CanDelegate(MaxDelegationDepth+1, MaxDelegationDepth, true) {
+		t.Errorf("depth %d > MaxDelegationDepth → must be refused", MaxDelegationDepth+1)
+	}
+	if CanDelegate(0, MaxDelegationDepth, false) {
+		t.Errorf("budget not ok → denied regardless of depth")
 	}
 }
 

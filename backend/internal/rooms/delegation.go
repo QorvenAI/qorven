@@ -10,12 +10,17 @@ import (
 	"log/slog"
 
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/delegation"
 )
 
-// MaxDelegationDepth bounds the head→L3→head-rollup chain. Depth 0 = a head
-// delegating to an L3 (the L3 run is depth 1); the head's roll-up wake is depth
-// 2 and is summary-only, so no further delegation can start.
-const MaxDelegationDepth = 1
+// MaxDelegationDepth is the maximum number of delegation hops allowed in a
+// single work cascade. The authoritative value lives in the shared
+// internal/delegation package (delegation.MaxDepth) so both this package and
+// the tools package can reference it without an import cycle.
+// CanDelegate(depth, MaxDelegationDepth, true) is true for depths 0–3 and
+// false for 4, giving exactly four active hops:
+// CEO (0) → COO (1) → officer (2) → worker (3) → sub-task runner (4 refused).
+const MaxDelegationDepth = delegation.MaxDepth
 
 // IsSubordinate reports whether workerID is among the head's direct subordinates.
 // (Direct manager_id only — matches agent.GetSubordinates.) Pure.
