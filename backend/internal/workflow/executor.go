@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +150,10 @@ func (e *Executor) executeStep(ctx context.Context, step Step, vars map[string]a
 		return e.execDelegate(ctx, step, vars)
 	case StepNotify:
 		return e.execPrompt(ctx, step, vars) // notify = prompt for now
+	case StepCollect:
+		return e.execCollect(ctx, step, vars)
+	case StepWait:
+		return e.execWait(ctx, step, vars)
 	case "parallel":
 		return e.execParallel(ctx, step, vars)
 	default:
@@ -306,6 +311,70 @@ func (e *Executor) execParallel(ctx context.Context, step Step, vars map[string]
 		}
 	}
 	return strings.Join(combined, "\n"), "", nil
+}
+
+// execCollect captures named fields from the run vars into a single map stored
+// under SaveAs (or merged into vars if SaveAs is empty). Missing fields are
+// captured as "" so downstream steps can rely on the keys existing.
+func (e *Executor) execCollect(_ context.Context, step Step, vars map[string]any) (string, string, error) {
+	collected := make(map[string]any, len(step.Fields))
+	for _, f := range step.Fields {
+		if v, ok := vars[f]; ok {
+			collected[f] = v
+		} else {
+			collected[f] = ""
+		}
+	}
+	if step.SaveAs != "" {
+		vars[step.SaveAs] = collected
+	} else {
+		for k, v := range collected {
+			vars[k] = v
+		}
+	}
+	return fmt.Sprintf("Collected %d field(s)", len(collected)), "", nil
+}
+
+const maxWaitSeconds = 300.0 // cap a wait step at 5 minutes so a run can't hang
+
+// execWait pauses for Args["seconds"]/Args["duration"], capped at maxWaitSeconds,
+// honoring context cancellation.
+func (e *Executor) execWait(ctx context.Context, step Step, _ map[string]any) (string, string, error) {
+	secs := 1.0
+	if step.Args != nil {
+		if v, ok := wfToFloat(step.Args["seconds"]); ok {
+			secs = v
+		} else if v, ok := wfToFloat(step.Args["duration"]); ok {
+			secs = v
+		}
+	}
+	if secs < 0 {
+		secs = 0
+	}
+	if secs > maxWaitSeconds {
+		secs = maxWaitSeconds
+	}
+	select {
+	case <-time.After(time.Duration(secs * float64(time.Second))):
+		return fmt.Sprintf("Waited %.2fs", secs), "", nil
+	case <-ctx.Done():
+		return "Wait cancelled", "", ctx.Err()
+	}
+}
+
+// wfToFloat coerces a JSON number/int/string into a float64.
+func wfToFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case string:
+		if f, err := strconv.ParseFloat(n, 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 // interpolate replaces {{var}} with values from vars map.
