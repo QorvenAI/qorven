@@ -211,7 +211,6 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Delete("/gateway/cache", gw.handleGatewayCacheFlush)
 		r.Get("/gateway/pricing", gw.handleGatewayPricingList)
 		r.Get("/gateway/pricing/gaps", gw.handleGatewayPricingGaps)
-		r.Post("/gateway/pricing/backfill", gw.handleGatewayPricingBackfill)
 
 		// OAuth provider flows (Claude Code, GitHub Copilot, Google Vertex AI)
 		r.Get("/providers/oauth", gw.handleOAuthProvidersList)
@@ -225,8 +224,6 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Delete("/providers/oauth/{provider}/app", gw.handleOAuthProviderAppDelete)
 		r.Get("/providers", gw.handleListProviders)
 		r.Get("/providers/{id}", gw.handleGetProvider)
-		r.Put("/providers/{id}", gw.handleUpdateProvider)
-		r.Delete("/providers/{id}", gw.handleDeleteProvider)
 		r.Post("/providers/{id}/verify", gw.handleVerifyProvider)
 		r.Patch("/providers/{id}/capabilities", gw.handleUpdateProviderCapabilities)
 		r.Post("/providers/test", gw.handleTestProvider)
@@ -236,17 +233,10 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 		r.Post("/providers/probe-models", gw.handleProbeModels)
 		r.Get("/providers/{provider_id}/keys", gw.handleListProviderKeys)
 		r.Post("/providers/keys/{key_id}/verify", gw.handleVerifyProviderKey)
-		r.Delete("/providers/keys/{key_id}", gw.handleRetireProviderKey)
-		r.Put("/providers/keys/{key_id}/budget", gw.handleSetKeyBudget)
-		r.Post("/providers/keys/{key_id}/topup", gw.handleMarkPrepaidTopUp)
-		r.Post("/providers/keys/{key_id}/funding", gw.handleSetKeyFunding)
-		r.Post("/providers/keys/{key_id}/window", gw.handleSetKeyWindow)
 		r.Post("/providers/keys/{key_id}/test", gw.handleTestKeyAndFetchModels)
 		r.Get("/providers/{provider_id}/pool", gw.handleGetPoolConfig)
-		r.Put("/providers/{provider_id}/pool", gw.handleSavePoolConfig)
 		r.Get("/providers/{provider_id}/usage", gw.handleKeyUsageLogs)
 		r.Get("/providers/{provider_id}/budget", gw.handleGetProviderBudget)
-		r.Put("/providers/{provider_id}/budget", gw.handleSetProviderBudget)
 		r.Get("/providers/spend/summary", gw.handleGetProviderSpendSummary)
 		r.Get("/providers/{provider_id}/live-models", gw.handleFetchLiveModels)
 		r.Get("/models/catalog", gw.handleModelCatalog)
@@ -1277,8 +1267,24 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 			ar.Post("/providers", gw.handleCreateProviderDB)
 			ar.Post("/providers/{provider_id}/keys", gw.handleAddProviderKey)
 
-			// Gateway pricing overrides
+			// Provider mutations
+			ar.Put("/providers/{id}", gw.handleUpdateProvider)
+			ar.Delete("/providers/{id}", gw.handleDeleteProvider)
+
+			// Provider-key mutations
+			ar.Delete("/providers/keys/{key_id}", gw.handleRetireProviderKey)
+			ar.Put("/providers/keys/{key_id}/budget", gw.handleSetKeyBudget)
+			ar.Post("/providers/keys/{key_id}/topup", gw.handleMarkPrepaidTopUp)
+			ar.Post("/providers/keys/{key_id}/funding", gw.handleSetKeyFunding)
+			ar.Post("/providers/keys/{key_id}/window", gw.handleSetKeyWindow)
+
+			// Provider pool + budget mutations
+			ar.Put("/providers/{provider_id}/pool", gw.handleSavePoolConfig)
+			ar.Put("/providers/{provider_id}/budget", gw.handleSetProviderBudget)
+
+			// Gateway pricing
 			ar.Put("/gateway/pricing/{modelId}", gw.handleGatewayPricingSet)
+			ar.Post("/gateway/pricing/backfill", gw.handleGatewayPricingBackfill)
 
 			// Org roster mutations
 			ar.Post("/org/roster/hire", gw.handleOrgHireAgent)
