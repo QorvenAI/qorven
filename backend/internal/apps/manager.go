@@ -89,8 +89,8 @@ type AppManager struct {
 	credLookup func(tenantID, slug string) string
 
 	// allowedInstallRoots is the set of parent directories from which apps may
-	// be installed. An empty slice means all paths are allowed (open/test mode).
-	// Set via SetAllowedInstallRoots after construction.
+	// be installed. An empty slice means NO install is allowed (fail-closed).
+	// Set via SetAllowedInstallRoots after construction before any installs.
 	allowedInstallRoots []string
 
 	mu     sync.RWMutex
@@ -180,11 +180,14 @@ func (m *AppManager) Install(ctx context.Context, manifestDir string, installedB
 		return nil, err
 	}
 
-	// Allowlist check — reject paths outside permitted install roots.
+	// Allowlist check — fail CLOSED: reject unless the path is explicitly allowed.
+	// When allowedInstallRoots is empty (no roots configured), ALL installs are
+	// rejected. Production startup always calls SetAllowedInstallRoots before
+	// any install; tests must do the same or use AllowAnyInstallPathForTesting.
 	m.mu.RLock()
 	roots := m.allowedInstallRoots
 	m.mu.RUnlock()
-	if len(roots) > 0 && !isAllowedInstallPath(absDir, roots) {
+	if !isAllowedInstallPath(absDir, roots) {
 		return nil, ErrInstallPathNotPermitted
 	}
 
@@ -459,7 +462,7 @@ func (m *AppManager) Store() *AppStore { return m.store }
 // SetAllowedInstallRoots replaces the install-path allowlist. Each root must be
 // an absolute directory path; sub-directories of those roots are also permitted.
 // Call this after construction (e.g. from gateway startup) before any installs.
-// An empty slice disables the allowlist (useful in unit tests).
+// Passing an empty slice means NO install will be permitted (fail-closed default).
 func (m *AppManager) SetAllowedInstallRoots(roots []string) {
 	m.mu.Lock()
 	m.allowedInstallRoots = roots

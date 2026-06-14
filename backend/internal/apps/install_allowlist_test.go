@@ -103,3 +103,52 @@ func TestIsAllowedInstallPath_NonExistentSubdir_AllowedWhenParentUnderRoot(t *te
 		t.Errorf("non-existent subdir %q under root %q should be allowed (will be created by Install)", notYet, root)
 	}
 }
+
+// TestIsAllowedInstallPath_EmptyRootsGuard verifies that the predicate returns
+// false when the allowedRoots slice is empty — ensuring the guard in Install
+// (which now calls isAllowedInstallPath unconditionally) is fail-closed.
+func TestIsAllowedInstallPath_EmptyRootsGuard(t *testing.T) {
+	root := t.TempDir()
+	// nil roots
+	if isAllowedInstallPath(root, nil) {
+		t.Error("expected predicate to return false for nil roots (fail-closed)")
+	}
+	// empty slice roots
+	if isAllowedInstallPath(root, []string{}) {
+		t.Error("expected predicate to return false for empty roots (fail-closed)")
+	}
+}
+
+// TestIsAllowedInstallPath_ParentSymlinkEscape_NonExistentLeaf verifies that
+// a symlink that is a PARENT component pointing outside the root is rejected
+// even when the target leaf does not yet exist on disk.
+//
+// Layout:
+//
+//	sandbox/     ← the allowed root
+//	  escape → outside/   (symlink to a dir OUTSIDE sandbox)
+//	  (escape/newapp does not exist)
+//
+// "sandbox/escape/newapp" textually looks like it's under sandbox, but
+// after resolving the symlinked parent it resolves to "outside/newapp" which
+// is outside the root — must be REJECTED.
+func TestIsAllowedInstallPath_ParentSymlinkEscape_NonExistentLeaf(t *testing.T) {
+	sandbox := t.TempDir()
+	outside := t.TempDir()
+
+	// Create a symlink inside sandbox that points to outside.
+	linkPath := filepath.Join(sandbox, "escape")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skip("cannot create symlink:", err)
+	}
+
+	// Target path: the leaf "newapp" does NOT exist yet.
+	target := filepath.Join(linkPath, "newapp")
+	if _, err := os.Stat(target); err == nil {
+		t.Fatal("test setup error: leaf should not exist")
+	}
+
+	if isAllowedInstallPath(target, []string{sandbox}) {
+		t.Errorf("parent-symlink escape: %q resolves outside root %q but was allowed", target, sandbox)
+	}
+}
