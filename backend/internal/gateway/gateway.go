@@ -1536,10 +1536,15 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			gw.wfExecutor.OnDelegate = func(ctx context.Context, soulKey, task string) {
 				// Delegate via the real delegate_to_soul tool — same path as @mentions in chat.
 				toolCtx := tools.WithAgentID(ctx, "")
-				gw.toolReg.Execute(toolCtx, "delegate_to_soul", map[string]any{
+				res := gw.toolReg.Execute(toolCtx, "delegate_to_soul", map[string]any{
 					"soul_key": soulKey,
 					"task":     task,
 				})
+				// Surface a failed delegation (e.g. unknown soul_key) instead of
+				// silently no-opping the workflow step.
+				if res != nil && res.IsError {
+					slog.Warn("workflow.delegate.failed", "soul_key", soulKey, "result", res.ForLLM)
+				}
 			}
 		}
 
