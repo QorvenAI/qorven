@@ -290,6 +290,12 @@ function BudgetsSection({ budgets, agentList, onSave, onReload }: {
       toast.error('Enter valid non-negative amounts');
       return;
     }
+    // A 0 cap blocks the agent entirely (it's an enforced hard limit). Leave a
+    // field blank to mean "unlimited"; a 0 is almost always a mistake here.
+    if (m === 0 || d === 0) {
+      toast.error('A cap of 0 blocks the agent. Leave blank for unlimited, or enter a positive amount.');
+      return;
+    }
     setSaving(true);
     await onSave(agentId, m, d);
     setSaving(false);
