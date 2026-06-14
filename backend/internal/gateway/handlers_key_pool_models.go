@@ -1299,6 +1299,11 @@ func (gw *Gateway) handleExportTrajectory(w http.ResponseWriter, r *http.Request
 
 	var sessions []*session.Session
 	if sessionID != "" {
+		// Single-session export: require ownership.
+		if err := gw.authorizeSessionID(r.Context(), sessionID); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+			return
+		}
 		sess, err := gw.sessions.GetByID(r.Context(), sessionID)
 		if err != nil {
 			writeJSON(w, 404, map[string]string{"error": "session not found"})
@@ -1306,11 +1311,51 @@ func (gw *Gateway) handleExportTrajectory(w http.ResponseWriter, r *http.Request
 		}
 		sessions = []*session.Session{sess}
 	} else {
-		var err error
-		sessions, err = gw.sessions.List(r.Context(), defaultTenant, "", 100)
-		if err != nil {
-			writeJSON(w, 500, map[string]string{"error": err.Error()})
-			return
+		// Bulk export: admins get all sessions; non-admins see only their own.
+		u := userFromContext(r.Context())
+		isAdmin := u != nil && u.Role == "admin"
+		if isAdmin {
+			// Admin: export all sessions across the tenant (existing behaviour).
+			var err error
+			sessions, err = gw.sessions.List(r.Context(), defaultTenant, "", 100)
+			if err != nil {
+				writeJSON(w, 500, map[string]string{"error": err.Error()})
+				return
+			}
+		} else {
+			// Non-admin: restrict bulk export to sessions the caller owns.
+			// sessions.List has no owner_actor_id filter, so we query directly.
+			if gw.db == nil {
+				writeJSON(w, 503, map[string]string{"error": "database not available"})
+				return
+			}
+			ownerID := ""
+			if u != nil {
+				ownerID = u.ID
+			}
+			if ownerID == "" {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized", "code": "no_actor"})
+				return
+			}
+			rows, err := gw.db.Pool.Query(r.Context(),
+				`SELECT id, tenant_id, agent_id, COALESCE(channel,'web'), COALESCE(label,''),
+				        COALESCE(status,'active'), messages, input_tokens, output_tokens, created_at, updated_at
+				 FROM sessions
+				 WHERE tenant_id = $1 AND owner_actor_id = $2
+				   AND (status = 'active' OR status IS NULL OR status = '')
+				 ORDER BY updated_at DESC LIMIT 100`, defaultTenant, ownerID)
+			if err != nil {
+				writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				sess := &session.Session{}
+				rows.Scan(&sess.ID, &sess.TenantID, &sess.AgentID, &sess.Channel, &sess.Label,
+					&sess.Status, &sess.Messages, &sess.InputTokens, &sess.OutputTokens,
+					&sess.CreatedAt, &sess.UpdatedAt)
+				sessions = append(sessions, sess)
+			}
 		}
 	}
 

@@ -130,7 +130,12 @@ func (gw *Gateway) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
-	s, err := gw.sessions.GetByID(r.Context(), chi.URLParam(r, "id"))
+	sessionID := chi.URLParam(r, "id")
+	if err := gw.authorizeSessionID(r.Context(), sessionID); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
+	s, err := gw.sessions.GetByID(r.Context(), sessionID)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "session not found"})
 		return
@@ -143,7 +148,12 @@ func (gw *Gateway) handleGetSessionFiles(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, 503, map[string]string{"error": "database not configured"})
 		return
 	}
-	files, err := gw.sessions.GetFiles(r.Context(), chi.URLParam(r, "id"))
+	sessionID := chi.URLParam(r, "id")
+	if err := gw.authorizeSessionID(r.Context(), sessionID); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized for this session", "code": "not_owner"})
+		return
+	}
+	files, err := gw.sessions.GetFiles(r.Context(), sessionID)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 		return

@@ -82,9 +82,10 @@ func (t *SessionsHistoryTool) Execute(ctx context.Context, args map[string]any) 
 	if n, ok := toInt(args["last_n"]); ok && n > 0 { lastN = n }
 
 	tenantID := TenantIDFromCtx(ctx)
+	agentID := AgentIDFromCtx(ctx)
 	var messagesJSON []byte
 	err := t.pool.QueryRow(ctx,
-		`SELECT messages FROM sessions WHERE session_key = $1 AND tenant_id = $2`, key, tenantID).Scan(&messagesJSON)
+		`SELECT messages FROM sessions WHERE session_key = $1 AND tenant_id = $2 AND agent_id = $3`, key, tenantID, agentID).Scan(&messagesJSON)
 	if err != nil { return ErrorResult("session not found: " + key) }
 
 	var messages []struct {
