@@ -4,11 +4,15 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const defaultSubordinateMaxHops = 10
 
 const (
 	OrgLevelUser     = 1
@@ -141,33 +145,98 @@ func (s *OrgChartStore) SyncFromAgent(ctx context.Context, tenantID, agentID uui
 	})
 }
 
-// ValidateDelegation checks that delegator can delegate to delegatee per org hierarchy rules.
+// walkIsSubordinate is a pure, DB-free helper for unit testing. It reports whether
+// descendantID is below ancestorID in the manager_id tree by walking the parentOf
+// closure upward from descendantID. The loop is bounded by maxHops to prevent an
+// infinite walk on a cycle. Returns false on reaching the bound (cycle or very deep
+// tree).
+func walkIsSubordinate(ancestorID, descendantID uuid.UUID, parentOf func(uuid.UUID) (*uuid.UUID, bool), maxHops int) bool {
+	current := descendantID
+	for hop := 0; hop < maxHops; hop++ {
+		parent, ok := parentOf(current)
+		if !ok || parent == nil {
+			return false // root reached or unknown node
+		}
+		if *parent == ancestorID {
+			return true
+		}
+		current = *parent
+	}
+	return false // depth bound exhausted — cycle or extraordinarily deep tree
+}
+
+// isSubordinate reports whether descendantID is a subordinate of ancestorID in the
+// agents.manager_id tree. It uses walkIsSubordinate with a DB-backed parentOf
+// closure. db must be non-nil.
+func (s *OrgChartStore) isSubordinate(ctx context.Context, tenantID, ancestorID, descendantID uuid.UUID) (bool, error) {
+	var lastErr error
+	parentOf := func(id uuid.UUID) (*uuid.UUID, bool) {
+		var managerID *uuid.UUID
+		err := s.db.QueryRow(ctx,
+			`SELECT manager_id FROM agents WHERE id = $1 AND tenant_id = $2`,
+			id, tenantID,
+		).Scan(&managerID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				lastErr = err
+			}
+			return nil, false
+		}
+		return managerID, true
+	}
+	result := walkIsSubordinate(ancestorID, descendantID, parentOf, defaultSubordinateMaxHops)
+	return result, lastErr
+}
+
+// ValidateDelegation checks that delegatorID may delegate to delegateeID.
+//
+// Rule (fail-closed):
+//
+//	Allow iff:
+//	  (1) s.db == nil  — no DB means no enforcement (unit-test / no-DB path), OR
+//	  (2) delegateeID is a subordinate of delegatorID in the agents.manager_id tree
+//	      AND (when both overlay nodes exist) delegatee's level is strictly below
+//	      delegator's level (not-upward)
+//	      AND (when delegator has a CanDelegateTo allowlist) delegateeID is on it.
+//
+// Deny (return error) whenever delegateeID is NOT in delegatorID's manager_id
+// subtree, even if neither agent has a row in org_hierarchy. This replaces the old
+// silent-pass on missing rows.
 func (s *OrgChartStore) ValidateDelegation(ctx context.Context, tenantID, delegatorID, delegateeID uuid.UUID) error {
 	if s.db == nil {
 		return nil
 	}
 
+	// Check the authoritative manager_id tree first (fail-closed).
+	sub, err := s.isSubordinate(ctx, tenantID, delegatorID, delegateeID)
+	if err != nil {
+		// DB error: fail closed.
+		return fmt.Errorf("delegation check failed (db error): %w", err)
+	}
+	if !sub {
+		return fmt.Errorf("delegation denied: agent %s is not a subordinate of %s in the org tree", delegateeID, delegatorID)
+	}
+
+	// Overlay level check (not-upward) — only when both nodes are present.
 	delegator, _ := s.GetNode(ctx, tenantID, delegatorID)
 	delegatee, _ := s.GetNode(ctx, tenantID, delegateeID)
-
-	if delegator == nil || delegatee == nil {
-		return nil
-	}
-
-	if delegator.OrgLevel >= delegatee.OrgLevel {
-		return fmt.Errorf("cannot delegate upward: level %d cannot delegate to level %d", delegator.OrgLevel, delegatee.OrgLevel)
-	}
-
-	if len(delegator.CanDelegateTo) > 0 {
-		allowed := false
-		for _, id := range delegator.CanDelegateTo {
-			if id == delegateeID {
-				allowed = true
-				break
-			}
+	if delegator != nil && delegatee != nil {
+		if delegator.OrgLevel != 0 && delegatee.OrgLevel != 0 && delegator.OrgLevel >= delegatee.OrgLevel {
+			return fmt.Errorf("cannot delegate upward: level %d cannot delegate to level %d", delegator.OrgLevel, delegatee.OrgLevel)
 		}
-		if !allowed {
-			return fmt.Errorf("agent %s is not in delegator's allowed delegation targets", delegateeID)
+
+		// CanDelegateTo allowlist — skip when the list is empty (open delegation within the subtree).
+		if len(delegator.CanDelegateTo) > 0 {
+			allowed := false
+			for _, id := range delegator.CanDelegateTo {
+				if id == delegateeID {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("agent %s is not in delegator's allowed delegation targets", delegateeID)
+			}
 		}
 	}
 
