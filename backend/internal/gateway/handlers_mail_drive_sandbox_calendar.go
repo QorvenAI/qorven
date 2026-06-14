@@ -85,6 +85,16 @@ func (gw *Gateway) handleCreateMailIdentity(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), 500)
 		return
 	}
+
+	// Newly-created identities won't have IMAP credentials yet (they are set via
+	// the update endpoint), so AddIdentity is typically a no-op here. We call it
+	// defensively so any future schema changes that do include IMAP at create time
+	// are automatically polled without a restart.
+	if gw.mailPoller != nil {
+		imapPass, _ := gw.mailStore.IdentityIMAPPass(context.Background(), id.ID, gw.cfg.Auth.EncryptionKey)
+		gw.mailPoller.AddIdentity(context.Background(), defaultTenant, id, imapPass)
+	}
+
 	json.NewEncoder(w).Encode(id)
 }
 
@@ -205,6 +215,21 @@ func (gw *Gateway) handleUpdateMailIdentity(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
+
+	// If IMAP credentials changed, (re-)start the IDLE goroutine for this
+	// identity immediately so the new mailbox is polled without a restart.
+	// Use context.Background() — not the request context — because the poll
+	// loop must outlive the HTTP response.
+	if gw.mailPoller != nil && body.IMAPHost != "" {
+		updatedID, err := gw.mailStore.GetIdentity(r.Context(), id)
+		if err == nil {
+			imapPass, _ := gw.mailStore.IdentityIMAPPass(context.Background(), id, encKey)
+			gw.mailPoller.AddIdentity(context.Background(), defaultTenant, updatedID, imapPass)
+		} else {
+			slog.Warn("mail.poller.hot_add.fetch_failed", "identity_id", id, "error", err)
+		}
+	}
+
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 

@@ -11,6 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -29,10 +31,28 @@ type IMAPPoller struct {
 	store        *Store
 	router       *Router
 	agentTrigger AgentTrigger
+
+	// running tracks the (cancel func, generation counter) for each identity's
+	// IDLE goroutine so that AddIdentity can stop a stale goroutine before
+	// launching a replacement and cleanup defers can avoid stomping a newer entry.
+	// gen is a monotonically increasing counter; each launch gets its own value.
+	mu      sync.Mutex
+	running map[string]struct {
+		cancel context.CancelFunc
+		gen    uint64
+	}
+	genCounter atomic.Uint64
 }
 
 func NewIMAPPoller(store *Store, router *Router) *IMAPPoller {
-	return &IMAPPoller{store: store, router: router}
+	return &IMAPPoller{
+		store:  store,
+		router: router,
+		running: make(map[string]struct {
+			cancel context.CancelFunc
+			gen    uint64
+		}),
+	}
 }
 
 // SetAgentTrigger wires the callback that wakes a Soul when mail arrives.
@@ -171,28 +191,87 @@ func (p *IMAPPoller) PollIdentity(ctx context.Context, tenantID string, id *Iden
 	return nil
 }
 
-// StartIDLE connects to IMAP and uses IDLE to get push notifications.
-// Falls back to polling if IDLE is not supported.
-func (p *IMAPPoller) StartIDLE(ctx context.Context, tenantID string, id *Identity, imapPass string) {
-	if id.IMAPHost == "" || imapPass == "" {
-		return
+// startIDLETracked is the internal launcher used by both StartPolling and
+// AddIdentity.  It creates a child context derived from parentCtx, registers
+// its cancel func in p.running[identityID] (so AddIdentity can stop a stale
+// goroutine before launching a replacement), and launches the retry goroutine.
+// Callers MUST NOT hold p.mu when calling this function.
+func (p *IMAPPoller) startIDLETracked(parentCtx context.Context, tenantID string, id *Identity, imapPass string) {
+	idCtx, cancel := context.WithCancel(parentCtx)
+	gen := p.genCounter.Add(1)
+
+	p.mu.Lock()
+	// If a goroutine is already running for this identity, cancel it first so we
+	// don't leak goroutines (e.g. when credentials are refreshed via update).
+	if old, ok := p.running[id.ID]; ok {
+		old.cancel()
 	}
+	p.running[id.ID] = struct {
+		cancel context.CancelFunc
+		gen    uint64
+	}{cancel, gen}
+	p.mu.Unlock()
 
 	go func() {
+		defer func() {
+			// Remove from the map when the goroutine exits, but only if this
+			// goroutine is still the current owner.  A newer launch may have
+			// already replaced the entry.
+			p.mu.Lock()
+			if entry, ok := p.running[id.ID]; ok && entry.gen == gen {
+				delete(p.running, id.ID)
+			}
+			p.mu.Unlock()
+		}()
+
 		for {
 			select {
-			case <-ctx.Done():
+			case <-idCtx.Done():
 				return
 			default:
 			}
 
-			err := p.idleLoop(ctx, tenantID, id, imapPass)
+			err := p.idleLoop(idCtx, tenantID, id, imapPass)
 			if err != nil {
 				slog.Warn("imap.idle.error", "identity", id.Address, "error", err, "retry_in", "10s")
-				time.Sleep(10 * time.Second)
+				select {
+				case <-idCtx.Done():
+					return
+				case <-time.After(10 * time.Second):
+				}
 			}
 		}
 	}()
+}
+
+// StartIDLE connects to IMAP and uses IDLE to get push notifications.
+// Falls back to polling if IDLE is not supported.
+// Deprecated: prefer startIDLETracked for internal use; StartIDLE is kept for
+// any existing external callers that don't need cancel tracking.
+func (p *IMAPPoller) StartIDLE(ctx context.Context, tenantID string, id *Identity, imapPass string) {
+	if id.IMAPHost == "" || imapPass == "" {
+		return
+	}
+	p.startIDLETracked(ctx, tenantID, id, imapPass)
+}
+
+// AddIdentity starts polling for a newly-created mail identity without
+// requiring a server restart.  It is safe to call from any goroutine
+// (including an HTTP handler).  If a goroutine is already running for the
+// given identity it is replaced (idempotent / restart-safe).
+//
+// ctx must be a long-lived context — use context.Background() from the
+// call-site, NOT the HTTP request context, because the request context is
+// cancelled as soon as the response is sent.
+func (p *IMAPPoller) AddIdentity(ctx context.Context, tenantID string, id *Identity, imapPass string) {
+	if id.IMAPHost == "" || imapPass == "" {
+		return
+	}
+	if !id.IsActive {
+		return
+	}
+	slog.Info("imap.poller.hot_add", "identity", id.Address)
+	p.startIDLETracked(ctx, tenantID, id, imapPass)
 }
 
 func (p *IMAPPoller) idleLoop(ctx context.Context, tenantID string, id *Identity, imapPass string) error {
@@ -282,7 +361,7 @@ func (p *IMAPPoller) StartPolling(ctx context.Context, tenantID string, getPassw
 			if pass == "" {
 				continue
 			}
-			p.StartIDLE(ctx, tenantID, &id, pass)
+			p.startIDLETracked(ctx, tenantID, &id, pass)
 		}
 	}()
 }

@@ -5,6 +5,7 @@
 package mail
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -138,6 +139,54 @@ func TestSanitizeHeader_StripsCRLF(t *testing.T) {
 		if strings.ContainsAny(sanitizeHeader(in), "\r\n") {
 			t.Errorf("sanitizeHeader(%q) still contains CR/LF", in)
 		}
+	}
+}
+
+// TestIMAPPoller_AddIdentity_Idempotency verifies that calling AddIdentity twice
+// for the same identity installs a higher generation counter (i.e. the second
+// call replaces the first, not adds alongside it).  It uses an already-cancelled
+// context so the goroutines exit immediately without trying to connect to a real
+// IMAP server.
+func TestIMAPPoller_AddIdentity_Idempotency(t *testing.T) {
+	p := NewIMAPPoller(nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so no IMAP dial is ever attempted
+
+	id := &Identity{
+		ID:       "test-identity-1",
+		Address:  "test@example.com",
+		IMAPHost: "imap.example.com",
+		IMAPPort: 993,
+		IMAPUser: "test@example.com",
+		IsActive: true,
+	}
+
+	// First add — should register in p.running with gen == 1.
+	p.AddIdentity(ctx, "tenant1", id, "password")
+
+	p.mu.Lock()
+	firstEntry, ok := p.running[id.ID]
+	p.mu.Unlock()
+	if !ok {
+		t.Fatal("expected identity to be registered in running map after first AddIdentity")
+	}
+	firstGen := firstEntry.gen
+
+	// Second add — should install a higher generation, not a duplicate goroutine.
+	ctxB, cancelB := context.WithCancel(context.Background())
+	cancelB()
+	p.AddIdentity(ctxB, "tenant1", id, "password")
+
+	p.mu.Lock()
+	secondEntry, ok2 := p.running[id.ID]
+	p.mu.Unlock()
+	if !ok2 {
+		// Both goroutines have already exited and cleaned up — that's acceptable.
+		return
+	}
+	if secondEntry.gen <= firstGen {
+		t.Errorf("expected second AddIdentity to install a higher generation (got %d, first was %d) — goroutine was not replaced", secondEntry.gen, firstGen)
 	}
 }
 
