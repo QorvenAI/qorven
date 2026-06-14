@@ -405,6 +405,22 @@ func (gw *Gateway) handleSetupCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"setup_required": required})
 }
 
+// RequireAdmin rejects non-admin users. Must run AFTER AuthMiddlewareV2 (it reads the user from context).
+func (gw *Gateway) RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u := userFromContext(r.Context())
+		if u == nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+			return
+		}
+		if u.Role != "admin" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // AuthMiddlewareV2 checks JWT cookie → Bearer token → gateway_token → API key.
 func (gw *Gateway) AuthMiddlewareV2(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
