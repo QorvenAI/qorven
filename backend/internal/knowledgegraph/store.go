@@ -69,7 +69,7 @@ func (s *Store) AddRelationship(ctx context.Context, tenantID string, r Relation
 
 func (s *Store) SearchEntities(ctx context.Context, tenantID, query string, limit int) ([]Entity, error) {
 	if limit <= 0 { limit = 20 }
-	rows, err := s.pool.Query(ctx, `SELECT id, tenant_id, agent_id, name, entity_type, source, confidence
+	rows, err := s.pool.Query(ctx, `SELECT id, tenant_id, COALESCE(agent_id::text,''), name, entity_type, COALESCE(source,''), confidence
 		FROM kg_entities WHERE tenant_id=$1 AND name ILIKE '%' || $2 || '%'
 		ORDER BY confidence DESC LIMIT $3`, tenantID, query, limit)
 	if err != nil { return nil, err }
