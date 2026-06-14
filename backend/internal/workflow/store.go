@@ -218,6 +218,15 @@ func (s *Store) ListRuns(ctx context.Context, workflowID string, limit int) ([]R
 // ListAllRuns returns recent workflow runs for a tenant (newest first).
 func (s *Store) ListAllRuns(ctx context.Context, tenantID string, limit int) ([]Run, error) {
 	if limit <= 0 { limit = 50 }
+	if s.pool == nil {
+		runs := []Run{}
+		for _, r := range s.memRuns {
+			if r.TenantID == tenantID {
+				runs = append(runs, *r)
+			}
+		}
+		return runs, nil
+	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, workflow_id, tenant_id, agent_id, status, current_step, context, COALESCE(result,''), started_at, completed_at, COALESCE(error,'')
 		 FROM workflow_runs WHERE tenant_id = $1 ORDER BY started_at DESC LIMIT $2`, tenantID, limit)
@@ -252,6 +261,12 @@ func (s *Store) GetRunForTenant(ctx context.Context, tenantID, runID string) (*R
 
 // CancelRun marks a running workflow run as cancelled.
 func (s *Store) CancelRun(ctx context.Context, tenantID, runID string) error {
+	if s.pool == nil {
+		if r, ok := s.memRuns[runID]; ok && r.TenantID == tenantID && r.Status == "running" {
+			r.Status = "cancelled"
+		}
+		return nil
+	}
 	_, err := s.pool.Exec(ctx,
 		`UPDATE workflow_runs SET status='cancelled', completed_at=now() WHERE id=$1 AND tenant_id=$2 AND status='running'`,
 		runID, tenantID)
