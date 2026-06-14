@@ -18,48 +18,68 @@ import (
 // must route through the permission gate."
 //
 // Contract: every name in tools.DestructiveTools MUST be registered
-// on the gateway's real tool registry, AND the registered tool MUST
-// be wrapped (permissions.IsGated reports true). A new destructive
-// tool added without its permissions.WrapLazy wrapper fails this test
-// — the build goes red, not the production deploy.
+// via the PRODUCTION gw.registerDestructiveTools path, AND every
+// non-exempt tool MUST be wrapped (permissions.IsGated reports true).
 //
-// This test boots a minimal Gateway that carries the same tool
-// registry bootstrap path the production gateway uses, so the check
-// actually walks real production registrations. We take the Gateway
-// through ensureProtocolSurfaces + the github-tool block that
-// gateway.New runs. Everything else (voice, dreamer, LSP, etc.) stays
-// out of the test.
+// This test calls gw.registerDestructiveTools directly — the same
+// method registerTools() calls during normal gateway boot — so any
+// un-wrapping in the real registration code fails this test. The old
+// hand-maintained registerDestructiveToolsForTest mirror has been
+// removed; there is now a single source of truth.
+//
+// cron is the documented exempt tool: it is in the manifest but
+// intentionally NOT wrapped (see registerDestructiveTools for the
+// rationale). The test asserts this exception explicitly so it cannot
+// be silently removed without making the test fail.
 func TestDestructiveManifest_AllWrapped(t *testing.T) {
 	gw, _, _ := newMinimalGateway(t, MinimalGatewayOpts{})
+	gw.toolReg = tools.NewRegistry()
 
-	// Mount the registry that gateway.New() normally fills. The
-	// minimal gateway doesn't auto-register tools (registrations are
-	// side-effects of gateway.New's bigger boot path), so we invoke
-	// the production wrapper block here directly.
-	registerDestructiveToolsForTest(t, gw)
+	// Call the PRODUCTION registration method — not a mirror.
+	gw.registerDestructiveTools(
+		gw.toolReg,
+		"/tmp/qorven-workspace-test",
+		"/tmp",
+		func() string { return "" },
+		tools.NewFileHistory(),
+	)
 
 	if gw.toolReg == nil {
 		t.Fatalf("tool registry is nil; destructive manifest cannot be enforced")
 	}
 
+	// cron is the only manifest tool intentionally exempt from the gate.
+	// Assert the exception is still present in the manifest and still bare.
+	const cronExempt = "cron"
+	if _, ok := tools.DestructiveTools[cronExempt]; !ok {
+		t.Fatalf("cron is no longer in DestructiveTools — update this test to reflect the new manifest")
+	}
+	cronTool, cronRegistered := gw.toolReg.Get(cronExempt)
+	if cronRegistered && permissions.IsGated(cronTool) {
+		t.Errorf("cron is now wrapped — if intentional, remove the explicit exemption from this test and update registerDestructiveTools")
+	}
+
 	var failures []string
 	for name, reason := range tools.DestructiveTools {
+		if name == cronExempt {
+			continue // documented exception above
+		}
 		tool, ok := gw.toolReg.Get(name)
 		if !ok {
-			// Not-registered is acceptable: the full tool set depends
-			// on optional services (e.g. exec depends on sandbox). We
-			// only fail for tools that ARE registered but not wrapped.
+			failures = append(failures,
+				name+" — "+reason.Description+" — NOT REGISTERED (add it to registerDestructiveTools)")
 			continue
 		}
 		if !permissions.IsGated(tool) {
 			failures = append(failures,
-				name+" — "+reason.Description+" — NOT WRAPPED with permissions")
+				name+" — "+reason.Description+" — registered WITHOUT the permission gate wrapper")
 		}
 	}
 	if len(failures) > 0 {
 		t.Fatalf(
-			"destructive-tool manifest violation (%d tool(s) registered without the permission gate):\n  - %s\n\n"+
-				"Wrap the tool's registration with permissions.WrapLazy(gateGetter, inner, GatedToolOptions{...}) at the gateway bootstrap.",
+			"destructive-tool manifest violation (%d tool(s)):\n  - %s\n\n"+
+				"Fix: in gateway_tools.go registerDestructiveTools, ensure every non-exempt tool "+
+				"is registered with permissions.WrapLazy(gateGetter, inner, GatedToolOptions{...}).",
 			len(failures), strings.Join(failures, "\n  - "),
 		)
 	}
@@ -114,81 +134,6 @@ func TestDestructiveManifest_AcceptsWrapped(t *testing.T) {
 	if !permissions.IsGated(tool) {
 		t.Fatalf("wrapped tool should report IsGated=true")
 	}
-}
-
-// registerDestructiveToolsForTest installs the destructive-tool
-// registrations the real gateway.New block performs. Kept in this
-// test-only file so we can exercise the manifest check without
-// dragging in gateway.New's other side effects. The logic MUST mirror
-// gateway.go's registration block — any drift is itself a bug.
-func registerDestructiveToolsForTest(t *testing.T, gw *Gateway) {
-	t.Helper()
-	if gw.toolReg == nil {
-		gw.toolReg = tools.NewRegistry()
-	}
-	tokenGetter := func() string { return "" }
-	workspace := "/tmp/qorven-workspace-test"
-
-	// gh_push_file
-	gw.toolReg.Register(permissions.WrapLazy(
-		func() *permissions.Gate { return gw.permissionGate },
-		tools.NewGhPushFileToolWithToken(tokenGetter),
-		permissions.GatedToolOptions{
-			Reason:      "Writes a file to a user-owned GitHub repository",
-			RequestedBy: "agent",
-		},
-	))
-	// gh_merge_pr
-	gw.toolReg.Register(permissions.WrapLazy(
-		func() *permissions.Gate { return gw.permissionGate },
-		tools.NewGhMergePRToolWithToken(tokenGetter),
-		permissions.GatedToolOptions{
-			Reason:      "Merge a pull request",
-			RequestedBy: "agent",
-		},
-	))
-	// exec
-	gw.toolReg.Register(permissions.WrapLazy(
-		func() *permissions.Gate { return gw.permissionGate },
-		tools.NewExecTool(workspace, true),
-		permissions.GatedToolOptions{
-			Reason:      "Run a shell command on the host",
-			RequestedBy: "agent",
-		},
-	))
-	// write_file
-	writeTool := tools.NewWriteFileTool(workspace)
-	gw.toolReg.Register(permissions.WrapLazy(
-		func() *permissions.Gate { return gw.permissionGate },
-		writeTool,
-		permissions.GatedToolOptions{
-			Reason:      "Write a file to the workspace",
-			RequestedBy: "agent",
-		},
-	))
-	// apply_patch
-	fileHistory := tools.NewFileHistory()
-	gw.toolReg.Register(permissions.WrapLazy(
-		func() *permissions.Gate { return gw.permissionGate },
-		tools.NewApplyPatchTool(workspace, fileHistory),
-		permissions.GatedToolOptions{
-			Reason:      "Apply a code patch to workspace files",
-			RequestedBy: "agent",
-		},
-	))
-	// undo
-	gw.toolReg.Register(permissions.WrapLazy(
-		func() *permissions.Gate { return gw.permissionGate },
-		tools.NewUndoTool(fileHistory),
-		permissions.GatedToolOptions{
-			Reason:      "Undo a previous file change",
-			RequestedBy: "agent",
-		},
-	))
-	// cron is intentionally NOT wrapped: it runs in headless/unattended
-	// channel sessions where no human approver is present. The gate
-	// fails closed (returns "gate not configured") when the gate is nil,
-	// which would deadlock autonomous scheduling entirely.
 }
 
 // stubBareTool is an unwrapped Tool used for the regression test.

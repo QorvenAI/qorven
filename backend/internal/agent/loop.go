@@ -1608,7 +1608,9 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 				}
 			}
 
-			// Permission check: verify agent role allows this tool
+			// Authoritative per-role tool gate: a role-denied tool is refused here,
+			// before executeTool is reached. executeTool itself does not re-check role.
+			// This is the single enforcement point for role-based tool access control.
 			if ag.Role != nil {
 				agentPerms := permissions.DefaultPermissions(permissions.Role(*ag.Role))
 				allowed := permissions.FilterTools(permissions.Role(*ag.Role), agentPerms, []string{tc.Name})
