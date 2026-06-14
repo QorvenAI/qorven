@@ -188,6 +188,13 @@ func (s *OrgChartStore) isSubordinate(ctx context.Context, tenantID, ancestorID,
 	return result, lastErr
 }
 
+// IsSubordinate is the exported counterpart of isSubordinate for use by packages
+// outside this one (e.g. gateway handlers). It reports whether descendantID sits
+// below ancestorID in the agents.manager_id tree.
+func (s *OrgChartStore) IsSubordinate(ctx context.Context, tenantID, ancestorID, descendantID uuid.UUID) (bool, error) {
+	return s.isSubordinate(ctx, tenantID, ancestorID, descendantID)
+}
+
 // ValidateDelegation checks that delegatorID may delegate to delegateeID.
 //
 // Rule (fail-closed):

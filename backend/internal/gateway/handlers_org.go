@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/qorvenai/qorven/internal/agent"
 	cronpkg "github.com/qorvenai/qorven/internal/cron"
 )
@@ -311,6 +312,8 @@ func (gw *Gateway) handleOrgHireAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOrgTerminateAgent marks an agent as terminated in org_roster and sets terminated_at.
+// Before terminating, it reparents the agent's direct reports to the agent's own manager
+// (reparent-to-grandparent) so no subordinates are left pointing at a terminated agent.
 // POST /v1/org/roster/{id}/terminate
 func (gw *Gateway) handleOrgTerminateAgent(w http.ResponseWriter, r *http.Request) {
 	if gw.db == nil {
@@ -328,6 +331,25 @@ func (gw *Gateway) handleOrgTerminateAgent(w http.ResponseWriter, r *http.Reques
 	if u != nil {
 		terminatedBy = u.ID
 	}
+
+	// Reparent direct reports to the terminated agent's manager (reparent-to-grandparent).
+	// This runs BEFORE the terminate status update so that if the reparent fails we
+	// still have a consistent tree — the agent is not yet marked terminated.
+	// If the terminated agent is top-level (manager_id IS NULL), reports become
+	// top-level too, which is the correct outcome.
+	var grandparentID *uuid.UUID
+	_ = gw.db.Pool.QueryRow(r.Context(),
+		`SELECT manager_id FROM agents WHERE id=$1 AND tenant_id=$2`,
+		agentID, defaultTenant).Scan(&grandparentID)
+
+	_, _ = gw.db.Pool.Exec(r.Context(),
+		`UPDATE agents SET manager_id=$1 WHERE manager_id=$2 AND tenant_id=$3`,
+		grandparentID, agentID, defaultTenant)
+
+	// Sync the overlay (org_hierarchy.reports_to) for all reparented agents in bulk.
+	_, _ = gw.db.Pool.Exec(r.Context(),
+		`UPDATE org_hierarchy SET reports_to=$1 WHERE reports_to=$2::uuid AND tenant_id=$3`,
+		grandparentID, agentID, defaultTenant)
 
 	_, err := gw.db.Pool.Exec(r.Context(),
 		`UPDATE agents SET terminated_at=now() WHERE id=$1 AND tenant_id=$2`,
@@ -354,4 +376,111 @@ func (gw *Gateway) handleOrgTerminateAgent(w http.ResponseWriter, r *http.Reques
 	gw.disableAgentChannels(r.Context(), agentID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "terminated", "agent_id": agentID})
+}
+
+// handleOrgReassignManager reassigns an agent's direct manager.
+// Body: {"manager_id": "<uuid>"} or {"manager_id": null} to make the agent top-level.
+// Rejects the change if it would create a cycle (proposed manager is a subordinate of the agent).
+// PATCH /v1/org/roster/{id}/manager
+func (gw *Gateway) handleOrgReassignManager(w http.ResponseWriter, r *http.Request) {
+	if gw.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database not available"})
+		return
+	}
+
+	// Defense-in-depth: verify admin even though the route is in the RequireAdmin group.
+	u := userFromContext(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if u.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admin role required", "code": "admin_only"})
+		return
+	}
+
+	rawID := chi.URLParam(r, "id")
+	agentID, err := uuid.Parse(rawID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent id"})
+		return
+	}
+
+	var body struct {
+		ManagerID *string `json:"manager_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Verify the target agent exists in this tenant.
+	var existingOrgLevel, existingOrgRole string
+	var existingBudget float64
+	err = gw.db.Pool.QueryRow(r.Context(),
+		`SELECT COALESCE(org_level,''), COALESCE(org_role,''), COALESCE(monthly_budget_usd,0)
+		 FROM agents WHERE id=$1 AND tenant_id=$2`,
+		agentID, defaultTenant).Scan(&existingOrgLevel, &existingOrgRole, &existingBudget)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		return
+	}
+
+	var newManagerID *uuid.UUID
+	if body.ManagerID != nil {
+		mid, err := uuid.Parse(*body.ManagerID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid manager_id"})
+			return
+		}
+
+		// Reject self-assignment.
+		if mid == agentID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "an agent cannot be its own manager"})
+			return
+		}
+
+		// Verify the proposed manager exists in this tenant.
+		var managerExists bool
+		_ = gw.db.Pool.QueryRow(r.Context(),
+			`SELECT true FROM agents WHERE id=$1 AND tenant_id=$2`,
+			mid, defaultTenant).Scan(&managerExists)
+		if !managerExists {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "manager agent not found"})
+			return
+		}
+
+		// Cycle detection: reject if the proposed manager is a subordinate of this agent.
+		if gw.orgChartStore != nil {
+			tenantUID, _ := uuid.Parse(defaultTenant)
+			isSub, err := gw.orgChartStore.IsSubordinate(r.Context(), tenantUID, agentID, mid)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+				return
+			}
+			if isSub {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reassignment would create a reporting cycle"})
+				return
+			}
+		}
+
+		newManagerID = &mid
+	}
+
+	// Apply the manager update.
+	_, err = gw.db.Pool.Exec(r.Context(),
+		`UPDATE agents SET manager_id=$1 WHERE id=$2 AND tenant_id=$3`,
+		newManagerID, agentID, defaultTenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": sanitizeError(err)})
+		return
+	}
+
+	// Sync the org_hierarchy overlay so reports_to matches the new manager.
+	if gw.orgChartStore != nil {
+		tenantUID, _ := uuid.Parse(defaultTenant)
+		_ = gw.orgChartStore.SyncFromAgent(r.Context(), tenantUID, agentID, newManagerID, existingOrgLevel, existingOrgRole, existingBudget)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

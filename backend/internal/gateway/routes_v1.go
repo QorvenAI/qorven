@@ -1289,6 +1289,7 @@ func (gw *Gateway) registerV1Routes(parent chi.Router) {
 			// Org roster mutations
 			ar.Post("/org/roster/hire", gw.handleOrgHireAgent)
 			ar.Post("/org/roster/{id}/terminate", gw.handleOrgTerminateAgent)
+			ar.Patch("/org/roster/{id}/manager", gw.handleOrgReassignManager)
 		})
 
 	})
