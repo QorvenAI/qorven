@@ -73,6 +73,12 @@ func (gw *Gateway) Start() error {
 			slog.Warn("chief.bootstrap_failed", "error", err)
 		} else {
 			slog.Info("chief of staff ready")
+			// Seed the default C-suite (COO/CFO/CTO/CMO) under Prime on a
+			// fresh install. The call is a no-op when the org already has
+			// C-suite officers, so it is safe to run on every startup.
+			if err := gw.seedCSuite(context.Background()); err != nil {
+				slog.Warn("csuite.seed_failed", "error", err)
+			}
 		}
 		if _, err := gw.ensureCoder(context.Background()); err != nil {
 			slog.Warn("coder.bootstrap_failed", "error", err)
