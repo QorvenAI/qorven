@@ -228,7 +228,6 @@ type Gateway struct {
 	intentRouter     *agent.IntentRouter
 	subagentRunStore *agent.SubagentRunStore
 	outputValidator  *agent.OutputValidator
-	workflowEngine   *workflow.Engine
 
 	// ERP governance subsystem
 	designationStore *governance.DesignationStore
@@ -630,16 +629,6 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.delegation = gw.buildDelegationOrchestrator()
 			governance.SeedDefaults(context.Background(), db.Pool, defaultTenant)
 			gw.policyEngine.LoadPolicies(context.Background(), defaultTenant)
-			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)
-			gw.workflowEngine.SetEventHandler(func(evt workflow.StepEvent) {
-				if gw.rtHub != nil {
-					gw.rtHub.Broadcast(realtime.Event{
-						Type:      realtime.EventWorkflowStepProgress,
-						Timestamp: time.Now().UnixMilli(),
-						Data:      map[string]any{"run_id": evt.RunID, "step_id": evt.StepID, "event": evt.Event, "payload": evt.Payload},
-					})
-				}
-			})
 			gw.msgStore = agent.NewMessageStore(db.Pool)
 			gw.hbStore = heartbeat.NewStore(db.Pool)
 			gw.mailStore = mail.NewStore(db.Pool)
