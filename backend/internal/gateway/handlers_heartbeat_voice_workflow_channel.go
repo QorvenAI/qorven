@@ -154,6 +154,10 @@ func (gw *Gateway) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 400, map[string]string{"error": "name required"})
 		return
 	}
+	if msg := validateWorkflowCron(wf.TriggerType, wf.TriggerConfig); msg != "" {
+		writeJSON(w, 400, map[string]string{"error": msg})
+		return
+	}
 	id, err := gw.wfStore.Create(r.Context(), defaultTenant, wf)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -216,6 +220,10 @@ func (gw *Gateway) handleUpdateWorkflow(w http.ResponseWriter, r *http.Request) 
 	}
 	if v, ok := patch["enabled"]; ok {
 		json.Unmarshal(v, &merged.Enabled)
+	}
+	if msg := validateWorkflowCron(merged.TriggerType, merged.TriggerConfig); msg != "" {
+		writeJSON(w, 400, map[string]string{"error": msg})
+		return
 	}
 	if err := gw.wfStore.Update(r.Context(), id, merged); err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})

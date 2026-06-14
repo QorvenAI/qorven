@@ -295,6 +295,7 @@ func (gw *Gateway) Start() error {
 		})
 		gw.cronRunner.Start(context.Background())
 		slog.Info("cron runner started")
+		gw.startWorkflowCron(context.Background())
 		gw.startCalendarSyncTicker(context.Background())
 
 		// Self-building loop (disabled by default)
