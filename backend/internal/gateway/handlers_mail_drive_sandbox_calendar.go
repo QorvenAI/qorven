@@ -223,7 +223,13 @@ func (gw *Gateway) handleUpdateMailIdentity(w http.ResponseWriter, r *http.Reque
 	if gw.mailPoller != nil && body.IMAPHost != "" {
 		updatedID, err := gw.mailStore.GetIdentity(r.Context(), id)
 		if err == nil {
-			imapPass, _ := gw.mailStore.IdentityIMAPPass(context.Background(), id, encKey)
+			imapPass, passErr := gw.mailStore.IdentityIMAPPass(context.Background(), id, encKey)
+			if passErr != nil || imapPass == "" {
+				// AddIdentity no-ops on an empty password, so polling silently
+				// won't start — log it so "I saved creds but nothing polls" is
+				// diagnosable rather than mysterious.
+				slog.Warn("mail.poller.hot_add.no_imap_pass", "identity_id", id, "error", passErr)
+			}
 			gw.mailPoller.AddIdentity(context.Background(), defaultTenant, updatedID, imapPass)
 		} else {
 			slog.Warn("mail.poller.hot_add.fetch_failed", "identity_id", id, "error", err)
