@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"strings"
 	"time"
 
 	"github.com/adhocore/gronx"
@@ -469,43 +468,17 @@ func IsValidExpr(expr string) bool {
 }
 
 // computeNextRunFromExpr parses a cron expression and returns the next run time.
+// It uses the full gronx parser so ALL five fields (including day-of-month and
+// day-of-week) are honored — a schedule like "30 9 * * 1" fires only on Mondays,
+// not every day. Only genuinely-unparseable input falls back to hourly.
 func computeNextRunFromExpr(expr string) time.Time {
 	now := time.Now()
-	parts := strings.Fields(expr)
-	if len(parts) < 5 {
-		return now.Add(time.Hour) // fallback
+	if next, err := gronx.NextTickAfter(expr, now, false); err == nil {
+		return next
 	}
-
-	// Handle common patterns directly
-	switch {
-	case expr == "* * * * *":
-		return now.Add(time.Minute).Truncate(time.Minute)
-	case parts[0] == "0" && parts[1] == "*":
-		return now.Add(time.Hour).Truncate(time.Hour)
-	case parts[0] == "0" && parts[1] == "0":
-		next := now.AddDate(0, 0, 1)
-		return time.Date(next.Year(), next.Month(), next.Day(), 0, 0, 0, 0, now.Location())
-	}
-
-	// Parse minute and hour fields for simple schedules
-	minute := parseField(parts[0], 0, 59)
-	hour := parseField(parts[1], 0, 23)
-
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
-	if !next.After(now) {
-		next = next.Add(24 * time.Hour)
-	}
-	return next
-}
-
-func parseField(field string, min, max int) int {
-	if field == "*" { return min }
-	parts := strings.Split(field, "/")
-	v := 0
-	fmt.Sscanf(parts[0], "%d", &v)
-	if v < min { v = min }
-	if v > max { v = max }
-	return v
+	// Unparseable expression: hourly fallback. Callers MUST validate with
+	// IsValidExpr before persisting so this path is not reached for user input.
+	return now.Add(time.Hour)
 }
 
 // FormatNextRun formats a next run time for display.

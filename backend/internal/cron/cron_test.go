@@ -211,3 +211,17 @@ func strPtr(s string) *string { return &s }
 type cronErr string
 func (e cronErr) Error() string { return string(e) }
 func errFromStr(s string) error { return cronErr(s) }
+
+// TestNextRunFromExpr_HonorsDayOfWeek is the regression for the simplified
+// parser that ignored day/month/weekday: a Monday-only schedule must land on a
+// Monday, not fire daily. Uses the full gronx parser via computeNextRunFromExpr.
+func TestNextRunFromExpr_HonorsDayOfWeek(t *testing.T) {
+	// "30 9 * * 1" = 09:30 on Mondays only.
+	next := NextRunFromExpr("30 9 * * 1")
+	if next.Weekday() != time.Monday {
+		t.Fatalf("Monday-only cron scheduled on %s, want Monday", next.Weekday())
+	}
+	if next.Hour() != 9 || next.Minute() != 30 {
+		t.Fatalf("scheduled at %02d:%02d, want 09:30", next.Hour(), next.Minute())
+	}
+}
