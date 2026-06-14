@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/qorvenai/qorven/internal/tools"
 )
 
 // TestRun_CollectSurvivesRunLoop is the regression for the run-loop overwrite:
@@ -58,6 +60,28 @@ func TestExecCollect_CapturesFields(t *testing.T) {
 		t.Fatal("missing field should be present (empty), not absent")
 	}
 	_ = out
+}
+
+func TestExecAPI_BlocksInternalURL(t *testing.T) {
+	e := &Executor{}
+	for _, bad := range []string{
+		"http://169.254.169.254/latest/meta-data/",
+		"http://localhost:4200/v1/admin",
+		"http://127.0.0.1/",
+		"http://10.0.0.1/",
+		"http://192.168.1.1/",
+	} {
+		_, _, err := e.execAPI(context.Background(), Step{Type: StepAPI, URL: bad, Method: "GET"}, map[string]any{})
+		if err == nil {
+			t.Errorf("execAPI must block internal URL %q", bad)
+		}
+	}
+}
+
+func TestIsInternalURL_AllowsExternal(t *testing.T) {
+	if blocked, _ := tools.IsInternalURL("https://api.github.com/repos/x/y"); blocked {
+		t.Fatal("external URL should not be blocked")
+	}
 }
 
 func TestExecWait_DelaysAndCaps(t *testing.T) {

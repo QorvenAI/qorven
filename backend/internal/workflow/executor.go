@@ -227,6 +227,14 @@ func (e *Executor) execCondition(ctx context.Context, step Step, vars map[string
 
 func (e *Executor) execAPI(ctx context.Context, step Step, vars map[string]any) (string, string, error) {
 	url := interpolate(step.URL, vars)
+
+	// SSRF guard: reject internal/private/metadata URLs before building the
+	// request. This mirrors the guard in connectors/execute.go and
+	// tools/web_fetch.go so every outbound-fetch path is protected uniformly.
+	if blocked, reason := tools.IsInternalURL(url); blocked {
+		return "", "", fmt.Errorf("api step blocked unsafe URL: %s", reason)
+	}
+
 	method := step.Method
 	if method == "" {
 		method = "GET"
@@ -255,7 +263,20 @@ func (e *Executor) execAPI(ctx context.Context, step Step, vars map[string]any) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	// Use a client that re-validates redirect targets so a front-door URL that
+	// 302-redirects to an internal address cannot bypass the SSRF guard above.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if blocked, reason := tools.IsInternalURL(req.URL.String()); blocked {
+				return fmt.Errorf("redirect to unsafe URL blocked: %s", reason)
+			}
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err
 	}
