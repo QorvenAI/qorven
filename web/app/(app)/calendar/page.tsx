@@ -20,7 +20,7 @@ import { calendarApi as calendarSyncApi } from '@/lib/api-workspace';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-type CalEvent = { id: string; title: string; start_time: string; end_time?: string; agent_id?: string; description?: string; event_type?: string };
+type CalEvent = { id: string; title: string; start_at: string; end_at?: string; agent_id?: string; description?: string; event_type?: string };
 type SocialPost = { id: string; content: string; platforms: string[]; status: string; scheduled_at?: string; agent_id?: string };
 
 type DayEntry = {
@@ -37,7 +37,7 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ title: '', start_time: '', end_time: '', description: '' });
+  const [form, setForm] = useState({ title: '', start_at: '', end_at: '', description: '' });
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda' | 'list'>('month');
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<TimelineItem | null>(null);
@@ -96,21 +96,21 @@ export default function CalendarPage() {
     if (!form.title) return;
     await calendarApi.create({
       title: form.title,
-      start_time: form.start_time,
-      end_time: form.end_time || undefined,
+      start_at: form.start_at ? new Date(form.start_at).toISOString() : undefined,
+      end_at: form.end_at ? new Date(form.end_at).toISOString() : undefined,
       description: form.description || undefined,
       agent_id: calFilter || undefined,
     });
     setShowCreate(false);
-    setForm({ title: '', start_time: '', end_time: '', description: '' });
+    setForm({ title: '', start_at: '', end_at: '', description: '' });
     load();
   };
 
   // Build event map by date
   const eventsByDate: Record<string, CalEvent[]> = {};
   events.forEach(e => {
-    if (e.start_time) {
-      const d = e.start_time.slice(0, 10);
+    if (e.start_at) {
+      const d = e.start_at.slice(0, 10);
       eventsByDate[d] = eventsByDate[d] ?? [];
       eventsByDate[d].push(e);
     }
@@ -202,12 +202,12 @@ export default function CalendarPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground">Start</label>
-              <input type="datetime-local" value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))}
+              <input type="datetime-local" value={form.start_at} onChange={e => setForm(f => ({ ...f, start_at: e.target.value }))}
                 className="mt-1 qr-input" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground">End</label>
-              <input type="datetime-local" value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))}
+              <input type="datetime-local" value={form.end_at} onChange={e => setForm(f => ({ ...f, end_at: e.target.value }))}
                 className="mt-1 qr-input" />
             </div>
           </div>
@@ -337,8 +337,8 @@ export default function CalendarPage() {
                           <div className="min-w-0">
                             <p className="text-sm font-medium">{e.title}</p>
                             <p className="text-xs text-muted-foreground">
-                              {new Date(e.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              {e.end_time && ` – ${new Date(e.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                              {new Date(e.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {e.end_at && ` – ${new Date(e.end_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                             </p>
                           </div>
                         </div>
@@ -413,15 +413,15 @@ export default function CalendarPage() {
         /* List view — chronological all entries */
         <div className="space-y-2">
           {[...events]
-            .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+            .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
             .map(e => (
               <div key={e.id} className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3">
                 <Clock className="h-4 w-4 text-primary shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{e.title}</p>
                   <p className="text-xs text-muted-foreground">
-                    {new Date(e.start_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    {e.end_time && ` → ${new Date(e.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                    {new Date(e.start_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {e.end_at && ` → ${new Date(e.end_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                   </p>
                 </div>
                 {e.event_type && <span className="text-xs bg-muted px-2 py-0.5 rounded">{e.event_type}</span>}
