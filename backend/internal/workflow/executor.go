@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,8 @@ type Executor struct {
 	tenantID    string
 	// OnDelegate is called when a step delegates to a Soul
 	OnDelegate func(ctx context.Context, soulKey, task string)
+	// OnNotify sends a real in-app notification. nil = no-op (returns a benign message).
+	OnNotify func(ctx context.Context, title, body string)
 }
 
 func NewExecutor(store *Store, provReg interface{ Default() providers.Provider }, toolReg *tools.Registry, tenantID string) *Executor {
@@ -148,7 +151,11 @@ func (e *Executor) executeStep(ctx context.Context, step Step, vars map[string]a
 	case StepDelegate:
 		return e.execDelegate(ctx, step, vars)
 	case StepNotify:
-		return e.execPrompt(ctx, step, vars) // notify = prompt for now
+		return e.execNotify(ctx, step, vars)
+	case StepCollect:
+		return e.execCollect(ctx, step, vars)
+	case StepWait:
+		return e.execWait(ctx, step, vars)
 	case "parallel":
 		return e.execParallel(ctx, step, vars)
 	default:
@@ -222,6 +229,14 @@ func (e *Executor) execCondition(ctx context.Context, step Step, vars map[string
 
 func (e *Executor) execAPI(ctx context.Context, step Step, vars map[string]any) (string, string, error) {
 	url := interpolate(step.URL, vars)
+
+	// SSRF guard: reject internal/private/metadata URLs before building the
+	// request. This mirrors the guard in connectors/execute.go and
+	// tools/web_fetch.go so every outbound-fetch path is protected uniformly.
+	if blocked, reason := tools.IsInternalURL(url); blocked {
+		return "", "", fmt.Errorf("api step blocked unsafe URL: %s", reason)
+	}
+
 	method := step.Method
 	if method == "" {
 		method = "GET"
@@ -250,7 +265,20 @@ func (e *Executor) execAPI(ctx context.Context, step Step, vars map[string]any) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	// Use a client that re-validates redirect targets so a front-door URL that
+	// 302-redirects to an internal address cannot bypass the SSRF guard above.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if blocked, reason := tools.IsInternalURL(req.URL.String()); blocked {
+				return fmt.Errorf("redirect to unsafe URL blocked: %s", reason)
+			}
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -260,6 +288,24 @@ func (e *Executor) execAPI(ctx context.Context, step Step, vars map[string]any) 
 		body = body[:5000]
 	}
 	return string(body), "", nil
+}
+
+func (e *Executor) execNotify(ctx context.Context, step Step, vars map[string]any) (string, string, error) {
+	title := interpolate(step.Prompt, vars)
+	if title == "" {
+		title = "Workflow notification"
+	}
+	body := ""
+	if step.Args != nil {
+		if b, ok := step.Args["body"].(string); ok {
+			body = interpolate(b, vars)
+		}
+	}
+	if e.OnNotify != nil {
+		e.OnNotify(ctx, title, body)
+		return "Notification sent: " + title, "", nil
+	}
+	return "Notification (no sink configured): " + title, "", nil
 }
 
 func (e *Executor) execDelegate(ctx context.Context, step Step, vars map[string]any) (string, string, error) {
@@ -306,6 +352,73 @@ func (e *Executor) execParallel(ctx context.Context, step Step, vars map[string]
 		}
 	}
 	return strings.Join(combined, "\n"), "", nil
+}
+
+// execCollect captures named fields from the run vars into a single map stored
+// under SaveAs (or merged into vars if SaveAs is empty). Missing fields are
+// captured as "" so downstream steps can rely on the keys existing.
+func (e *Executor) execCollect(_ context.Context, step Step, vars map[string]any) (string, string, error) {
+	collected := make(map[string]any, len(step.Fields))
+	for _, f := range step.Fields {
+		if v, ok := vars[f]; ok {
+			collected[f] = v
+		} else {
+			collected[f] = ""
+		}
+	}
+	if step.SaveAs != "" {
+		vars[step.SaveAs] = collected
+		// Return an empty result string: the run loop writes result into
+		// vars[SaveAs] when result != "", which would clobber the map we
+		// just stored. We've already done the SaveAs write ourselves.
+		return "", "", nil
+	}
+	for k, v := range collected {
+		vars[k] = v
+	}
+	return fmt.Sprintf("Collected %d field(s)", len(collected)), "", nil
+}
+
+const maxWaitSeconds = 300.0 // cap a wait step at 5 minutes so a run can't hang
+
+// execWait pauses for Args["seconds"]/Args["duration"], capped at maxWaitSeconds,
+// honoring context cancellation.
+func (e *Executor) execWait(ctx context.Context, step Step, _ map[string]any) (string, string, error) {
+	secs := 1.0
+	if step.Args != nil {
+		if v, ok := wfToFloat(step.Args["seconds"]); ok {
+			secs = v
+		} else if v, ok := wfToFloat(step.Args["duration"]); ok {
+			secs = v
+		}
+	}
+	if secs < 0 {
+		secs = 0
+	}
+	if secs > maxWaitSeconds {
+		secs = maxWaitSeconds
+	}
+	select {
+	case <-time.After(time.Duration(secs * float64(time.Second))):
+		return fmt.Sprintf("Waited %.2fs", secs), "", nil
+	case <-ctx.Done():
+		return "Wait cancelled", "", ctx.Err()
+	}
+}
+
+// wfToFloat coerces a JSON number/int/string into a float64.
+func wfToFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case string:
+		if f, err := strconv.ParseFloat(n, 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 // interpolate replaces {{var}} with values from vars map.

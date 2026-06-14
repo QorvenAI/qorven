@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/qorvenai/qorven/internal/agent"
+	"github.com/qorvenai/qorven/internal/workflow"
 )
 
 // ─── Org Hierarchy ───────────────────────────────────────────────────────────
@@ -385,41 +386,73 @@ func (gw *Gateway) handleGetTraceTree(w http.ResponseWriter, r *http.Request) {
 
 // ─── Workflow Runs ───────────────────────────────────────────────────────────
 
+// orchRunView is the JSON shape the frontend OrchRun interface expects.
+type orchRunView struct {
+	ID            string     `json:"id"`
+	WorkflowID    string     `json:"workflow_id"`
+	Status        string     `json:"status"`
+	CurrentStepID string     `json:"current_step_id"`
+	TotalCostUUSD int64      `json:"total_cost_uusd"`
+	StartedAt     string     `json:"started_at"`
+	CompletedAt   string     `json:"completed_at,omitempty"`
+	Error         string     `json:"error,omitempty"`
+}
+
+func toOrchRunView(r workflow.Run) orchRunView {
+	v := orchRunView{
+		ID:         r.ID,
+		WorkflowID: r.WorkflowID,
+		Status:     r.Status,
+		Error:      r.Error,
+		StartedAt:  r.StartedAt.Format(time.RFC3339),
+	}
+	if r.CompletedAt != nil {
+		v.CompletedAt = r.CompletedAt.Format(time.RFC3339)
+	}
+	return v
+}
+
 func (gw *Gateway) handleListOrchestrationRuns(w http.ResponseWriter, r *http.Request) {
-	if gw.workflowEngine == nil {
-		writeJSON(w, 503, map[string]string{"error": "workflow engine not configured"})
+	if gw.wfStore == nil {
+		writeJSON(w, 503, map[string]string{"error": "workflow store not available"})
 		return
 	}
-	runs, err := gw.workflowEngine.ListRuns(r.Context(), defaultTenant, 50)
+	runs, err := gw.wfStore.ListAllRuns(r.Context(), defaultTenant, 100)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"runs": runs})
+	views := make([]orchRunView, 0, len(runs))
+	for _, run := range runs {
+		views = append(views, toOrchRunView(run))
+	}
+	writeJSON(w, 200, map[string]any{"runs": views})
 }
 
 func (gw *Gateway) handleGetOrchestrationRun(w http.ResponseWriter, r *http.Request) {
-	if gw.workflowEngine == nil {
-		writeJSON(w, 503, map[string]string{"error": "workflow engine not configured"})
+	if gw.wfStore == nil {
+		writeJSON(w, 503, map[string]string{"error": "workflow store not available"})
 		return
 	}
 	runID := chi.URLParam(r, "run_id")
-	run, err := gw.workflowEngine.GetRun(r.Context(), runID)
+	run, err := gw.wfStore.GetRunForTenant(r.Context(), defaultTenant, runID)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		writeJSON(w, 404, map[string]string{"error": sanitizeError(err)})
 		return
 	}
-	steps, _ := gw.workflowEngine.GetStepRuns(r.Context(), runID)
-	writeJSON(w, 200, map[string]any{"run": run, "steps": steps})
+	writeJSON(w, 200, map[string]any{"run": toOrchRunView(*run)})
 }
 
 func (gw *Gateway) handleCancelOrchestrationRun(w http.ResponseWriter, r *http.Request) {
-	if gw.workflowEngine == nil {
-		writeJSON(w, 503, map[string]string{"error": "workflow engine not configured"})
+	if gw.wfStore == nil {
+		writeJSON(w, 503, map[string]string{"error": "workflow store not available"})
 		return
 	}
 	runID := chi.URLParam(r, "run_id")
-	gw.workflowEngine.CancelRun(runID)
+	if err := gw.wfStore.CancelRun(r.Context(), defaultTenant, runID); err != nil {
+		writeJSON(w, 500, map[string]string{"error": sanitizeError(err)})
+		return
+	}
 	writeJSON(w, 200, map[string]string{"status": "cancelled"})
 }
 

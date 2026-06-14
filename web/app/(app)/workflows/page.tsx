@@ -102,8 +102,7 @@ export default function WorkflowsPage() {
                       <span className={cn('font-medium', wf.enabled ? 'text-emerald-500' : 'text-muted-foreground')}>
                         {wf.enabled ? 'enabled' : 'draft'}
                       </span>
-                      {wf.trigger_type && <> · Trigger: {wf.trigger_type}</>}
-                      {' · '}Last run: {wf.last_run ? new Date(wf.last_run).toLocaleDateString() : 'Never'}
+                      {wf.trigger_type && <> · {wf.trigger_type}</>}
                     </p>
                   </div>
                 </Link>

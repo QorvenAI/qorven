@@ -74,7 +74,7 @@ export const workflows = {
     return request<{ status: string }>(`/workflows/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   },
   delete: (id: string) => request<{ status: string }>(`/workflows/${id}`, { method: 'DELETE' }),
-  run: (id: string) => request<{ run_id: string }>(`/workflows/${id}/run`, { method: 'POST' }),
+  run: (id: string) => request<{ status: string }>(`/workflows/${id}/run`, { method: 'POST' }),
   runs: (id: string) => listRequest<WorkflowRun>(`/workflows/${id}/runs`),
 };
 

@@ -41,17 +41,17 @@ import {
 import { cn } from '@/lib/utils';
 
 const TYPE_META: Record<WorkflowStepType, { icon: typeof Play; color: string; label: string }> = {
-  prompt:    { icon: MessageSquare, color: '#8b5cf6', label: 'Prompt' },
-  tool:      { icon: Wrench,        color: '#06b6d4', label: 'Tool' },
-  condition: { icon: GitBranch,     color: '#f59e0b', label: 'Condition' },
-  collect:   { icon: ClipboardList, color: '#10b981', label: 'Collect' },
-  api:       { icon: Globe,         color: '#ef4444', label: 'API' },
-  delegate:  { icon: Users,         color: '#a855f7', label: 'Delegate' },
-  notify:    { icon: Bell,          color: '#ec4899', label: 'Notify' },
-  wait:      { icon: Pause,         color: '#64748b', label: 'Wait' },
+  prompt:    { icon: MessageSquare, color: 'var(--wf-step-prompt)',    label: 'Prompt' },
+  tool:      { icon: Wrench,        color: 'var(--wf-step-tool)',      label: 'Tool' },
+  condition: { icon: GitBranch,     color: 'var(--wf-step-condition)', label: 'Condition' },
+  collect:   { icon: ClipboardList, color: 'var(--wf-step-collect)',   label: 'Collect' },
+  api:       { icon: Globe,         color: 'var(--wf-step-api)',       label: 'API' },
+  delegate:  { icon: Users,         color: 'var(--wf-step-delegate)',  label: 'Delegate' },
+  notify:    { icon: Bell,          color: 'var(--wf-step-notify)',    label: 'Notify' },
+  wait:      { icon: Pause,         color: 'var(--wf-step-wait)',      label: 'Wait' },
 };
 const typeMeta = (t: string) =>
-  TYPE_META[t as WorkflowStepType] ?? { icon: Code2, color: '#64748b', label: t };
+  TYPE_META[t as WorkflowStepType] ?? { icon: Code2, color: 'var(--wf-step-default)', label: t };
 
 type Tab = 'dag' | 'history' | 'source' | 'settings';
 
@@ -279,7 +279,7 @@ function EditorView({ wfId, steps: initialSteps, onSaved }: {
     setEdges((eds) => addEdge({
       ...params,
       type: 'smoothstep',
-      style: { stroke: '#71717a', strokeWidth: 1.5 },
+      style: { stroke: 'var(--wf-edge-default)', strokeWidth: 1.5 },
     }, eds));
   }, [setEdges]);
 
@@ -406,12 +406,12 @@ function EditorView({ wfId, steps: initialSteps, onSaved }: {
           deleteKeyCode={['Delete', 'Backspace']}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#52525b" gap={20} size={1} />
+          <Background color="var(--wf-bg)" gap={20} size={1} />
           <Controls showInteractive={false} />
           <MiniMap
             zoomable
             pannable
-            nodeColor={(n) => (n.data as StepNodeData)?.color ?? '#64748b'}
+            nodeColor={(n) => (n.data as StepNodeData)?.color ?? 'var(--wf-step-default)'}
             maskColor="rgba(0,0,0,0.6)"
           />
         </ReactFlow>
@@ -752,7 +752,7 @@ function buildGraph(steps: WorkflowStep[]): { nodes: FlowNode[]; edges: FlowEdge
         target: s.next,
         type: 'smoothstep',
         animated: false,
-        style: { stroke: '#71717a', strokeWidth: 1.5 },
+        style: { stroke: 'var(--wf-edge-default)', strokeWidth: 1.5 },
       });
     }
     // Branch edges for condition steps
@@ -765,10 +765,10 @@ function buildGraph(steps: WorkflowStep[]): { nodes: FlowNode[]; edges: FlowEdge
           target: targetId,
           type: 'smoothstep',
           label: value,
-          labelStyle: { fontSize: 10, fontFamily: 'ui-monospace', fill: '#a1a1aa' }, // ok — ReactFlow SVG label, not a page font
-          labelBgStyle: { fill: '#18181b', fillOpacity: 0.8 },
+          labelStyle: { fontSize: 10, fontFamily: 'ui-monospace', fill: 'var(--wf-label-text)' },
+          labelBgStyle: { fill: 'var(--wf-label-fill)', fillOpacity: 0.8 },
           labelBgPadding: [4, 2],
-          style: { stroke: '#f59e0b', strokeWidth: 1.5, strokeDasharray: '4 2' },
+          style: { stroke: 'var(--wf-edge-condition)', strokeWidth: 1.5, strokeDasharray: '4 2' },
         });
       }
     }
@@ -841,7 +841,13 @@ function computeLayout(
 // Edit name, description, trigger_type/trigger_config, enabled toggle.
 // Calls PUT /workflows/{id} with only the changed fields.
 
-const TRIGGER_TYPES = ['manual', 'webhook', 'cron', 'channel_message', 'event'] as const;
+const TRIGGER_TYPES: { value: string; label: string }[] = [
+  { value: 'manual',          label: 'Manual' },
+  { value: 'cron',            label: 'Cron' },
+  { value: 'webhook',         label: 'Webhook (coming soon)' },
+  { value: 'channel_message', label: 'Channel message (coming soon)' },
+  { value: 'event',           label: 'Event (coming soon)' },
+];
 
 function SettingsView({ wf, onSaved }: { wf: Workflow; onSaved: () => void }) {
   const [name, setName] = useState(wf.name ?? '');
@@ -920,8 +926,8 @@ function SettingsView({ wf, onSaved }: { wf: Workflow; onSaved: () => void }) {
             onChange={(e) => setTriggerType(e.target.value)}
             className="qr-input"
           >
-            {TRIGGER_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {TRIGGER_TYPES.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
             ))}
           </select>
           <p className="mt-1 text-2xs text-muted-foreground">
@@ -930,6 +936,9 @@ function SettingsView({ wf, onSaved }: { wf: Workflow; onSaved: () => void }) {
             {triggerType === 'cron' && 'Schedule via trigger config: {"cron": "0 9 * * 1-5"}.'}
             {triggerType === 'channel_message' && 'Fire when a channel receives a message matching trigger config filter.'}
             {triggerType === 'event' && 'Subscribe to a platform event in trigger config.'}
+            {['webhook', 'channel_message', 'event'].includes(triggerType) && (
+              <> Only Manual and Cron triggers currently fire automatically.</>
+            )}
           </p>
         </SettingField>
 

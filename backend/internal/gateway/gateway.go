@@ -228,7 +228,6 @@ type Gateway struct {
 	intentRouter     *agent.IntentRouter
 	subagentRunStore *agent.SubagentRunStore
 	outputValidator  *agent.OutputValidator
-	workflowEngine   *workflow.Engine
 
 	// ERP governance subsystem
 	designationStore *governance.DesignationStore
@@ -630,16 +629,6 @@ END $$ LANGUAGE plpgsql VOLATILE`)
 			gw.delegation = gw.buildDelegationOrchestrator()
 			governance.SeedDefaults(context.Background(), db.Pool, defaultTenant)
 			gw.policyEngine.LoadPolicies(context.Background(), defaultTenant)
-			gw.workflowEngine = workflow.NewEngine(db.Pool, nil)
-			gw.workflowEngine.SetEventHandler(func(evt workflow.StepEvent) {
-				if gw.rtHub != nil {
-					gw.rtHub.Broadcast(realtime.Event{
-						Type:      realtime.EventWorkflowStepProgress,
-						Timestamp: time.Now().UnixMilli(),
-						Data:      map[string]any{"run_id": evt.RunID, "step_id": evt.StepID, "event": evt.Event, "payload": evt.Payload},
-					})
-				}
-			})
 			gw.msgStore = agent.NewMessageStore(db.Pool)
 			gw.hbStore = heartbeat.NewStore(db.Pool)
 			gw.mailStore = mail.NewStore(db.Pool)
@@ -1540,6 +1529,23 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		// Workflow executor
 		if gw.wfStore != nil {
 			gw.wfExecutor = workflow.NewExecutor(gw.wfStore, gw.providerReg, gw.toolReg, defaultTenant)
+			gw.wfExecutor.OnNotify = func(ctx context.Context, title, body string) {
+				// Send a real in-app notification attributed to the workflow system.
+				gw.writeNotification("", "workflow", "Workflow", "workflow", title, body, "workflow", "")
+			}
+			gw.wfExecutor.OnDelegate = func(ctx context.Context, soulKey, task string) {
+				// Delegate via the real delegate_to_soul tool — same path as @mentions in chat.
+				toolCtx := tools.WithAgentID(ctx, "")
+				res := gw.toolReg.Execute(toolCtx, "delegate_to_soul", map[string]any{
+					"soul_key": soulKey,
+					"task":     task,
+				})
+				// Surface a failed delegation (e.g. unknown soul_key) instead of
+				// silently no-opping the workflow step.
+				if res != nil && res.IsError {
+					slog.Warn("workflow.delegate.failed", "soul_key", soulKey, "result", res.ForLLM)
+				}
+			}
 		}
 
 		// Research engine — bridge the provider registry into the llm.Provider
