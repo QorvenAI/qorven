@@ -107,3 +107,25 @@ func TestExecWait_RespectsContextCancel(t *testing.T) {
 		t.Fatal("wait ignored ctx cancel")
 	}
 }
+
+func TestExecNotify_FiresCallback(t *testing.T) {
+	fired := ""
+	e := &Executor{OnNotify: func(_ context.Context, title, _ string) { fired = title }}
+	if _, _, err := e.executeStep(context.Background(), Step{Type: StepNotify, Prompt: "Deploy done"}, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if fired != "Deploy done" {
+		t.Fatalf("notify callback not fired, got %q", fired)
+	}
+}
+
+func TestExecDelegate_FiresCallback(t *testing.T) {
+	var gotSoul, gotTask string
+	e := &Executor{OnDelegate: func(_ context.Context, soul, task string) { gotSoul, gotTask = soul, task }}
+	if _, _, err := e.executeStep(context.Background(), Step{Type: StepDelegate, SoulKey: "cmo", Task: "Plan launch"}, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if gotSoul != "cmo" || gotTask != "Plan launch" {
+		t.Fatalf("delegate callback wrong: %q/%q", gotSoul, gotTask)
+	}
+}

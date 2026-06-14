@@ -1529,6 +1529,18 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 		// Workflow executor
 		if gw.wfStore != nil {
 			gw.wfExecutor = workflow.NewExecutor(gw.wfStore, gw.providerReg, gw.toolReg, defaultTenant)
+			gw.wfExecutor.OnNotify = func(ctx context.Context, title, body string) {
+				// Send a real in-app notification attributed to the workflow system.
+				gw.writeNotification("", "workflow", "Workflow", "workflow", title, body, "workflow", "")
+			}
+			gw.wfExecutor.OnDelegate = func(ctx context.Context, soulKey, task string) {
+				// Delegate via the real delegate_to_soul tool — same path as @mentions in chat.
+				toolCtx := tools.WithAgentID(ctx, "")
+				gw.toolReg.Execute(toolCtx, "delegate_to_soul", map[string]any{
+					"soul_key": soulKey,
+					"task":     task,
+				})
+			}
 		}
 
 		// Research engine — bridge the provider registry into the llm.Provider

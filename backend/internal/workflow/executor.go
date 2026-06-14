@@ -29,6 +29,8 @@ type Executor struct {
 	tenantID    string
 	// OnDelegate is called when a step delegates to a Soul
 	OnDelegate func(ctx context.Context, soulKey, task string)
+	// OnNotify sends a real in-app notification. nil = no-op (returns a benign message).
+	OnNotify func(ctx context.Context, title, body string)
 }
 
 func NewExecutor(store *Store, provReg interface{ Default() providers.Provider }, toolReg *tools.Registry, tenantID string) *Executor {
@@ -149,7 +151,7 @@ func (e *Executor) executeStep(ctx context.Context, step Step, vars map[string]a
 	case StepDelegate:
 		return e.execDelegate(ctx, step, vars)
 	case StepNotify:
-		return e.execPrompt(ctx, step, vars) // notify = prompt for now
+		return e.execNotify(ctx, step, vars)
 	case StepCollect:
 		return e.execCollect(ctx, step, vars)
 	case StepWait:
@@ -286,6 +288,24 @@ func (e *Executor) execAPI(ctx context.Context, step Step, vars map[string]any) 
 		body = body[:5000]
 	}
 	return string(body), "", nil
+}
+
+func (e *Executor) execNotify(ctx context.Context, step Step, vars map[string]any) (string, string, error) {
+	title := interpolate(step.Prompt, vars)
+	if title == "" {
+		title = "Workflow notification"
+	}
+	body := ""
+	if step.Args != nil {
+		if b, ok := step.Args["body"].(string); ok {
+			body = interpolate(b, vars)
+		}
+	}
+	if e.OnNotify != nil {
+		e.OnNotify(ctx, title, body)
+		return "Notification sent: " + title, "", nil
+	}
+	return "Notification (no sink configured): " + title, "", nil
 }
 
 func (e *Executor) execDelegate(ctx context.Context, step Step, vars map[string]any) (string, string, error) {
