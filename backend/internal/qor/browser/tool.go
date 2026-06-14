@@ -60,6 +60,7 @@ func (t *BrowserTool) Execute(ctx context.Context, args map[string]any) *tools.R
 	case "navigate":
 		url, _ := args["url"].(string)
 		if url == "" { return tools.ErrorResult("url required") }
+		if err := tools.SafeNavigateURL(url); err != nil { return tools.ErrorResult("blocked: " + err.Error()) }
 		if err := t.mgr.Navigate(ctx, url); err != nil { return tools.ErrorResult(err.Error()) }
 		t.mgr.WaitIdle(ctx, 1e9) // 1 second
 		title, _ := t.mgr.GetTitle(ctx)
@@ -105,6 +106,7 @@ func (t *BrowserTool) Execute(ctx context.Context, args map[string]any) *tools.R
 	case "open":
 		url, _ := args["url"].(string)
 		if url == "" { return tools.ErrorResult("url required") }
+		if err := tools.SafeNavigateURL(url); err != nil { return tools.ErrorResult("blocked: " + err.Error()) }
 		tid, err := t.mgr.OpenTab(ctx, url)
 		if err != nil { return tools.ErrorResult(err.Error()) }
 		return tools.SuccessResult("Opened tab " + tid)

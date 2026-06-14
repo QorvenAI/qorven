@@ -10,6 +10,7 @@ import (
 
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+	"github.com/qorvenai/qorven/internal/tools"
 )
 
 // tabs.go — Tab management (list, open, close, switch).
@@ -39,6 +40,9 @@ func (m *Manager) ListTabs(ctx context.Context) ([]TabInfo, error) {
 
 // OpenTab opens a new tab with the given URL.
 func (m *Manager) OpenTab(ctx context.Context, url string) (string, error) {
+	if err := tools.SafeNavigateURL(url); err != nil {
+		return "", err
+	}
 	m.mu.Lock()
 	if !m.running { m.mu.Unlock(); return "", fmt.Errorf("browser not running") }
 	if len(m.tabs) >= m.cfg.MaxPages {

@@ -9,12 +9,16 @@ import (
 	"fmt"
 
 	"github.com/chromedp/chromedp"
+	"github.com/qorvenai/qorven/internal/tools"
 )
 
 // page.go — Page navigation and management.
 
 // Navigate opens a URL in the active tab.
 func (m *Manager) Navigate(ctx context.Context, url string) error {
+	if err := tools.SafeNavigateURL(url); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	if !m.running { m.mu.Unlock(); return fmt.Errorf("browser not running") }
 	bctx := m.ctx
