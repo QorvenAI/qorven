@@ -41,12 +41,10 @@ func (gw *Gateway) handleAnalyticsOverview(w http.ResponseWriter, r *http.Reques
 	pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM social_posts WHERE status = 'published' AND published_at > NOW() - INTERVAL '7 days'`).Scan(&published7d)
 
-	// Posts by platform (use first element of platforms jsonb array)
-	type platformCount struct {
-		Platform string `json:"platform"`
-		Count    int    `json:"count"`
-	}
-	postsByPlatform := []platformCount{}
+	// Posts by platform (use first element of platforms jsonb array).
+	// Returned as a {platform: count} map — the analytics UI iterates it with
+	// Object.entries(), so the shape must be an object, not an array.
+	postsByPlatform := map[string]int{}
 	rows, err := pool.Query(ctx,
 		`SELECT platforms->>0 AS platform, COUNT(*) AS cnt
 		 FROM social_posts
@@ -56,18 +54,20 @@ func (gw *Gateway) handleAnalyticsOverview(w http.ResponseWriter, r *http.Reques
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var pc platformCount
-			rows.Scan(&pc.Platform, &pc.Count)
-			if pc.Platform != "" {
-				postsByPlatform = append(postsByPlatform, pc)
+			var platform string
+			var cnt int
+			rows.Scan(&platform, &cnt)
+			if platform != "" {
+				postsByPlatform[platform] = cnt
 			}
 		}
 	}
 
-	// Posts by agent (join with agents for display_name)
+	// Posts by agent (join with agents for the display name). The JSON field is
+	// "agent_name" to match what the analytics UI reads.
 	type agentCount struct {
 		AgentID     string `json:"agent_id"`
-		DisplayName string `json:"display_name"`
+		DisplayName string `json:"agent_name"`
 		Count       int    `json:"count"`
 	}
 	postsByAgent := []agentCount{}
@@ -312,5 +312,7 @@ func (gw *Gateway) handleAnalyticsTimeline(w http.ResponseWriter, r *http.Reques
 		timeline = append(timeline, dr)
 	}
 
-	writeJSON(w, 200, map[string]any{"timeline": timeline})
+	// Return the raw array — the analytics UI consumes /analytics/timeline as a
+	// flat TimelineDay[], not a wrapped object.
+	writeJSON(w, 200, timeline)
 }
