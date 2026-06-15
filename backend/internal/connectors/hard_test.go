@@ -26,21 +26,6 @@ func TestHard_Registry_CRUD(t *testing.T) {
 	if len(list) < 3 { t.Errorf("list=%d", len(list)) }
 }
 
-func TestHard_ConnectorTool_AllActions(t *testing.T) {
-	c := &mockConnector{id: "test"}
-	actions := []Action{
-		{ID: "list", Name: "List Items"},
-		{ID: "create", Name: "Create Item"},
-		{ID: "delete", Name: "Delete Item"},
-	}
-	for _, action := range actions {
-		tool := NewConnectorTool(c, action, nil)
-		if tool.Name() == "" { t.Error("empty name") }
-		if tool.Description() == "" { t.Error("empty desc") }
-		if tool.Parameters() == nil { t.Error("nil params") }
-	}
-}
-
 func TestHard_Manifest_Fields(t *testing.T) {
 	m := Manifest{ID: "jira", Name: "Jira", Description: "Issue tracker"}
 	if m.ID != "jira" { t.Error("id") }

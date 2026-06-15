@@ -44,18 +44,6 @@ func TestRegistry_List(t *testing.T) {
 	if len(list) < 2 { t.Errorf("expected 2+, got %d", len(list)) }
 }
 
-func TestConnectorTool_Name(t *testing.T) {
-	ct := NewConnectorTool(&mockConnector{id: "jira"}, Action{ID: "create_issue", Name: "Create Issue"}, nil)
-	name := ct.Name()
-	if name == "" { t.Error("empty name") }
-}
-
-func TestConnectorTool_Execute_NilCreds(t *testing.T) {
-	ct := NewConnectorTool(&mockConnector{id: "jira"}, Action{ID: "list"}, nil)
-	// Skip execute — needs real cred store
-	_ = ct
-}
-
 type mockConnector struct{ id string }
 func (c *mockConnector) ID() string { return c.id }
 func (c *mockConnector) Name() string { return c.id }

@@ -20,13 +20,14 @@ func NewSocialMonitorTool() *SocialMonitorTool { return &SocialMonitorTool{} }
 
 func (t *SocialMonitorTool) Name() string { return "social_monitor" }
 func (t *SocialMonitorTool) Description() string {
-	return "Monitor social platforms (GitHub, Reddit, HackerNews, Twitter) for mentions, trends, or specific topics. Use for brand monitoring, competitor analysis, or trend research."
+	// Twitter intentionally omitted — requires Twitter API v2 bearer-token auth; add when credentials are configured.
+	return "Monitor social platforms (GitHub, Reddit, HackerNews) for mentions, trends, or specific topics. Use for brand monitoring, competitor analysis, or trend research."
 }
 func (t *SocialMonitorTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"platform": map[string]any{"type": "string", "enum": []string{"github", "reddit", "hackernews", "twitter"}, "description": "Platform to monitor"},
+			"platform": map[string]any{"type": "string", "enum": []string{"github", "reddit", "hackernews"}, "description": "Platform to monitor"},
 			"query":    map[string]any{"type": "string", "description": "Search query or topic"},
 			"limit":    map[string]any{"type": "integer", "description": "Max results (default 10)"},
 		},
@@ -144,6 +145,9 @@ func (t *SocialMonitorTool) searchHackerNews(ctx context.Context, query string, 
 }
 
 func fetchJSON(ctx context.Context, url string) ([]byte, error) {
+	if err := ValidateURL(url); err != nil {
+		return nil, err
+	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	req.Header.Set("User-Agent", "Qorven/1.0")
 	req.Header.Set("Accept", "application/json")

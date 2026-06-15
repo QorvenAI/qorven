@@ -7,13 +7,14 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Loader2, RefreshCw, CheckCircle2, XCircle, AlertCircle,
-  Play, CheckCheck, Ban, CircleDot, Clock, ChevronRight, User,
+  Play, CheckCheck, Ban, CircleDot, Clock, User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   plans as plansApi,
-  type Plan, type PlanNode, type PlanEdge, type PlanStatus, type NodeState, type NodeKind,
+  type Plan, type PlanNode, type PlanEdge, type PlanStatus,
 } from '@/lib/api';
+import { PlanGraph } from '@/components/plans/plan-graph';
 
 // ─── status meta ────────────────────────────────────────────────────
 
@@ -29,24 +30,6 @@ const PLAN_STATUS: Record<PlanStatus, { label: string; icon: typeof CircleDot; c
   cancelled:          { label: 'Cancelled',       icon: Ban,          cls: 'text-muted-foreground' },
 };
 
-const NODE_STATE: Record<NodeState, { label: string; cls: string; dot: string }> = {
-  pending:   { label: 'Pending',   cls: 'text-muted-foreground', dot: 'bg-muted-foreground/40' },
-  running:   { label: 'Running',   cls: 'text-primary',          dot: 'bg-primary animate-pulse' },
-  done:      { label: 'Done',      cls: 'text-emerald-400',      dot: 'bg-emerald-400' },
-  failed:    { label: 'Failed',    cls: 'text-destructive',      dot: 'bg-destructive' },
-  blocked:   { label: 'Blocked',   cls: 'text-amber-400',        dot: 'bg-amber-400' },
-  cancelled: { label: 'Cancelled', cls: 'text-muted-foreground', dot: 'bg-muted-foreground/30' },
-};
-
-const NODE_KIND_LABEL: Record<NodeKind, string> = {
-  planner:       'Planner',
-  human_feedback:'Human Review',
-  agent_task:    'Agent Task',
-  review:        'Review',
-  push:          'Push',
-  preview:       'Preview',
-};
-
 function relTime(iso?: string): string {
   if (!iso) return '—';
   const diff = Date.now() - Date.parse(iso);
@@ -55,51 +38,6 @@ function relTime(iso?: string): string {
   if (diff < 3_600_000)  return `${Math.round(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
   return new Date(iso).toLocaleDateString();
-}
-
-// ─── node tree ────────────────────────────────────────────────────────
-
-function NodeRow({ node, edges, depth = 0 }: { node: PlanNode; edges: PlanEdge[]; depth?: number }) {
-  const state = NODE_STATE[node.state] ?? NODE_STATE.pending;
-  const outgoing = edges.filter((e) => e.from_node === node.id);
-
-  return (
-    <div className={cn('space-y-1', depth > 0 && 'ml-6 border-l border-border/60 pl-4')}>
-      <div className="flex items-start gap-2.5 rounded-lg border border-border bg-card p-3">
-        <span className={cn('mt-1.5 h-2 w-2 rounded-full shrink-0', state.dot)} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium truncate">{node.title || '(untitled node)'}</span>
-            <span className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-mono text-muted-foreground">
-              {NODE_KIND_LABEL[node.kind] ?? node.kind}
-            </span>
-            <span className={cn('text-2xs font-medium', state.cls)}>{state.label}</span>
-          </div>
-          {node.assignee_soul && (
-            <div className="mt-1 flex items-center gap-1 text-2xs text-muted-foreground">
-              <User className="h-3 w-3" />{node.assignee_soul}
-            </div>
-          )}
-          {node.error && (
-            <p className="mt-1 text-2xs text-destructive font-mono">{node.error}</p>
-          )}
-          <div className="mt-1 flex flex-wrap items-center gap-3 text-2xs text-muted-foreground">
-            {node.started_at && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />Started {relTime(node.started_at)}</span>}
-            {node.ended_at   && <span className="flex items-center gap-1"><CheckCheck className="h-3 w-3" />Ended {relTime(node.ended_at)}</span>}
-          </div>
-          {outgoing.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {outgoing.map((e) => (
-                <span key={e.to_node} className="inline-flex items-center gap-1 rounded-sm border border-border/60 bg-muted/40 px-1.5 py-0.5 text-2xs text-muted-foreground font-mono">
-                  <ChevronRight className="h-2.5 w-2.5" />{e.condition}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── approve / reject / revise panel ─────────────────────────────────
@@ -215,20 +153,8 @@ export default function PlanDetailClient() {
   const statusMeta = PLAN_STATUS[plan.status] ?? PLAN_STATUS.draft;
   const StatusIcon = statusMeta.icon;
 
-  const roots = nodes.filter((n) => !n.parent_id);
-  const childrenOf = (parentId: string) => nodes.filter((n) => n.parent_id === parentId);
-
-  function renderTree(nodeList: PlanNode[], depth = 0): React.ReactElement[] {
-    return nodeList.map((n) => (
-      <div key={n.id}>
-        <NodeRow node={n} edges={edges} depth={depth} />
-        {renderTree(childrenOf(n.id), depth + 1)}
-      </div>
-    ));
-  }
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-4 lg:p-6">
+    <div className="mx-auto max-w-5xl space-y-6 p-4 lg:p-6">
       <Link href="/plans" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
         <ArrowLeft className="h-3.5 w-3.5" /> All Plans
       </Link>
@@ -266,7 +192,7 @@ export default function PlanDetailClient() {
         {nodes.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">No nodes yet.</p>
         ) : (
-          <div className="space-y-2">{renderTree(roots)}</div>
+          <PlanGraph nodes={nodes} edges={edges} />
         )}
       </section>
 
