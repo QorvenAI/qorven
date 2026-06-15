@@ -151,9 +151,11 @@ type pendingDelegation struct {
 }
 
 // handleManualDelegation implements the two-phase confirmation flow for manual
-// delegation mode. Returns true if the request was fully handled (either held
-// for confirmation or resolved from a pending confirmation), false otherwise.
-func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWriter, agentID, sessionID, model, userMsg string) bool {
+// delegation mode. Returns (true, responseText) if the request was fully
+// handled (either held for confirmation or resolved from a pending
+// confirmation); (false, "") otherwise. It no longer writes to w directly —
+// the caller is responsible for delivering the response in its own dialect.
+func (gw *Gateway) handleManualDelegation(ctx context.Context, agentID, sessionID, userMsg string) (bool, string) {
 	normalized := strings.TrimSpace(strings.ToLower(userMsg))
 
 	// Phase 2: user replied to a pending confirmation.
@@ -170,20 +172,12 @@ func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWr
 			})
 			response := fmt.Sprintf("Delegating to @%s...\n\n%s", pending.SoulKey, result.ForLLM)
 			gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-			writeJSON(w, 200, map[string]any{
-				"object": "chat.completion", "model": model,
-				"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-			})
-			return true
+			return true, response
 		case "no", "n", "cancel", "abort", "stop", "nope":
 			gw.pendingDelegations.Delete(sessionID)
 			response := fmt.Sprintf("Cancelled. Task to @%s was not delegated.", pending.SoulKey)
 			gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-			writeJSON(w, 200, map[string]any{
-				"object": "chat.completion", "model": model,
-				"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-			})
-			return true
+			return true, response
 		default:
 			// User is editing — replace the pending task with the new message if it's another @mention.
 			if m := cmdMentionRe.FindStringSubmatch(strings.TrimSpace(userMsg)); len(m) == 3 {
@@ -193,11 +187,7 @@ func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWr
 					gw.pendingDelegations.Store(sessionID, pendingDelegation{SoulKey: soulKey, Task: task})
 					response := fmt.Sprintf("Updated. Confirm to delegate to @%s:\n\n> %s\n\nReply `yes` to proceed or `no` to cancel.", soulKey, task)
 					gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-					writeJSON(w, 200, map[string]any{
-						"object": "chat.completion", "model": model,
-						"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-					})
-					return true
+					return true, response
 				}
 			}
 			// Not a confirmation and not a new @mention — clear pending and let it fall through to the agent.
@@ -213,15 +203,11 @@ func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWr
 			gw.pendingDelegations.Store(sessionID, pendingDelegation{SoulKey: soulKey, Task: task})
 			response := fmt.Sprintf("Manual delegation mode — confirm to delegate to @%s:\n\n> %s\n\nReply `yes` to proceed or `no` to cancel.", soulKey, task)
 			gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-			writeJSON(w, 200, map[string]any{
-				"object": "chat.completion", "model": model,
-				"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-			})
-			return true
+			return true, response
 		}
 	}
 
-	return false
+	return false, ""
 }
 
 func isEmailLike(s string) bool {
@@ -267,61 +253,15 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 	}
 
 	// If agent_id provided, use the full agent loop (tools, memory, skills).
-	// Prime-alias resolution and chattability guard have moved into runChatCore
-	// (via handleAgentChat) so both the OpenAI and AI-SDK adapters benefit.
-	// Manual-delegation and command-interceptor stay here for this task.
+	// Prime-alias resolution, chattability guard, command interception, and
+	// manual delegation all run inside runChatCore so both the OpenAI-SSE and
+	// AI-SDK adapters benefit.
 	if req.AgentID != "" && gw.agentLoop != nil {
-		agentID := req.AgentID
-		userMsg := req.Message
-		if userMsg == "" && len(req.Messages) > 0 {
-			userMsg = req.Messages[len(req.Messages)-1].Content
-		}
-
-		// manual delegation mode: two-phase confirmation before delegating.
-		if req.DelegationMode == "manual" {
-			if handled := gw.handleManualDelegation(r.Context(), w, agentID, req.SessionID, req.Model, userMsg); handled {
-				return
-			}
-		}
-
-		// Command interceptor: @mention → delegate, /command → tool exec
-		if handled, response := gw.interceptCommand(r.Context(), agentID, req.SessionID, userMsg); handled {
-			if req.Stream {
-				flusher, ok := w.(http.Flusher)
-				if !ok {
-					writeJSON(w, 500, map[string]string{"error": "streaming not supported"})
-					return
-				}
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("Connection", "keep-alive")
-				w.WriteHeader(200)
-				data, _ := json.Marshal(map[string]any{
-					"object": "chat.completion.chunk",
-					"choices": []map[string]any{{
-						"index": 0, "delta": map[string]any{"content": response},
-					}},
-				})
-				fmt.Fprintf(w, "data: %s\n\n", data)
-				fmt.Fprintf(w, "data: [DONE]\n\n")
-				flusher.Flush()
-			} else {
-				writeJSON(w, 200, map[string]any{
-					"object": "chat.completion", "model": req.Model,
-					"choices": []map[string]any{{
-						"index": 0, "message": map[string]any{"role": "assistant", "content": response},
-						"finish_reason": "stop",
-					}},
-				})
-			}
-			return
-		}
-
 		ctx := r.Context()
 		if req.PlanMode {
 			ctx = context.WithValue(ctx, planModeContextKey{}, true)
 		}
-		gw.handleAgentChat(w, r.WithContext(ctx), agentID, req.SessionID, req.Model, req.Messages, req.Stream, req.Depth, req.Channel, req.ThinkingLevel, req.DelegationMode)
+		gw.handleAgentChat(w, r.WithContext(ctx), req.AgentID, req.SessionID, req.Model, req.Messages, req.Stream, req.Depth, req.Channel, req.ThinkingLevel, req.DelegationMode)
 		return
 	}
 
@@ -504,6 +444,37 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 		}
 	}
 
+	// --- command interception / manual delegation pre-flight ---
+	// Runs AFTER agent/session resolution and BEFORE the agent loop so BOTH
+	// the OpenAI-SSE and AI-SDK adapters get interception + delegation.
+	// Delivery is adapter-neutral: for streaming we drive onStreamStart +
+	// onEvent(text_delta) + onEvent(done); for non-streaming we return a
+	// synthetic RunResult{Content: response} so the adapter writes the JSON.
+	if intercepted, interceptResponse := func() (bool, string) {
+		if p.DelegationMode == "manual" {
+			if handled, resp := gw.handleManualDelegation(r.Context(), agentID, sessionID, userMsg); handled {
+				return true, resp
+			}
+		}
+		if handled, resp := gw.interceptCommand(r.Context(), agentID, sessionID, userMsg); handled {
+			return true, resp
+		}
+		return false, ""
+	}(); intercepted {
+		if p.Stream {
+			if onStreamStart != nil {
+				onStreamStart()
+			}
+			if onEvent != nil {
+				onEvent(agent.StreamEvent{Type: "text_delta", Delta: interceptResponse})
+				onEvent(agent.StreamEvent{Type: "done"})
+			}
+			return nil, agentID, nil
+		}
+		// Non-streaming: return a synthetic result so the adapter writes the completion JSON.
+		return &agent.RunResult{Content: interceptResponse}, agentID, nil
+	}
+
 	// --- UserID ---
 	var webUserID string
 	if u := userFromContext(r.Context()); u != nil {
@@ -648,10 +619,9 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 }
 
 func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agentID, sessionID, model string, messages []providers.Message, stream bool, depthParam, channel, thinkingLevel, delegationMode string) {
-	// Note: prime-alias resolution and chattability guard are now inside
-	// runChatCore so both the OpenAI and AI-SDK adapters benefit.
-	// Manual-delegation and command-interceptor stay in handleChatCompletions
-	// (handled before this call) — they are NOT moved in this task.
+	// Note: prime-alias resolution, chattability guard, command interception,
+	// and manual delegation are all handled inside runChatCore so both the
+	// OpenAI-SSE and AI-SDK adapters benefit.
 
 	// SSE flusher check: do this early so we can return a clean 500 before
 	// any headers are written, but do NOT write SSE headers yet — that happens
