@@ -796,12 +796,18 @@ func (gw *Gateway) streamChat(w http.ResponseWriter, r *http.Request, p provider
 //
 // Request (POST, JSON):
 //
-//	{ messages: [{role, parts:[{type:"text",text:"..."}]}, ...],
+//	{ messages: [{role, parts:[{type:"text",text:"..."}|{type:"file",url,mediaType,filename}]}, ...],
 //	  agentId: "uuid", sessionId: "uuid", thinkingLevel?: "off"|"medium"|"high" }
 //
 // Response: SSE with Content-Type text/event-stream and the
 // x-vercel-ai-ui-message-stream: v1 header. Each event is a JSON-serialized
 // UIMessageChunk. Stream ends with `data: [DONE]\n\n`.
+//
+// This is a thin AI-SDK-SSE adapter over runChatCore, which handles all
+// production-parity concerns: authenticated UserID, TenantID, DiscussionID,
+// SourceChannel, prime-alias, chattability guard, intent routing,
+// session-ensure, depth/council, autonomous mode, runRouter injection,
+// command interceptor, and manual delegation.
 func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Messages []struct {
@@ -825,16 +831,27 @@ func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract user message text from the last user message (AI SDK v6 uses parts).
+	// Extract user message text and file attachments from the last user message
+	// (AI SDK v6 uses parts; v5 uses content string as fallback).
 	userMsg := ""
+	var fileParts []agent.FilePart
 	for i := len(body.Messages) - 1; i >= 0; i-- {
 		m := body.Messages[i]
 		if m.Role != "user" {
 			continue
 		}
 		for _, p := range m.Parts {
-			if p.Type == "text" {
+			switch p.Type {
+			case "text":
 				userMsg += p.Text
+			case "file":
+				if p.URL != "" {
+					fileParts = append(fileParts, agent.FilePart{
+						URL:       p.URL,
+						MediaType: p.MediaType,
+						Filename:  p.Filename,
+					})
+				}
 			}
 		}
 		if userMsg == "" {
@@ -844,49 +861,74 @@ func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 		}
 		break
 	}
+
+	// Inject <attached_file> blocks into the user message so the agent loop
+	// can read file content. This mirrors web/app/api/chat/route.ts behaviour
+	// on the Node path, closing the static-export attachments gap.
+	userMsg = agent.EncodeAttachedFiles(userMsg, fileParts)
+
 	if userMsg == "" {
 		http.Error(w, `{"error":"no user message found"}`, http.StatusBadRequest)
 		return
 	}
+
+	// Early guard: agentLoop nil produces a clean error before any headers.
 	if gw.agentLoop == nil {
 		http.Error(w, `{"error":"agent loop not initialised"}`, http.StatusServiceUnavailable)
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	// Flusher check before headers — returns a clean 500 if streaming is
+	// unsupported, consistent with the OpenAI path.
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("x-vercel-ai-ui-message-stream", "v1")
-	w.Header().Set("x-accel-buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	enq := func(chunk map[string]any) {
-		data, _ := json.Marshal(chunk)
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-	}
-
-	// Start marker — AI SDK expects this before any content.
-	enq(map[string]any{"type": "start"})
-
-	textID := fmt.Sprintf("t-%d", time.Now().UnixNano())
-	textStarted := false
-
-	req := agent.RunRequest{
+	params := chatCoreParams{
 		AgentID:       body.AgentID,
 		SessionID:     body.SessionID,
 		UserMessage:   userMsg,
 		Channel:       "web",
 		ThinkingLevel: body.ThinkingLevel,
+		Stream:        true, // AI-SDK path is always streaming
 	}
 
-	if _, runErr := gw.agentLoop.Run(r.Context(), req, func(event agent.StreamEvent) {
+	// textID / textStarted are closed over by onStreamStart and onEvent.
+	textID := fmt.Sprintf("t-%d", time.Now().UnixNano())
+	textStarted := false
+
+	var flusher http.Flusher
+
+	enq := func(chunk map[string]any) {
+		data, _ := json.Marshal(chunk)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// onStreamStart is called by runChatCore AFTER all guards pass (chattability,
+	// empty-message, etc.) and immediately before the streaming goroutine begins.
+	// Writing SSE headers here — not before — ensures guard rejections return a
+	// clean JSON error without committed SSE headers.
+	onStreamStart := func() {
+		flusher, _ = w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("x-vercel-ai-ui-message-stream", "v1")
+		w.Header().Set("x-accel-buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		// Start marker — AI SDK expects this before any content.
+		enq(map[string]any{"type": "start"})
+	}
+
+	// onEvent is the AI-SDK-SSE adapter: maps each StreamEvent to the
+	// UIMessageChunk shape the frontend expects. Terminal markers
+	// (text-end / finish / [DONE]) are emitted here on the "done" event so the
+	// sequence is identical whether the loop exits normally or via interceptor.
+	onEvent := func(event agent.StreamEvent) {
 		switch event.Type {
 		case "text_delta":
 			if !textStarted {
@@ -949,26 +991,42 @@ func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 				enq(map[string]any{"type": "text-end", "id": textID})
 				textStarted = false
 			}
-			msg := ""
+			errMsg := ""
 			if s, ok := event.Data.(string); ok {
-				msg = s
+				errMsg = s
 			} else if event.Delta != "" {
-				msg = event.Delta
+				errMsg = event.Delta
 			}
-			enq(map[string]any{"type": "error", "errorText": msg})
+			enq(map[string]any{"type": "error", "errorText": errMsg})
 		case "done":
-			// handled below after Run returns
+			// Emit terminal sequence: close open text block → finish → [DONE].
+			if textStarted {
+				enq(map[string]any{"type": "text-end", "id": textID})
+				textStarted = false
+			}
+			enq(map[string]any{"type": "finish"})
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
 		}
-	}); runErr != nil && !textStarted {
-		enq(map[string]any{"type": "error", "errorText": runErr.Error()})
 	}
 
-	if textStarted {
-		enq(map[string]any{"type": "text-end", "id": textID})
+	// runChatCore drives the full pipeline: prime-alias, chattability guard,
+	// intent routing, session-ensure, UserID/TenantID/DiscussionID stamping,
+	// depth/council, autonomous mode, runRouter injection, interceptor, and
+	// manual delegation. onStreamStart is called after all guards pass;
+	// onEvent receives every StreamEvent including "done".
+	//
+	// If a guard rejects (chattability-403, empty-message-400, etc.) the core
+	// calls writeJSON and returns (nil, "", err) — onStreamStart was never
+	// called so no SSE headers were committed, and we return cleanly here.
+	//
+	// Since Stream=true the core always returns (nil, "", nil) on success.
+	if _, _, err := gw.runChatCore(w, r, params, onStreamStart, onEvent); err != nil {
+		// Guard rejected before onStreamStart — response already written, nothing more to do.
+		return
 	}
-	enq(map[string]any{"type": "finish"})
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
 }
 
 // handleOpenAIModels returns an OpenAI-compatible /v1/models response scoped
