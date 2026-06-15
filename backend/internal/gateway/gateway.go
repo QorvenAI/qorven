@@ -2076,6 +2076,11 @@ func (gw *Gateway) dispatchRuntimeSignal(ctx context.Context, agentID string, si
 			UserMessage: msg,
 			Channel:     "task",
 		}
+		if gw.runtimeMgr != nil {
+			if rt := gw.runtimeMgr.Get(agentID); rt != nil {
+				req.OverrideFn = rt.NextOverride
+			}
+		}
 		_, _ = gw.agentLoop.Run(ctx, req, func(_ agent.StreamEvent) {}) //nolint:errcheck
 
 	case agent.WakeupManual:
@@ -2087,6 +2092,11 @@ func (gw *Gateway) dispatchRuntimeSignal(ctx context.Context, agentID string, si
 			AgentID:     agentID,
 			UserMessage: msg,
 			Channel:     "task",
+		}
+		if gw.runtimeMgr != nil {
+			if rt := gw.runtimeMgr.Get(agentID); rt != nil {
+				req.OverrideFn = rt.NextOverride
+			}
 		}
 		_, _ = gw.agentLoop.Run(ctx, req, func(_ agent.StreamEvent) {}) //nolint:errcheck
 

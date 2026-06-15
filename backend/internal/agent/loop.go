@@ -988,6 +988,13 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 			result.Content = "Request cancelled."
 			break
 		}
+
+		// Poll for a mid-run user override from /runtime/override and inject it
+		// as a user turn so the agent steers on its next LLM call.
+		if ov := maybeInjectOverride(req.OverrideFn); ov != "" {
+			slog.Info("agent.loop.override_injected", "agent", ag.ID, "iter", iter, "override", ov)
+			messages = append(messages, providers.Message{Role: "user", Content: ov})
+		}
 		// For code tasks, allow many more consecutive tool iterations — app building
 		// legitimately requires 10+ consecutive file writes without any text in between.
 		// Research/chat tasks keep the tight 5-call limit to prevent search loops.
@@ -2240,4 +2247,14 @@ CREATE INDEX IF NOT EXISTS tool_approvals_pending ON tool_approvals(agent_id, st
 	}
 
 	return result, nil
+}
+
+// maybeInjectOverride calls fn (if non-nil) and returns the trimmed override
+// message, or "" when fn is nil or returns empty. Pure helper — callers are
+// responsible for logging and appending to the message slice.
+func maybeInjectOverride(fn func() string) string {
+	if fn == nil {
+		return ""
+	}
+	return fn()
 }
