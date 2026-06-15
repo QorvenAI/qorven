@@ -22,6 +22,18 @@ import (
 // vendorMu serializes first-time downloads so concurrent requests don't race.
 var vendorMu sync.Mutex
 
+// cachedScriptValid reports whether already-cached bytes may be served. When a
+// pin (wantSHA256) is set, the cached copy is re-verified against it on every
+// read, so a file cached during an earlier trust-on-first-use window (or a
+// tampered cache) is rejected and re-downloaded rather than served blindly.
+func cachedScriptValid(b []byte, wantSHA256 string) bool {
+	if wantSHA256 == "" {
+		return true // no pin configured — trust the cached same-origin copy
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]) == wantSHA256
+}
+
 // EnsureVendorScript returns the bytes of a vendored public-host script (e.g.
 // React UMD), downloading it once from a PINNED HTTPS url into the data dir and
 // caching it there. The cached copy is then served SAME-ORIGIN from Qorven, so
@@ -38,14 +50,14 @@ func EnsureVendorScript(ctx context.Context, name, url, wantSHA256 string) ([]by
 	dir := config.Sub("public-vendor")
 	path := filepath.Join(dir, name+".js")
 
-	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+	if b, err := os.ReadFile(path); err == nil && len(b) > 0 && cachedScriptValid(b, wantSHA256) {
 		return b, nil
 	}
 
 	vendorMu.Lock()
 	defer vendorMu.Unlock()
 	// Re-check after acquiring the lock (another goroutine may have fetched it).
-	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+	if b, err := os.ReadFile(path); err == nil && len(b) > 0 && cachedScriptValid(b, wantSHA256) {
 		return b, nil
 	}
 

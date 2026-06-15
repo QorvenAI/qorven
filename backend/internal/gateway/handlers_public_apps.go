@@ -60,16 +60,18 @@ var publicVendorScripts = map[string]struct {
 	url    string
 	sha256 string
 }{
-	// SHA left empty → trust-on-first-use over HTTPS from a PINNED version, then
-	// cached and served same-origin (eliminating the serve-time CDN exposure).
-	// Set a real SHA-256 here to additionally verify the one-time download.
+	// SHA-256 pins for the exact React 18.3.1 UMD production builds. The one-time
+	// download is verified against these before caching, and the cached copy is
+	// re-verified on every read — so a compromised CDN cannot inject a payload
+	// even on first boot. Hashes cross-checked against unpkg and jsdelivr (the
+	// same npm tarball served from two independent CDNs).
 	"react": {
 		url:    "https://unpkg.com/react@18.3.1/umd/react.production.min.js",
-		sha256: "",
+		sha256: "d949f1c3687aedadcedac85261865f29b17cd273997e7f6b2bfc53b2f9d4c4dd",
 	},
 	"react-dom": {
 		url:    "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js",
-		sha256: "",
+		sha256: "35f4f974f4b2bcd44da73963347f8952e341f83909e4498227d4e26b98f66f0d",
 	},
 }
 
