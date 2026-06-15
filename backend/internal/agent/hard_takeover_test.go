@@ -124,9 +124,12 @@ func TestHard_ActivityTracker_ConcurrentAccess(t *testing.T) {
 // ── Process Notifier ──
 
 func TestHard_ProcessNotifier_StartAndComplete(t *testing.T) {
+	var notifiedMu sync.Mutex
 	var notified string
 	pn := NewProcessNotifier(func(agentID, sessionID, message string) {
+		notifiedMu.Lock()
 		notified = message
+		notifiedMu.Unlock()
 	})
 
 	id := pn.Start(context.Background(), "agent-123", "sess-456", "test build", func(ctx context.Context) (string, error) {
@@ -147,8 +150,11 @@ func TestHard_ProcessNotifier_StartAndComplete(t *testing.T) {
 	proc, _ = pn.Get(id)
 	if proc.Status != "completed" { t.Errorf("status after completion: %q", proc.Status) }
 	if proc.Result != "build succeeded" { t.Errorf("result: %q", proc.Result) }
-	if notified == "" { t.Error("notification callback not called") }
-	if !strings.Contains(notified, "completed") { t.Errorf("notification: %q", notified) }
+	notifiedMu.Lock()
+	n := notified
+	notifiedMu.Unlock()
+	if n == "" { t.Error("notification callback not called") }
+	if !strings.Contains(n, "completed") { t.Errorf("notification: %q", n) }
 	t.Logf("process: started→completed, notified in %v ✓", proc.Duration)
 }
 

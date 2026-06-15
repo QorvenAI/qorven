@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // LoopGuard detects when the agent is stuck in repetitive tool call patterns.
@@ -20,6 +21,7 @@ import (
 //  3. Read-only streak: N consecutive non-mutating tool calls without writes
 //
 type LoopGuard struct {
+	mu              sync.Mutex
 	history         []toolCallRecord
 	maxHistory      int
 	readOnlyStreak  int
@@ -78,6 +80,9 @@ func NewLoopGuard() *LoopGuard {
 func (g *LoopGuard) RecordCall(toolName string, args map[string]any) string {
 	h := hashToolCall(toolName, args)
 
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	g.history = append(g.history, toolCallRecord{
 		toolName: toolName,
 		argsHash: h,
@@ -94,6 +99,8 @@ func (g *LoopGuard) RecordCall(toolName string, args map[string]any) string {
 // RecordResult updates the latest matching record with the result hash.
 func (g *LoopGuard) RecordResult(toolName, argsHash, result string) {
 	rh := hashResult(result)
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	// Walk backwards to find the matching call
 	for i := len(g.history) - 1; i >= 0; i-- {
 		rec := &g.history[i]
@@ -106,11 +113,15 @@ func (g *LoopGuard) RecordResult(toolName, argsHash, result string) {
 
 // RecordError increments the global error counter.
 func (g *LoopGuard) RecordError() {
+	g.mu.Lock()
 	g.totalErrors++
+	g.mu.Unlock()
 }
 
 // RecordToolError tracks consecutive errors for a specific tool.
 func (g *LoopGuard) RecordToolError(toolName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.perToolErrors == nil { g.perToolErrors = make(map[string]int) }
 	g.perToolErrors[toolName]++
 	g.totalErrors++
@@ -118,11 +129,15 @@ func (g *LoopGuard) RecordToolError(toolName string) {
 
 // RecordToolSuccess resets the per-tool error counter.
 func (g *LoopGuard) RecordToolSuccess(toolName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.perToolErrors != nil { delete(g.perToolErrors, toolName) }
 }
 
 // IsToolCircuitBroken returns true if a tool has failed too many times consecutively.
 func (g *LoopGuard) IsToolCircuitBroken(toolName string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.perToolErrors == nil { return false }
 	return g.perToolErrors[toolName] >= 2 // break after 2 consecutive failures
 }
@@ -130,6 +145,8 @@ func (g *LoopGuard) IsToolCircuitBroken(toolName string) bool {
 // RecordMutation resets or increments the read-only streak.
 // Mutating tools reset the streak; read-only tools increment it.
 func (g *LoopGuard) RecordMutation(toolName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if isMutatingTool(toolName) {
 		g.readOnlyStreak = 0
 	} else if !isNeutralTool(toolName) {
@@ -140,6 +157,8 @@ func (g *LoopGuard) RecordMutation(toolName string) {
 
 // DetectSameArgs checks for no-progress loops (same tool + same args repeated).
 func (g *LoopGuard) DetectSameArgs(toolName, argsHash string) DetectionResult {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if toolName == g.lastToolName && argsHash == g.lastArgsHash {
 		g.consecutiveSame++
 	} else {
@@ -178,6 +197,9 @@ func (g *LoopGuard) DetectSameResult(toolName, resultHash string) DetectionResul
 		return DetectionResult{}
 	}
 
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	count := 0
 	for i := len(g.history) - 1; i >= 0 && i >= len(g.history)-g.maxHistory; i-- {
 		rec := g.history[i]
@@ -211,6 +233,8 @@ func (g *LoopGuard) DetectSameResult(toolName, resultHash string) DetectionResul
 
 // DetectReadOnlyStreak checks for unproductive read-only loops.
 func (g *LoopGuard) DetectReadOnlyStreak() DetectionResult {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.readOnlyStreak >= g.ReadOnlyCriticalAt {
 		return DetectionResult{
 			Level:   DetectionCritical,
@@ -233,6 +257,8 @@ func (g *LoopGuard) DetectReadOnlyStreak() DetectionResult {
 
 // DetectErrorCircuitBreak checks if total errors exceed the circuit breaker threshold.
 func (g *LoopGuard) DetectErrorCircuitBreak() DetectionResult {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.totalErrors >= g.ErrorCircuitBreak {
 		return DetectionResult{
 			Level:   DetectionCritical,
@@ -244,6 +270,8 @@ func (g *LoopGuard) DetectErrorCircuitBreak() DetectionResult {
 
 // Reset clears all state (e.g., on new session).
 func (g *LoopGuard) Reset() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.history = g.history[:0]
 	g.readOnlyStreak = 0
 	g.totalErrors = 0

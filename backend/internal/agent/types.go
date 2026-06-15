@@ -98,6 +98,13 @@ type RunRequest struct {
 	// this channel at every tool-call boundary and folds the messages into
 	// the conversation context before the next LLM call.
 	InjectCh InjectChannel
+
+	// OverrideFn is optional; polled at the top of each loop iteration to
+	// inject a mid-run user steering message. When non-nil and returns a
+	// non-empty string the message is appended as a user turn so the agent
+	// adapts on its next iteration without being cancelled. Nil for all
+	// non-runtime callers.
+	OverrideFn func() string `json:"-"`
 }
 
 // ImageInput represents an image attached to a request.

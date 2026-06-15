@@ -45,7 +45,8 @@ type AgentRuntime struct {
 	lastActive time.Time
 	mu         sync.RWMutex
 
-	runFn RuntimeRunFn
+	runFn         RuntimeRunFn
+	onStateChange func(agentID string, state RuntimeState) // nil-safe; called outside the lock
 }
 
 // NewAgentRuntime creates a runtime for agentID. runFn is called for each signal.
@@ -170,10 +171,23 @@ func (r *AgentRuntime) State() RuntimeState {
 
 func (r *AgentRuntime) setState(s RuntimeState) {
 	r.mu.Lock()
+	old := r.state
 	r.state = s
 	if s == RuntimeWorking {
 		r.lastActive = time.Now()
 	}
+	cb := r.onStateChange
+	r.mu.Unlock()
+	if cb != nil && old != s {
+		cb(r.agentID, s)
+	}
+}
+
+// setOnStateChange sets the state-change callback under the runtime's own lock,
+// so it's safe to call concurrently with setState (which reads it under r.mu).
+func (r *AgentRuntime) setOnStateChange(fn func(agentID string, state RuntimeState)) {
+	r.mu.Lock()
+	r.onStateChange = fn
 	r.mu.Unlock()
 }
 

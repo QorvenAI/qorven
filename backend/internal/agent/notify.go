@@ -58,9 +58,10 @@ func (pn *ProcessNotifier) Start(ctx context.Context, agentID, sessionID, name s
 
 	go func() {
 		result, err := runFn(ctx)
-		proc.Duration = time.Since(proc.StartedAt)
+		elapsed := time.Since(proc.StartedAt)
 
 		pn.mu.Lock()
+		proc.Duration = elapsed
 		if err != nil {
 			proc.Status = "failed"
 			proc.Result = err.Error()
@@ -88,21 +89,28 @@ func (pn *ProcessNotifier) Start(ctx context.Context, agentID, sessionID, name s
 	return id
 }
 
-// Get returns a background process by ID.
-func (pn *ProcessNotifier) Get(id string) (*BackgroundProcess, bool) {
+// Get returns a snapshot copy of a background process by ID.
+// Returning a copy (not a pointer) ensures the caller sees a stable view
+// with no data race against the goroutine that may still be updating the struct.
+func (pn *ProcessNotifier) Get(id string) (BackgroundProcess, bool) {
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
 	p, ok := pn.processes[id]
-	return p, ok
+	if !ok {
+		return BackgroundProcess{}, false
+	}
+	return *p, true
 }
 
-// List returns all processes for an agent.
-func (pn *ProcessNotifier) List(agentID string) []*BackgroundProcess {
+// List returns snapshot copies of all processes for an agent.
+func (pn *ProcessNotifier) List(agentID string) []BackgroundProcess {
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
-	var out []*BackgroundProcess
+	var out []BackgroundProcess
 	for _, p := range pn.processes {
-		if p.AgentID == agentID { out = append(out, p) }
+		if p.AgentID == agentID {
+			out = append(out, *p)
+		}
 	}
 	return out
 }

@@ -182,6 +182,127 @@ func TestBus_SendToUnregistered_NoPanic(t *testing.T) {
 
 
 
+// newTestSupervisor builds a minimal Supervisor wired to a real Bus.
+// The bus has Prime's handler registered; worker agents do NOT get handlers
+// (which is the normal production state).
+func newTestSupervisor() (*Supervisor, *Bus) {
+	bus := NewBus(nil)
+	cfg := DefaultConfig()
+	cfg.AuditInterval = time.Hour  // prevent background loops from firing
+	cfg.HeartbeatTTL = time.Minute // short TTL for staleness tests
+	s := NewSupervisor(bus, NewFixCatalog(FixDependencies{}), cfg, "prime")
+	bus.Register("prime", s.handleMessage)
+	return s, bus
+}
+
+// TestAudit_NoHandlerIsNotAnError: a worker with no bus handler must not accumulate
+// errors and must not be degraded after an audit cycle.
+func TestAudit_NoHandlerIsNotAnError(t *testing.T) {
+	s, _ := newTestSupervisor()
+	worker := AgentInfo{ID: "worker-1", Name: "Worker"}
+
+	s.SetListAgents(func(_ context.Context) ([]AgentInfo, error) {
+		return []AgentInfo{worker}, nil
+	})
+
+	// Force 100% sampling so the audit always fires
+	s.config.BaseSampleLow = 1.0
+	s.config.BaseSampleMedium = 1.0
+	s.config.BaseSampleHigh = 1.0
+
+	// Run several cycles — historically 3 would trigger "degraded"
+	for i := 0; i < 5; i++ {
+		s.runAuditCycle(context.Background())
+	}
+
+	s.mu.RLock()
+	health, ok := s.agents["worker-1"]
+	s.mu.RUnlock()
+
+	if ok {
+		if health.ConsecErrors != 0 {
+			t.Errorf("no-handler worker should have 0 consecutive errors, got %d", health.ConsecErrors)
+		}
+		if health.Status == "degraded" {
+			t.Errorf("no-handler worker should not be degraded, got status=%q", health.Status)
+		}
+	}
+	// If the agent never appeared in the map it was silently skipped — also correct.
+}
+
+// TestHealth_RecentHeartbeatIsHealthy: a heartbeat received just now must produce status "healthy".
+func TestHealth_RecentHeartbeatIsHealthy(t *testing.T) {
+	s, _ := newTestSupervisor()
+	s.recordHeartbeat("agent-hb")
+
+	s.mu.RLock()
+	health := s.agents["agent-hb"]
+	s.mu.RUnlock()
+
+	if health == nil {
+		t.Fatal("health record should exist after heartbeat")
+	}
+	if health.LastHeartbeat.IsZero() {
+		t.Error("LastHeartbeat should be set after recordHeartbeat")
+	}
+	if health.Status != "healthy" {
+		t.Errorf("expected status healthy after heartbeat, got %q", health.Status)
+	}
+}
+
+// TestHealth_NeverSeenIsNotUnresponsive: an agent that has never sent a heartbeat
+// (LastHeartbeat.IsZero()) must not be marked unresponsive by checkHeartbeats.
+func TestHealth_NeverSeenIsNotUnresponsive(t *testing.T) {
+	s, _ := newTestSupervisor()
+
+	// Manually register a health record with zero heartbeat (simulates "agent seeded but never ran")
+	s.mu.Lock()
+	s.agents["agent-never"] = &AgentHealth{
+		AgentID:   "agent-never",
+		AgentName: "NeverRan",
+		Status:    "healthy",
+		// LastHeartbeat intentionally left as zero value
+	}
+	s.mu.Unlock()
+
+	s.checkHeartbeats(context.Background())
+
+	s.mu.RLock()
+	health := s.agents["agent-never"]
+	s.mu.RUnlock()
+
+	if health.Status == "unresponsive" {
+		t.Errorf("never-seen agent must not be unresponsive, got status=%q", health.Status)
+	}
+}
+
+// TestHealth_StaleHeartbeatIsUnresponsive: an agent whose last heartbeat is older than
+// the TTL must be marked unresponsive by checkHeartbeats.
+func TestHealth_StaleHeartbeatIsUnresponsive(t *testing.T) {
+	s, _ := newTestSupervisor()
+
+	// Plant a stale heartbeat (2× TTL in the past)
+	staleTime := time.Now().Add(-2 * s.config.HeartbeatTTL)
+	s.mu.Lock()
+	s.agents["agent-stale"] = &AgentHealth{
+		AgentID:       "agent-stale",
+		AgentName:     "StaleBot",
+		Status:        "healthy",
+		LastHeartbeat: staleTime,
+	}
+	s.mu.Unlock()
+
+	s.checkHeartbeats(context.Background())
+
+	s.mu.RLock()
+	health := s.agents["agent-stale"]
+	s.mu.RUnlock()
+
+	if health.Status != "unresponsive" {
+		t.Errorf("stale agent should be unresponsive, got status=%q", health.Status)
+	}
+}
+
 func TestMessage_IntentConstants(t *testing.T) {
 	for _, intent := range []Intent{IntentStatusRequest, IntentReviewRequest,
 		IntentACK, IntentEscalationNotice, IntentAutoFix, IntentHeartbeat} {
