@@ -12,10 +12,11 @@ import (
 
 // RuntimeManager holds all active per-agent runtimes.
 type RuntimeManager struct {
-	runtimes map[string]*AgentRuntime // agentID → runtime
-	mu       sync.RWMutex
-	runFn    RuntimeRunFn
-	ctx      context.Context
+	runtimes      map[string]*AgentRuntime // agentID → runtime
+	mu            sync.RWMutex
+	runFn         RuntimeRunFn
+	ctx           context.Context
+	onStateChange func(agentID string, state RuntimeState) // nil-safe; copied onto every runtime
 }
 
 // NewRuntimeManager creates a manager. runFn is called by every runtime on wakeup.
@@ -24,6 +25,18 @@ func NewRuntimeManager(ctx context.Context, runFn RuntimeRunFn) *RuntimeManager 
 		runtimes: make(map[string]*AgentRuntime),
 		runFn:    runFn,
 		ctx:      ctx,
+	}
+}
+
+// SetOnStateChange registers a callback that is invoked (outside any lock) whenever
+// an agent runtime transitions to a new state. It also back-fills the callback onto
+// any runtimes that were created before the setter was called.
+func (m *RuntimeManager) SetOnStateChange(fn func(agentID string, state RuntimeState)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onStateChange = fn
+	for _, rt := range m.runtimes {
+		rt.onStateChange = fn
 	}
 }
 
@@ -46,6 +59,7 @@ func (m *RuntimeManager) EnsureRuntime(agentID, tenantID string) *AgentRuntime {
 		return rt
 	}
 	rt := NewAgentRuntime(agentID, tenantID, m.runFn)
+	rt.onStateChange = m.onStateChange // propagate callback; nil-safe if not yet set
 	m.runtimes[agentID] = rt
 	go rt.Run(m.ctx)
 	slog.Info("runtime_manager.runtime_started", "agent", agentID)

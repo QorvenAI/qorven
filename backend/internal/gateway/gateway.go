@@ -1424,6 +1424,14 @@ This is a self-building capability — you are extending Qorven autonomously.`,
 			agentList, err := gw.agents.List(context.Background(), defaultTenant)
 			if err == nil {
 				gw.runtimeMgr = agent.NewRuntimeManager(context.Background(), gw.dispatchRuntimeSignal)
+				gw.runtimeMgr.SetOnStateChange(func(agentID string, state agent.RuntimeState) {
+					if gw.rtHub != nil {
+						gw.rtHub.Broadcast(realtime.Event{
+							Type: realtime.EventRuntimeStateChanged,
+							Data: map[string]any{"agent_id": agentID, "state": string(state)},
+						})
+					}
+				})
 				gw.taskCoordinator = NewTaskCoordinator(gw.taskStore, gw.runtimeMgr, gw.rtHub)
 				if gw.db != nil {
 					gw.taskCoordinator.SetPresence(presence.NewStore(gw.db.Pool))
