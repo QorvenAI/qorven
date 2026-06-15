@@ -36,7 +36,7 @@ func (m *RuntimeManager) SetOnStateChange(fn func(agentID string, state RuntimeS
 	defer m.mu.Unlock()
 	m.onStateChange = fn
 	for _, rt := range m.runtimes {
-		rt.onStateChange = fn
+		rt.setOnStateChange(fn)
 	}
 }
 
@@ -59,7 +59,7 @@ func (m *RuntimeManager) EnsureRuntime(agentID, tenantID string) *AgentRuntime {
 		return rt
 	}
 	rt := NewAgentRuntime(agentID, tenantID, m.runFn)
-	rt.onStateChange = m.onStateChange // propagate callback; nil-safe if not yet set
+	rt.setOnStateChange(m.onStateChange) // propagate callback; nil-safe if not yet set
 	m.runtimes[agentID] = rt
 	go rt.Run(m.ctx)
 	slog.Info("runtime_manager.runtime_started", "agent", agentID)

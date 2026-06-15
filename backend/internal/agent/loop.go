@@ -993,7 +993,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest, onEvent func(StreamEvent
 		// as a user turn so the agent steers on its next LLM call.
 		if ov := maybeInjectOverride(req.OverrideFn); ov != "" {
 			slog.Info("agent.loop.override_injected", "agent", ag.ID, "iter", iter, "override", ov)
-			messages = append(messages, providers.Message{Role: "user", Content: ov})
+			messages = append(messages, providers.Message{Role: "user", Content: "[User override] " + ov})
 		}
 		// For code tasks, allow many more consecutive tool iterations — app building
 		// legitimately requires 10+ consecutive file writes without any text in between.

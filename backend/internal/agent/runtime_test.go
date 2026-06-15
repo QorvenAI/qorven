@@ -106,15 +106,21 @@ func TestRuntimeManager_SetOnStateChange_BackFills(t *testing.T) {
 	// Create runtime BEFORE registering the callback.
 	rt := mgr.EnsureRuntime("agent-4", "tenant-1")
 
+	var firedMu sync.Mutex
 	var fired bool
 	mgr.SetOnStateChange(func(_ string, _ RuntimeState) {
+		firedMu.Lock()
 		fired = true
+		firedMu.Unlock()
 	})
 
 	// After back-fill the runtime should have the callback.
 	rt.setState(RuntimeWorking)
 
-	if !fired {
+	firedMu.Lock()
+	f := fired
+	firedMu.Unlock()
+	if !f {
 		t.Fatal("callback was not back-filled onto pre-existing runtime")
 	}
 }

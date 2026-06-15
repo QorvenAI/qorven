@@ -183,6 +183,14 @@ func (r *AgentRuntime) setState(s RuntimeState) {
 	}
 }
 
+// setOnStateChange sets the state-change callback under the runtime's own lock,
+// so it's safe to call concurrently with setState (which reads it under r.mu).
+func (r *AgentRuntime) setOnStateChange(fn func(agentID string, state RuntimeState)) {
+	r.mu.Lock()
+	r.onStateChange = fn
+	r.mu.Unlock()
+}
+
 // AgentID returns the agent this runtime serves.
 func (r *AgentRuntime) AgentID() string { return r.agentID }
 
