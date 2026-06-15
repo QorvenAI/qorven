@@ -151,9 +151,11 @@ type pendingDelegation struct {
 }
 
 // handleManualDelegation implements the two-phase confirmation flow for manual
-// delegation mode. Returns true if the request was fully handled (either held
-// for confirmation or resolved from a pending confirmation), false otherwise.
-func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWriter, agentID, sessionID, model, userMsg string) bool {
+// delegation mode. Returns (true, responseText) if the request was fully
+// handled (either held for confirmation or resolved from a pending
+// confirmation); (false, "") otherwise. It no longer writes to w directly —
+// the caller is responsible for delivering the response in its own dialect.
+func (gw *Gateway) handleManualDelegation(ctx context.Context, agentID, sessionID, userMsg string) (bool, string) {
 	normalized := strings.TrimSpace(strings.ToLower(userMsg))
 
 	// Phase 2: user replied to a pending confirmation.
@@ -170,20 +172,12 @@ func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWr
 			})
 			response := fmt.Sprintf("Delegating to @%s...\n\n%s", pending.SoulKey, result.ForLLM)
 			gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-			writeJSON(w, 200, map[string]any{
-				"object": "chat.completion", "model": model,
-				"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-			})
-			return true
+			return true, response
 		case "no", "n", "cancel", "abort", "stop", "nope":
 			gw.pendingDelegations.Delete(sessionID)
 			response := fmt.Sprintf("Cancelled. Task to @%s was not delegated.", pending.SoulKey)
 			gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-			writeJSON(w, 200, map[string]any{
-				"object": "chat.completion", "model": model,
-				"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-			})
-			return true
+			return true, response
 		default:
 			// User is editing — replace the pending task with the new message if it's another @mention.
 			if m := cmdMentionRe.FindStringSubmatch(strings.TrimSpace(userMsg)); len(m) == 3 {
@@ -193,11 +187,7 @@ func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWr
 					gw.pendingDelegations.Store(sessionID, pendingDelegation{SoulKey: soulKey, Task: task})
 					response := fmt.Sprintf("Updated. Confirm to delegate to @%s:\n\n> %s\n\nReply `yes` to proceed or `no` to cancel.", soulKey, task)
 					gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-					writeJSON(w, 200, map[string]any{
-						"object": "chat.completion", "model": model,
-						"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-					})
-					return true
+					return true, response
 				}
 			}
 			// Not a confirmation and not a new @mention — clear pending and let it fall through to the agent.
@@ -213,15 +203,11 @@ func (gw *Gateway) handleManualDelegation(ctx context.Context, w http.ResponseWr
 			gw.pendingDelegations.Store(sessionID, pendingDelegation{SoulKey: soulKey, Task: task})
 			response := fmt.Sprintf("Manual delegation mode — confirm to delegate to @%s:\n\n> %s\n\nReply `yes` to proceed or `no` to cancel.", soulKey, task)
 			gw.saveCommandToSession(ctx, sessionID, agentID, userMsg, response)
-			writeJSON(w, 200, map[string]any{
-				"object": "chat.completion", "model": model,
-				"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": response}, "finish_reason": "stop"}},
-			})
-			return true
+			return true, response
 		}
 	}
 
-	return false
+	return false, ""
 }
 
 func isEmailLike(s string) bool {
@@ -266,87 +252,16 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// If agent_id provided, use the full agent loop (tools, memory, skills)
-	// Intercept @mentions and /commands — execute directly, skip LLM
+	// If agent_id provided, use the full agent loop (tools, memory, skills).
+	// Prime-alias resolution, chattability guard, command interception, and
+	// manual delegation all run inside runChatCore so both the OpenAI-SSE and
+	// AI-SDK adapters benefit.
 	if req.AgentID != "" && gw.agentLoop != nil {
-		// Resolve "prime" alias → coder agent (role=code). The /code page uses
-		// "prime" as a fixed alias; the DB agent has agent_key="coder", role="code".
-		if req.AgentID == "prime" && gw.agents != nil {
-			if ags, listErr := gw.agents.List(r.Context(), defaultTenant); listErr == nil {
-				for _, a := range ags {
-					if a.Role != nil && *a.Role == "code" {
-						req.AgentID = a.ID
-						break
-					}
-				}
-			}
-		}
-		// Workers (L3) are managed by their C-officer and observed via their
-		// monitor — block direct user chat on the user-facing channels. Only a
-		// confirmed not-chattable verdict blocks; alias/lookup misses fall
-		// through so legitimate non-UUID callers are unaffected. Internal
-		// callers (task/cron/a2a/room) invoke agentLoop.Run directly and never
-		// reach this handler.
-		if req.Channel == "" || req.Channel == "web" || req.Channel == "tui" {
-			if isNotChattable(gw.agentChatAllowed(r.Context(), req.AgentID)) {
-				writeJSON(w, http.StatusForbidden, map[string]any{
-					"error": "This worker is managed by its C-officer and cannot be chatted directly. Open its monitor to review tasks, or message its manager.",
-					"code":  "agent_not_chattable",
-				})
-				return
-			}
-		}
-		agentID := req.AgentID
-		userMsg := req.Message
-		if userMsg == "" && len(req.Messages) > 0 {
-			userMsg = req.Messages[len(req.Messages)-1].Content
-		}
-
-		// manual delegation mode: two-phase confirmation before delegating.
-		if req.DelegationMode == "manual" {
-			if handled := gw.handleManualDelegation(r.Context(), w, agentID, req.SessionID, req.Model, userMsg); handled {
-				return
-			}
-		}
-
-		// Command interceptor: @mention → delegate, /command → tool exec
-		if handled, response := gw.interceptCommand(r.Context(), agentID, req.SessionID, userMsg); handled {
-			if req.Stream {
-				flusher, ok := w.(http.Flusher)
-				if !ok {
-					writeJSON(w, 500, map[string]string{"error": "streaming not supported"})
-					return
-				}
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("Connection", "keep-alive")
-				w.WriteHeader(200)
-				data, _ := json.Marshal(map[string]any{
-					"object": "chat.completion.chunk",
-					"choices": []map[string]any{{
-						"index": 0, "delta": map[string]any{"content": response},
-					}},
-				})
-				fmt.Fprintf(w, "data: %s\n\n", data)
-				fmt.Fprintf(w, "data: [DONE]\n\n")
-				flusher.Flush()
-			} else {
-				writeJSON(w, 200, map[string]any{
-					"object": "chat.completion", "model": req.Model,
-					"choices": []map[string]any{{
-						"index": 0, "message": map[string]any{"role": "assistant", "content": response},
-						"finish_reason": "stop",
-					}},
-				})
-			}
-			return
-		}
-
 		ctx := r.Context()
 		if req.PlanMode {
 			ctx = context.WithValue(ctx, planModeContextKey{}, true)
 		}
-		gw.handleAgentChat(w, r.WithContext(ctx), agentID, req.SessionID, req.Model, req.Messages, req.Stream, req.Depth, req.Channel, req.ThinkingLevel, req.DelegationMode)
+		gw.handleAgentChat(w, r.WithContext(ctx), req.AgentID, req.SessionID, req.Model, req.Messages, req.Stream, req.Depth, req.Channel, req.ThinkingLevel, req.DelegationMode)
 		return
 	}
 
@@ -399,26 +314,95 @@ func (gw *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agentID, sessionID, model string, messages []providers.Message, stream bool, depthParam, channel, thinkingLevel, delegationMode string) {
-	// Extract last user message
-	userMsg := ""
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
-			userMsg = messages[i].Content
-			break
+// chatCoreParams carries all inputs that runChatCore needs to prepare and run
+// the agent loop. It is populated by each protocol adapter (OpenAI-SSE,
+// AI-SDK, etc.) before calling runChatCore.
+type chatCoreParams struct {
+	AgentID        string
+	SessionID      string
+	Model          string
+	Messages       []providers.Message
+	UserMessage    string // if non-empty used directly; else extracted from Messages
+	Channel        string // default "web"
+	Depth          string
+	ThinkingLevel  string
+	DelegationMode string
+	PlanMode       bool
+	Stream         bool
+}
+
+// runChatCore performs agent chat preparation (prime-alias resolution,
+// chattability guard, intent routing, session-ensure, RunRequest assembly,
+// depth/council decision, autonomous flag) and then runs the agent loop.
+//
+// onStreamStart is called exactly once, after ALL guards pass and immediately
+// before the streaming goroutine begins. The adapter uses it to write its
+// dialect-specific SSE headers (and any start marker). It is NEVER called when
+// a guard rejects the request, ensuring no SSE headers are committed before an
+// error response. For non-streaming requests onStreamStart is ignored.
+//
+// Each StreamEvent is forwarded to onEvent so the adapter marshals it in its
+// own SSE dialect. runChatCore owns the doneCh lifecycle and blocks until the
+// stream is fully flushed before returning.
+//
+// For non-streaming requests onEvent is ignored; the RunResult (plus the
+// resolved agentID) is returned so the adapter can write the completion JSON.
+// Council results short-circuit: runChatCore writes the completion directly
+// and returns (nil, "", nil).
+//
+// Returns (nil, "", nil) on council short-circuit (response already written).
+// Returns (nil, "", error) when the guard rejected the request (response already written).
+func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCoreParams, onStreamStart func(), onEvent func(agent.StreamEvent)) (*agent.RunResult, string, error) {
+	// --- prime-alias resolution (moved from handleChatCompletions) ---
+	if p.AgentID == "prime" && gw.agents != nil {
+		if ags, listErr := gw.agents.List(r.Context(), defaultTenant); listErr == nil {
+			for _, a := range ags {
+				if a.Role != nil && *a.Role == "code" {
+					p.AgentID = a.ID
+					break
+				}
+			}
+		}
+	}
+
+	// --- chattability guard (moved from handleChatCompletions) ---
+	if p.Channel == "" || p.Channel == "web" || p.Channel == "tui" {
+		if isNotChattable(gw.agentChatAllowed(r.Context(), p.AgentID)) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "This worker is managed by its C-officer and cannot be chatted directly. Open its monitor to review tasks, or message its manager.",
+				"code":  "agent_not_chattable",
+			})
+			return nil, "", fmt.Errorf("agent_not_chattable")
+		}
+	}
+
+	// --- extract user message ---
+	userMsg := p.UserMessage
+	if userMsg == "" {
+		for i := len(p.Messages) - 1; i >= 0; i-- {
+			if p.Messages[i].Role == "user" {
+				userMsg = p.Messages[i].Content
+				break
+			}
 		}
 	}
 	if userMsg == "" {
 		writeJSON(w, 400, map[string]string{"error": "no user message found"})
-		return
+		return nil, "", fmt.Errorf("no user message")
 	}
 	if gw.agentLoop == nil {
 		writeJSON(w, 503, map[string]string{"error": "agent loop not initialized"})
-		return
+		return nil, "", fmt.Errorf("agent loop not initialized")
 	}
 
-	// Intent routing: check deterministic rules before default agent dispatch.
-	// Only reroute if the request targets a general/chief agent (not explicit specialist).
+	agentID := p.AgentID
+	sessionID := p.SessionID
+	channel := p.Channel
+	if channel == "" {
+		channel = "web"
+	}
+
+	// --- intent routing ---
 	if gw.intentRouter != nil && (agentID == "" || agentID == "chief" || agentID == gw.agentLoop.PrimeID) {
 		decision := gw.intentRouter.Route(r.Context(), agent.RoutingContext{
 			Content: userMsg,
@@ -438,12 +422,9 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		}
 	}
 
-	// Ensure session exists for this key — create if missing
-	// AppendMessage handles both UUID and session_key lookups
+	// --- session-ensure ---
 	if gw.sessions != nil && sessionID != "" {
 		if _, err := gw.sessions.Get(r.Context(), sessionID); err != nil {
-			// Resolve agent_key → agent UUID for the FK constraint.
-			// "prime" is an alias for the code role agent used by the /code page.
 			agKeyOrRole := agentID
 			if agKeyOrRole == "prime" {
 				agKeyOrRole = "code"
@@ -459,31 +440,60 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 					}
 				}
 			}
-			ch := channel
-			if ch == "" {
-				ch = "web"
-			}
-			gw.sessions.CreateWithKey(r.Context(), defaultTenant, agUUID, "operator", ch, sessionID) //nolint:errcheck
+			gw.sessions.CreateWithKey(r.Context(), defaultTenant, agUUID, "operator", channel, sessionID) //nolint:errcheck
 		}
 	}
 
+	// --- command interception / manual delegation pre-flight ---
+	// Runs AFTER agent/session resolution and BEFORE the agent loop so BOTH
+	// the OpenAI-SSE and AI-SDK adapters get interception + delegation.
+	// Delivery is adapter-neutral: for streaming we drive onStreamStart +
+	// onEvent(text_delta) + onEvent(done); for non-streaming we return a
+	// synthetic RunResult{Content: response} so the adapter writes the JSON.
+	if intercepted, interceptResponse := func() (bool, string) {
+		if p.DelegationMode == "manual" {
+			if handled, resp := gw.handleManualDelegation(r.Context(), agentID, sessionID, userMsg); handled {
+				return true, resp
+			}
+		}
+		if handled, resp := gw.interceptCommand(r.Context(), agentID, sessionID, userMsg); handled {
+			return true, resp
+		}
+		return false, ""
+	}(); intercepted {
+		if p.Stream {
+			if onStreamStart != nil {
+				onStreamStart()
+			}
+			if onEvent != nil {
+				onEvent(agent.StreamEvent{Type: "text_delta", Delta: interceptResponse})
+				onEvent(agent.StreamEvent{Type: "done"})
+			}
+			return nil, agentID, nil
+		}
+		// Non-streaming: return a synthetic result so the adapter writes the completion JSON.
+		return &agent.RunResult{Content: interceptResponse}, agentID, nil
+	}
+
+	// --- UserID ---
 	var webUserID string
 	if u := userFromContext(r.Context()); u != nil {
 		webUserID = u.ID
 	}
 
+	// --- RunRequest assembly ---
 	req := agent.RunRequest{
 		AgentID:        agentID,
 		SessionID:      sessionID,
 		UserMessage:    userMsg,
-		Model:          model,
+		Model:          p.Model,
 		Channel:        channel,
-		ThinkingLevel:  thinkingLevel,
-		DelegationMode: delegationMode,
+		ThinkingLevel:  p.ThinkingLevel,
+		DelegationMode: p.DelegationMode,
 		UserID:         webUserID,
 		TenantID:       defaultTenant,
 	}
-	if r.Context().Value(planModeContextKey{}) == true {
+	if p.PlanMode || r.Context().Value(planModeContextKey{}) == true {
 		req.Mode = "plan"
 	}
 
@@ -498,26 +508,24 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 	req.DiscussionID = currentDiscussionID
 	req.SourceChannel = "web"
 
-	// Depth dial: check if council mode should activate
-	depth := council.Depth(depthParam)
+	// --- depth / council ---
+	depth := council.Depth(p.Depth)
 	if depth == "" {
 		depth = council.DepthBalanced
 	}
 	depthCfg := council.GetDepthConfig(depth)
 
-	// Apply depth config to run request
 	if !depthCfg.ToolsEnabled {
 		req.NoTools = true
 	}
 
-	// Auto-enable autonomous mode for code sessions — allows self-continuation
-	// past maxIter so agents can run 1-2+ hour coding tasks without stopping.
+	// --- autonomous for code- sessions ---
 	if strings.HasPrefix(sessionID, "code-") {
 		req.Autonomous = true
 	}
 
-	// Check if council should run (non-streaming only)
-	if !stream && depthCfg.CouncilEnabled {
+	// Council short-circuit (non-streaming only)
+	if !p.Stream && depthCfg.CouncilEnabled {
 		dims := providers.ScoreRequest(userMsg, !req.NoTools, false, 0)
 		if council.ShouldUseCouncil(depth, dims.Complexity) {
 			provider := gw.providerReg.Default()
@@ -534,30 +542,24 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 						}},
 						"council": councilResult,
 					})
-					return
+					return nil, agentID, nil // short-circuit: response already written
 				}
 				slog.Warn("council.failed_fallback_to_single", "error", err)
 			}
 		}
 	}
 
-	if stream {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			writeJSON(w, 500, map[string]string{"error": "streaming not supported"})
-			return
+	// --- streaming path ---
+	if p.Stream {
+		// All guards have passed. Signal the adapter to write its SSE headers
+		// now — AFTER guards, BEFORE the first event byte.
+		if onStreamStart != nil {
+			onStreamStart()
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(200)
 
 		// doneCh is closed the moment [DONE] is written to the client.
-		// The agent loop continues post-processing (persist, metrics, memory)
-		// in a background goroutine so the HTTP response closes immediately.
 		doneCh := make(chan struct{})
 
-		// Register this run so mid-run messages can be injected
 		var runID string
 		runCtx := context.Background()
 		if gw.runRouter != nil {
@@ -577,90 +579,161 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 				runFn = gw.agentLoop.Autonomous.RunAutonomous
 			}
 			runFn(runCtx, req, func(event agent.StreamEvent) {
-				var data []byte
-				switch event.Type {
-				case "text_delta":
-					data, _ = json.Marshal(map[string]any{
-						"object": "chat.completion.chunk",
-						"choices": []map[string]any{{
-							"index": 0, "delta": map[string]any{"content": event.Delta},
-						}},
-					})
-				case "thinking_delta":
-					data, _ = json.Marshal(map[string]any{
-						"object": "chat.completion.chunk",
-						"choices": []map[string]any{{
-							"index": 0, "delta": map[string]any{"reasoning_content": event.Delta},
-						}},
-					})
-				case "tool_start":
-					data, _ = json.Marshal(map[string]any{"type": "tool_start", "data": event.Data})
-				case "tool_result":
-					data, _ = json.Marshal(map[string]any{"type": "tool_result", "data": event.Data})
-				case "sources":
-					data, _ = json.Marshal(map[string]any{"type": "sources", "data": event.Data})
-				case "part":
-					data, _ = json.Marshal(map[string]any{"type": "part", "data": event.Data})
-				case "widget":
-					data, _ = json.Marshal(map[string]any{"type": "widget", "data": event.Data})
-				case "title":
-					data, _ = json.Marshal(map[string]any{"type": "title", "data": event.Data})
-				case "tags":
-					data, _ = json.Marshal(map[string]any{"type": "tags", "data": event.Data})
-				case "follow_up":
-					data, _ = json.Marshal(map[string]any{"type": "follow_up", "data": event.Data})
-				case "citation":
-					data, _ = json.Marshal(map[string]any{"type": "citation", "data": event.Data})
-				case "stream_start":
-					data, _ = json.Marshal(map[string]any{"type": "stream_start", "data": event.Data})
-				case "tool_approval":
-					data, _ = json.Marshal(map[string]any{"type": "tool_approval", "data": event.Data})
-				case "usage":
-					data, _ = json.Marshal(map[string]any{"type": "usage", "data": event.Data})
-				case "error":
-					data, _ = json.Marshal(map[string]any{"type": "error", "data": event.Error})
-				case "done":
+				if event.Type == "done" {
 					select {
 					case <-doneCh: // already closed
 					default:
-						fmt.Fprintf(w, "data: [DONE]\n\n")
-						flusher.Flush()
+						onEvent(event) // let adapter write its terminal marker
 						close(doneCh)
 					}
 					return
-				default:
-					return
 				}
-				// Only write to response if still open
 				select {
 				case <-doneCh:
 					return
 				default:
 				}
-				fmt.Fprintf(w, "data: %s\n\n", data)
-				flusher.Flush()
+				onEvent(event)
 			})
 			// Ensure doneCh is closed even if loop returns without a "done" event
 			select {
 			case <-doneCh:
 			default:
-				fmt.Fprintf(w, "data: [DONE]\n\n")
-				flusher.Flush()
+				onEvent(agent.StreamEvent{Type: "done"})
 				close(doneCh)
 			}
 			go gw.assignDiscussionAsync(context.Background(), agentID, sessionID, userMsg)
 		}()
 		<-doneCh
+		return nil, agentID, nil
+	}
+
+	// --- non-streaming path ---
+	result, err := gw.agentLoop.Run(r.Context(), req, func(agent.StreamEvent) {})
+	if err != nil {
+		return nil, agentID, err
+	}
+	go gw.assignDiscussionAsync(context.Background(), agentID, sessionID, userMsg)
+	// Return the resolved agentID so the adapter can report it in metadata.
+	return result, agentID, nil
+}
+
+func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agentID, sessionID, model string, messages []providers.Message, stream bool, depthParam, channel, thinkingLevel, delegationMode string) {
+	// Note: prime-alias resolution, chattability guard, command interception,
+	// and manual delegation are all handled inside runChatCore so both the
+	// OpenAI-SSE and AI-SDK adapters benefit.
+
+	// SSE flusher check: do this early so we can return a clean 500 before
+	// any headers are written, but do NOT write SSE headers yet — that happens
+	// via onStreamStart AFTER all guards inside runChatCore pass.
+	if stream {
+		if _, ok := w.(http.Flusher); !ok {
+			writeJSON(w, 500, map[string]string{"error": "streaming not supported"})
+			return
+		}
+	}
+
+	params := chatCoreParams{
+		AgentID:        agentID,
+		SessionID:      sessionID,
+		Model:          model,
+		Messages:       messages,
+		Channel:        channel,
+		Depth:          depthParam,
+		ThinkingLevel:  thinkingLevel,
+		DelegationMode: delegationMode,
+		PlanMode:       r.Context().Value(planModeContextKey{}) == true,
+		Stream:         stream,
+	}
+
+	// onStreamStart is called by runChatCore after all guards pass, immediately
+	// before the streaming goroutine begins. This guarantees SSE headers are
+	// never written on a guard-rejected request.
+	onStreamStart := func() {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(200)
+	}
+
+	// OpenAI-SSE adapter: marshal each StreamEvent into the OpenAI chunk format.
+	onEvent := func(event agent.StreamEvent) {
+		var data []byte
+		switch event.Type {
+		case "text_delta":
+			data, _ = json.Marshal(map[string]any{
+				"object": "chat.completion.chunk",
+				"choices": []map[string]any{{
+					"index": 0, "delta": map[string]any{"content": event.Delta},
+				}},
+			})
+		case "thinking_delta":
+			data, _ = json.Marshal(map[string]any{
+				"object": "chat.completion.chunk",
+				"choices": []map[string]any{{
+					"index": 0, "delta": map[string]any{"reasoning_content": event.Delta},
+				}},
+			})
+		case "tool_start":
+			data, _ = json.Marshal(map[string]any{"type": "tool_start", "data": event.Data})
+		case "tool_result":
+			data, _ = json.Marshal(map[string]any{"type": "tool_result", "data": event.Data})
+		case "sources":
+			data, _ = json.Marshal(map[string]any{"type": "sources", "data": event.Data})
+		case "part":
+			data, _ = json.Marshal(map[string]any{"type": "part", "data": event.Data})
+		case "widget":
+			data, _ = json.Marshal(map[string]any{"type": "widget", "data": event.Data})
+		case "title":
+			data, _ = json.Marshal(map[string]any{"type": "title", "data": event.Data})
+		case "tags":
+			data, _ = json.Marshal(map[string]any{"type": "tags", "data": event.Data})
+		case "follow_up":
+			data, _ = json.Marshal(map[string]any{"type": "follow_up", "data": event.Data})
+		case "citation":
+			data, _ = json.Marshal(map[string]any{"type": "citation", "data": event.Data})
+		case "stream_start":
+			data, _ = json.Marshal(map[string]any{"type": "stream_start", "data": event.Data})
+		case "tool_approval":
+			data, _ = json.Marshal(map[string]any{"type": "tool_approval", "data": event.Data})
+		case "usage":
+			data, _ = json.Marshal(map[string]any{"type": "usage", "data": event.Data})
+		case "error":
+			data, _ = json.Marshal(map[string]any{"type": "error", "data": event.Error})
+		case "done":
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		default:
+			return
+		}
+		flusher, _ := w.(http.Flusher)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	result, resolvedAgentID, err := gw.runChatCore(w, r, params, onStreamStart, onEvent)
+	if err != nil || result == nil {
+		// Either the guard rejected (response written), council short-circuited
+		// (response written), streaming completed (nil result), or a run error.
+		if err != nil && result == nil && !stream {
+			writeJSON(w, 502, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 
-	// Non-streaming
-	result, err := gw.agentLoop.Run(r.Context(), req, func(event agent.StreamEvent) {})
-	if err != nil {
-		writeJSON(w, 502, map[string]string{"error": err.Error()})
-		return
+	// Non-streaming completion response.
+	// Use resolvedAgentID (after prime-alias + intent routing) so metadata
+	// reflects the agent that actually handled the request.
+	reportAgentID := resolvedAgentID
+	if reportAgentID == "" {
+		reportAgentID = agentID
 	}
-	go gw.assignDiscussionAsync(context.Background(), agentID, sessionID, userMsg)
 	writeJSON(w, 200, map[string]any{
 		"object": "chat.completion", "model": model,
 		"choices": []map[string]any{{
@@ -676,7 +749,7 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 			"tools_used": result.ToolsUsed,
 			"iterations": result.Iterations,
 			"session_id": sessionID,
-			"agent_id":   agentID,
+			"agent_id":   reportAgentID,
 		},
 	})
 }
@@ -723,12 +796,18 @@ func (gw *Gateway) streamChat(w http.ResponseWriter, r *http.Request, p provider
 //
 // Request (POST, JSON):
 //
-//	{ messages: [{role, parts:[{type:"text",text:"..."}]}, ...],
+//	{ messages: [{role, parts:[{type:"text",text:"..."}|{type:"file",url,mediaType,filename}]}, ...],
 //	  agentId: "uuid", sessionId: "uuid", thinkingLevel?: "off"|"medium"|"high" }
 //
 // Response: SSE with Content-Type text/event-stream and the
 // x-vercel-ai-ui-message-stream: v1 header. Each event is a JSON-serialized
 // UIMessageChunk. Stream ends with `data: [DONE]\n\n`.
+//
+// This is a thin AI-SDK-SSE adapter over runChatCore, which handles all
+// production-parity concerns: authenticated UserID, TenantID, DiscussionID,
+// SourceChannel, prime-alias, chattability guard, intent routing,
+// session-ensure, depth/council, autonomous mode, runRouter injection,
+// command interceptor, and manual delegation.
 func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Messages []struct {
@@ -752,16 +831,27 @@ func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract user message text from the last user message (AI SDK v6 uses parts).
+	// Extract user message text and file attachments from the last user message
+	// (AI SDK v6 uses parts; v5 uses content string as fallback).
 	userMsg := ""
+	var fileParts []agent.FilePart
 	for i := len(body.Messages) - 1; i >= 0; i-- {
 		m := body.Messages[i]
 		if m.Role != "user" {
 			continue
 		}
 		for _, p := range m.Parts {
-			if p.Type == "text" {
+			switch p.Type {
+			case "text":
 				userMsg += p.Text
+			case "file":
+				if p.URL != "" {
+					fileParts = append(fileParts, agent.FilePart{
+						URL:       p.URL,
+						MediaType: p.MediaType,
+						Filename:  p.Filename,
+					})
+				}
 			}
 		}
 		if userMsg == "" {
@@ -771,49 +861,74 @@ func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 		}
 		break
 	}
+
+	// Inject <attached_file> blocks into the user message so the agent loop
+	// can read file content. This mirrors web/app/api/chat/route.ts behaviour
+	// on the Node path, closing the static-export attachments gap.
+	userMsg = agent.EncodeAttachedFiles(userMsg, fileParts)
+
 	if userMsg == "" {
 		http.Error(w, `{"error":"no user message found"}`, http.StatusBadRequest)
 		return
 	}
+
+	// Early guard: agentLoop nil produces a clean error before any headers.
 	if gw.agentLoop == nil {
 		http.Error(w, `{"error":"agent loop not initialised"}`, http.StatusServiceUnavailable)
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	// Flusher check before headers — returns a clean 500 if streaming is
+	// unsupported, consistent with the OpenAI path.
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("x-vercel-ai-ui-message-stream", "v1")
-	w.Header().Set("x-accel-buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	enq := func(chunk map[string]any) {
-		data, _ := json.Marshal(chunk)
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-	}
-
-	// Start marker — AI SDK expects this before any content.
-	enq(map[string]any{"type": "start"})
-
-	textID := fmt.Sprintf("t-%d", time.Now().UnixNano())
-	textStarted := false
-
-	req := agent.RunRequest{
+	params := chatCoreParams{
 		AgentID:       body.AgentID,
 		SessionID:     body.SessionID,
 		UserMessage:   userMsg,
 		Channel:       "web",
 		ThinkingLevel: body.ThinkingLevel,
+		Stream:        true, // AI-SDK path is always streaming
 	}
 
-	if _, runErr := gw.agentLoop.Run(r.Context(), req, func(event agent.StreamEvent) {
+	// textID / textStarted are closed over by onStreamStart and onEvent.
+	textID := fmt.Sprintf("t-%d", time.Now().UnixNano())
+	textStarted := false
+
+	var flusher http.Flusher
+
+	enq := func(chunk map[string]any) {
+		data, _ := json.Marshal(chunk)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// onStreamStart is called by runChatCore AFTER all guards pass (chattability,
+	// empty-message, etc.) and immediately before the streaming goroutine begins.
+	// Writing SSE headers here — not before — ensures guard rejections return a
+	// clean JSON error without committed SSE headers.
+	onStreamStart := func() {
+		flusher, _ = w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("x-vercel-ai-ui-message-stream", "v1")
+		w.Header().Set("x-accel-buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		// Start marker — AI SDK expects this before any content.
+		enq(map[string]any{"type": "start"})
+	}
+
+	// onEvent is the AI-SDK-SSE adapter: maps each StreamEvent to the
+	// UIMessageChunk shape the frontend expects. Terminal markers
+	// (text-end / finish / [DONE]) are emitted here on the "done" event so the
+	// sequence is identical whether the loop exits normally or via interceptor.
+	onEvent := func(event agent.StreamEvent) {
 		switch event.Type {
 		case "text_delta":
 			if !textStarted {
@@ -876,26 +991,42 @@ func (gw *Gateway) handleAISDKChat(w http.ResponseWriter, r *http.Request) {
 				enq(map[string]any{"type": "text-end", "id": textID})
 				textStarted = false
 			}
-			msg := ""
+			errMsg := ""
 			if s, ok := event.Data.(string); ok {
-				msg = s
+				errMsg = s
 			} else if event.Delta != "" {
-				msg = event.Delta
+				errMsg = event.Delta
 			}
-			enq(map[string]any{"type": "error", "errorText": msg})
+			enq(map[string]any{"type": "error", "errorText": errMsg})
 		case "done":
-			// handled below after Run returns
+			// Emit terminal sequence: close open text block → finish → [DONE].
+			if textStarted {
+				enq(map[string]any{"type": "text-end", "id": textID})
+				textStarted = false
+			}
+			enq(map[string]any{"type": "finish"})
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
 		}
-	}); runErr != nil && !textStarted {
-		enq(map[string]any{"type": "error", "errorText": runErr.Error()})
 	}
 
-	if textStarted {
-		enq(map[string]any{"type": "text-end", "id": textID})
+	// runChatCore drives the full pipeline: prime-alias, chattability guard,
+	// intent routing, session-ensure, UserID/TenantID/DiscussionID stamping,
+	// depth/council, autonomous mode, runRouter injection, interceptor, and
+	// manual delegation. onStreamStart is called after all guards pass;
+	// onEvent receives every StreamEvent including "done".
+	//
+	// If a guard rejects (chattability-403, empty-message-400, etc.) the core
+	// calls writeJSON and returns (nil, "", err) — onStreamStart was never
+	// called so no SSE headers were committed, and we return cleanly here.
+	//
+	// Since Stream=true the core always returns (nil, "", nil) on success.
+	if _, _, err := gw.runChatCore(w, r, params, onStreamStart, onEvent); err != nil {
+		// Guard rejected before onStreamStart — response already written, nothing more to do.
+		return
 	}
-	enq(map[string]any{"type": "finish"})
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
 }
 
 // handleOpenAIModels returns an OpenAI-compatible /v1/models response scoped
