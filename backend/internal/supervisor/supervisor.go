@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -245,6 +246,12 @@ func (s *Supervisor) auditAgent(ctx context.Context, agent AgentInfo) {
 
 	err := s.bus.Send(ctx, msg)
 	if err != nil {
+		if strings.Contains(err.Error(), "no handler registered for agent") {
+			// A worker with no live-probe handler is normal — its health is tracked
+			// via heartbeats, not this probe. Do NOT count this as an agent error.
+			slog.Debug("supervisor.audit.no_handler", "agent", agent.ID)
+			return
+		}
 		slog.Warn("supervisor.audit.send_failed", "agent", agent.ID, "error", err)
 		s.recordError(agent.ID, agent.Name)
 	}
@@ -415,34 +422,35 @@ func (s *Supervisor) checkHeartbeats(ctx context.Context) {
 	for _, agentID := range stale {
 		slog.Warn("supervisor.heartbeat.stale", "agent", agentID)
 
-		// Send one STATUS_REQUEST as a probe
+		// Staleness alone is the signal — mark unresponsive regardless of whether
+		// the probe send succeeds. Workers without a live-probe handler always fail
+		// the send, but that failure is meaningless; the missing heartbeat is the truth.
+		s.mu.Lock()
+		if health, ok := s.agents[agentID]; ok {
+			health.Status = "unresponsive"
+			slog.Error("supervisor.agent.unresponsive", "agent", agentID)
+		}
+		s.mu.Unlock()
+
+		// Escalate to human
+		s.bus.Send(ctx, Message{
+			From:    s.primeID,
+			To:      "human",
+			Intent:  IntentEscalationNotice,
+			Content: fmt.Sprintf("Agent %s is unresponsive (no heartbeat for %s)", agentID, s.config.HeartbeatTTL),
+			Risk:    RiskMedium,
+		})
+
+		// Send a courtesy probe — if the agent does have a handler and responds,
+		// its heartbeat will be reset and it will recover on the next cycle.
 		timeout := s.config.ResponseTimeout
-		err := s.bus.Send(ctx, Message{
+		s.bus.Send(ctx, Message{ //nolint:errcheck
 			From:        s.primeID,
 			To:          agentID,
 			Intent:      IntentStatusRequest,
 			Content:     "Heartbeat timeout — are you alive?",
 			SyncTimeout: &timeout,
 		})
-
-		if err != nil {
-			// No response → mark as unresponsive
-			s.mu.Lock()
-			if health, ok := s.agents[agentID]; ok {
-				health.Status = "unresponsive"
-				slog.Error("supervisor.agent.unresponsive", "agent", agentID)
-			}
-			s.mu.Unlock()
-
-			// Escalate
-			s.bus.Send(ctx, Message{
-				From:    s.primeID,
-				To:      "human",
-				Intent:  IntentEscalationNotice,
-				Content: fmt.Sprintf("Agent %s is unresponsive (no heartbeat for %s)", agentID, s.config.HeartbeatTTL),
-				Risk:    RiskMedium,
-			})
-		}
 	}
 }
 
