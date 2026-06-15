@@ -44,10 +44,10 @@ func TestResolveTaskProject_DB(t *testing.T) {
 	const tenantID = "00000000-0000-0000-0000-000000000001"
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
-	// Create a budget_projects row to act as the project.
+	// Create a project row (the real table is `projects`, created by migration 030).
 	var projectID string
 	err = pool.QueryRow(ctx,
-		`INSERT INTO budget_projects (tenant_id, name) VALUES ($1::uuid, $2) RETURNING id::text`,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1::uuid, $2) RETURNING id::text`,
 		tenantID, "test-proj-"+suffix,
 	).Scan(&projectID)
 	if err != nil {
@@ -55,7 +55,7 @@ func TestResolveTaskProject_DB(t *testing.T) {
 	}
 	t.Logf("project: %s", projectID)
 
-	// Create an agent to satisfy tasks FK (if tasks has agent_id).
+	// Create an agent so we can reference it via the tasks.assigned_to FK.
 	store := NewStore(pool)
 	ag, err := store.Create(ctx, tenantID, CreateAgentInput{
 		AgentKey:     "resolve-test-" + suffix,
@@ -67,10 +67,11 @@ func TestResolveTaskProject_DB(t *testing.T) {
 	}
 
 	// Seed a task linked to the project.
+	// tasks uses assigned_to (uuid FK → agents) and status (varchar), not agent_id/state.
 	var taskWithProject string
 	err = pool.QueryRow(ctx,
-		`INSERT INTO tasks (tenant_id, agent_id, title, state, project_id)
-		 VALUES ($1::uuid, $2::uuid, $3, 'pending', $4::uuid)
+		`INSERT INTO tasks (tenant_id, assigned_to, title, status, project_id)
+		 VALUES ($1::uuid, $2::uuid, $3, 'backlog', $4::uuid)
 		 RETURNING id::text`,
 		tenantID, ag.ID, "task-with-proj-"+suffix, projectID,
 	).Scan(&taskWithProject)
@@ -81,8 +82,8 @@ func TestResolveTaskProject_DB(t *testing.T) {
 	// Seed a task with no project.
 	var taskNoProject string
 	err = pool.QueryRow(ctx,
-		`INSERT INTO tasks (tenant_id, agent_id, title, state)
-		 VALUES ($1::uuid, $2::uuid, $3, 'pending')
+		`INSERT INTO tasks (tenant_id, assigned_to, title, status)
+		 VALUES ($1::uuid, $2::uuid, $3, 'backlog')
 		 RETURNING id::text`,
 		tenantID, ag.ID, "task-no-proj-"+suffix,
 	).Scan(&taskNoProject)
@@ -93,7 +94,7 @@ func TestResolveTaskProject_DB(t *testing.T) {
 	t.Cleanup(func() {
 		pool.Exec(context.Background(), `DELETE FROM tasks WHERE id = $1 OR id = $2`, taskWithProject, taskNoProject)
 		pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, ag.ID)
-		pool.Exec(context.Background(), `DELETE FROM budget_projects WHERE id = $1::uuid`, projectID)
+		pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1::uuid`, projectID)
 	})
 
 	l := &Loop{agentStore: store, tenantID: tenantID}
