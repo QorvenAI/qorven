@@ -112,10 +112,11 @@ func TestSetBudget_AllowsDeliberateZero(t *testing.T) {
 			"DELETE FROM gateway_budgets WHERE tenant_id=$1", tenant)
 	})
 	if err := s.SetBudget(context.Background(), tenant, BudgetScope{
-		Scope:     "agent",
-		ScopeID:   agentID,
-		MonthlyUSD: 0,
-		AllowZero: true,
+		Scope:          "agent",
+		ScopeID:        agentID,
+		MonthlyUSD:     0,
+		AllocationMode: "fresh", // fresh mode doesn't require a parent scope
+		AllowZero:      true,
 	}); err != nil {
 		t.Fatalf("deliberate zero (AllowZero=true) should be accepted: %v", err)
 	}
