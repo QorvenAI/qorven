@@ -395,18 +395,24 @@ type chatCoreParams struct {
 // chattability guard, intent routing, session-ensure, RunRequest assembly,
 // depth/council decision, autonomous flag) and then runs the agent loop.
 //
-// For streaming requests the caller must write SSE response headers BEFORE
-// calling. Each StreamEvent is forwarded to onEvent so the adapter marshals it
-// in its own SSE dialect. runChatCore owns the doneCh lifecycle and blocks
-// until the stream is fully flushed before returning.
+// onStreamStart is called exactly once, after ALL guards pass and immediately
+// before the streaming goroutine begins. The adapter uses it to write its
+// dialect-specific SSE headers (and any start marker). It is NEVER called when
+// a guard rejects the request, ensuring no SSE headers are committed before an
+// error response. For non-streaming requests onStreamStart is ignored.
 //
-// For non-streaming requests onEvent is ignored; the RunResult is returned
-// so the adapter can write the completion JSON. Council results short-circuit:
-// runChatCore writes the completion directly and returns (nil, nil).
+// Each StreamEvent is forwarded to onEvent so the adapter marshals it in its
+// own SSE dialect. runChatCore owns the doneCh lifecycle and blocks until the
+// stream is fully flushed before returning.
 //
-// Returns (nil, nil) on council short-circuit (response already written).
-// Returns (nil, error) when the guard rejected the request (response already written).
-func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCoreParams, onEvent func(agent.StreamEvent)) (*agent.RunResult, error) {
+// For non-streaming requests onEvent is ignored; the RunResult (plus the
+// resolved agentID) is returned so the adapter can write the completion JSON.
+// Council results short-circuit: runChatCore writes the completion directly
+// and returns (nil, "", nil).
+//
+// Returns (nil, "", nil) on council short-circuit (response already written).
+// Returns (nil, "", error) when the guard rejected the request (response already written).
+func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCoreParams, onStreamStart func(), onEvent func(agent.StreamEvent)) (*agent.RunResult, string, error) {
 	// --- prime-alias resolution (moved from handleChatCompletions) ---
 	if p.AgentID == "prime" && gw.agents != nil {
 		if ags, listErr := gw.agents.List(r.Context(), defaultTenant); listErr == nil {
@@ -426,7 +432,7 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 				"error": "This worker is managed by its C-officer and cannot be chatted directly. Open its monitor to review tasks, or message its manager.",
 				"code":  "agent_not_chattable",
 			})
-			return nil, fmt.Errorf("agent_not_chattable")
+			return nil, "", fmt.Errorf("agent_not_chattable")
 		}
 	}
 
@@ -442,11 +448,11 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 	}
 	if userMsg == "" {
 		writeJSON(w, 400, map[string]string{"error": "no user message found"})
-		return nil, fmt.Errorf("no user message")
+		return nil, "", fmt.Errorf("no user message")
 	}
 	if gw.agentLoop == nil {
 		writeJSON(w, 503, map[string]string{"error": "agent loop not initialized"})
-		return nil, fmt.Errorf("agent loop not initialized")
+		return nil, "", fmt.Errorf("agent loop not initialized")
 	}
 
 	agentID := p.AgentID
@@ -565,7 +571,7 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 						}},
 						"council": councilResult,
 					})
-					return nil, nil // short-circuit: response already written
+					return nil, agentID, nil // short-circuit: response already written
 				}
 				slog.Warn("council.failed_fallback_to_single", "error", err)
 			}
@@ -574,6 +580,12 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 
 	// --- streaming path ---
 	if p.Stream {
+		// All guards have passed. Signal the adapter to write its SSE headers
+		// now — AFTER guards, BEFORE the first event byte.
+		if onStreamStart != nil {
+			onStreamStart()
+		}
+
 		// doneCh is closed the moment [DONE] is written to the client.
 		doneCh := make(chan struct{})
 
@@ -622,16 +634,17 @@ func (gw *Gateway) runChatCore(w http.ResponseWriter, r *http.Request, p chatCor
 			go gw.assignDiscussionAsync(context.Background(), agentID, sessionID, userMsg)
 		}()
 		<-doneCh
-		return nil, nil
+		return nil, agentID, nil
 	}
 
 	// --- non-streaming path ---
 	result, err := gw.agentLoop.Run(r.Context(), req, func(agent.StreamEvent) {})
 	if err != nil {
-		return nil, err
+		return nil, agentID, err
 	}
 	go gw.assignDiscussionAsync(context.Background(), agentID, sessionID, userMsg)
-	return result, nil
+	// Return the resolved agentID so the adapter can report it in metadata.
+	return result, agentID, nil
 }
 
 func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agentID, sessionID, model string, messages []providers.Message, stream bool, depthParam, channel, thinkingLevel, delegationMode string) {
@@ -640,15 +653,14 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 	// Manual-delegation and command-interceptor stay in handleChatCompletions
 	// (handled before this call) — they are NOT moved in this task.
 
+	// SSE flusher check: do this early so we can return a clean 500 before
+	// any headers are written, but do NOT write SSE headers yet — that happens
+	// via onStreamStart AFTER all guards inside runChatCore pass.
 	if stream {
 		if _, ok := w.(http.Flusher); !ok {
 			writeJSON(w, 500, map[string]string{"error": "streaming not supported"})
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(200)
 	}
 
 	params := chatCoreParams{
@@ -662,6 +674,16 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		DelegationMode: delegationMode,
 		PlanMode:       r.Context().Value(planModeContextKey{}) == true,
 		Stream:         stream,
+	}
+
+	// onStreamStart is called by runChatCore after all guards pass, immediately
+	// before the streaming goroutine begins. This guarantees SSE headers are
+	// never written on a guard-rejected request.
+	onStreamStart := func() {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(200)
 	}
 
 	// OpenAI-SSE adapter: marshal each StreamEvent into the OpenAI chunk format.
@@ -725,7 +747,7 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		}
 	}
 
-	result, err := gw.runChatCore(w, r, params, onEvent)
+	result, resolvedAgentID, err := gw.runChatCore(w, r, params, onStreamStart, onEvent)
 	if err != nil || result == nil {
 		// Either the guard rejected (response written), council short-circuited
 		// (response written), streaming completed (nil result), or a run error.
@@ -735,7 +757,13 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 		return
 	}
 
-	// Non-streaming completion response
+	// Non-streaming completion response.
+	// Use resolvedAgentID (after prime-alias + intent routing) so metadata
+	// reflects the agent that actually handled the request.
+	reportAgentID := resolvedAgentID
+	if reportAgentID == "" {
+		reportAgentID = agentID
+	}
 	writeJSON(w, 200, map[string]any{
 		"object": "chat.completion", "model": model,
 		"choices": []map[string]any{{
@@ -751,7 +779,7 @@ func (gw *Gateway) handleAgentChat(w http.ResponseWriter, r *http.Request, agent
 			"tools_used": result.ToolsUsed,
 			"iterations": result.Iterations,
 			"session_id": sessionID,
-			"agent_id":   agentID,
+			"agent_id":   reportAgentID,
 		},
 	})
 }
