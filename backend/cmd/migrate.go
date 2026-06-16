@@ -118,8 +118,11 @@ func openMigrationsDB() (*store.DB, error) {
 func bootstrapExtensions(db *store.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	for _, ext := range []string{"pgcrypto", "vector", "uuid-ossp"} {
-		// Best effort — missing extensions surface through migration failures downstream.
+	for _, ext := range []string{"pgcrypto", "vector", "uuid-ossp", "pg_trgm"} {
+		// Best effort — a failure for one extension (e.g. vector/pgvector not
+		// installed) must not block the others. Each exec is independent; we
+		// ignore all errors here and let migration failures surface downstream
+		// with a clear SQL error if an extension was truly required.
 		_, _ = db.Pool.Exec(ctx, fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS "%s"`, ext))
 	}
 	_, err := db.Pool.Exec(ctx, `

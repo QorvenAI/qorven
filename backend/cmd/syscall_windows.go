@@ -17,3 +17,8 @@ func daemonSysProcAttr() *syscall.SysProcAttr {
 func diskFree(path string) string {
 	return "unknown"
 }
+
+// diskFreeBytes returns 0 on Windows (not implemented).
+func diskFreeBytes(path string) uint64 {
+	return 0
+}

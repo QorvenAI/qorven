@@ -34,3 +34,12 @@ func diskFree(path string) string {
 	}
 	return fmt.Sprintf("%.0fMB", float64(free)/float64(1<<20))
 }
+
+// diskFreeBytes returns free bytes available at path, or 0 on error.
+func diskFreeBytes(path string) uint64 {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0
+	}
+	return stat.Bavail * uint64(stat.Bsize)
+}

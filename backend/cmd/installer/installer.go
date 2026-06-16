@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +83,19 @@ type installStep struct {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
+// InstallMode controls which steps the installer runs.
+type InstallMode string
+
+const (
+	// InstallModeFresh runs the full 12-step sequence (default when nothing exists).
+	InstallModeFresh InstallMode = "fresh"
+	// InstallModeUpgrade swaps only the binary + migrates + restarts the service.
+	// Skips package installs, OS user, data dirs, and DB setup — all already in place.
+	InstallModeUpgrade InstallMode = "upgrade"
+	// InstallModeRepair re-runs the full idempotent sequence to fix a broken install.
+	InstallModeRepair InstallMode = "repair"
+)
+
 type Config struct {
 	Version          string
 	DataDir          string
@@ -88,8 +103,9 @@ type Config struct {
 	SkipPG           bool
 	TailscaleAuthKey string // optional pre-auth key for headless setup
 	SkipTailscale    bool
-	Port             int  // chosen port; 0 means use DefaultPort (8486)
-	SkipNginx        bool // true = do not install/configure nginx
+	Port             int         // chosen port; 0 means use DefaultPort (8486)
+	SkipNginx        bool        // true = do not install/configure nginx
+	Mode             InstallMode // fresh / upgrade / repair; empty = auto-detect
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -134,6 +150,13 @@ type Model struct {
 	height   int
 	quitting bool
 
+	// install-state checkpoint (Task B)
+	state    *installState
+	resuming bool // true when a prior partial install was detected
+
+	// existing install info (Task C)
+	existingInfo existingInstallInfo
+
 	// install timing
 	stepStarted time.Time
 	elapsed     time.Duration
@@ -169,11 +192,101 @@ func New(cfg Config) *Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(cPrimary)
 
+	steps := platformSteps()
+
+	// ── Mode detection (Task C) ───────────────────────────────────────────────
+	// Resolve the effective install mode. Priority: explicit Config.Mode flag >
+	// QORVEN_INSTALL_MODE env var > auto-detect (binary present → upgrade).
+	// Repair is treated as a full idempotent sequence (safe re-run).
+	effectiveMode := resolveInstallMode(cfg)
+	cfg.Mode = effectiveMode
+
+	// For upgrade mode, mark all non-upgrade steps as skipped upfront so the
+	// TUI only runs the binary-swap + service-restart steps.
+	if effectiveMode == InstallModeUpgrade {
+		upgradeIndices := platformUpgradeStepIndices()
+		upgradeSet := make(map[int]bool, len(upgradeIndices))
+		for _, i := range upgradeIndices {
+			upgradeSet[i] = true
+		}
+		for i := range steps {
+			if !upgradeSet[i] {
+				steps[i].status = stepDone
+				steps[i].detail = "skipped (upgrade)"
+			}
+		}
+	}
+
+	// ── Resume from checkpoint (Task B) ──────────────────────────────────────
+	// Load any prior install-state checkpoint. If a partial install was
+	// interrupted, mark already-completed steps as done so we can skip them on
+	// resume. If the state file is absent or corrupt, fall back to the full
+	// sequence (safe default — all steps are idempotent).
+	//
+	// In upgrade mode we don't try to resume a prior checkpoint — the upgrade
+	// fast-path is already minimal and re-running it is safe.
+	state := loadInstallState()
+	// Only resume from a checkpoint that matches THIS installer version and step
+	// list. Step indices are positional — if a different version reordered or
+	// added/removed steps, a stale checkpoint's indices would map to the wrong
+	// steps and silently skip a needed one. On any mismatch we discard the old
+	// checkpoint and run the full (idempotent) sequence.
+	canResume := effectiveMode != InstallModeUpgrade &&
+		state != nil &&
+		len(state.CompletedSteps) > 0 &&
+		state.Version == cfg.Version &&
+		state.StepCount == len(steps)
+	if canResume {
+		for i := range steps {
+			if stepCompletedInState(state, i) {
+				steps[i].status = stepDone
+				steps[i].detail = "resumed"
+			}
+		}
+		// Propagate any saved config flags (port, skip flags) back into cfg so
+		// the resumed run behaves consistently with the original run.
+		if state.Config.Port > 0 {
+			cfg.Port = state.Config.Port
+		}
+		if state.Config.DataDir != "" {
+			cfg.DataDir = state.Config.DataDir
+		}
+		cfg.SkipPG = state.Config.SkipPG
+		cfg.SkipDocker = state.Config.SkipDocker
+		cfg.SkipNginx = state.Config.SkipNginx
+		// SkipTailscale from state only if the flag was not explicitly passed.
+		if !cfg.SkipTailscale {
+			cfg.SkipTailscale = state.Config.SkipTailscale
+		}
+	} else {
+		// Fresh install or upgrade — create a new state record (populated as
+		// steps complete).
+		state = &installState{
+			Version:   cfg.Version,
+			StepCount: len(steps),
+			Mode:      string(effectiveMode),
+		}
+		state.Config.Port = cfg.Port
+		state.Config.DataDir = cfg.DataDir
+		state.Config.SkipPG = cfg.SkipPG
+		state.Config.SkipDocker = cfg.SkipDocker
+		state.Config.SkipTailscale = cfg.SkipTailscale
+		state.Config.SkipNginx = cfg.SkipNginx
+	}
+
+	resuming := canResume
+
+	// Detect the existing binary version for the welcome screen display.
+	existingInfo := detectExistingInstall()
+
 	return &Model{
-		cfg:     cfg,
-		screen:  screenWelcome,
-		spinner: sp,
-		steps:   platformSteps(),
+		cfg:          cfg,
+		screen:       screenWelcome,
+		spinner:      sp,
+		steps:        steps,
+		state:        state,
+		resuming:     resuming,
+		existingInfo: existingInfo,
 	}
 }
 
@@ -207,12 +320,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quitting = true
 				return m, tea.Quit
 			case "enter", " ":
-				if m.cfg.SkipTailscale {
-					// Flag already decided — skip Tailscale choice, go straight to install
-					m.screen = screenInstall
-					m.stepStarted = time.Now()
-					return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
+				// CHANGE 3: Default path — skip Tailscale entirely, go straight to
+				// install. Detection handles the URL automatically (Change 2).
+				// If --with-tailscale / --tailscale-auth-key was passed, honour it
+				// (cfg.SkipTailscale will be false and TailscaleAuthKey set).
+				if !m.cfg.SkipTailscale && m.cfg.TailscaleAuthKey == "" {
+					m.cfg.SkipTailscale = true
 				}
+				m.screen = screenInstall
+				m.stepStarted = time.Now()
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
+			case "a", "A":
+				// CHANGE 4: Advanced path — show Tailscale choice screen.
 				m.screen = screenTailscaleChoice
 				return m, nil
 			}
@@ -240,7 +359,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Go straight to install — no port/nginx questions
 				m.screen = screenInstall
 				m.stepStarted = time.Now()
-				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
 			}
 
 		case screenPortPicker:
@@ -312,7 +431,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.SkipNginx = (m.nginxChoice == 0) // 0=No, 1=Yes
 				m.screen = screenInstall
 				m.stepStarted = time.Now()
-				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
 			}
 
 		case screenInstall:
@@ -412,12 +531,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.status = stepFail
 			m.screen = screenError
 			m.errMsg = msg.err.Error()
+			// Do NOT mark this step complete — on re-run it should retry.
 			return m, nil
 		}
 		if msg.warn {
 			s.status = stepWarn
 		} else {
 			s.status = stepDone
+		}
+		// Persist ONLY genuinely-done steps to the checkpoint. A warn step
+		// (e.g. pgvector skipped, Docker unavailable) must NOT be recorded as
+		// complete — on a re-run it should be re-attempted, so a previously-
+		// failed optional install (like pgvector) can recover.
+		if !msg.warn {
+			markStepComplete(m.state, msg.idx)
 		}
 		next := msg.idx + 1
 		for next < len(m.steps) && m.steps[next].status != stepPending {
@@ -430,12 +557,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.kickStep(next)
 		}
 		// All steps done — check what Tailscale step returned.
-		// steps[11].detail is either:
+		// The Tailscale step detail is one of:
 		//   "connected:<100.x.x.x>"  → already connected, skip auth screen
 		//   "url:<https://...>"       → need browser auth
-		//   "skipped"                 → --skip-tailscale or error, go to config
+		//   "skipped*"               → --skip-tailscale or error, auto-detect URL
 		m.ips = detectIPs()
-		detail := m.steps[11].detail
+		detail := m.stepDetailByLabel("tailscale")
 		switch {
 		case strings.HasPrefix(detail, "connected:"):
 			ip := strings.TrimPrefix(detail, "connected:")
@@ -455,13 +582,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenTailscale
 			return m, m.pollTailscaleIP()
 		default:
-			// Tailscale skipped / not a VPS — go to manual config
+			// Tailscale skipped / not present — auto-detect best URL.
 			best := m.ips.publicURL
 			if best == "" && len(m.ips.lanIPs) > 0 {
 				best = m.ips.lanIPs[0]
 			}
 			m.urlInput = best
 			m.urlCursor = len(m.urlInput)
+			// CHANGE 2: when detection found a usable address, commit it
+			// automatically and go straight to Done — no URL-confirmation screen.
+			// Only fall back to the editable screenConfig when nothing was
+			// detected (rare: weird container/no-network environment).
+			if m.ips.publicURL != "" || len(m.ips.lanIPs) > 0 {
+				if err := m.writeMinimalConfig(); err != nil {
+					m.screen = screenError
+					m.errMsg = err.Error()
+					return m, nil
+				}
+				m.screen = screenDone
+				m.health = healthChecking
+				return m, m.waitForHealth(12 * time.Second)
+			}
+			// Nothing detected — fall back to editable prompt defaulting to localhost.
+			if m.urlInput == "" {
+				m.urlInput = "localhost"
+				m.urlCursor = len(m.urlInput)
+			}
 			m.screen = screenConfig
 			return m, nil
 		}
@@ -483,6 +629,23 @@ func (m *Model) kickStep(idx int) tea.Cmd {
 	}
 }
 
+// kickFirstPending finds the first step that is still pending (not yet done or
+// warned from a prior run) and kicks it. If all steps are already done (a
+// fully-completed prior install), it synthesises a stepResultMsg for the last
+// step so the TUI can advance to the done screen normally.
+func (m *Model) kickFirstPending() tea.Cmd {
+	for i := range m.steps {
+		if m.steps[i].status == stepPending {
+			return m.kickStep(i)
+		}
+	}
+	// All steps already done — emit a synthetic completion for the last step.
+	last := len(m.steps) - 1
+	return func() tea.Msg {
+		return stepResultMsg{idx: last, detail: m.steps[last].detail, warn: false, err: nil}
+	}
+}
+
 func (m *Model) writeMinimalConfig() error {
 	etcDir := platformConfigDir()
 	os.MkdirAll(etcDir, 0755)
@@ -500,7 +663,16 @@ func (m *Model) writeMinimalConfig() error {
 
 	port := m.effectivePort()
 	configPath := filepath.Join(etcDir, "config.toml")
-	cfgContent := fmt.Sprintf(`# Qorven Configuration — generated by qorven install
+
+	// If config.toml already exists and is non-trivial (more than a blank file),
+	// leave it untouched. A user may have customised listen port, base_url, or
+	// TLS settings — overwriting would clobber those changes. The installer only
+	// needs to write config.toml on a fresh install. On a re-run the .env
+	// (secrets + DSN) is the only file that may need updating.
+	if fi, statErr := os.Stat(configPath); statErr == nil && fi.Size() > 32 {
+		// Config already exists — skip writing it; just update secrets below.
+	} else {
+		cfgContent := fmt.Sprintf(`# Qorven Configuration — generated by qorven install
 [server]
 listen = "0.0.0.0:%d"
 base_url = "%s"
@@ -511,32 +683,53 @@ mode = "disabled"
 [database]
 # DSN is in .env
 `, port, baseURL)
-	if err := os.WriteFile(configPath, []byte(cfgContent), 0644); err != nil {
-		return fmt.Errorf("write config.toml: %w", err)
+		if err := os.WriteFile(configPath, []byte(cfgContent), 0644); err != nil {
+			return fmt.Errorf("write config.toml: %w", err)
+		}
 	}
 
-	dsn := probeSocketDSN()
 	envPath := filepath.Join(etcDir, ".env")
 
-	// Preserve the existing encryption_key and gateway_token on re-run.
-	// Regenerating these would render all stored API keys and secrets unreadable.
+	// Preserve ALL existing secrets and, when --skip-postgres is set, the DSN.
+	// Regenerating QORVEN_ENCRYPTION_KEY renders all stored API keys unreadable —
+	// it is NEVER regenerated once it exists.
 	existingKey := ""
 	existingToken := ""
+	existingDSN := ""
 	if existing, readErr := os.ReadFile(envPath); readErr == nil {
 		for _, line := range strings.Split(string(existing), "\n") {
-			if strings.HasPrefix(line, "QORVEN_ENCRYPTION_KEY=") {
+			switch {
+			case strings.HasPrefix(line, "QORVEN_ENCRYPTION_KEY="):
 				existingKey = strings.TrimPrefix(line, "QORVEN_ENCRYPTION_KEY=")
-			}
-			if strings.HasPrefix(line, "QORVEN_GATEWAY_TOKEN=") {
+			case strings.HasPrefix(line, "QORVEN_GATEWAY_TOKEN="):
 				existingToken = strings.TrimPrefix(line, "QORVEN_GATEWAY_TOKEN=")
+			case strings.HasPrefix(line, "QORVEN_POSTGRES_DSN="):
+				existingDSN = strings.TrimPrefix(line, "QORVEN_POSTGRES_DSN=")
 			}
 		}
 	}
+
+	// Generate secrets only when absent (first install).
 	if existingKey == "" {
 		existingKey = randHex(32)
 	}
 	if existingToken == "" {
 		existingToken = randHex(16)
+	}
+
+	// DSN: when --skip-postgres is set the user points at a custom / remote PG.
+	// If a DSN is already in .env, honour it unconditionally — never overwrite a
+	// user-supplied DSN with a localhost probe. Only probe (and write) when no
+	// DSN exists yet.
+	var dsn string
+	if m.cfg.SkipPG && existingDSN != "" {
+		dsn = existingDSN
+	} else if existingDSN != "" {
+		// Fresh re-run (PG managed by installer): prefer the stored DSN so a
+		// running socket path that changed transiently doesn't get overwritten.
+		dsn = existingDSN
+	} else {
+		dsn = probeSocketDSN()
 	}
 
 	env := strings.Join([]string{
@@ -550,16 +743,53 @@ mode = "disabled"
 		return fmt.Errorf("write .env: %w", err)
 	}
 
-	// Run migrations before starting the service (retry 3x — socket needs a moment)
+	// (redactDSNPassword is defined below; it hides any embedded password before
+	// the DSN is shown to the user in an error message.)
+
+	// Run migrations before starting the service.
+	// Retry up to 3 times to allow the socket a moment to become available.
+	// A FINAL failure is fatal: starting the service on a broken/dirty schema
+	// causes confusing runtime errors that are much harder to diagnose than
+	// a clear install-time failure.
+	var migrateErr error
 	for i := 0; i < 3; i++ {
-		if err := platformMigrate(configPath, dsn); err == nil {
+		migrateErr = platformMigrate(configPath, dsn)
+		if migrateErr == nil {
 			break
 		}
-		time.Sleep(2 * time.Second)
+		if i < 2 {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	if migrateErr != nil {
+		return fmt.Errorf(
+			"database migration failed — the service was NOT started to avoid a broken schema.\n\n"+
+				"To diagnose and retry:\n"+
+				"  sudo QORVEN_CONFIG=%s QORVEN_POSTGRES_DSN=%s qorven migrate up\n\n"+
+				"If the schema is dirty from a previous failed run:\n"+
+				"  sudo qorven migrate force <N>  (use the version shown in the error above)\n\n"+
+				"Underlying error: %w",
+			configPath, redactDSNPassword(dsn), migrateErr)
 	}
 
 	platformRestartService(configPath)
 	return nil
+}
+
+// redactDSNPassword hides any embedded password in a Postgres DSN before it is
+// shown to the user (e.g. in an error message). Handles both the URL form
+// (postgres://user:pass@host/db) and the keyword form (password=secret).
+func redactDSNPassword(dsn string) string {
+	if u, err := url.Parse(dsn); err == nil && u.User != nil {
+		if _, hasPw := u.User.Password(); hasPw {
+			u.User = url.UserPassword(u.User.Username(), "****")
+			dsn = u.String()
+		}
+	}
+	// Keyword form: password=... (with or without quotes), and the password=
+	// query param on a URL DSN.
+	reKw := regexp.MustCompile(`(?i)password=('[^']*'|"[^"]*"|[^\s&]+)`)
+	return reKw.ReplaceAllString(dsn, "password=****")
 }
 
 // ── Layout primitives ─────────────────────────────────────────────────────────
@@ -672,9 +902,16 @@ func (m *Model) renderHeader() string {
 	brand := lipgloss.NewStyle().Bold(true).Foreground(wh).Render("⚡ Qorven")
 	// Version pill
 	ver := lipgloss.NewStyle().Foreground(lavender).Render("  " + m.cfg.Version)
-	// Separator + context
+	// Separator + context (shows mode for upgrade/repair)
 	sep := lipgloss.NewStyle().Foreground(lavender).Render("  │  ")
-	ctx := lipgloss.NewStyle().Foreground(lavender).Render("Server Installer")
+	ctxLabel := "Server Installer"
+	switch m.cfg.Mode {
+	case InstallModeUpgrade:
+		ctxLabel = "Upgrade"
+	case InstallModeRepair:
+		ctxLabel = "Repair"
+	}
+	ctx := lipgloss.NewStyle().Foreground(lavender).Render(ctxLabel)
 	left := brand + ver + sep + ctx
 
 	var right string
@@ -710,7 +947,7 @@ func (m *Model) renderHeader() string {
 // renderFooter — full-width dark hint bar, consistent on every screen
 func (m *Model) renderFooter() string {
 	hints := map[screen]string{
-		screenWelcome:         "Enter  agree & install  ·  Ctrl+C  cancel",
+		screenWelcome:         "Enter  install   ·   A  advanced   ·   Ctrl+C  cancel",
 		screenTailscaleChoice: "↑ ↓ / J K  navigate  ·  Enter  confirm  ·  Ctrl+C  cancel",
 		screenInstall:         "Installing…  ·  Ctrl+C  force quit (re-run to resume)",
 		screenTailscale: "Waiting for Tailscale authorization  ·  S  skip (use IP manually)  ·  Ctrl+C  cancel",
@@ -795,13 +1032,68 @@ func (m *Model) viewWelcomeLeft() string {
 		Render(noticeInner)
 	b.WriteString(noticeBox + "\n\n")
 
+	// ── Mode notice (upgrade / repair / resume) ──────────────────────────────
+	switch m.cfg.Mode {
+	case InstallModeUpgrade:
+		existingVer := m.existingInfo.BinaryVersion
+		if existingVer == "" {
+			existingVer = "existing version"
+		}
+		upgradeBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cPrimary).
+			Padding(0, 2).
+			Width(innerW - 2).
+			Render(primSt.Render("⬆  Upgrade detected") + "\n" +
+				fgSt.Render(fmt.Sprintf("   Found %s — upgrading to %s.", existingVer, m.cfg.Version)) + "\n" +
+				mutedSt.Render("   Only the binary and service are updated. Your data, config, and DB are untouched."))
+		b.WriteString(upgradeBox + "\n\n")
+	case InstallModeRepair:
+		repairBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cAmber).
+			Padding(0, 2).
+			Width(innerW - 2).
+			Render(warnSt.Bold(true).Render("🔧  Repair mode") + "\n" +
+				warnSt.Render("   Re-running all steps to fix a broken install.") + "\n" +
+				mutedSt.Render("   All steps are idempotent — safe to re-run."))
+		b.WriteString(repairBox + "\n\n")
+	}
+	if m.resuming {
+		doneCount := 0
+		for _, s := range m.steps {
+			if s.status == stepDone || s.status == stepWarn {
+				doneCount++
+			}
+		}
+		resumeBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cAmber).
+			Padding(0, 2).
+			Width(innerW - 2).
+			Render(warnSt.Bold(true).Render("↩  Resuming partial install") + "\n" +
+				warnSt.Render(fmt.Sprintf("   %d of %d steps already done — continuing from where it stopped.", doneCount, len(m.steps))))
+		b.WriteString(resumeBox + "\n\n")
+	}
+
 	// ── CTA ──────────────────────────────────────────────────────────────────
+	ctaLabel := "▶  I understand — Install Qorven"
+	switch m.cfg.Mode {
+	case InstallModeUpgrade:
+		ctaLabel = "▶  Upgrade Qorven"
+	case InstallModeRepair:
+		ctaLabel = "▶  Repair installation"
+	default:
+		if m.resuming {
+			ctaLabel = "▶  Resume installation"
+		}
+	}
 	cta := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(cPrimary).
 		Padding(0, 3).
-		Render("▶  I understand — Install Qorven")
+		Render(ctaLabel)
 	b.WriteString(cta)
 	return b.String()
 }
@@ -1035,10 +1327,12 @@ func (m *Model) viewInstallLeft() string {
 				detail = "  " + mutedSt.Render(s.detail)
 			}
 		case stepWarn:
-			icon = warnSt.Render(" !")
-			label = warnSt.Render(s.label)
+			// CHANGE 5: render optional-skipped steps as calm/neutral, not alarming
+			// amber. pgvector unavailable, Docker skipped, etc. are not errors.
+			icon = dimSt.Render(" ○")
+			label = mutedSt.Render(s.label)
 			if s.detail != "" {
-				detail = "  " + warnSt.Render(s.detail)
+				detail = "  " + dimSt.Render(s.detail)
 			}
 		case stepFail:
 			icon = failSt.Render(" ✗")
@@ -1306,8 +1600,21 @@ func (m *Model) viewDoneLeft() string {
 		b.WriteString("  " + mutedSt.Render("Reachable from any device on your Tailscale network.") + "\n\n")
 	}
 
-	b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
-	b.WriteString(fgSt.Render("Open either URL to complete setup in your browser.") + "\n")
+	// CHANGE 5: show a calm note if any optional steps were skipped.
+	skippedCount := 0
+	for _, s := range m.steps {
+		if s.status == stepWarn {
+			skippedCount++
+		}
+	}
+	if skippedCount > 0 {
+		b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
+		b.WriteString(dimSt.Render("Optional features skipped (e.g. vector search)") + "\n")
+		b.WriteString(dimSt.Render("Nothing is broken — enable them later in Settings.") + "\n")
+	} else {
+		b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
+	}
+	b.WriteString(fgSt.Render("Open the URL above to complete setup in your browser.") + "\n")
 	return b.String()
 }
 
@@ -1388,6 +1695,21 @@ func (m *Model) countDone() int {
 		}
 	}
 	return n
+}
+
+// stepDetailByLabel returns the detail string of the first step whose label
+// contains substr (case-insensitive). Returns "" when no matching step exists
+// (e.g. Tailscale step absent on a platform that omits it). This replaces all
+// hardcoded step index accesses so the code works regardless of how many steps
+// each platform defines.
+func (m *Model) stepDetailByLabel(substr string) string {
+	lower := strings.ToLower(substr)
+	for _, s := range m.steps {
+		if strings.Contains(strings.ToLower(s.label), lower) {
+			return s.detail
+		}
+	}
+	return ""
 }
 
 

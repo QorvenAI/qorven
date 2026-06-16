@@ -6,7 +6,7 @@
 #   iwr -useb https://get.qorven.ai/install.ps1 | iex
 #
 # What it does:
-#   1. Installs PostgreSQL via winget (if missing)
+#   1. Installs PostgreSQL (winget-first; EDB MSI fallback if winget is absent or fails)
 #   2. Installs pgvector extension (optional — skipped gracefully if unavailable)
 #   3. Creates the qorven database and role
 #   4. Downloads the Qorven binary (windows/amd64)
@@ -53,7 +53,12 @@ function Write-Info { param($msg) Write-Host "       $msg" -ForegroundColor Dark
 function Write-Rb   { param($msg) Write-Host "  [RB] $msg" -ForegroundColor DarkGray }
 
 # ── rollback state ────────────────────────────────────────────────────────────
-$script:RollbackInstalledPg       = $false  # we ran the EDB MSI installer
+# How (if at all) THIS run installed PostgreSQL, so rollback uninstalls it with
+# the right tool and NEVER removes a PostgreSQL the user already had.
+#   'none'   — PG pre-existed (or we didn't install it): do NOT touch it.
+#   'winget' — we installed it via winget: roll back with winget uninstall.
+#   'msi'    — we installed it via the EDB MSI: roll back with the MSI uninstaller.
+$script:RollbackPgMethod          = 'none'
 $script:RollbackCreatedRole       = $false  # we ran CREATE ROLE qorven
 $script:RollbackCreatedDb         = $false  # we ran CREATE DATABASE qorven
 $script:RollbackCreatedInstallDir = $false  # we created $InstallDir
@@ -118,11 +123,22 @@ function Invoke-Rollback {
         }
     } catch {}
 
-    # PostgreSQL — only if we installed it
-    if ($script:RollbackInstalledPg -and (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Rb "Removing PostgreSQL (we installed it)..."
+    # PostgreSQL — only if THIS run installed it, and with the matching uninstaller.
+    # Never remove a PostgreSQL that pre-existed ('none').
+    if ($script:RollbackPgMethod -eq 'winget' -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Rb "Removing PostgreSQL (installed via winget this run)..."
         winget uninstall --id PostgreSQL.PostgreSQL.$PgVersion --silent 2>&1 | Out-Null
         Write-Rb "PostgreSQL removed"
+    } elseif ($script:RollbackPgMethod -eq 'msi') {
+        # EDB MSI registers an ARP uninstall entry; invoke it silently if found.
+        Write-Rb "Removing PostgreSQL (installed via EDB MSI this run)..."
+        $unins = "C:\Program Files\PostgreSQL\$PgVersion\uninstall-postgresql.exe"
+        if (Test-Path $unins) {
+            & $unins --mode unattended 2>&1 | Out-Null
+            Write-Rb "PostgreSQL removed"
+        } else {
+            Write-Rb "EDB uninstaller not found at $unins — remove PostgreSQL $PgVersion manually if unwanted"
+        }
     }
 
     # Temp files
@@ -202,6 +218,12 @@ if ([System.Environment]::Is64BitOperatingSystem -eq $false -or [System.Environm
     Invoke-Rollback "Qorven requires a 64-bit Windows installation. 32-bit is not supported."
 }
 
+# OS version floor — require Windows 10 / Server 2019 (NT 10.0) or later
+$osVer = [System.Environment]::OSVersion.Version
+if ($osVer.Major -lt 10) {
+    Invoke-Rollback "Qorven requires Windows 10 / Windows Server 2019 or later (detected: Windows $($osVer.Major).$($osVer.Minor))."
+}
+
 $WingetAvail = Command-Exists 'winget'
 if ($WingetAvail) {
     Write-Ok "winget found: $(winget --version)"
@@ -238,8 +260,9 @@ Write-Ok "Prerequisites OK"
 # ── Step 2: PostgreSQL ────────────────────────────────────────────────────────
 Write-Step 2 7 "PostgreSQL"
 
-# Known superuser password — we set it ourselves via the EDB MSI so we never
-# need to ask the user and never need to patch pg_hba.conf.
+# Known superuser password — used by the EDB MSI path (--superpassword flag).
+# The winget path may override this if winget PG uses passwordless/trust auth.
+# Either way we never prompt interactively.
 $PgSuperPass = Random-Hex 16
 $env:PGPASSWORD = $PgSuperPass
 
@@ -272,58 +295,132 @@ if ($pgService) {
         $canTest = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
         if (-not $canTest) { Invoke-Rollback "PG_SUPERUSER_PASSWORD env var set but connection failed" }
     } else {
-        # Ask up to 3 times
-        $attempts = 0
-        $canTest = $false
-        while (-not $canTest -and $attempts -lt 3) {
-            Write-Host ""
-            Write-Host "  PostgreSQL is already installed on this machine." -ForegroundColor Cyan
-            Write-Host "  Enter the 'postgres' superuser password to continue." -ForegroundColor Cyan
-            Write-Host "  (Or set PG_SUPERUSER_PASSWORD env var to skip this prompt.)" -ForegroundColor DarkGray
-            $secPw = Read-Host "  postgres password" -AsSecureString
-            $bstr  = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
-            $env:PGPASSWORD = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-            $canTest = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
-            $attempts++
-        }
-        if (-not $canTest) {
-            Invoke-Rollback "Cannot connect to PostgreSQL after 3 attempts. Run: qorven install --skip-postgres to skip DB setup."
-        }
+        # No passwordless connection and PG_SUPERUSER_PASSWORD is not set.
+        # Unattended installs must not block on interactive prompts.
+        Invoke-Rollback (
+            "Existing PostgreSQL requires a password and none was supplied.`n" +
+            "  Re-run with the superuser password in the environment:`n" +
+            "    `$env:PG_SUPERUSER_PASSWORD='your-password'; iwr -useb https://get.qorven.ai/install.ps1 | iex`n" +
+            "  Or use --skip-postgres and supply a DSN via QORVEN_POSTGRES_DSN to point at an existing database."
+        )
     }
 } else {
-    # Download and silently install the EDB PostgreSQL MSI.
-    # The MSI accepts --superpassword so we set a known password — no pg_hba.conf patching required.
-    $MsiUrl  = "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-1-windows-x64.exe"
-    $MsiPath = "$env:TEMP\pg-installer.exe"
-    Write-Info "Downloading PostgreSQL $PgVersion installer (~250 MB)..."
-    try {
-        Invoke-WebRequest -Uri $MsiUrl -OutFile $MsiPath -UseBasicParsing
-    } catch {
-        # Fall back to older EDB URL pattern
-        $MsiUrl = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1258893"
-        try { Invoke-WebRequest -Uri $MsiUrl -OutFile $MsiPath -UseBasicParsing } catch {
-            Invoke-Rollback "PostgreSQL installer download failed. Download manually from https://www.postgresql.org/download/windows/ and re-run."
+    # Fresh install — try winget first (resolves the current release automatically,
+    # no brittle URL or hardcoded patch-suffix). Fall back to EDB MSI when winget
+    # is unavailable or fails.
+    $pgInstalledViaWinget = $false
+
+    if ($WingetAvail) {
+        Write-Info "Installing PostgreSQL $PgVersion via winget..."
+        $wingetResult = winget install --id "PostgreSQL.PostgreSQL.$PgVersion" `
+            --silent --accept-package-agreements --accept-source-agreements 2>&1
+        $wgAlready = ($wingetResult -match 'already installed')
+        if ($LASTEXITCODE -eq 0 -or $wingetResult -match 'successfully installed' -or $wgAlready) {
+            $pgInstalledViaWinget = $true
+            # Only mark for rollback if WE actually installed it this run. If winget
+            # reports "already installed", PostgreSQL pre-existed — never uninstall it.
+            if ($wgAlready) {
+                $script:RollbackPgMethod = 'none'
+                Write-Ok "PostgreSQL $PgVersion already present (winget) — reusing it"
+            } else {
+                $script:RollbackPgMethod = 'winget'
+                Write-Ok "PostgreSQL $PgVersion installed via winget"
+            }
+            Start-Sleep -Seconds 5
+
+            # winget's PostgreSQL package does not set a known superuser password
+            # (it uses Windows authentication / trust for the local postgres account).
+            # Attempt a passwordless connection; if that works we're done.  If not,
+            # check PG_SUPERUSER_PASSWORD.  winget PG installs with the postgres
+            # Windows service account — local connections via 127.0.0.1 may require
+            # a password set by the user during install (depends on winget package version).
+            #
+            # Strategy: find psql first, then probe.
+            $PgBinDirTmp = "C:\Program Files\PostgreSQL\$PgVersion\bin"
+            if (-not (Test-Path "$PgBinDirTmp\psql.exe")) {
+                $found = Get-ChildItem 'C:\Program Files\PostgreSQL' -Filter 'psql.exe' -Recurse -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+                if ($found) { $PgBinDirTmp = $found.DirectoryName }
+            }
+
+            if (Test-Path "$PgBinDirTmp\psql.exe") {
+                $env:PGPASSWORD = ''
+                $wingetPwdless = ((& "$PgBinDirTmp\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
+                if (-not $wingetPwdless -and $env:PG_SUPERUSER_PASSWORD) {
+                    $env:PGPASSWORD = $env:PG_SUPERUSER_PASSWORD
+                    $wingetPwdless = ((& "$PgBinDirTmp\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
+                }
+                if ($wingetPwdless) {
+                    # We have a working connection — set $PgSuperPass to the env var value
+                    # (or empty for passwordless) so Step 4 can connect.
+                    if ($env:PG_SUPERUSER_PASSWORD) {
+                        $PgSuperPass = $env:PG_SUPERUSER_PASSWORD
+                        $env:PGPASSWORD = $PgSuperPass
+                    }
+                    # else: $env:PGPASSWORD stays '' (passwordless)
+                } else {
+                    # winget PG installed but can't connect — fall through to EDB MSI which sets a known password.
+                    Write-Warn "winget PostgreSQL installed but connection test failed — falling back to EDB MSI for a known-password install."
+                    winget uninstall --id "PostgreSQL.PostgreSQL.$PgVersion" --silent 2>&1 | Out-Null
+                    $pgInstalledViaWinget = $false
+                    $script:RollbackPgMethod = 'none'
+                    $env:PGPASSWORD = $PgSuperPass  # restore fresh random password for MSI path
+                }
+            } else {
+                # psql not found after winget install — fall back to EDB MSI
+                Write-Warn "psql.exe not found after winget install — falling back to EDB MSI."
+                winget uninstall --id "PostgreSQL.PostgreSQL.$PgVersion" --silent 2>&1 | Out-Null
+                $pgInstalledViaWinget = $false
+                $script:RollbackPgMethod = 'none'
+                $env:PGPASSWORD = $PgSuperPass
+            }
+        } else {
+            Write-Warn "winget install failed (exit $LASTEXITCODE) — falling back to EDB MSI."
+            $env:PGPASSWORD = $PgSuperPass
         }
     }
-    if (-not (Test-Path $MsiPath)) { Invoke-Rollback "PostgreSQL installer not found after download" }
 
-    Write-Info "Installing PostgreSQL $PgVersion (unattended)..."
-    $installArgs = @(
-        '--mode', 'unattended',
-        '--superpassword', $PgSuperPass,
-        '--servicename', "postgresql-x64-$PgVersion",
-        '--servicepassword', 'NT AUTHORITY\NetworkService',
-        '--datadir', "C:\Program Files\PostgreSQL\$PgVersion\data",
-        '--serverport', '5432',
-        '--unattendedmodeui', 'none'
-    )
-    $proc = Start-Process -FilePath $MsiPath -ArgumentList $installArgs -Wait -PassThru
-    Remove-Item $MsiPath -Force -ErrorAction SilentlyContinue
-    if ($proc.ExitCode -ne 0) { Invoke-Rollback "PostgreSQL installer exited with code $($proc.ExitCode)" }
-    $script:RollbackInstalledPg = $true
-    Write-Ok "PostgreSQL $PgVersion installed"
-    Start-Sleep -Seconds 5
+    if (-not $pgInstalledViaWinget) {
+        # EDB MSI path — the MSI accepts --superpassword so we set a known password.
+        # EDB's URL uses a patch-release suffix (e.g. -1-, -2-) that changes with each
+        # minor update.  Try suffixes 1–4 before giving up.
+        $MsiPath = "$env:TEMP\pg-installer.exe"
+        $downloaded = $false
+        Write-Info "Downloading PostgreSQL $PgVersion installer from EDB (~250 MB)..."
+        foreach ($patchSuffix in @(1, 2, 3, 4)) {
+            $MsiUrl = "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-$patchSuffix-windows-x64.exe"
+            try {
+                Invoke-WebRequest -Uri $MsiUrl -OutFile $MsiPath -UseBasicParsing -ErrorAction Stop
+                $downloaded = $true
+                Write-Info "Downloaded: postgresql-$PgVersion-$patchSuffix-windows-x64.exe"
+                break
+            } catch {
+                Write-Info "Suffix -$patchSuffix not found, trying next..."
+                Remove-Item $MsiPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not $downloaded) {
+            Invoke-Rollback "PostgreSQL installer download failed (tried patch suffixes 1-4 for version $PgVersion). Download manually from https://www.postgresql.org/download/windows/ and re-run."
+        }
+        if (-not (Test-Path $MsiPath)) { Invoke-Rollback "PostgreSQL installer not found after download" }
+
+        Write-Info "Installing PostgreSQL $PgVersion (unattended)..."
+        $installArgs = @(
+            '--mode', 'unattended',
+            '--superpassword', $PgSuperPass,
+            '--servicename', "postgresql-x64-$PgVersion",
+            '--servicepassword', 'NT AUTHORITY\NetworkService',
+            '--datadir', "C:\Program Files\PostgreSQL\$PgVersion\data",
+            '--serverport', '5432',
+            '--unattendedmodeui', 'none'
+        )
+        $proc = Start-Process -FilePath $MsiPath -ArgumentList $installArgs -Wait -PassThru
+        Remove-Item $MsiPath -Force -ErrorAction SilentlyContinue
+        if ($proc.ExitCode -ne 0) { Invoke-Rollback "PostgreSQL installer exited with code $($proc.ExitCode)" }
+        $script:RollbackPgMethod = 'msi'
+        Write-Ok "PostgreSQL $PgVersion installed (EDB MSI)"
+        Start-Sleep -Seconds 5
+    }
 }
 
 # Ensure service is running
@@ -400,9 +497,9 @@ try {
 # ── Step 4: Database setup ────────────────────────────────────────────────────
 Write-Step 4 7 "Database setup"
 
-# $env:PGPASSWORD was set in Step 2 — either the password we created via EDB MSI,
-# or the password the user entered for a pre-existing installation. No pg_hba.conf
-# patching required.
+# $env:PGPASSWORD was set in Step 2 — the random password from the EDB MSI install,
+# the PG_SUPERUSER_PASSWORD env var for a pre-existing installation, or '' for
+# passwordless/trust auth. No pg_hba.conf patching required.
 $canConnect = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT 1" 2>&1) -match '1')
 if (-not $canConnect) {
     Invoke-Rollback "Cannot connect to PostgreSQL. Check the service is running and the password is correct."

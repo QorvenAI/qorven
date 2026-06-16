@@ -9,7 +9,8 @@ import "fmt"
 // Windows installation is handled by the PowerShell script (install.ps1).
 // These stubs satisfy the build — the TUI installer never runs on Windows.
 
-func platformSteps() []installStep { return nil }
+func platformSteps() []installStep        { return nil }
+func platformUpgradeStepIndices() []int   { return nil }
 
 func platformConfigDir() string { return `C:\ProgramData\Qorven` }
 
