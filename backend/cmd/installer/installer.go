@@ -136,6 +136,10 @@ type Model struct {
 	height   int
 	quitting bool
 
+	// install-state checkpoint (Task B)
+	state    *installState
+	resuming bool // true when a prior partial install was detected
+
 	// install timing
 	stepStarted time.Time
 	elapsed     time.Duration
@@ -171,11 +175,58 @@ func New(cfg Config) *Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(cPrimary)
 
+	steps := platformSteps()
+
+	// Load any prior install-state checkpoint. If a partial install was
+	// interrupted, mark already-completed steps as done so we can skip them on
+	// resume. If the state file is absent or corrupt, fall back to the full
+	// sequence (safe default — all steps are idempotent).
+	state := loadInstallState()
+	if state != nil && len(state.CompletedSteps) > 0 {
+		for i := range steps {
+			if stepCompletedInState(state, i) {
+				steps[i].status = stepDone
+				steps[i].detail = "resumed"
+			}
+		}
+		// Propagate any saved config flags (port, skip flags) back into cfg so
+		// the resumed run behaves consistently with the original run.
+		if state.Config.Port > 0 {
+			cfg.Port = state.Config.Port
+		}
+		if state.Config.DataDir != "" {
+			cfg.DataDir = state.Config.DataDir
+		}
+		cfg.SkipPG = state.Config.SkipPG
+		cfg.SkipDocker = state.Config.SkipDocker
+		cfg.SkipNginx = state.Config.SkipNginx
+		// SkipTailscale from state only if the flag was not explicitly passed.
+		if !cfg.SkipTailscale {
+			cfg.SkipTailscale = state.Config.SkipTailscale
+		}
+	} else {
+		// Fresh install — create a new state record now (populated as steps complete).
+		state = &installState{
+			Version: cfg.Version,
+			Mode:    "fresh",
+		}
+		state.Config.Port = cfg.Port
+		state.Config.DataDir = cfg.DataDir
+		state.Config.SkipPG = cfg.SkipPG
+		state.Config.SkipDocker = cfg.SkipDocker
+		state.Config.SkipTailscale = cfg.SkipTailscale
+		state.Config.SkipNginx = cfg.SkipNginx
+	}
+
+	resuming := state != nil && len(state.CompletedSteps) > 0
+
 	return &Model{
-		cfg:     cfg,
-		screen:  screenWelcome,
-		spinner: sp,
-		steps:   platformSteps(),
+		cfg:      cfg,
+		screen:   screenWelcome,
+		spinner:  sp,
+		steps:    steps,
+		state:    state,
+		resuming: resuming,
 	}
 }
 
@@ -213,7 +264,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Flag already decided — skip Tailscale choice, go straight to install
 					m.screen = screenInstall
 					m.stepStarted = time.Now()
-					return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
+					return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
 				}
 				m.screen = screenTailscaleChoice
 				return m, nil
@@ -242,7 +293,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Go straight to install — no port/nginx questions
 				m.screen = screenInstall
 				m.stepStarted = time.Now()
-				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
 			}
 
 		case screenPortPicker:
@@ -314,7 +365,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.SkipNginx = (m.nginxChoice == 0) // 0=No, 1=Yes
 				m.screen = screenInstall
 				m.stepStarted = time.Now()
-				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickStep(0))
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
 			}
 
 		case screenInstall:
@@ -414,6 +465,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.status = stepFail
 			m.screen = screenError
 			m.errMsg = msg.err.Error()
+			// Do NOT mark this step complete — on re-run it should retry.
 			return m, nil
 		}
 		if msg.warn {
@@ -421,6 +473,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			s.status = stepDone
 		}
+		// Persist completed step to the state checkpoint so a re-run can skip it.
+		markStepComplete(m.state, msg.idx)
 		next := msg.idx + 1
 		for next < len(m.steps) && m.steps[next].status != stepPending {
 			next++
@@ -482,6 +536,23 @@ func (m *Model) kickStep(idx int) tea.Cmd {
 	return func() tea.Msg {
 		detail, warn, err := executeStep(idx, cfg)
 		return stepResultMsg{idx: idx, detail: detail, warn: warn, err: err}
+	}
+}
+
+// kickFirstPending finds the first step that is still pending (not yet done or
+// warned from a prior run) and kicks it. If all steps are already done (a
+// fully-completed prior install), it synthesises a stepResultMsg for the last
+// step so the TUI can advance to the done screen normally.
+func (m *Model) kickFirstPending() tea.Cmd {
+	for i := range m.steps {
+		if m.steps[i].status == stepPending {
+			return m.kickStep(i)
+		}
+	}
+	// All steps already done — emit a synthetic completion for the last step.
+	last := len(m.steps) - 1
+	return func() tea.Msg {
+		return stepResultMsg{idx: last, detail: m.steps[last].detail, warn: false, err: nil}
 	}
 }
 
@@ -864,13 +935,35 @@ func (m *Model) viewWelcomeLeft() string {
 		Render(noticeInner)
 	b.WriteString(noticeBox + "\n\n")
 
+	// ── Resume notice (shown when a prior partial install is detected) ──────
+	if m.resuming {
+		doneCount := 0
+		for _, s := range m.steps {
+			if s.status == stepDone || s.status == stepWarn {
+				doneCount++
+			}
+		}
+		resumeBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cAmber).
+			Padding(0, 2).
+			Width(innerW - 2).
+			Render(warnSt.Bold(true).Render("↩  Resuming partial install") + "\n" +
+				warnSt.Render(fmt.Sprintf("   %d of %d steps already done — continuing from where it stopped.", doneCount, len(m.steps))))
+		b.WriteString(resumeBox + "\n\n")
+	}
+
 	// ── CTA ──────────────────────────────────────────────────────────────────
+	ctaLabel := "▶  I understand — Install Qorven"
+	if m.resuming {
+		ctaLabel = "▶  Resume installation"
+	}
 	cta := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(cPrimary).
 		Padding(0, 3).
-		Render("▶  I understand — Install Qorven")
+		Render(ctaLabel)
 	b.WriteString(cta)
 	return b.String()
 }

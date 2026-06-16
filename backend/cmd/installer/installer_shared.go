@@ -5,10 +5,97 @@ package installer
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
+
+// ── Install-state checkpoint ──────────────────────────────────────────────────
+
+// installState is written to <platformConfigDir>/.install-state.json after
+// each step completes. It lets a re-run resume from the first incomplete step
+// instead of re-running the full sequence.
+type installState struct {
+	// CompletedSteps records which step indices completed (done or warn).
+	CompletedSteps []int `json:"completed_steps"`
+	// Version is the installer version string at the time of the run.
+	Version string `json:"version"`
+	// Mode is the install mode ("fresh", "upgrade", "repair").
+	Mode string `json:"mode"`
+	// Config captures the flags chosen by the user so a resumed run uses the
+	// same settings.
+	Config struct {
+		Port          int    `json:"port"`
+		DataDir       string `json:"data_dir"`
+		SkipPG        bool   `json:"skip_pg"`
+		SkipDocker    bool   `json:"skip_docker"`
+		SkipTailscale bool   `json:"skip_tailscale"`
+		SkipNginx     bool   `json:"skip_nginx"`
+	} `json:"config"`
+	// UpdatedAt is the timestamp of the last checkpoint write.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// stateFilePath returns the path to .install-state.json.
+func stateFilePath() string {
+	return filepath.Join(platformConfigDir(), ".install-state.json")
+}
+
+// loadInstallState reads the state file and returns it. Returns nil (not an
+// error) when the file is absent or corrupt — callers treat that as "no prior
+// state" and run the full sequence.
+func loadInstallState() *installState {
+	data, err := os.ReadFile(stateFilePath())
+	if err != nil {
+		return nil
+	}
+	var s installState
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil // corrupt — ignore safely
+	}
+	return &s
+}
+
+// saveInstallState persists the state file. Errors are silently ignored: the
+// state file is an optimisation (faster re-runs), not a correctness requirement.
+func saveInstallState(s *installState) {
+	s.UpdatedAt = time.Now()
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return
+	}
+	os.MkdirAll(filepath.Dir(stateFilePath()), 0755)
+	os.WriteFile(stateFilePath(), data, 0644) //nolint:errcheck
+}
+
+// stepCompletedInState returns true if the given step index appears in the
+// state's CompletedSteps list.
+func stepCompletedInState(s *installState, idx int) bool {
+	if s == nil {
+		return false
+	}
+	for _, i := range s.CompletedSteps {
+		if i == idx {
+			return true
+		}
+	}
+	return false
+}
+
+// markStepComplete records idx as completed in the state and persists it.
+func markStepComplete(s *installState, idx int) {
+	if s == nil {
+		return
+	}
+	if !stepCompletedInState(s, idx) {
+		s.CompletedSteps = append(s.CompletedSteps, idx)
+	}
+	saveInstallState(s)
+}
 
 // ── Shell helpers ─────────────────────────────────────────────────────────────
 
