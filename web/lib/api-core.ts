@@ -122,8 +122,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401 && typeof window !== 'undefined') {
     if (localStorage.getItem('qorven_token')) {
       clearToken();
-      const next = encodeURIComponent(window.location.pathname + window.location.search);
-      window.location.href = `/login?next=${next}`;
+      // Don't redirect (or build a self-referential `next`) when already on the
+      // login page — avoids the `/login?next=/login?next=…` recursion.
+      if (!window.location.pathname.startsWith('/login')) {
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = `/login?next=${next}`;
+      }
     }
     throw new Error('Unauthorized');
   }
