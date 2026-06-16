@@ -550,12 +550,30 @@ mode = "disabled"
 		return fmt.Errorf("write .env: %w", err)
 	}
 
-	// Run migrations before starting the service (retry 3x — socket needs a moment)
+	// Run migrations before starting the service.
+	// Retry up to 3 times to allow the socket a moment to become available.
+	// A FINAL failure is fatal: starting the service on a broken/dirty schema
+	// causes confusing runtime errors that are much harder to diagnose than
+	// a clear install-time failure.
+	var migrateErr error
 	for i := 0; i < 3; i++ {
-		if err := platformMigrate(configPath, dsn); err == nil {
+		migrateErr = platformMigrate(configPath, dsn)
+		if migrateErr == nil {
 			break
 		}
-		time.Sleep(2 * time.Second)
+		if i < 2 {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	if migrateErr != nil {
+		return fmt.Errorf(
+			"database migration failed — the service was NOT started to avoid a broken schema.\n\n"+
+				"To diagnose and retry:\n"+
+				"  sudo QORVEN_CONFIG=%s QORVEN_POSTGRES_DSN=%s qorven migrate up\n\n"+
+				"If the schema is dirty from a previous failed run:\n"+
+				"  sudo qorven migrate force <N>  (use the version shown in the error above)\n\n"+
+				"Underlying error: %w",
+			configPath, dsn, migrateErr)
 	}
 
 	platformRestartService(configPath)

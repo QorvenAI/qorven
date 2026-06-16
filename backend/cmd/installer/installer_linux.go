@@ -91,15 +91,278 @@ func probePGPort() string {
 	return "5432"
 }
 
+// postgresServerPresent returns true when a PostgreSQL SERVER (not just the
+// client tool psql) is installed and/or running. We check three signals:
+//
+//  1. pg_isready succeeds — server is actively listening.
+//  2. pg_lsclusters lists at least one cluster (Debian/Ubuntu).
+//  3. A postgresql server unit file exists in systemd.
+//
+// Importantly, installing only postgresql-client gives you `psql` but none
+// of these three — so the old `commandExists("psql")` gate was a false
+// positive that skipped the install even when no server was present.
+func postgresServerPresent() bool {
+	// 1. pg_isready — fastest path; succeeds if the server is up.
+	if _, e := runSilent("pg_isready", "-q"); e == nil {
+		return true
+	}
+	// 2. pg_lsclusters — Debian/Ubuntu cluster manager.
+	if commandExists("pg_lsclusters") {
+		out, err := exec.Command("pg_lsclusters", "-h").Output()
+		if err == nil && strings.TrimSpace(string(out)) != "" {
+			return true
+		}
+	}
+	// 3. systemd server unit file present.
+	out, err := exec.Command("systemctl", "list-unit-files",
+		"--no-legend", "--no-pager", "postgresql*").Output()
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			// We want server units, not just the client; exclude pure client
+			// packages which never register a service unit.
+			if len(fields) >= 1 && strings.HasSuffix(fields[0], ".service") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ensurePGDGRepo adds the official PGDG apt repository idempotently.
+// If /etc/apt/sources.list.d/pgdg.list already contains the correct entry
+// for this distro's codename the function is a no-op. The GPG key is
+// written to /usr/share/keyrings/postgresql.asc.
+func ensurePGDGRepo() error {
+	// Determine codename: lsb_release -cs is canonical; fall back to
+	// parsing /etc/os-release VERSION_CODENAME for minimal containers.
+	codename, _ := runSilent("lsb_release", "-cs")
+	codename = strings.TrimSpace(codename)
+	if codename == "" {
+		raw, err := os.ReadFile("/etc/os-release")
+		if err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				if strings.HasPrefix(line, "VERSION_CODENAME=") {
+					codename = strings.Trim(strings.TrimPrefix(line, "VERSION_CODENAME="), `"'`)
+					break
+				}
+			}
+		}
+	}
+	if codename == "" {
+		return fmt.Errorf("cannot determine distro codename for PGDG repo")
+	}
+
+	keyPath := "/usr/share/keyrings/postgresql.asc"
+	listPath := "/etc/apt/sources.list.d/pgdg.list"
+	repoLine := fmt.Sprintf(
+		"deb [signed-by=%s] https://apt.postgresql.org/pub/repos/apt %s-pgdg main",
+		keyPath, codename)
+
+	// Idempotent: skip if the list already has the right entry.
+	existing, readErr := os.ReadFile(listPath)
+	if readErr == nil && strings.Contains(string(existing), codename+"-pgdg") {
+		return nil
+	}
+
+	// Download and install the signing key.
+	if _, err := runSilent("curl", "-fsSL",
+		"https://www.postgresql.org/media/keys/accc4cf8.asc",
+		"-o", keyPath); err != nil {
+		return fmt.Errorf("download PGDG signing key: %w", err)
+	}
+
+	if err := os.WriteFile(listPath, []byte(repoLine+"\n"), 0644); err != nil {
+		return fmt.Errorf("write PGDG sources.list: %w", err)
+	}
+	if err := runQuiet("apt-get", "update", "-qq"); err != nil {
+		return fmt.Errorf("apt-get update after adding PGDG: %w", err)
+	}
+	return nil
+}
+
+// installPostgresApt installs PostgreSQL 16 from PGDG together with
+// pgvector in one apt transaction. If the PG-16 packages are not
+// available for this distro (very old release), it falls back to the
+// distro's default postgresql package and a separate pgvector install.
+func installPostgresApt() error {
+	if err := ensurePGDGRepo(); err != nil {
+		// PGDG failed — fall back to distro default.
+		return runQuiet("apt-get", "install", "-y", "-qq", "postgresql", "postgresql-contrib")
+	}
+
+	// Try installing PG 16 + contrib + pgvector together from PGDG.
+	err := runQuiet("apt-get", "install", "-y", "-qq",
+		"postgresql-16",
+		"postgresql-client-16",
+		"postgresql-contrib-16",
+		"postgresql-16-pgvector",
+	)
+	if err == nil {
+		return nil
+	}
+
+	// PG 16 packages not available for this distro — fall back to
+	// distro-default postgresql and let installPgvector handle the
+	// pgvector package separately.
+	if fbErr := runQuiet("apt-get", "install", "-y", "-qq",
+		"postgresql", "postgresql-contrib"); fbErr != nil {
+		return fmt.Errorf("apt install postgresql (fallback): %w", fbErr)
+	}
+	return nil
+}
+
+// runningPGMajor returns the major version of the PostgreSQL SERVER that is
+// currently running (e.g. "16"). It tries multiple sources in order:
+//
+//  1. pg_lsclusters — most reliable on Debian/Ubuntu; shows the running server.
+//  2. psql --version — works when the client matches the server major.
+//  3. pg_config --version — available when the server's dev package is installed.
+func runningPGMajor() string {
+	// pg_lsclusters: first column is the major version.
+	if commandExists("pg_lsclusters") {
+		out, err := exec.Command("pg_lsclusters", "-h").Output()
+		if err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 1 && fields[0] != "" {
+					maj := strings.Split(fields[0], ".")[0]
+					if maj != "" {
+						return maj
+					}
+				}
+			}
+		}
+	}
+	// psql --version: "psql (PostgreSQL) 16.3"
+	if v, err := runSilent("psql", "--version"); err == nil {
+		parts := strings.Fields(v)
+		if len(parts) >= 3 {
+			return strings.Split(parts[2], ".")[0]
+		}
+	}
+	// pg_config --version: "PostgreSQL 16.3"
+	if v, err := runSilent("pg_config", "--version"); err == nil {
+		parts := strings.Fields(v)
+		if len(parts) >= 2 {
+			return strings.Split(parts[1], ".")[0]
+		}
+	}
+	return ""
+}
+
+// pgvectorAvailable checks whether the pgvector extension is available for
+// the installed server (i.e. the shared library / control file exists).
+// It does NOT check whether `CREATE EXTENSION vector` has been run.
+func pgvectorAvailable(pgMaj string) bool {
+	// Check the .control file for the specific server major (Debian/Ubuntu layout).
+	if pgMaj != "" {
+		controlPath := fmt.Sprintf("/usr/share/postgresql/%s/extension/vector.control", pgMaj)
+		if _, err := os.Stat(controlPath); err == nil {
+			return true
+		}
+	}
+	// Generic path (RHEL / other layouts).
+	paths := []string{
+		"/usr/share/postgresql/extension/vector.control",
+		"/usr/lib/postgresql/extension/vector.control",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// installPgvector ensures the pgvector extension package is installed for
+// the given server major version. It now returns a bool (installed/already
+// present) and an error. Callers treat a failure as a warning — Qorven
+// works without vector search; the caller surfaces the appropriate message.
+func installPgvector(pgMaj string) (bool, error) {
+	if pgMaj == "" {
+		return false, fmt.Errorf("pgvector: unknown server major version")
+	}
+
+	// Already installed?
+	if pgvectorAvailable(pgMaj) {
+		return true, nil
+	}
+
+	// Detect package manager.
+	hasDnf := commandExists("dnf")
+	hasYum := commandExists("yum")
+
+	if commandExists("apt-get") {
+		versioned := "postgresql-" + pgMaj + "-pgvector"
+
+		// First attempt: try without adding the PGDG repo (it may already
+		// be present, or the distro universe repo may carry it).
+		if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
+			return true, nil
+		}
+
+		// Ensure PGDG repo and retry.
+		if err := ensurePGDGRepo(); err == nil {
+			if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
+				return true, nil
+			}
+		}
+
+		// Last-ditch fallback: unversioned name (Ubuntu universe).
+		if runQuiet("apt-get", "install", "-y", "-qq", "postgresql-pgvector") == nil {
+			return true, nil
+		}
+		return false, fmt.Errorf("could not install %s from any apt source", versioned)
+	}
+
+	if hasDnf || hasYum {
+		pm := "dnf"
+		if !hasDnf {
+			pm = "yum"
+		}
+		// Add PGDG repo if not present.
+		if _, e := runSilent("rpm", "-q", "pgdg-redhat-repo"); e != nil {
+			repoUrl := fmt.Sprintf("https://download.postgresql.org/pub/repos/yum/reporpms/EL-$(rpm -E %%rhel)-x86_64/pgdg-redhat-repo-latest.noarch.rpm")
+			runQuiet(pm, "install", "-y", repoUrl)
+		}
+		pkgName := fmt.Sprintf("pgvector_%s", pgMaj)
+		if runQuiet(pm, "install", "-y", pkgName) == nil {
+			return true, nil
+		}
+		if runQuiet(pm, "install", "-y", "pgvector") == nil {
+			return true, nil
+		}
+		return false, fmt.Errorf("could not install pgvector for PG %s via %s", pgMaj, pm)
+	}
+
+	return false, fmt.Errorf("pgvector: no supported package manager found")
+}
+
 // startPostgresService handles the Debian/Ubuntu multi-name service problem.
 // The generic "postgresql" unit may not exist; the real one is often
 // "postgresql@16-main" or "postgresql@14-main". We try multiple names.
+// After installing PG 16 specifically, if pg_lsclusters shows no cluster,
+// we run pg_createcluster 16 main --start (PGDG Debian packages sometimes
+// skip auto-create on fresh installs).
 func startPostgresService() error {
-	// Try generic name first (works on some distros)
+	// If pg_lsclusters is present and shows no cluster, auto-create one.
+	// This is needed after a fresh PGDG PG 16 install on Debian/Ubuntu.
+	if commandExists("pg_lsclusters") {
+		out, err := exec.Command("pg_lsclusters", "-h").Output()
+		if err == nil && strings.TrimSpace(string(out)) == "" {
+			// No clusters — create PG 16 main cluster.
+			if commandExists("pg_createcluster") {
+				runQuiet("pg_createcluster", "16", "main", "--start")
+			}
+		}
+	}
+
+	// Try generic name first (works on some distros).
 	if runQuiet("systemctl", "start", "postgresql") == nil {
 		return nil
 	}
-	// Try all versioned cluster units (Debian/Ubuntu style)
+	// Try all versioned cluster units (Debian/Ubuntu style).
 	out, err := exec.Command("systemctl", "list-units", "--type=service", "--all",
 		"--no-legend", "--no-pager", "postgresql*").Output()
 	if err == nil {
@@ -118,7 +381,7 @@ func startPostgresService() error {
 			}
 		}
 	}
-	// pg_ctlcluster fallback (Debian-only utility)
+	// pg_ctlcluster fallback (Debian-only utility).
 	if commandExists("pg_ctlcluster") {
 		// pg_lsclusters -h: version  cluster  port  status
 		lsOut, lsErr := exec.Command("pg_lsclusters", "-h").Output()
@@ -131,7 +394,7 @@ func startPostgresService() error {
 			}
 		}
 	}
-	// Final check
+	// Final check.
 	if _, e := runSilent("pg_isready", "-q"); e == nil {
 		return nil
 	}
@@ -148,71 +411,13 @@ func pgDiagnostic() string {
 	return strings.TrimSpace(string(out))
 }
 
-func installPgvector(pgMaj string) {
-	if pgMaj == "" {
-		return
-	}
-
-	// Detect package manager
-	hasDnf := commandExists("dnf")
-	hasYum := commandExists("yum")
-
-	if commandExists("apt-get") {
-		// Debian/Ubuntu path
-		versioned := "postgresql-" + pgMaj + "-pgvector"
-		if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
-			return
-		}
-		// Add PGDG repo and retry
-		distro, _ := runSilent("bash", "-c", `source /etc/os-release 2>/dev/null && echo "${ID}"`)
-		distro = strings.TrimSpace(distro)
-		codename, _ := runSilent("lsb_release", "-cs")
-		codename = strings.TrimSpace(codename)
-		if (distro == "ubuntu" || distro == "debian") && codename != "" {
-			keyPath := "/usr/share/keyrings/postgresql.asc"
-			runSilent("curl", "-fsSL",
-				"https://www.postgresql.org/media/keys/accc4cf8.asc",
-				"-o", keyPath)
-			repo := fmt.Sprintf(
-				"deb [signed-by=%s] https://apt.postgresql.org/pub/repos/apt %s-pgdg main",
-				keyPath, codename)
-			os.WriteFile("/etc/apt/sources.list.d/pgdg.list", []byte(repo+"\n"), 0644)
-			runQuiet("apt-get", "update", "-qq")
-			if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
-				return
-			}
-		}
-		// Fallback: unversioned name (Ubuntu universe)
-		runQuiet("apt-get", "install", "-y", "-qq", "postgresql-pgvector")
-		return
-	}
-
-	if hasDnf || hasYum {
-		// RHEL/Fedora/Amazon Linux path — use PGDG RPM repo
-		pm := "dnf"
-		if !hasDnf {
-			pm = "yum"
-		}
-		// Add PGDG repo if not present
-		if _, e := runSilent("rpm", "-q", "pgdg-redhat-repo"); e != nil {
-			repoUrl := fmt.Sprintf("https://download.postgresql.org/pub/repos/yum/reporpms/EL-$(rpm -E %%rhel)-x86_64/pgdg-redhat-repo-latest.noarch.rpm")
-			runQuiet(pm, "install", "-y", repoUrl)
-		}
-		pkgName := fmt.Sprintf("pgvector_%s", pgMaj)
-		if runQuiet(pm, "install", "-y", pkgName) == nil {
-			return
-		}
-		// Try alternate naming
-		runQuiet(pm, "install", "-y", "pgvector")
-	}
-}
-
-// pgvectorEnabled checks whether the vector extension is actually available in PostgreSQL.
+// pgvectorEnabled checks whether the vector extension is actually active in
+// the qorven database (i.e. CREATE EXTENSION vector has been run).
 func pgvectorEnabled() bool {
 	out, err := runSilent("sudo", "-u", "postgres", "psql", "-d", "qorven", "-tAc",
 		"SELECT 1 FROM pg_extension WHERE extname='vector'")
 	if err != nil {
-		// Try TCP fallback
+		// Try TCP fallback.
 		out, err = runSilent("psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "qorven", "-tAc",
 			"SELECT 1 FROM pg_extension WHERE extname='vector'")
 	}
@@ -293,10 +498,16 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		if cfg.SkipPG {
 			return "skipped (--skip-postgres)", true, nil
 		}
-		if !commandExists("psql") {
+
+		// FIX 1: Detect a real running/installed SERVER, not just the psql
+		// client tool. postgresql-client provides `psql` but no server; the
+		// old commandExists("psql") gate was therefore a false positive.
+		if !postgresServerPresent() {
+			// FIX 2: Install PostgreSQL 16 from PGDG + pgvector in one apt
+			// transaction. For RHEL/dnf/yum the existing PGDG-RPM path is used.
 			if commandExists("apt-get") {
-				if err = runQuiet("apt-get", "install", "-y", "-qq", "postgresql", "postgresql-contrib"); err != nil {
-					return "", false, fmt.Errorf("apt install postgresql: %w\n\n%s", err, pgDiagnostic())
+				if err = installPostgresApt(); err != nil {
+					return "", false, fmt.Errorf("install postgresql: %w\n\n%s", err, pgDiagnostic())
 				}
 			} else if commandExists("dnf") {
 				runQuiet("dnf", "install", "-y", "-q", "postgresql-server", "postgresql-contrib")
@@ -313,7 +524,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			return "", false, fmt.Errorf("%w\n\nDiagnostic output:\n%s", err, pgDiagnostic())
 		}
 
-		// Wait for readiness
+		// Wait for readiness.
 		ready := false
 		for i := 0; i < 20; i++ {
 			if _, e := runSilent("pg_isready", "-q"); e == nil {
@@ -326,13 +537,23 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			return "", false, fmt.Errorf("postgresql did not become ready within 20s\n\nDiagnostic:\n%s", pgDiagnostic())
 		}
 
+		// FIX 3: Detect running server major and ensure pgvector ALWAYS,
+		// regardless of whether PG was just freshly installed or was
+		// pre-existing. This is the fix for the silent re-run skip.
+		pgMaj := runningPGMajor()
+		pvOK, pvErr := installPgvector(pgMaj)
+
 		v, _ := runSilent("psql", "--version")
-		pgMaj := ""
-		if parts := strings.Fields(strings.TrimSpace(v)); len(parts) >= 3 {
-			pgMaj = strings.Split(parts[2], ".")[0]
+		vStr := strings.TrimSpace(v)
+
+		if pvOK {
+			return "installed — " + vStr + " — pgvector enabled ✓", false, nil
 		}
-		installPgvector(pgMaj)
-		return "installed — " + strings.TrimSpace(v), false, nil
+		// pgvector failed — warn but do not abort; Qorven works without it.
+		if pvErr != nil {
+			slog.Warn("install.pgvector_failed", "err", pvErr)
+		}
+		return "installed — " + vStr + " — vector search not enabled (optional — enable later)", true, nil
 
 	case 4: // Docker (optional)
 		if cfg.SkipDocker {
@@ -428,7 +649,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			}
 		}
 
-		// Always grant — idempotent, ensures re-run repairs broken permissions
+		// Always grant — idempotent, ensures re-run repairs broken permissions.
 		psql("GRANT ALL PRIVILEGES ON DATABASE qorven TO qorven;", "postgres")
 		psql("GRANT ALL ON SCHEMA public TO qorven;", "qorven")
 
@@ -469,7 +690,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			return "", false, fmt.Errorf("rename binary: %w", err)
 		}
 		runQuiet("chown", "qorven:qorven", target)
-		// Remove any old symlink at the legacy location before creating a new one
+		// Remove any old symlink at the legacy location before creating a new one.
 		os.Remove(symlink)
 		if err = os.Symlink(target, symlink); err != nil {
 			slog.Warn("install.symlink_failed", "err", err)
