@@ -226,7 +226,17 @@ func New(cfg Config) *Model {
 	// In upgrade mode we don't try to resume a prior checkpoint — the upgrade
 	// fast-path is already minimal and re-running it is safe.
 	state := loadInstallState()
-	if effectiveMode != InstallModeUpgrade && state != nil && len(state.CompletedSteps) > 0 {
+	// Only resume from a checkpoint that matches THIS installer version and step
+	// list. Step indices are positional — if a different version reordered or
+	// added/removed steps, a stale checkpoint's indices would map to the wrong
+	// steps and silently skip a needed one. On any mismatch we discard the old
+	// checkpoint and run the full (idempotent) sequence.
+	canResume := effectiveMode != InstallModeUpgrade &&
+		state != nil &&
+		len(state.CompletedSteps) > 0 &&
+		state.Version == cfg.Version &&
+		state.StepCount == len(steps)
+	if canResume {
 		for i := range steps {
 			if stepCompletedInState(state, i) {
 				steps[i].status = stepDone
@@ -252,8 +262,9 @@ func New(cfg Config) *Model {
 		// Fresh install or upgrade — create a new state record (populated as
 		// steps complete).
 		state = &installState{
-			Version: cfg.Version,
-			Mode:    string(effectiveMode),
+			Version:   cfg.Version,
+			StepCount: len(steps),
+			Mode:      string(effectiveMode),
 		}
 		state.Config.Port = cfg.Port
 		state.Config.DataDir = cfg.DataDir
@@ -263,7 +274,7 @@ func New(cfg Config) *Model {
 		state.Config.SkipNginx = cfg.SkipNginx
 	}
 
-	resuming := effectiveMode != InstallModeUpgrade && state != nil && len(state.CompletedSteps) > 0
+	resuming := canResume
 
 	// Detect the existing binary version for the welcome screen display.
 	existingInfo := detectExistingInstall()
@@ -522,8 +533,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			s.status = stepDone
 		}
-		// Persist completed step to the state checkpoint so a re-run can skip it.
-		markStepComplete(m.state, msg.idx)
+		// Persist ONLY genuinely-done steps to the checkpoint. A warn step
+		// (e.g. pgvector skipped, Docker unavailable) must NOT be recorded as
+		// complete — on a re-run it should be re-attempted, so a previously-
+		// failed optional install (like pgvector) can recover.
+		if !msg.warn {
+			markStepComplete(m.state, msg.idx)
+		}
 		next := msg.idx + 1
 		for next < len(m.steps) && m.steps[next].status != stepPending {
 			next++

@@ -20,10 +20,15 @@ import (
 // each step completes. It lets a re-run resume from the first incomplete step
 // instead of re-running the full sequence.
 type installState struct {
-	// CompletedSteps records which step indices completed (done or warn).
+	// CompletedSteps records which step indices that genuinely completed (done,
+	// NOT warn — a warn step is re-attempted on resume).
 	CompletedSteps []int `json:"completed_steps"`
 	// Version is the installer version string at the time of the run.
 	Version string `json:"version"`
+	// StepCount is the number of steps in the run that wrote this checkpoint.
+	// Resume is only valid when this matches the current run's step count — it
+	// guards against step-index drift between versions (indices are positional).
+	StepCount int `json:"step_count"`
 	// Mode is the install mode ("fresh", "upgrade", "repair").
 	Mode string `json:"mode"`
 	// Config captures the flags chosen by the user so a resumed run uses the
@@ -221,9 +226,11 @@ type existingInstallInfo struct {
 	BinaryVersion string
 }
 
-// detectExistingInstall probes signals for an existing install: binary presence,
-// systemd unit, and config.toml. It does NOT run qorven itself so it is safe
-// when the binary is mid-update.
+// detectExistingInstall probes for a COMPLETE prior install. "Found" requires
+// the binary AND the config.toml to both exist — a lone binary (e.g. left by a
+// fresh install that failed before DB/user setup) does NOT count as a complete
+// install, so it won't be misclassified as an upgrade. It does NOT run qorven
+// itself so it is safe when the binary is mid-update.
 func detectExistingInstall() existingInstallInfo {
 	info := existingInstallInfo{}
 
@@ -244,7 +251,11 @@ func detectExistingInstall() existingInstallInfo {
 		}
 	}
 
-	info.Found = true
+	// A complete install also has a config.toml. Without it, this is a partial/
+	// failed fresh attempt (binary placed, setup never finished) — NOT an upgrade.
+	if _, cErr := os.Stat(filepath.Join(platformConfigDir(), "config.toml")); cErr == nil {
+		info.Found = true
+	}
 	return info
 }
 
@@ -253,7 +264,9 @@ func detectExistingInstall() existingInstallInfo {
 //
 //   - If Config.Mode is set explicitly (e.g. from a flag), use it.
 //   - If QORVEN_INSTALL_MODE env var is set, use it.
-//   - Otherwise auto-detect: no binary → fresh; binary present → upgrade.
+//   - Otherwise auto-detect: only choose upgrade when a COMPLETE install exists
+//     (binary + config) AND no partial-install checkpoint is in progress. A
+//     binary left by a failed fresh attempt → fresh (so PG/user/DB setup runs).
 func resolveInstallMode(cfg Config) InstallMode {
 	if cfg.Mode != "" {
 		return cfg.Mode
@@ -264,8 +277,12 @@ func resolveInstallMode(cfg Config) InstallMode {
 			return InstallMode(env)
 		}
 	}
-	info := detectExistingInstall()
-	if info.Found {
+	// If a checkpoint shows a fresh/repair install was interrupted (steps done
+	// but not finished), resume that as fresh — never silently upgrade over it.
+	if st := loadInstallState(); st != nil && len(st.CompletedSteps) > 0 && st.Mode != string(InstallModeUpgrade) {
+		return InstallMode(st.Mode)
+	}
+	if detectExistingInstall().Found {
 		return InstallModeUpgrade
 	}
 	return InstallModeFresh
