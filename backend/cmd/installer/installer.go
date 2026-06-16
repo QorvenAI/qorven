@@ -320,12 +320,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quitting = true
 				return m, tea.Quit
 			case "enter", " ":
-				if m.cfg.SkipTailscale {
-					// Flag already decided — skip Tailscale choice, go straight to install
-					m.screen = screenInstall
-					m.stepStarted = time.Now()
-					return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
+				// CHANGE 3: Default path — skip Tailscale entirely, go straight to
+				// install. Detection handles the URL automatically (Change 2).
+				// If --with-tailscale / --tailscale-auth-key was passed, honour it
+				// (cfg.SkipTailscale will be false and TailscaleAuthKey set).
+				if !m.cfg.SkipTailscale && m.cfg.TailscaleAuthKey == "" {
+					m.cfg.SkipTailscale = true
 				}
+				m.screen = screenInstall
+				m.stepStarted = time.Now()
+				return m, tea.Batch(m.spinner.Tick, tickCmd(), m.kickFirstPending())
+			case "a", "A":
+				// CHANGE 4: Advanced path — show Tailscale choice screen.
 				m.screen = screenTailscaleChoice
 				return m, nil
 			}
@@ -551,12 +557,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.kickStep(next)
 		}
 		// All steps done — check what Tailscale step returned.
-		// steps[11].detail is either:
+		// The Tailscale step detail is one of:
 		//   "connected:<100.x.x.x>"  → already connected, skip auth screen
 		//   "url:<https://...>"       → need browser auth
-		//   "skipped"                 → --skip-tailscale or error, go to config
+		//   "skipped*"               → --skip-tailscale or error, auto-detect URL
 		m.ips = detectIPs()
-		detail := m.steps[11].detail
+		detail := m.stepDetailByLabel("tailscale")
 		switch {
 		case strings.HasPrefix(detail, "connected:"):
 			ip := strings.TrimPrefix(detail, "connected:")
@@ -576,13 +582,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenTailscale
 			return m, m.pollTailscaleIP()
 		default:
-			// Tailscale skipped / not a VPS — go to manual config
+			// Tailscale skipped / not present — auto-detect best URL.
 			best := m.ips.publicURL
 			if best == "" && len(m.ips.lanIPs) > 0 {
 				best = m.ips.lanIPs[0]
 			}
 			m.urlInput = best
 			m.urlCursor = len(m.urlInput)
+			// CHANGE 2: when detection found a usable address, commit it
+			// automatically and go straight to Done — no URL-confirmation screen.
+			// Only fall back to the editable screenConfig when nothing was
+			// detected (rare: weird container/no-network environment).
+			if m.ips.publicURL != "" || len(m.ips.lanIPs) > 0 {
+				if err := m.writeMinimalConfig(); err != nil {
+					m.screen = screenError
+					m.errMsg = err.Error()
+					return m, nil
+				}
+				m.screen = screenDone
+				m.health = healthChecking
+				return m, m.waitForHealth(12 * time.Second)
+			}
+			// Nothing detected — fall back to editable prompt defaulting to localhost.
+			if m.urlInput == "" {
+				m.urlInput = "localhost"
+				m.urlCursor = len(m.urlInput)
+			}
 			m.screen = screenConfig
 			return m, nil
 		}
@@ -922,7 +947,7 @@ func (m *Model) renderHeader() string {
 // renderFooter — full-width dark hint bar, consistent on every screen
 func (m *Model) renderFooter() string {
 	hints := map[screen]string{
-		screenWelcome:         "Enter  agree & install  ·  Ctrl+C  cancel",
+		screenWelcome:         "Enter  install   ·   A  advanced   ·   Ctrl+C  cancel",
 		screenTailscaleChoice: "↑ ↓ / J K  navigate  ·  Enter  confirm  ·  Ctrl+C  cancel",
 		screenInstall:         "Installing…  ·  Ctrl+C  force quit (re-run to resume)",
 		screenTailscale: "Waiting for Tailscale authorization  ·  S  skip (use IP manually)  ·  Ctrl+C  cancel",
@@ -1302,10 +1327,12 @@ func (m *Model) viewInstallLeft() string {
 				detail = "  " + mutedSt.Render(s.detail)
 			}
 		case stepWarn:
-			icon = warnSt.Render(" !")
-			label = warnSt.Render(s.label)
+			// CHANGE 5: render optional-skipped steps as calm/neutral, not alarming
+			// amber. pgvector unavailable, Docker skipped, etc. are not errors.
+			icon = dimSt.Render(" ○")
+			label = mutedSt.Render(s.label)
 			if s.detail != "" {
-				detail = "  " + warnSt.Render(s.detail)
+				detail = "  " + dimSt.Render(s.detail)
 			}
 		case stepFail:
 			icon = failSt.Render(" ✗")
@@ -1573,8 +1600,21 @@ func (m *Model) viewDoneLeft() string {
 		b.WriteString("  " + mutedSt.Render("Reachable from any device on your Tailscale network.") + "\n\n")
 	}
 
-	b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
-	b.WriteString(fgSt.Render("Open either URL to complete setup in your browser.") + "\n")
+	// CHANGE 5: show a calm note if any optional steps were skipped.
+	skippedCount := 0
+	for _, s := range m.steps {
+		if s.status == stepWarn {
+			skippedCount++
+		}
+	}
+	if skippedCount > 0 {
+		b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
+		b.WriteString(dimSt.Render("Optional features skipped (e.g. vector search)") + "\n")
+		b.WriteString(dimSt.Render("Nothing is broken — enable them later in Settings.") + "\n")
+	} else {
+		b.WriteString(dimSt.Render(strings.Repeat("─", 44)) + "\n\n")
+	}
+	b.WriteString(fgSt.Render("Open the URL above to complete setup in your browser.") + "\n")
 	return b.String()
 }
 
@@ -1655,6 +1695,21 @@ func (m *Model) countDone() int {
 		}
 	}
 	return n
+}
+
+// stepDetailByLabel returns the detail string of the first step whose label
+// contains substr (case-insensitive). Returns "" when no matching step exists
+// (e.g. Tailscale step absent on a platform that omits it). This replaces all
+// hardcoded step index accesses so the code works regardless of how many steps
+// each platform defines.
+func (m *Model) stepDetailByLabel(substr string) string {
+	lower := strings.ToLower(substr)
+	for _, s := range m.steps {
+		if strings.Contains(strings.ToLower(s.label), lower) {
+			return s.detail
+		}
+	}
+	return ""
 }
 
 
