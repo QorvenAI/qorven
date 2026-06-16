@@ -136,18 +136,6 @@ func detectRunningPGVersion() string {
 	return ""
 }
 
-// linkedBrewPGService returns the brew service name for the currently active PG.
-func linkedBrewPGService() string {
-	// Try postgresql@16, then postgresql@15, then generic postgresql
-	for _, candidate := range []string{"postgresql@17", "postgresql@16", "postgresql@15", "postgresql@14", "postgresql"} {
-		out, err := exec.Command("brew", "services", "list").Output()
-		if err == nil && strings.Contains(string(out), candidate) {
-			return candidate
-		}
-	}
-	return "postgresql@16"
-}
-
 func platformRequirementsText() string {
 	req := func(icon, label, detail string) string {
 		return icon + "  " + fgSt.Render(label) + "\n" +
