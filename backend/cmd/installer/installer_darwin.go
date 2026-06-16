@@ -106,9 +106,26 @@ func launchdPlistPath() string {
 }
 
 // detectRunningPGVersion returns the major version of the currently running
-// PostgreSQL on macOS (needed to match pgvector to the right version).
+// PostgreSQL server on macOS. It queries the live server first (most accurate),
+// then falls back to parsing `psql --version` (client version, usually matches).
 func detectRunningPGVersion() string {
-	out, err := exec.Command("psql", "--version").Output()
+	// Best: query the server directly — SHOW server_version_num returns e.g. "160004"
+	out, err := exec.Command("psql", "-tAc", "SHOW server_version_num").Output()
+	if err == nil {
+		s := strings.TrimSpace(string(out))
+		if len(s) >= 6 {
+			// server_version_num is zero-padded to 6 digits: MMmmpp
+			// Major version is the leading digits (1-2 chars before the first '00')
+			major := s[:len(s)-4]
+			// Strip leading zeros just in case (shouldn't happen for PG >= 10)
+			major = strings.TrimLeft(major, "0")
+			if major != "" {
+				return major
+			}
+		}
+	}
+	// Fallback: parse `psql --version` output (e.g. "psql (PostgreSQL) 16.3")
+	out, err = exec.Command("psql", "--version").Output()
 	if err != nil {
 		return ""
 	}
@@ -173,7 +190,13 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 	case 1: // Homebrew
 		brew, brewErr := exec.LookPath("brew")
 		if brewErr != nil {
-			return "", false, fmt.Errorf("Homebrew not found — install from https://brew.sh then re-run")
+			// If PostgreSQL is already running we can proceed without Homebrew —
+			// we'll reuse the existing server (step 2 short-circuits) and only
+			// need brew for pgvector (which is optional).  Warn, don't fail.
+			if _, pgErr := exec.Command("pg_isready").Output(); pgErr == nil {
+				return "not found — skipped (PostgreSQL already running; pgvector install may be unavailable)", true, nil
+			}
+			return "", false, fmt.Errorf("Homebrew not found — install from https://brew.sh then re-run (or pre-install PostgreSQL and re-run)")
 		}
 		v, _ := exec.Command(brew, "--version").Output()
 		return strings.SplitN(strings.TrimSpace(string(v)), "\n", 2)[0], false, nil
@@ -241,32 +264,44 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		if cfg.SkipPG {
 			return "skipped (--skip-postgres)", true, nil
 		}
-		pgVer := detectRunningPGVersion()
 
-		// brew install pgvector installs for the linked PG — verify versions match
-		if pgVer != "" {
-			// Force link correct version before installing pgvector
-			svc := linkedBrewPGService()
-			if svc != "" {
-				runQuiet("brew", "link", "--force", "--overwrite", svc)
-			}
+		// Detect the RUNNING server's major version (not a client or candidate guess).
+		runningMajor := detectRunningPGVersion()
+
+		// brew is required to install pgvector; if absent, warn and skip.
+		if _, brewErr := exec.LookPath("brew"); brewErr != nil {
+			return "skipped (Homebrew not found — install brew then run: brew install pgvector)", true, nil
+		}
+
+		// Force-link the running PG major so pgvector builds/installs against the
+		// correct PostgreSQL headers and places its files in the right extension dir.
+		if runningMajor != "" {
+			runQuiet("brew", "link", "--force", "--overwrite", "postgresql@"+runningMajor)
 		}
 
 		if err = runQuiet("brew", "install", "pgvector"); err != nil {
 			return "skipped (pgvector unavailable — vector search disabled)", true, nil
 		}
 
-		// Verify pgvector shared library is findable by the running PG
+		// Verify vector.control is present in the extension directory for the
+		// running major.  Try the versioned path first, then a generic fallback.
 		prefix := brewPrefix()
-		pgShareDir := fmt.Sprintf("%s/opt/postgresql@%s/share/postgresql@%s/extension", prefix, pgVer, pgVer)
-		if pgVer == "" || !fileExists(pgShareDir+"/vector.control") {
-			// Try generic path
-			altPath := prefix + "/share/postgresql/extension/vector.control"
-			if !fileExists(altPath) {
-				return "installed (pgvector library path not verified — run: CREATE EXTENSION vector; manually)", true, nil
+		if runningMajor != "" {
+			versionedDir := fmt.Sprintf("%s/opt/postgresql@%s/share/postgresql@%s/extension", prefix, runningMajor, runningMajor)
+			if fileExists(versionedDir + "/vector.control") {
+				return fmt.Sprintf("installed (postgresql@%s)", runningMajor), false, nil
 			}
 		}
-		return "installed", false, nil
+		// Generic paths (unversioned formula or non-Homebrew PG)
+		for _, altPath := range []string{
+			prefix + "/share/postgresql/extension/vector.control",
+			"/usr/share/postgresql/extension/vector.control",
+		} {
+			if fileExists(altPath) {
+				return "installed", false, nil
+			}
+		}
+		return "installed (pgvector library path not verified — run: CREATE EXTENSION vector; manually)", true, nil
 
 	case 4: // Database setup
 		if cfg.SkipPG {

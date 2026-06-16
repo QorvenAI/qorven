@@ -61,13 +61,21 @@ case "$(uname -m)" in
   *) die "unsupported architecture: $(uname -m)" ;;
 esac
 
-# macOS: check for Homebrew before anything else
+# macOS: check for Homebrew.  Homebrew is required to install PostgreSQL, but if
+# PostgreSQL is already running we can proceed without it (pgvector is the only
+# remaining brew dependency and is optional).
 if [ "$OS" = "darwin" ] && ! command -v brew >/dev/null 2>&1; then
-  printf "\n  ${BOLD}Homebrew is required on macOS.${NC}\n"
-  printf "  Install it first:\n\n"
-  printf "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n\n"
-  printf "  Then re-run this installer.\n\n"
-  exit 1
+  if command -v pg_isready >/dev/null 2>&1 && pg_isready -q 2>/dev/null; then
+    printf "\n  ${BOLD}Note:${NC} Homebrew not found, but PostgreSQL is already running.\n"
+    printf "  Proceeding without Homebrew — pgvector (vector search) will be skipped.\n"
+    printf "  To enable pgvector later, install Homebrew and run: brew install pgvector\n\n"
+  else
+    printf "\n  ${BOLD}Homebrew is required on macOS.${NC}\n"
+    printf "  Install it first:\n\n"
+    printf "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n\n"
+    printf "  Then re-run this installer.\n\n"
+    exit 1
+  fi
 fi
 
 # ── uninstall ─────────────────────────────────────────────────────────────────
