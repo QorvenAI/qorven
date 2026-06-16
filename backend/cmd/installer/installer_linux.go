@@ -31,6 +31,12 @@ func platformSteps() []installStep {
 	}
 }
 
+// platformUpgradeStepIndices returns the step indices that run during an
+// upgrade. An upgrade only needs to: detect system (0), swap binary (8),
+// restart the service (9). Steps 1-7 (package installs, OS user, DB) and
+// 10-11 (nginx, Tailscale) are already in place and are skipped.
+func platformUpgradeStepIndices() []int { return []int{0, 8, 9} }
+
 func platformConfigDir() string { return "/etc/qorven" }
 
 func platformBinPath() string { return "/opt/qorven/bin/qorven" }

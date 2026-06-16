@@ -83,6 +83,19 @@ type installStep struct {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
+// InstallMode controls which steps the installer runs.
+type InstallMode string
+
+const (
+	// InstallModeFresh runs the full 12-step sequence (default when nothing exists).
+	InstallModeFresh InstallMode = "fresh"
+	// InstallModeUpgrade swaps only the binary + migrates + restarts the service.
+	// Skips package installs, OS user, data dirs, and DB setup — all already in place.
+	InstallModeUpgrade InstallMode = "upgrade"
+	// InstallModeRepair re-runs the full idempotent sequence to fix a broken install.
+	InstallModeRepair InstallMode = "repair"
+)
+
 type Config struct {
 	Version          string
 	DataDir          string
@@ -90,8 +103,9 @@ type Config struct {
 	SkipPG           bool
 	TailscaleAuthKey string // optional pre-auth key for headless setup
 	SkipTailscale    bool
-	Port             int  // chosen port; 0 means use DefaultPort (8486)
-	SkipNginx        bool // true = do not install/configure nginx
+	Port             int         // chosen port; 0 means use DefaultPort (8486)
+	SkipNginx        bool        // true = do not install/configure nginx
+	Mode             InstallMode // fresh / upgrade / repair; empty = auto-detect
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -140,6 +154,9 @@ type Model struct {
 	state    *installState
 	resuming bool // true when a prior partial install was detected
 
+	// existing install info (Task C)
+	existingInfo existingInstallInfo
+
 	// install timing
 	stepStarted time.Time
 	elapsed     time.Duration
@@ -177,12 +194,39 @@ func New(cfg Config) *Model {
 
 	steps := platformSteps()
 
+	// ── Mode detection (Task C) ───────────────────────────────────────────────
+	// Resolve the effective install mode. Priority: explicit Config.Mode flag >
+	// QORVEN_INSTALL_MODE env var > auto-detect (binary present → upgrade).
+	// Repair is treated as a full idempotent sequence (safe re-run).
+	effectiveMode := resolveInstallMode(cfg)
+	cfg.Mode = effectiveMode
+
+	// For upgrade mode, mark all non-upgrade steps as skipped upfront so the
+	// TUI only runs the binary-swap + service-restart steps.
+	if effectiveMode == InstallModeUpgrade {
+		upgradeIndices := platformUpgradeStepIndices()
+		upgradeSet := make(map[int]bool, len(upgradeIndices))
+		for _, i := range upgradeIndices {
+			upgradeSet[i] = true
+		}
+		for i := range steps {
+			if !upgradeSet[i] {
+				steps[i].status = stepDone
+				steps[i].detail = "skipped (upgrade)"
+			}
+		}
+	}
+
+	// ── Resume from checkpoint (Task B) ──────────────────────────────────────
 	// Load any prior install-state checkpoint. If a partial install was
 	// interrupted, mark already-completed steps as done so we can skip them on
 	// resume. If the state file is absent or corrupt, fall back to the full
 	// sequence (safe default — all steps are idempotent).
+	//
+	// In upgrade mode we don't try to resume a prior checkpoint — the upgrade
+	// fast-path is already minimal and re-running it is safe.
 	state := loadInstallState()
-	if state != nil && len(state.CompletedSteps) > 0 {
+	if effectiveMode != InstallModeUpgrade && state != nil && len(state.CompletedSteps) > 0 {
 		for i := range steps {
 			if stepCompletedInState(state, i) {
 				steps[i].status = stepDone
@@ -205,10 +249,11 @@ func New(cfg Config) *Model {
 			cfg.SkipTailscale = state.Config.SkipTailscale
 		}
 	} else {
-		// Fresh install — create a new state record now (populated as steps complete).
+		// Fresh install or upgrade — create a new state record (populated as
+		// steps complete).
 		state = &installState{
 			Version: cfg.Version,
-			Mode:    "fresh",
+			Mode:    string(effectiveMode),
 		}
 		state.Config.Port = cfg.Port
 		state.Config.DataDir = cfg.DataDir
@@ -218,15 +263,19 @@ func New(cfg Config) *Model {
 		state.Config.SkipNginx = cfg.SkipNginx
 	}
 
-	resuming := state != nil && len(state.CompletedSteps) > 0
+	resuming := effectiveMode != InstallModeUpgrade && state != nil && len(state.CompletedSteps) > 0
+
+	// Detect the existing binary version for the welcome screen display.
+	existingInfo := detectExistingInstall()
 
 	return &Model{
-		cfg:      cfg,
-		screen:   screenWelcome,
-		spinner:  sp,
-		steps:    steps,
-		state:    state,
-		resuming: resuming,
+		cfg:          cfg,
+		screen:       screenWelcome,
+		spinner:      sp,
+		steps:        steps,
+		state:        state,
+		resuming:     resuming,
+		existingInfo: existingInfo,
 	}
 }
 
@@ -812,9 +861,16 @@ func (m *Model) renderHeader() string {
 	brand := lipgloss.NewStyle().Bold(true).Foreground(wh).Render("⚡ Qorven")
 	// Version pill
 	ver := lipgloss.NewStyle().Foreground(lavender).Render("  " + m.cfg.Version)
-	// Separator + context
+	// Separator + context (shows mode for upgrade/repair)
 	sep := lipgloss.NewStyle().Foreground(lavender).Render("  │  ")
-	ctx := lipgloss.NewStyle().Foreground(lavender).Render("Server Installer")
+	ctxLabel := "Server Installer"
+	switch m.cfg.Mode {
+	case InstallModeUpgrade:
+		ctxLabel = "Upgrade"
+	case InstallModeRepair:
+		ctxLabel = "Repair"
+	}
+	ctx := lipgloss.NewStyle().Foreground(lavender).Render(ctxLabel)
 	left := brand + ver + sep + ctx
 
 	var right string
@@ -935,7 +991,33 @@ func (m *Model) viewWelcomeLeft() string {
 		Render(noticeInner)
 	b.WriteString(noticeBox + "\n\n")
 
-	// ── Resume notice (shown when a prior partial install is detected) ──────
+	// ── Mode notice (upgrade / repair / resume) ──────────────────────────────
+	switch m.cfg.Mode {
+	case InstallModeUpgrade:
+		existingVer := m.existingInfo.BinaryVersion
+		if existingVer == "" {
+			existingVer = "existing version"
+		}
+		upgradeBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cPrimary).
+			Padding(0, 2).
+			Width(innerW - 2).
+			Render(primSt.Render("⬆  Upgrade detected") + "\n" +
+				fgSt.Render(fmt.Sprintf("   Found %s — upgrading to %s.", existingVer, m.cfg.Version)) + "\n" +
+				mutedSt.Render("   Only the binary and service are updated. Your data, config, and DB are untouched."))
+		b.WriteString(upgradeBox + "\n\n")
+	case InstallModeRepair:
+		repairBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cAmber).
+			Padding(0, 2).
+			Width(innerW - 2).
+			Render(warnSt.Bold(true).Render("🔧  Repair mode") + "\n" +
+				warnSt.Render("   Re-running all steps to fix a broken install.") + "\n" +
+				mutedSt.Render("   All steps are idempotent — safe to re-run."))
+		b.WriteString(repairBox + "\n\n")
+	}
 	if m.resuming {
 		doneCount := 0
 		for _, s := range m.steps {
@@ -955,8 +1037,15 @@ func (m *Model) viewWelcomeLeft() string {
 
 	// ── CTA ──────────────────────────────────────────────────────────────────
 	ctaLabel := "▶  I understand — Install Qorven"
-	if m.resuming {
-		ctaLabel = "▶  Resume installation"
+	switch m.cfg.Mode {
+	case InstallModeUpgrade:
+		ctaLabel = "▶  Upgrade Qorven"
+	case InstallModeRepair:
+		ctaLabel = "▶  Repair installation"
+	default:
+		if m.resuming {
+			ctaLabel = "▶  Resume installation"
+		}
 	}
 	cta := lipgloss.NewStyle().
 		Bold(true).

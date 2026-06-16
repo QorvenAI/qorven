@@ -211,6 +211,66 @@ func isPrivateHostIP(host string) bool {
 	return isPrivateIP(ip)
 }
 
+// ── Install-mode detection ────────────────────────────────────────────────────
+
+// existingInstallInfo holds signals used to decide upgrade vs fresh vs repair.
+type existingInstallInfo struct {
+	// Found is true when an existing Qorven install is detected.
+	Found bool
+	// BinaryVersion is the version string reported by the existing binary (may be empty).
+	BinaryVersion string
+}
+
+// detectExistingInstall probes signals for an existing install: binary presence,
+// systemd unit, and config.toml. It does NOT run qorven itself so it is safe
+// when the binary is mid-update.
+func detectExistingInstall() existingInstallInfo {
+	info := existingInstallInfo{}
+
+	binPath := platformBinPath()
+	if _, err := os.Stat(binPath); err != nil {
+		return info // no binary → definitely fresh
+	}
+
+	// Binary exists — try to get its version (best-effort; ignore errors).
+	out, err := exec.Command(binPath, "version").CombinedOutput()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "v") || strings.Contains(line, "version") {
+				info.BinaryVersion = line
+				break
+			}
+		}
+	}
+
+	info.Found = true
+	return info
+}
+
+// resolveInstallMode returns the effective install mode given the user-supplied
+// Config.Mode, the QORVEN_INSTALL_MODE env var, and signals from detectExistingInstall.
+//
+//   - If Config.Mode is set explicitly (e.g. from a flag), use it.
+//   - If QORVEN_INSTALL_MODE env var is set, use it.
+//   - Otherwise auto-detect: no binary → fresh; binary present → upgrade.
+func resolveInstallMode(cfg Config) InstallMode {
+	if cfg.Mode != "" {
+		return cfg.Mode
+	}
+	if env := strings.TrimSpace(os.Getenv("QORVEN_INSTALL_MODE")); env != "" {
+		switch InstallMode(env) {
+		case InstallModeUpgrade, InstallModeRepair, InstallModeFresh:
+			return InstallMode(env)
+		}
+	}
+	info := detectExistingInstall()
+	if info.Found {
+		return InstallModeUpgrade
+	}
+	return InstallModeFresh
+}
+
 func detectMode(urlInput string, ips ipResult, tsIP string) string {
 	if tsIP != "" {
 		return "tailscale"

@@ -27,6 +27,10 @@ func platformSteps() []installStep {
 	}
 }
 
+// platformUpgradeStepIndices returns the step indices that run during an
+// upgrade on macOS. Only detect (0), swap binary (6), and restart service (7).
+func platformUpgradeStepIndices() []int { return []int{0, 6, 7} }
+
 // brewPrefix returns the actual Homebrew prefix — /opt/homebrew on Apple Silicon,
 // /usr/local on Intel. Never hardcode /usr/local on macOS.
 func brewPrefix() string {
