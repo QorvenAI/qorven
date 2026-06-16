@@ -70,19 +70,33 @@ if [ "$OS" = "darwin" ] && ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── uninstall (no binary needed) ──────────────────────────────────────────────
+# ── uninstall ─────────────────────────────────────────────────────────────────
+# Delegate to `qorven uninstall` (the single authoritative path) when the
+# binary is present. It removes binary, service, and optionally config/data/DB/
+# nginx/OS-user (--purge). If the binary is already gone, fall back to a minimal
+# direct cleanup so the script remains useful in disaster-recovery situations.
 if [ "$UNINSTALL" = "1" ]; then
   printf "\n  ${BOLD}${RED}Uninstalling Qorven${NC}\n\n"
+  QORVEN_BIN=""
+  for p in /opt/qorven/bin/qorven /usr/local/bin/qorven /usr/bin/qorven; do
+    if [ -x "$p" ]; then QORVEN_BIN="$p"; break; fi
+  done
+  if [ -n "$QORVEN_BIN" ]; then
+    # Binary present — let it handle everything cleanly (supports --purge).
+    exec "$QORVEN_BIN" uninstall --yes
+  fi
+  # Fallback: binary already gone — do minimal direct cleanup.
   systemctl stop    qorven 2>/dev/null || true
   systemctl disable qorven 2>/dev/null || true
   rm -f /etc/systemd/system/qorven.service
   systemctl daemon-reload 2>/dev/null || true
-  rm -f "$INSTALL_DIR/qorven"
-  rm -rf /etc/qorven
-  ok "Qorven uninstalled (data and database not removed)"
-  printf "\n  To also remove data:\n"
-  printf "    sudo rm -rf /var/lib/qorven /var/log/qorven\n"
-  printf "    sudo -u postgres psql -c 'DROP DATABASE qorven; DROP USER qorven;'\n\n"
+  rm -f "$INSTALL_DIR/qorven" /opt/qorven/bin/qorven
+  ok "Qorven uninstalled (data and database preserved)"
+  printf "\n  Config and data preserved. To remove everything:\n"
+  printf "    sudo rm -rf /var/lib/qorven /var/log/qorven /etc/qorven\n"
+  printf "    sudo -u postgres psql -c 'DROP DATABASE IF EXISTS qorven; DROP ROLE IF EXISTS qorven;'\n"
+  printf "    sudo userdel --remove qorven 2>/dev/null || true\n"
+  printf "    sudo rm -f /etc/nginx/conf.d/qorven.conf && sudo nginx -s reload\n\n"
   exit 0
 fi
 
