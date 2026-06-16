@@ -4,6 +4,34 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.12.1-alpha — 2026-06-16
+
+An install-experience release. Installation was rebuilt to be reliable, recoverable, and near-question-free on Linux, macOS, and Windows — fixing the PostgreSQL/pgvector failures some installs hit, and removing the networking questions that made setup feel complicated.
+
+### Changed
+
+- **Install just works, with one keypress.** The installer now detects your network automatically and hands you a URL — no more being asked how to reach Qorven or which IP to use. Whether you're on a cloud VM with a public IP, an EC2-style box behind NAT, or a home/office machine on a LAN, it picks the right address for you and only asks if it genuinely can't tell. Tailscale, custom ports, and a reverse proxy are still available, now tucked behind an "Advanced" option instead of interrupting everyone. ([1c92c77](https://github.com/QorvenAI/qorven/commit/1c92c77))
+- **PostgreSQL and pgvector install reliably.** Qorven now installs PostgreSQL 16 and the pgvector extension together from the official PostgreSQL repository in one step, instead of a fragile multi-try sequence that could silently leave vector search disabled. If a PostgreSQL is already running, it's reused rather than installing a second one. ([1c9f812](https://github.com/QorvenAI/qorven/commit/1c9f812))
+- **A failed install recovers when you re-run it.** Installs now checkpoint their progress and resume from where they stopped, and — critically — a missing pgvector is retried on the next run instead of being skipped forever. Re-running the installer over an existing setup upgrades it in place (swap the binary, run migrations) without touching your data, config, or database. ([2996d42](https://github.com/QorvenAI/qorven/commit/2996d42), [e588bf7](https://github.com/QorvenAI/qorven/commit/e588bf7), [1c9f812](https://github.com/QorvenAI/qorven/commit/1c9f812))
+- **Your settings survive a re-install.** Re-running the installer preserves your existing config, secrets, and database connection — your encryption key is never regenerated (which would have made stored API keys unreadable). ([80f1249](https://github.com/QorvenAI/qorven/commit/80f1249))
+- **Optional features fail calmly.** When something optional (like vector search) isn't available, the installer now says so plainly — "nothing is broken, enable it later" — instead of showing an alarming error. ([1c92c77](https://github.com/QorvenAI/qorven/commit/1c92c77))
+- **Windows installs are more dependable.** PostgreSQL is now installed via winget when available (falling back gracefully otherwise), and the installer no longer stops to ask for a database password — it runs unattended. ([30cb472](https://github.com/QorvenAI/qorven/commit/30cb472))
+- **macOS picks the right pgvector.** The installer now matches the pgvector extension to the PostgreSQL version you're actually running, and no longer hard-requires Homebrew when a database is already present. ([b2dbffa](https://github.com/QorvenAI/qorven/commit/b2dbffa))
+- **`qorven doctor` gained preflight and verify modes.** Run `qorven doctor --preflight` before installing to check your machine is ready, and `qorven doctor --verify` after to confirm everything came up correctly. ([c5b342a](https://github.com/QorvenAI/qorven/commit/c5b342a))
+- **A complete uninstall.** `qorven uninstall` now removes everything Qorven created, and `--purge` additionally removes the database, config, and data — while never removing PostgreSQL itself. ([a98465c](https://github.com/QorvenAI/qorven/commit/a98465c))
+
+### Fixed
+
+- **The login page no longer gets stuck in a redirect loop.** An expired session on the login screen could spiral into an endlessly nesting redirect URL — fixed so the login page stays put. ([198cd59](https://github.com/QorvenAI/qorven/commit/198cd59))
+- **The macOS installer no longer crashes on completion** (a step-tracking bug that affected the Mac install). ([1c92c77](https://github.com/QorvenAI/qorven/commit/1c92c77))
+
+### Security
+
+- A failed install never uninstalls a PostgreSQL you already had — rollback only removes a database server this installer itself installed. ([cd7dd25](https://github.com/QorvenAI/qorven/commit/cd7dd25))
+- The database password is no longer shown in install error messages. ([c27991d](https://github.com/QorvenAI/qorven/commit/c27991d))
+
+---
+
 ## v0.12.0-alpha — 2026-06-15
 
 A platform-wide quality and hardening release. Every major surface — governance, workflows, scheduling, the org, agent runtime, budgets, chat, mail, calendar, drive, the knowledge graph, channels, social, and connectors — was taken from "looks built" to "actually works," and a dedicated security pass closed the live exposure across the app. The recurring theme: strong engines that were half-wired to the UI are now wired end-to-end, and the things that silently did nothing now do what they say.
