@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -550,6 +552,9 @@ mode = "disabled"
 		return fmt.Errorf("write .env: %w", err)
 	}
 
+	// (redactDSNPassword is defined below; it hides any embedded password before
+	// the DSN is shown to the user in an error message.)
+
 	// Run migrations before starting the service.
 	// Retry up to 3 times to allow the socket a moment to become available.
 	// A FINAL failure is fatal: starting the service on a broken/dirty schema
@@ -573,11 +578,27 @@ mode = "disabled"
 				"If the schema is dirty from a previous failed run:\n"+
 				"  sudo qorven migrate force <N>  (use the version shown in the error above)\n\n"+
 				"Underlying error: %w",
-			configPath, dsn, migrateErr)
+			configPath, redactDSNPassword(dsn), migrateErr)
 	}
 
 	platformRestartService(configPath)
 	return nil
+}
+
+// redactDSNPassword hides any embedded password in a Postgres DSN before it is
+// shown to the user (e.g. in an error message). Handles both the URL form
+// (postgres://user:pass@host/db) and the keyword form (password=secret).
+func redactDSNPassword(dsn string) string {
+	if u, err := url.Parse(dsn); err == nil && u.User != nil {
+		if _, hasPw := u.User.Password(); hasPw {
+			u.User = url.UserPassword(u.User.Username(), "****")
+			dsn = u.String()
+		}
+	}
+	// Keyword form: password=... (with or without quotes), and the password=
+	// query param on a URL DSN.
+	reKw := regexp.MustCompile(`(?i)password=('[^']*'|"[^"]*"|[^\s&]+)`)
+	return reKw.ReplaceAllString(dsn, "password=****")
 }
 
 // ── Layout primitives ─────────────────────────────────────────────────────────
