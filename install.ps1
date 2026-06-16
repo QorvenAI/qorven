@@ -53,7 +53,12 @@ function Write-Info { param($msg) Write-Host "       $msg" -ForegroundColor Dark
 function Write-Rb   { param($msg) Write-Host "  [RB] $msg" -ForegroundColor DarkGray }
 
 # ── rollback state ────────────────────────────────────────────────────────────
-$script:RollbackInstalledPg       = $false  # we ran the EDB MSI installer
+# How (if at all) THIS run installed PostgreSQL, so rollback uninstalls it with
+# the right tool and NEVER removes a PostgreSQL the user already had.
+#   'none'   — PG pre-existed (or we didn't install it): do NOT touch it.
+#   'winget' — we installed it via winget: roll back with winget uninstall.
+#   'msi'    — we installed it via the EDB MSI: roll back with the MSI uninstaller.
+$script:RollbackPgMethod          = 'none'
 $script:RollbackCreatedRole       = $false  # we ran CREATE ROLE qorven
 $script:RollbackCreatedDb         = $false  # we ran CREATE DATABASE qorven
 $script:RollbackCreatedInstallDir = $false  # we created $InstallDir
@@ -118,11 +123,22 @@ function Invoke-Rollback {
         }
     } catch {}
 
-    # PostgreSQL — only if we installed it
-    if ($script:RollbackInstalledPg -and (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Rb "Removing PostgreSQL (we installed it)..."
+    # PostgreSQL — only if THIS run installed it, and with the matching uninstaller.
+    # Never remove a PostgreSQL that pre-existed ('none').
+    if ($script:RollbackPgMethod -eq 'winget' -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Rb "Removing PostgreSQL (installed via winget this run)..."
         winget uninstall --id PostgreSQL.PostgreSQL.$PgVersion --silent 2>&1 | Out-Null
         Write-Rb "PostgreSQL removed"
+    } elseif ($script:RollbackPgMethod -eq 'msi') {
+        # EDB MSI registers an ARP uninstall entry; invoke it silently if found.
+        Write-Rb "Removing PostgreSQL (installed via EDB MSI this run)..."
+        $unins = "C:\Program Files\PostgreSQL\$PgVersion\uninstall-postgresql.exe"
+        if (Test-Path $unins) {
+            & $unins --mode unattended 2>&1 | Out-Null
+            Write-Rb "PostgreSQL removed"
+        } else {
+            Write-Rb "EDB uninstaller not found at $unins — remove PostgreSQL $PgVersion manually if unwanted"
+        }
     }
 
     # Temp files
@@ -298,10 +314,18 @@ if ($pgService) {
         Write-Info "Installing PostgreSQL $PgVersion via winget..."
         $wingetResult = winget install --id "PostgreSQL.PostgreSQL.$PgVersion" `
             --silent --accept-package-agreements --accept-source-agreements 2>&1
-        if ($LASTEXITCODE -eq 0 -or $wingetResult -match 'successfully installed|already installed') {
+        $wgAlready = ($wingetResult -match 'already installed')
+        if ($LASTEXITCODE -eq 0 -or $wingetResult -match 'successfully installed' -or $wgAlready) {
             $pgInstalledViaWinget = $true
-            $script:RollbackInstalledPg = $true
-            Write-Ok "PostgreSQL $PgVersion installed via winget"
+            # Only mark for rollback if WE actually installed it this run. If winget
+            # reports "already installed", PostgreSQL pre-existed — never uninstall it.
+            if ($wgAlready) {
+                $script:RollbackPgMethod = 'none'
+                Write-Ok "PostgreSQL $PgVersion already present (winget) — reusing it"
+            } else {
+                $script:RollbackPgMethod = 'winget'
+                Write-Ok "PostgreSQL $PgVersion installed via winget"
+            }
             Start-Sleep -Seconds 5
 
             # winget's PostgreSQL package does not set a known superuser password
@@ -339,7 +363,7 @@ if ($pgService) {
                     Write-Warn "winget PostgreSQL installed but connection test failed — falling back to EDB MSI for a known-password install."
                     winget uninstall --id "PostgreSQL.PostgreSQL.$PgVersion" --silent 2>&1 | Out-Null
                     $pgInstalledViaWinget = $false
-                    $script:RollbackInstalledPg = $false
+                    $script:RollbackPgMethod = 'none'
                     $env:PGPASSWORD = $PgSuperPass  # restore fresh random password for MSI path
                 }
             } else {
@@ -347,7 +371,7 @@ if ($pgService) {
                 Write-Warn "psql.exe not found after winget install — falling back to EDB MSI."
                 winget uninstall --id "PostgreSQL.PostgreSQL.$PgVersion" --silent 2>&1 | Out-Null
                 $pgInstalledViaWinget = $false
-                $script:RollbackInstalledPg = $false
+                $script:RollbackPgMethod = 'none'
                 $env:PGPASSWORD = $PgSuperPass
             }
         } else {
@@ -393,7 +417,7 @@ if ($pgService) {
         $proc = Start-Process -FilePath $MsiPath -ArgumentList $installArgs -Wait -PassThru
         Remove-Item $MsiPath -Force -ErrorAction SilentlyContinue
         if ($proc.ExitCode -ne 0) { Invoke-Rollback "PostgreSQL installer exited with code $($proc.ExitCode)" }
-        $script:RollbackInstalledPg = $true
+        $script:RollbackPgMethod = 'msi'
         Write-Ok "PostgreSQL $PgVersion installed (EDB MSI)"
         Start-Sleep -Seconds 5
     }

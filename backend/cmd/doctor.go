@@ -664,7 +664,10 @@ func runDoctor() error {
 
 	// ── Gateway ──
 	fmt.Println()
-	gw := "http://" + cfg.Server.Listen
+	// Normalize the bind address for an OUTBOUND probe: 0.0.0.0 means "listen on
+	// all interfaces" but is not a valid connect target on macOS/Windows — dial
+	// loopback instead so the health check doesn't false-fail.
+	gw := "http://" + strings.Replace(cfg.Server.Listen, "0.0.0.0", "127.0.0.1", 1)
 	resp, err := http.Get(gw + "/health")
 	if err == nil && resp.StatusCode == 200 {
 		resp.Body.Close()
