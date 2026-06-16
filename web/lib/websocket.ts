@@ -534,8 +534,13 @@ export async function connectWebSocket() {
             if (typeof document !== 'undefined') {
               document.cookie = 'qorven_token=; path=/; max-age=0';
             }
-            const next = encodeURIComponent(window.location.pathname + window.location.search);
-            window.location.href = `/login?next=${next}&reason=session_expired`;
+            // Don't redirect (and don't build a self-referential `next`) when
+            // we're already on the login/public page — otherwise the reconnect
+            // loop nests `/login?next=/login?next=…` recursively.
+            if (!window.location.pathname.startsWith('/login')) {
+              const next = encodeURIComponent(window.location.pathname + window.location.search);
+              window.location.href = `/login?next=${next}&reason=session_expired`;
+            }
           }
         })
         .catch(() => {/* backend down — normal reconnect will handle */});
