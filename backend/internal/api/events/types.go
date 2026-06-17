@@ -8,7 +8,7 @@
 //	{"type": "<domain>.<verb>", "properties": { ... }}
 //
 // The discriminator lives on the envelope, not on the SSE "event:" field.
-// Clients (web /code page + bubbletea TUI + opencode-sdk-go-alike) decode
+// Clients (web /code page + CLI clients) decode
 // the envelope via ssestream.Stream[Envelope] and switch on Type.
 //
 // This file is the single source of truth. Adding a new event requires:

@@ -3,8 +3,8 @@
 // that can be found in the LICENSE file.
 
 // Package commands defines the canonical command surface shared between
-// the Qorven web UI and the bubbletea TUI. Every user-initiated action
-// (send a prompt, open the model picker, resize the TUI, show a toast)
+// the Qorven web UI and CLI clients. Every user-initiated action
+// (send a prompt, open the model picker, show a toast)
 // flows through one of these endpoints.
 //
 // The contract is the same across clients:

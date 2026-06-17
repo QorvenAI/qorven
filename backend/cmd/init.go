@@ -16,7 +16,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/spf13/cobra"
 
-	"github.com/qorvenai/qorven/cmd/wizard"
 	"github.com/qorvenai/qorven/internal/config"
 )
 
@@ -60,7 +59,7 @@ func init() {
 	initCmd.Flags().StringVar(&initAuthToken, "auth-token", "", "Gateway auth token (auto-generated if empty)")
 	initCmd.Flags().StringVar(&initWebListen, "port", "0.0.0.0:443", "Web UI listen address (host:port or just port)")
 	initCmd.Flags().StringVar(&initAPIListen, "api-port", fmt.Sprintf("0.0.0.0:%d", config.DefaultPort), "Internal API listen address (loopback:port or just port)")
-	initCmd.Flags().BoolVar(&initNonInteractive, "non-interactive", false, "Non-interactive mode (requires --db-dsn and --api-key)")
+	initCmd.Flags().BoolVar(&initNonInteractive, "non-interactive", false, "Deprecated no-op — init is always non-interactive now")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -94,32 +93,10 @@ func runInit(cmd *cobra.Command) error {
 	apiKey := initAPIKey
 	apiBase := initAPIBase
 
-	if !initNonInteractive && (dsn == "" || provider == "") {
-		// Launch the TUI to collect what we're still missing.
-		result, err := wizard.RunInit()
-		if err != nil {
-			return fmt.Errorf("init wizard error: %w", err)
-		}
-		if result.Cancelled {
-			return fmt.Errorf("setup cancelled")
-		}
-		if dsn == "" {
-			// Build DSN from TUI result
-			r := result
-			if r.DBPassword != "" {
-				dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
-					r.DBUser, r.DBPassword, r.DBHost, r.DBPort, r.DBName, r.DBSSLMode)
-			} else {
-				dsn = fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=%s",
-					r.DBUser, r.DBHost, r.DBPort, r.DBName, r.DBSSLMode)
-			}
-		}
-		if provider == "" {
-			provider = result.Provider
-			apiKey = result.APIKey
-			apiBase = result.APIBase
-		}
-	}
+	// init is non-interactive: it never prompts. The DSN is resolved from flags
+	// → env → existing config → auto-probe → socket default (below), and the
+	// provider falls back to a sensible default. A bad DSN surfaces as a clear
+	// "Testing connection… FAILED" error further down.
 
 	// Last-resort DSN if still empty.
 	if dsn == "" {

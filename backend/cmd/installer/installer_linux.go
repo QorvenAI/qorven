@@ -448,32 +448,12 @@ func pgvectorEnabled() bool {
 	return err == nil && strings.TrimSpace(out) == "1"
 }
 
-func platformRequirementsText() string {
-	req := func(icon, label, detail string) string {
-		return icon + "  " + fgSt.Render(label) + "\n" +
-			"   " + mutedSt.Render(detail)
-	}
-	return req("🐧", "Ubuntu 20.04+ / Debian 11+ / RHEL 8+", "systemd-based Linux") + "\n" +
-		req("🔑", "root or sudo access", "to install packages & services") + "\n" +
-		req("💾", "2 GB RAM  ·  10 GB disk", "minimum recommended") + "\n" +
-		req("🌐", "Internet access", "to pull packages on first install")
-}
-
+// platformServiceCommands returns the post-install management commands shown in
+// the final summary (plain text — no terminal styling).
 func platformServiceCommands() string {
-	return mutedSt.Render("  systemctl status qorven") + "\n" +
-		mutedSt.Render("  journalctl -u qorven -f") + "\n" +
-		mutedSt.Render("  sudo qorven migrate up")
-}
-
-func platformErrorHints() (common, logs string) {
-	common = dimSt.Render("  No internet — check curl / DNS") + "\n" +
-		dimSt.Render("  Port already in use") + "\n" +
-		dimSt.Render("  postgresql service not starting") + "\n" +
-		dimSt.Render("  Disk full — needs 10 GB free") + "\n" +
-		dimSt.Render("  Not running as root (use sudo)")
-	logs = mutedSt.Render("  journalctl -u qorven -f") + "\n" +
-		mutedSt.Render("  journalctl -u postgresql* -n 30")
-	return
+	return "  systemctl status qorven\n" +
+		"  journalctl -u qorven -f\n" +
+		"  sudo qorven migrate up"
 }
 
 func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {

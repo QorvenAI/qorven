@@ -7,10 +7,10 @@ package installer
 import "fmt"
 
 // Windows installation is handled by the PowerShell script (install.ps1).
-// These stubs satisfy the build — the TUI installer never runs on Windows.
+// These stubs satisfy the build — `qorven install` is not used on Windows.
 
-func platformSteps() []installStep        { return nil }
-func platformUpgradeStepIndices() []int   { return nil }
+func platformSteps() []installStep      { return nil }
+func platformUpgradeStepIndices() []int { return nil }
 
 func platformConfigDir() string { return `C:\ProgramData\Qorven` }
 
@@ -24,22 +24,8 @@ func probeSocketDSN() string {
 	return "postgres://qorven@localhost:5432/qorven?sslmode=disable"
 }
 
-func platformRequirementsText() string {
-	return fgSt.Render("Windows not supported via this wizard") + "\n" +
-		mutedSt.Render("Use the PowerShell installer instead:")  + "\n" +
-		dimSt.Render("  iwr https://get.qorven.ai/win | iex")
-}
-
 func platformServiceCommands() string {
-	return mutedSt.Render("  Get-Service QorvenAI") + "\n" +
-		mutedSt.Render("  qorven migrate up")
-}
-
-func platformErrorHints() (common, logs string) {
-	common = dimSt.Render("  Use the PowerShell installer:") + "\n" +
-		dimSt.Render("  iwr https://get.qorven.ai/win | iex")
-	logs = mutedSt.Render("  See C:\\ProgramData\\Qorven\\logs\\qorven.log")
-	return
+	return "  Get-Service QorvenAI\n  qorven migrate up"
 }
 
 func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {

@@ -151,33 +151,12 @@ func detectRunningPGVersion() string {
 	return ""
 }
 
-func platformRequirementsText() string {
-	req := func(icon, label, detail string) string {
-		return icon + "  " + fgSt.Render(label) + "\n" +
-			"   " + mutedSt.Render(detail)
-	}
-	return req("🍎", "macOS 12 Monterey or later", "Intel or Apple Silicon") + "\n" +
-		req("🍺", "Homebrew", "brew.sh — auto-detected at /opt/homebrew or /usr/local") + "\n" +
-		req("🔑", "sudo access", "to install the service and write to system dirs") + "\n" +
-		req("💾", "2 GB RAM  ·  5 GB disk", "minimum recommended") + "\n" +
-		req("🌐", "Internet access", "to pull packages on first install")
-}
-
+// platformServiceCommands returns the post-install management commands shown in
+// the final summary (plain text — no terminal styling).
 func platformServiceCommands() string {
-	return mutedSt.Render("  sudo launchctl list ai.qorven.server") + "\n" +
-		mutedSt.Render("  tail -f /usr/local/var/log/qorven.log") + "\n" +
-		mutedSt.Render("  sudo qorven migrate up")
-}
-
-func platformErrorHints() (common, logs string) {
-	common = dimSt.Render("  Homebrew not installed (brew.sh)") + "\n" +
-		dimSt.Render("  Multiple PostgreSQL versions — check brew services list") + "\n" +
-		dimSt.Render("  Port already in use") + "\n" +
-		dimSt.Render("  Disk full — needs 5 GB free") + "\n" +
-		dimSt.Render("  Not running with sudo")
-	logs = mutedSt.Render("  brew services list") + "\n" +
-		mutedSt.Render("  tail -f /usr/local/var/log/qorven.log")
-	return
+	return "  sudo launchctl list ai.qorven.server\n" +
+		"  tail -f /usr/local/var/log/qorven.log\n" +
+		"  sudo qorven migrate up"
 }
 
 func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {

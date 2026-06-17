@@ -14,10 +14,12 @@ import (
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install Qorven on this server (system dependencies, DB, service)",
-	Long: `Full server installation wizard.
+	Long: `Install Qorven on this server.
 
-Installs PostgreSQL if missing, creates the qorven database, copies the
-binary, and registers a system service so Qorven starts on boot.
+Runs non-interactively, streaming one line of progress per step — safe to run
+over ssh, cloud-init, or CI. Installs PostgreSQL if missing, creates the qorven
+database, copies the binary, and registers a system service so Qorven starts on
+boot. Re-running is safe: it resumes a partial install and repairs an existing one.
 
   Linux / macOS: must be run as root (or with sudo)
   Windows:       use the PowerShell installer instead:

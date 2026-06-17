@@ -208,14 +208,6 @@ func isValidIP(s string) bool {
 	return s != "" && net.ParseIP(s) != nil
 }
 
-func isPrivateHostIP(host string) bool {
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return isPrivateIP(ip)
-}
-
 // ── Install-mode detection ────────────────────────────────────────────────────
 
 // existingInstallInfo holds signals used to decide upgrade vs fresh vs repair.
@@ -286,27 +278,4 @@ func resolveInstallMode(cfg Config) InstallMode {
 		return InstallModeUpgrade
 	}
 	return InstallModeFresh
-}
-
-func detectMode(urlInput string, ips ipResult, tsIP string) string {
-	if tsIP != "" {
-		return "tailscale"
-	}
-	host := urlInput
-	if strings.Contains(host, "://") {
-		host = strings.SplitN(host, "://", 2)[1]
-	}
-	host = strings.SplitN(host, "/", 2)[0]
-	if strings.HasPrefix(host, "100.") {
-		return "tailscale"
-	}
-	if ips.behindNAT {
-		return "nat"
-	}
-	if host == "localhost" || strings.HasPrefix(host, "127.") ||
-		strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") ||
-		strings.HasPrefix(host, "100.64.") || isPrivateHostIP(host) {
-		return "local"
-	}
-	return "public"
 }
