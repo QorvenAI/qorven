@@ -863,8 +863,29 @@ server {
 				return "skipped (download failed)", true, nil
 			}
 			os.Chmod(script, 0755)
-			if err = runQuiet("sh", script); err != nil {
-				return "skipped (install failed)", true, nil
+			// The install script runs apt under the hood. On a fresh box the apt
+			// lock may still be held by an earlier step (Docker, system packages)
+			// or by unattended-upgrades, so a single attempt can spuriously fail.
+			// Retry a few times, surfacing the real output if it never succeeds.
+			var out string
+			ok := false
+			for attempt := 0; attempt < 3; attempt++ {
+				out, err = runSilent("sh", script)
+				if err == nil {
+					ok = true
+					break
+				}
+				time.Sleep(5 * time.Second)
+			}
+			if !ok {
+				msg := strings.TrimSpace(out)
+				if len(msg) > 200 {
+					msg = msg[len(msg)-200:]
+				}
+				if msg == "" {
+					msg = err.Error()
+				}
+				return "skipped (install failed: " + msg + ")", true, nil
 			}
 		}
 		if cfg.TailscaleAuthKey != "" {

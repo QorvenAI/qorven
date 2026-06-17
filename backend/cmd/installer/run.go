@@ -20,6 +20,18 @@ func Run(cfg Config) (bool, error) {
 
 	logHeader(cfg, resuming)
 
+	// Ask how the server will be reached BEFORE the install log scrolls by, so
+	// the question is the first thing the user sees. On an upgrade — or when
+	// there's no terminal — chooseConnection returns immediately without asking.
+	var conn connChoice
+	if cfg.Mode != InstallModeUpgrade {
+		conn = chooseConnection(cfg)
+		// Apply the choice: only attempt the Tailscale step when chosen.
+		cfg.SkipTailscale = !conn.useTailscale
+	} else {
+		conn = connChoice{useTailscale: !cfg.SkipTailscale}
+	}
+
 	for i := range steps {
 		// Steps pre-marked done by upgrade/resume are reported and skipped.
 		if steps[i].status == stepDone {
@@ -48,8 +60,8 @@ func Run(cfg Config) (bool, error) {
 		}
 	}
 
-	// Resolve the URL the UI will be reached at — auto-detected, never prompted.
-	baseURL := resolveBaseURL(steps)
+	// Resolve the URL the UI will be reached at, honouring the user's choice.
+	baseURL := resolveBaseURL(steps, conn)
 
 	if err := writeConfigAndMigrate(cfg, baseURL); err != nil {
 		fmt.Printf("\n%s\n", err.Error())
@@ -60,16 +72,29 @@ func Run(cfg Config) (bool, error) {
 	return true, nil
 }
 
-// resolveBaseURL picks the address to advertise in config + the summary. It
-// honours a Tailscale "connected:<ip>" result first, then a detected public or
-// LAN IP, then falls back to localhost. A Tailscale "url:<auth-url>" result
-// means the node still needs browser authorization — we cannot block on that in
-// a non-interactive run, so we fall back to a detected IP and surface the auth
-// URL in the final summary instead.
-func resolveBaseURL(steps []installStep) string {
+// resolveBaseURL picks the address to advertise in config + the summary, in
+// priority order:
+//  1. A user-chosen override (a detected IP they picked, or a custom URL).
+//  2. A Tailscale result: "connected:<ip>" → use it; "url:<auth-url>" → wait for
+//     the user to authorize in a browser, then use the assigned 100.x address.
+//  3. A detected public or LAN IP.
+//  4. localhost.
+func resolveBaseURL(steps []installStep, conn connChoice) string {
+	if conn.overrideURL != "" {
+		return conn.overrideURL
+	}
+
 	tsDetail := stepDetailByLabel(steps, "tailscale")
-	if strings.HasPrefix(tsDetail, "connected:") {
+	switch {
+	case strings.HasPrefix(tsDetail, "connected:"):
 		return strings.TrimPrefix(tsDetail, "connected:")
+	case strings.HasPrefix(tsDetail, "url:"):
+		authURL := strings.TrimPrefix(tsDetail, "url:")
+		if ip := awaitTailscaleAuth(authURL, 3*time.Minute); ip != "" {
+			return ip
+		}
+		// Not authorized in time — fall through to a detected address so the
+		// service still has a usable base_url; the summary repeats the auth URL.
 	}
 
 	ips := detectIPs()
