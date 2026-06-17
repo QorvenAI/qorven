@@ -659,8 +659,10 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		psql("GRANT ALL PRIVILEGES ON DATABASE qorven TO qorven;", "postgres")
 		psql("GRANT ALL ON SCHEMA public TO qorven;", "qorven")
 
-		// pgvector — must be created as superuser (postgres), not the app user.
-		// Also grant qorven SUPERUSER so it can recreate the extension after factory reset.
+		// pgvector — must be created as superuser (postgres), not the app user,
+		// and MUST be created in the qorven database (the one migrations run
+		// against), NOT the postgres maintenance database. Also grant qorven
+		// SUPERUSER so it can recreate the extension after a factory reset.
 		//
 		// pgvector is a HARD requirement, NOT an optional add-on: the schema
 		// declares vector(384)/vector(1536) columns and ivfflat/hnsw indexes.
@@ -669,13 +671,13 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		// it cannot be enabled, fail early with a clear, actionable message at
 		// the step that owns the problem — instead of letting migration fail
 		// unreadably four steps later.
-		psql("CREATE EXTENSION IF NOT EXISTS vector;", "postgres")
+		psql("CREATE EXTENSION IF NOT EXISTS vector;", "qorven")
 		psql("ALTER USER qorven SUPERUSER;", "postgres")
 		if !pgvectorEnabled() {
 			// Last-ditch: (re)install the package for the RUNNING server major
 			// — step 3's install may have warned-and-continued — then retry.
 			if _, ivErr := installPgvector(runningPGMajor()); ivErr == nil {
-				psql("CREATE EXTENSION IF NOT EXISTS vector;", "postgres")
+				psql("CREATE EXTENSION IF NOT EXISTS vector;", "qorven")
 			}
 		}
 		if pgvectorEnabled() {
@@ -684,7 +686,7 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		// Still not enabled. This WILL break migration, so stop now with the
 		// real PostgreSQL error and the exact package to install.
 		pgMaj := runningPGMajor()
-		createOut, _ := psql("CREATE EXTENSION vector;", "postgres")
+		createOut, _ := psql("CREATE EXTENSION vector;", "qorven")
 		detail := strings.TrimSpace(createOut)
 		if detail == "" {
 			detail = "(no error detail from PostgreSQL — the pgvector package is likely not installed)"
@@ -770,8 +772,12 @@ WantedBy=multi-user.target
 		}
 		runQuiet("systemctl", "daemon-reload")
 		runQuiet("systemctl", "enable", "qorven")
-		runQuiet("systemctl", "start", "qorven")
-		return "enabled", false, nil
+		// Do NOT start the service here. Config + .env are written and migrations
+		// run AFTER all steps complete; starting now would boot a service with no
+		// DSN that restart-loops and races the installer's own migration on the
+		// pg_extension catalog ("tuple concurrently updated"). The finalize step
+		// starts the service once the schema is ready.
+		return "enabled (starts after migrations)", false, nil
 
 	case 10: // nginx
 		if cfg.SkipNginx {

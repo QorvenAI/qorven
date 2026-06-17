@@ -10,8 +10,10 @@ import (
 )
 
 func main() {
-	// Inject the embedded migrations FS so the gateway can run schema
-	// migrations on first boot without an external migrations/ directory.
+	// Inject the embedded migrations FS so both the gateway (on first boot) and
+	// the `qorven migrate` command can run schema migrations without an external
+	// migrations/ directory — the installed binary is fully self-contained.
 	gateway.SetEmbeddedMigrations(EmbeddedMigrations)
+	cmd.SetEmbeddedMigrations(EmbeddedMigrations)
 	cmd.Execute()
 }

@@ -426,6 +426,11 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 </dict>
 </plist>
 `, platformBinPath(), platformConfigDir(), prefix, dataDir, logFile, logFile)
+		// Write the plist but do NOT load it here. Config + .env are written and
+		// migrations run AFTER all steps complete; loading now (RunAtLoad=true)
+		// would boot a service with no DSN that races the installer's own
+		// migration on the pg_extension catalog ("tuple concurrently updated").
+		// platformRestartService loads it in the finalize step, post-migration.
 		plistPath := launchdPlistPath()
 		if err = os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 			// Try user LaunchAgent as fallback (no sudo needed)
@@ -435,17 +440,9 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			if werr := os.WriteFile(plistPath, []byte(plist), 0644); werr != nil {
 				return "", false, fmt.Errorf("write plist (tried system and user location): %w", err)
 			}
-			exec.Command("launchctl", "unload", plistPath).Run()
-			if err = runQuiet("launchctl", "load", "-w", plistPath); err != nil {
-				return "", false, fmt.Errorf("launchctl load (user agent): %w", err)
-			}
-			return "registered as user LaunchAgent (not system-wide)", true, nil
+			return "registered as user LaunchAgent (starts after migrations)", true, nil
 		}
-		exec.Command("launchctl", "unload", plistPath).Run()
-		if err = runQuiet("launchctl", "load", "-w", plistPath); err != nil {
-			return "", false, fmt.Errorf("launchctl load: %w", err)
-		}
-		return "registered — auto-start on boot", false, nil
+		return "registered — auto-start on boot (starts after migrations)", false, nil
 
 	case 8: // Tailscale (optional)
 		if cfg.SkipTailscale {

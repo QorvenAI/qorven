@@ -12,6 +12,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,6 +28,17 @@ var (
 	migrateDir     string
 	migrateBootExt bool
 )
+
+// embeddedMigrations holds the migrations FS injected by SetEmbeddedMigrations
+// (from main, via go:embed). When set, `qorven migrate up` uses it so an
+// installed binary is self-contained — no migrations/ directory on disk is
+// required. The --dir flag remains a fallback for CI/dev where the embedded FS
+// is absent.
+var embeddedMigrations fs.FS
+
+// SetEmbeddedMigrations injects the embedded migrations FS so the migrate
+// command works on a fresh install with no external migrations/ directory.
+func SetEmbeddedMigrations(fsys fs.FS) { embeddedMigrations = fsys }
 
 func init() {
 	migrateCmd := &cobra.Command{
@@ -154,10 +166,17 @@ func runMigrateUp(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("bootstrap extensions: %w", err)
 		}
 	}
-	if err := db.MigrateUp(migrateDir); err != nil {
+	// Prefer the embedded migrations FS (set on an installed binary) so no
+	// migrations/ directory on disk is required. MigrateUpFS falls back to
+	// migrateDir on disk when the embedded FS is nil (CI/dev).
+	if err := db.MigrateUpFS(embeddedMigrations, migrateDir); err != nil {
 		return fmt.Errorf("migrate up: %w", err)
 	}
-	cmd.Printf("migrate up: applied from %s\n", migrateDir)
+	if embeddedMigrations != nil {
+		cmd.Printf("migrate up: applied from embedded migrations\n")
+	} else {
+		cmd.Printf("migrate up: applied from %s\n", migrateDir)
+	}
 	return nil
 }
 
