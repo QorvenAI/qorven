@@ -7,7 +7,7 @@
 #
 # What it does:
 #   1. Installs PostgreSQL (winget-first; EDB MSI fallback if winget is absent or fails)
-#   2. Installs pgvector extension (optional — skipped gracefully if unavailable)
+#   2. Installs pgvector extension (required — the schema uses vector columns)
 #   3. Creates the qorven database and role
 #   4. Downloads the Qorven binary (windows/amd64)
 #   5. Writes config.toml + secrets
@@ -446,8 +446,8 @@ $script:PgBinDir = $PgBinDir
 $env:PATH += ";$PgBinDir"
 Write-Ok "PostgreSQL service running — psql at $PgBinDir"
 
-# ── Step 3: pgvector (optional) ───────────────────────────────────────────────
-Write-Step 3 7 "pgvector (vector search — optional)"
+# ── Step 3: pgvector (required) ───────────────────────────────────────────────
+Write-Step 3 7 "pgvector (vector search — required)"
 
 # Download and install a pre-built pgvector ZIP from the pgvector GitHub releases.
 # No Visual Studio Build Tools required — pure binary install.
@@ -487,8 +487,8 @@ try {
     $pgvectorInstalled = $true
     Write-Ok "pgvector $pgvTag installed (pre-built binary)"
 } catch {
-    Write-Warn "pgvector download/install failed — vector search will be disabled."
-    Write-Info "Install manually later: https://github.com/pgvector/pgvector#windows"
+    Write-Warn "pgvector download/install failed here — will verify and retry at database setup."
+    Write-Info "Manual install reference: https://github.com/pgvector/pgvector#windows"
 } finally {
     Remove-Item $pgvectorZip  -Force -ErrorAction SilentlyContinue
     Remove-Item $pgvectorTmp  -Recurse -Force -ErrorAction SilentlyContinue
@@ -529,13 +529,20 @@ if (-not $dbExists) {
     Write-Ok "Database 'qorven' already exists"
 }
 
-# Enable pgvector only if the extension files are actually present
+# pgvector is a HARD requirement, NOT optional: the schema declares vector(384)/
+# vector(1536) columns and ivfflat/hnsw indexes. Without the extension the
+# migration that runs at service start dies with "type vector does not exist",
+# surfacing only as a generic service-start failure. Enable it here and fail
+# early with a clear message if it cannot be enabled.
 $vectorAvailable = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d postgres -tAc "SELECT name FROM pg_available_extensions WHERE name='vector'" 2>&1) -match 'vector')
 if ($vectorAvailable) {
     & "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d qorven -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>&1 | Out-Null
+}
+$vectorEnabled = ((& "$PgBinDir\psql.exe" -U postgres -h 127.0.0.1 -d qorven -tAc "SELECT 1 FROM pg_extension WHERE extname='vector'" 2>&1) -match '1')
+if ($vectorEnabled) {
     Write-Ok "pgvector extension enabled"
 } else {
-    Write-Warn "pgvector extension not available — vector search disabled (Qorven works without it)"
+    Invoke-Rollback "pgvector could not be enabled — it is REQUIRED (the schema uses vector columns). Re-run Step 3, or install the pre-built pgvector binary for PostgreSQL $PgVersion from https://github.com/pgvector/pgvector#windows, then re-run this installer."
 }
 
 Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue

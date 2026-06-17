@@ -53,7 +53,22 @@ func platformMigrate(configPath, dsn string) error {
 		"QORVEN_POSTGRES_DSN="+dsn,
 		"/opt/qorven/bin/qorven", "migrate", "up",
 	)
-	return cmd.Run()
+	// Capture output so a migration failure surfaces the REAL reason (a missing
+	// extension, a failing statement, a permission error) instead of a bare
+	// "exit status 1".
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return err
+		}
+		// Migration errors put the useful line last — keep the tail.
+		if len(msg) > 1200 {
+			msg = "…" + msg[len(msg)-1200:]
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
 }
 
 // probeSocketDSN tries Unix socket first (fastest, no password), falls back to TCP.
@@ -308,8 +323,11 @@ func installPgvector(pgMaj string) (bool, error) {
 			return true, nil
 		}
 
-		// Ensure PGDG repo and retry.
+		// Ensure PGDG repo and retry. ensurePGDGRepo only runs apt-get update
+		// when it actually writes the repo; if the repo already exists the apt
+		// index may be stale on a fresh box, so refresh explicitly before retry.
 		if err := ensurePGDGRepo(); err == nil {
+			runQuiet("apt-get", "update", "-qq")
 			if runQuiet("apt-get", "install", "-y", "-qq", versioned) == nil {
 				return true, nil
 			}
@@ -555,11 +573,13 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 		if pvOK {
 			return "installed — " + vStr + " — pgvector enabled ✓", false, nil
 		}
-		// pgvector failed — warn but do not abort; Qorven works without it.
+		// pgvector package install failed here. Don't abort yet — the DB-setup
+		// step retries the install and is the authoritative gate (pgvector is
+		// REQUIRED by the schema, so it will hard-fail there if still missing).
 		if pvErr != nil {
 			slog.Warn("install.pgvector_failed", "err", pvErr)
 		}
-		return "installed — " + vStr + " — vector search not enabled (optional — enable later)", true, nil
+		return "installed — " + vStr + " — pgvector pending (will be verified at database setup)", true, nil
 
 	case 4: // Docker (optional)
 		if cfg.SkipDocker {
@@ -661,12 +681,43 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 
 		// pgvector — must be created as superuser (postgres), not the app user.
 		// Also grant qorven SUPERUSER so it can recreate the extension after factory reset.
+		//
+		// pgvector is a HARD requirement, NOT an optional add-on: the schema
+		// declares vector(384)/vector(1536) columns and ivfflat/hnsw indexes.
+		// Without the extension, the migration step dies with a cryptic
+		// "type \"vector\" does not exist". We therefore enable it HERE and, if
+		// it cannot be enabled, fail early with a clear, actionable message at
+		// the step that owns the problem — instead of letting migration fail
+		// unreadably four steps later.
 		psql("CREATE EXTENSION IF NOT EXISTS vector;", "postgres")
 		psql("ALTER USER qorven SUPERUSER;", "postgres")
+		if !pgvectorEnabled() {
+			// Last-ditch: (re)install the package for the RUNNING server major
+			// — step 3's install may have warned-and-continued — then retry.
+			if _, ivErr := installPgvector(runningPGMajor()); ivErr == nil {
+				psql("CREATE EXTENSION IF NOT EXISTS vector;", "postgres")
+			}
+		}
 		if pgvectorEnabled() {
 			return "ready — pgvector enabled", false, nil
 		}
-		return "ready — pgvector not available (vector search disabled, Qorven works without it)", true, nil
+		// Still not enabled. This WILL break migration, so stop now with the
+		// real PostgreSQL error and the exact package to install.
+		pgMaj := runningPGMajor()
+		createOut, _ := psql("CREATE EXTENSION vector;", "postgres")
+		detail := strings.TrimSpace(createOut)
+		if detail == "" {
+			detail = "(no error detail from PostgreSQL — the pgvector package is likely not installed)"
+		}
+		return "", false, fmt.Errorf(
+			"pgvector could not be enabled — it is REQUIRED (the schema uses vector columns; "+
+				"the install cannot continue without it).\n\n"+
+				"PostgreSQL major version: %s\n"+
+				"Install the matching package, then re-run the installer:\n"+
+				"  Debian/Ubuntu:  sudo apt-get install -y postgresql-%s-pgvector\n"+
+				"  RHEL/Fedora:    sudo dnf install -y pgvector_%s\n\n"+
+				"PostgreSQL said: %s",
+			pgMaj, pgMaj, pgMaj, detail)
 
 	case 8: // Binary
 		binDir := "/opt/qorven/bin"

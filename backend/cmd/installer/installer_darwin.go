@@ -63,7 +63,22 @@ func platformMigrate(configPath, dsn string) error {
 		"--config", configPath,
 	)
 	cmd.Env = append(os.Environ(), "QORVEN_POSTGRES_DSN="+dsn)
-	return cmd.Run()
+	// Capture output so a migration failure surfaces the REAL reason (a missing
+	// extension, a failing statement, a permission error) instead of a bare
+	// "exit status 1".
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return err
+		}
+		// Migration errors put the useful line last — keep the tail.
+		if len(msg) > 1200 {
+			msg = "…" + msg[len(msg)-1200:]
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
 }
 
 // probeSocketDSN detects the correct Unix socket path for macOS.
@@ -311,17 +326,45 @@ func executeStep(idx int, cfg Config) (detail string, warn bool, err error) {
 			}
 		}
 
-		// Enable pgvector (non-fatal)
+		// pgvector is a HARD requirement, NOT an optional add-on: the schema
+		// declares vector(384)/vector(1536) columns and ivfflat/hnsw indexes.
+		// Without the extension the migration step dies with a cryptic
+		// "type \"vector\" does not exist". Enable it HERE and, if it cannot be
+		// enabled, fail early with a clear message at the step that owns the
+		// problem — instead of letting migration fail unreadably later.
+		vecEnabled := func() bool {
+			extOut, _ := exec.Command("psql", "-U", user, "-d", "qorven", "-tAc",
+				"SELECT 1 FROM pg_extension WHERE extname='vector'").Output()
+			return strings.TrimSpace(string(extOut)) == "1"
+		}
+
 		exec.Command("psql", "-U", user, "-d", "qorven", "-c",
 			"CREATE EXTENSION IF NOT EXISTS vector;").Run()
-
-		// Confirm whether vector is actually enabled
-		extOut, _ := exec.Command("psql", "-U", user, "-d", "qorven", "-tAc",
-			"SELECT 1 FROM pg_extension WHERE extname='vector'").Output()
-		if strings.TrimSpace(string(extOut)) == "1" {
+		if !vecEnabled() {
+			// Last-ditch: (re)install pgvector for the running server major
+			// (step 3 may have warned-and-continued), then retry CREATE.
+			if brewErr := runQuiet("brew", "install", "pgvector"); brewErr == nil {
+				exec.Command("psql", "-U", user, "-d", "qorven", "-c",
+					"CREATE EXTENSION IF NOT EXISTS vector;").Run()
+			}
+		}
+		if vecEnabled() {
 			return "ready — pgvector enabled", false, nil
 		}
-		return "ready — pgvector not available (vector search disabled, Qorven works without it)", true, nil
+		// Still not enabled — this WILL break migration. Stop now with the real
+		// PostgreSQL error and the exact command to fix it.
+		createOut, _ := exec.Command("psql", "-U", user, "-d", "qorven", "-c",
+			"CREATE EXTENSION vector;").CombinedOutput()
+		detail := strings.TrimSpace(string(createOut))
+		if detail == "" {
+			detail = "(no error detail from PostgreSQL — the pgvector package is likely not installed)"
+		}
+		return "", false, fmt.Errorf(
+			"pgvector could not be enabled — it is REQUIRED (the schema uses vector columns; "+
+				"the install cannot continue without it).\n\n"+
+				"Install it, then re-run the installer:\n"+
+				"  brew install pgvector\n\n"+
+				"PostgreSQL said: %s", detail)
 
 	case 5: // Directories
 		prefix := brewPrefix()
