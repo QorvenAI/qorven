@@ -4,6 +4,18 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.12.4-alpha — 2026-06-17
+
+### Changed
+
+- **The connection question now comes at the end of the install**, after all the setup work is done, instead of interrupting at the start.
+
+### Fixed
+
+- **Once you authorize a Tailscale machine, the summary shows your connected address** and no longer repeats the "authorize this machine" notice that was already completed.
+
+---
+
 ## v0.12.3-alpha — 2026-06-17
 
 ### Added
