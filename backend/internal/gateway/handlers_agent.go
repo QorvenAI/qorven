@@ -404,34 +404,6 @@ func (gw *Gateway) ensureChief(ctx context.Context) (*agent.Agent, error) {
 	return chief, nil
 }
 
-func (gw *Gateway) ensureCoder(ctx context.Context) (*agent.Agent, error) {
-	existing, err := gw.agents.GetByKey(ctx, "coder")
-	if err == nil && existing != nil {
-		return existing, nil
-	}
-	coder, err := gw.agents.Create(ctx, defaultTenant, agent.CoderSpec())
-	if err != nil {
-		return nil, err
-	}
-	if gw.bundleStore != nil {
-		seed := agent.AgentSeeds["code"]
-		bundles, _ := gw.bundleStore.ListAll(ctx, coder.ID)
-		hasSoul := false
-		for _, b := range bundles {
-			if b.BundleType == "soul" {
-				hasSoul = true
-			}
-		}
-		if !hasSoul && seed.Soul != "" {
-			gw.bundleStore.Upsert(ctx, agent.Bundle{
-				AgentID:    coder.ID,
-				BundleType: "soul",
-				Name:       "soul",
-				Content:    seed.Soul,
-				Priority:   200,
-				Enabled:    true,
-			})
-		}
-	}
-	return coder, nil
-}
+// Coders are created on demand (not at boot, not via this handler). The first
+// delegation to the "coder" soul lazily provisions one via
+// agent.Store.EnsureCoder — see souldesk.findSoul.

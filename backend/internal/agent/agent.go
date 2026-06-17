@@ -202,6 +202,18 @@ func (s *Store) GetByKey(ctx context.Context, key string) (*Agent, error) {
 	return s.getBy(ctx, "agent_key", key)
 }
 
+// EnsureCoder returns the on-demand Coder agent, creating it from CoderSpec()
+// the first time it is needed. Coders are not part of the default roster — the
+// CTO/Prime spawn one the first time real build work is delegated. The full
+// soul is carried in CoderSpec().SystemPrompt, so the agent is fully functional
+// without a separate bundle. Idempotent: returns the existing coder if present.
+func (s *Store) EnsureCoder(ctx context.Context, tenantID string) (*Agent, error) {
+	if existing, err := s.GetByKey(ctx, "coder"); err == nil && existing != nil {
+		return existing, nil
+	}
+	return s.Create(ctx, tenantID, CoderSpec())
+}
+
 const agentSelectCols = `SELECT id, tenant_id, agent_key, display_name, COALESCE(avatar,''),
         role, title, manager_id, provider_id, model, COALESCE(system_prompt,''),
         COALESCE(temperature,0.7), COALESCE(context_window,128000),

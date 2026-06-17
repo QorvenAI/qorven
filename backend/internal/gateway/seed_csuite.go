@@ -23,19 +23,24 @@ type csuiteOfficer struct {
 	budget  float64 // monthly_budget_usd
 }
 
+// defaultCSuiteOfficers are the functional officers seeded under Prime on a
+// fresh install. Prime itself is the COO (the coordinator the user talks to);
+// the human user is the CEO and is not seeded as an agent. Coders are NOT seeded
+// — the CTO spawns them on demand per project.
 var defaultCSuiteOfficers = []csuiteOfficer{
-	{key: "officer-coo", name: "COO", title: "Chief Operating Officer", role: "coo", orgRole: "coo", budget: 50},
-	{key: "officer-cfo", name: "CFO", title: "Chief Financial Officer", role: "cfo", orgRole: "cfo", budget: 50},
 	{key: "officer-cto", name: "CTO", title: "Chief Technology Officer", role: "cto", orgRole: "cto", budget: 50},
 	{key: "officer-cmo", name: "CMO", title: "Chief Marketing Officer", role: "cmo", orgRole: "cmo", budget: 50},
+	{key: "officer-cfo", name: "CFO", title: "Chief Financial Officer", role: "cfo", orgRole: "cfo", budget: 50},
+	{key: "officer-chro", name: "CHRO", title: "Chief HR Officer", role: "chro", orgRole: "chro", budget: 50},
 }
 
-// seedCSuite creates the default C-suite under the CEO (Prime) on a fresh install.
-// It is fully idempotent:
-//   - If any agent with org_role in (coo, cfo, cto, cmo) already exists for the
+// seedCSuite creates the default C-suite under Prime (the COO) on a fresh
+// install. The human user is the CEO — no CEO agent is created. It is fully
+// idempotent:
+//   - If any functional officer (cto/cmo/cfo/chro) already exists for the
 //     tenant, the org is considered customised and the entire function no-ops.
-//   - Prime's org_role is promoted from "coo" to "ceo" only if it still holds the
-//     boot-time default value "coo" — admin-changed values are never touched.
+//   - Prime stays the COO (its boot-time default); it is the coordinator the
+//     user talks to and the manager every officer reports to.
 //   - Each individual officer is guarded by agent_key before creation, so a partial
 //     previous seed cannot produce duplicates.
 func (gw *Gateway) seedCSuite(ctx context.Context) error {
@@ -44,12 +49,15 @@ func (gw *Gateway) seedCSuite(ctx context.Context) error {
 	}
 
 	// ── Freshness check ────────────────────────────────────────────────────────
-	// If any C-suite officer already exists, the org is populated — no-op.
+	// If any functional officer already exists, the org is populated — no-op.
+	// 'chief' (Prime, the COO) is excluded so its presence alone never blocks the
+	// officer seed. 'ceo' is included so an org from the older CEO-promotion seed
+	// is still recognised as populated and left untouched.
 	var count int
 	err := gw.db.Pool.QueryRow(ctx,
 		`SELECT count(*) FROM agents
 		 WHERE tenant_id = $1
-		   AND org_role IN ('coo','cfo','cto','cmo','ceo')
+		   AND org_role IN ('cfo','cto','cmo','chro','ceo')
 		   AND agent_key != 'chief'
 		   AND (terminated_at IS NULL AND (status IS NULL OR status != 'suspended'))`,
 		defaultTenant).Scan(&count)
@@ -67,22 +75,16 @@ func (gw *Gateway) seedCSuite(ctx context.Context) error {
 		return err // Prime must exist; ensureChief is called before us
 	}
 
-	// ── Promote Prime: coo → ceo (only if still at boot-time default) ─────────
-	// UPDATE is guarded: only flips if org_role is the default 'coo' so admin
-	// renames (Prime→ceo, Prime→president, etc.) are never overwritten.
-	_, _ = gw.db.Pool.Exec(ctx,
-		`UPDATE agents SET org_role = 'ceo', title = 'CEO'
-		 WHERE id = $1 AND org_role = 'coo'`,
-		prime.ID)
-	// Sync the org_hierarchy row for Prime as well.
+	// Prime stays the COO — the coordinator the user talks to and the manager
+	// every officer reports to. The human user is the CEO (not an agent), shown
+	// at the top of the org chart. Ensure Prime's org row reflects COO at L1.
 	if gw.orgChartStore != nil {
 		if tenantUID, tErr := uuid.Parse(defaultTenant); tErr == nil {
 			if agentUID, aErr := uuid.Parse(prime.ID); aErr == nil {
-				_ = gw.orgChartStore.SyncFromAgent(ctx, tenantUID, agentUID, nil, "l1", "ceo", 0)
+				_ = gw.orgChartStore.SyncFromAgent(ctx, tenantUID, agentUID, nil, "l1", "coo", 0)
 			}
 		}
 	}
-	slog.Info("csuite.seed.prime_promoted", "agent_id", prime.ID, "new_role", "ceo")
 
 	// ── Create C-suite officers ────────────────────────────────────────────────
 	primeUID := prime.ID

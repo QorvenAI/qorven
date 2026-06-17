@@ -80,11 +80,9 @@ func (gw *Gateway) Start() error {
 				slog.Warn("csuite.seed_failed", "error", err)
 			}
 		}
-		if _, err := gw.ensureCoder(context.Background()); err != nil {
-			slog.Warn("coder.bootstrap_failed", "error", err)
-		} else {
-			slog.Info("coder ready")
-		}
+		// Coders are NOT seeded by default — they are spawned on demand the first
+		// time build work is delegated (agent.Store.EnsureCoder via souldesk),
+		// so they never appear in the default roster.
 	}
 
 	// Start real-time WebSocket hub

@@ -16,9 +16,10 @@ import (
 	"github.com/qorvenai/qorven/internal/testsupport"
 )
 
-// TestSeedCSuite_FreshTenant verifies that the seedCSuite logic creates 4 C-suite
-// officers and promotes Prime→CEO on a clean tenant, then is a no-op on the second
-// run (idempotency).
+// TestSeedCSuite_FreshTenant verifies that the seedCSuite logic creates the 4
+// functional officers (CTO/CMO/CFO/CHRO) under Prime on a clean tenant, leaves
+// Prime as the COO (no CEO promotion — the human user is the CEO), then is a
+// no-op on the second run (idempotency).
 //
 // Uses a scratch tenant UUID so it never touches the real dev org.
 // Skips automatically if the DB is unreachable.
@@ -86,7 +87,7 @@ func TestSeedCSuite_FreshTenant(t *testing.T) {
 	pool.QueryRow(ctx,
 		`SELECT count(*) FROM agents
 		 WHERE tenant_id = $1
-		   AND org_role IN ('coo','cfo','cto','cmo')
+		   AND org_role IN ('cfo','cto','cmo','chro')
 		   AND agent_key != 'chief'
 		   AND terminated_at IS NULL`,
 		scratchTenant).Scan(&officerCount)
@@ -96,14 +97,15 @@ func TestSeedCSuite_FreshTenant(t *testing.T) {
 		t.Logf("officers created: %d (PASS)", officerCount)
 	}
 
-	// Prime should have been promoted to ceo.
+	// Prime should remain the COO — the human user is the CEO, so Prime is NOT
+	// promoted.
 	var primeRole string
 	pool.QueryRow(ctx,
 		`SELECT org_role FROM agents WHERE id = $1`, prime.ID).Scan(&primeRole)
-	if primeRole != "ceo" {
-		t.Errorf("prime org_role = %q, want 'ceo'", primeRole)
+	if primeRole != "coo" {
+		t.Errorf("prime org_role = %q, want 'coo' (no CEO promotion)", primeRole)
 	} else {
-		t.Logf("prime promoted to %s (PASS)", primeRole)
+		t.Logf("prime stayed %s (PASS)", primeRole)
 	}
 
 	// ── Second seed run — must be a no-op ─────────────────────────────────────
@@ -115,7 +117,7 @@ func TestSeedCSuite_FreshTenant(t *testing.T) {
 	pool.QueryRow(ctx,
 		`SELECT count(*) FROM agents
 		 WHERE tenant_id = $1
-		   AND org_role IN ('coo','cfo','cto','cmo')
+		   AND org_role IN ('cfo','cto','cmo','chro')
 		   AND agent_key != 'chief'
 		   AND terminated_at IS NULL`,
 		scratchTenant).Scan(&countAfter)
@@ -135,7 +137,7 @@ func runSeedForTenant(ctx context.Context, pool *pgxpool.Pool, agentStore *agent
 	if err := pool.QueryRow(ctx,
 		`SELECT count(*) FROM agents
 		 WHERE tenant_id = $1
-		   AND org_role IN ('coo','cfo','cto','cmo','ceo')
+		   AND org_role IN ('cfo','cto','cmo','chro','ceo')
 		   AND agent_key != 'chief'
 		   AND (terminated_at IS NULL AND (status IS NULL OR status != 'suspended'))`,
 		tenantID).Scan(&count); err != nil {
@@ -145,11 +147,7 @@ func runSeedForTenant(ctx context.Context, pool *pgxpool.Pool, agentStore *agent
 		return nil // already populated
 	}
 
-	// Promote Prime coo→ceo.
-	_, _ = pool.Exec(ctx,
-		`UPDATE agents SET org_role = 'ceo', title = 'CEO'
-		 WHERE id = $1 AND org_role = 'coo'`,
-		primeID)
+	// Prime stays the COO — no CEO promotion (the human user is the CEO).
 
 	// Default C-suite seats — same slice as production.
 	officers := []struct {
@@ -160,10 +158,10 @@ func runSeedForTenant(ctx context.Context, pool *pgxpool.Pool, agentStore *agent
 		orgRole string
 		budget  float64
 	}{
-		{"officer-coo", "COO", "Chief Operating Officer", "coo", "coo", 50},
-		{"officer-cfo", "CFO", "Chief Financial Officer", "cfo", "cfo", 50},
 		{"officer-cto", "CTO", "Chief Technology Officer", "cto", "cto", 50},
 		{"officer-cmo", "CMO", "Chief Marketing Officer", "cmo", "cmo", 50},
+		{"officer-cfo", "CFO", "Chief Financial Officer", "cfo", "cfo", 50},
+		{"officer-chro", "CHRO", "Chief HR Officer", "chro", "chro", 50},
 	}
 
 	for _, off := range officers {

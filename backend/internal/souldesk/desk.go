@@ -355,6 +355,13 @@ func (d *SoulDesk) findSoul(ctx context.Context, soulKey string) (*agent.Agent, 
 			return d.agentStore.Get(ctx, a.ID)
 		}
 	}
+	// The Coder is not part of the default roster — it is spawned the first time
+	// build work is delegated. Create it on demand so delegation never fails.
+	if strings.EqualFold(soulKey, "coder") {
+		if coder, ensErr := d.agentStore.EnsureCoder(ctx, d.tenantID); ensErr == nil && coder != nil {
+			return coder, nil
+		}
+	}
 	return nil, fmt.Errorf("not found")
 }
 
