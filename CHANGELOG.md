@@ -4,6 +4,23 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.12.2-alpha — 2026-06-17
+
+A follow-up to the install-experience release. Installation is now fully unattended and works in any environment, and a fresh install on a clean server was tested end to end — surfacing and fixing several issues that previously stopped a brand-new install from completing.
+
+### Changed
+
+- **Installation is now fully unattended.** `qorven install` no longer opens an interactive screen — it prints its progress one step at a time and runs start to finish without a keypress. This means it now works over SSH, in cloud-init, and in automated pipelines, where the previous interactive installer could stall with no output. Re-running it still resumes a partial install or upgrades an existing one in place.
+- **First-time setup lives in the web interface.** The separate `qorven setup` command has been retired in favour of the in-app setup wizard, which already walks you through the same steps with a better experience.
+- **`qorven init` runs without prompting.** It now resolves your database connection from flags, environment, existing config, or auto-detection, and gives a clear error only when it genuinely can't proceed.
+
+### Fixed
+
+- **A fresh install now completes cleanly on a new server.** Testing a brand-new install end to end uncovered and fixed several blockers: the vector-search extension is now enabled in the right database, the service waits for the database schema to be ready before starting (instead of competing with it), and an installed server no longer needs a separate migrations folder on disk. A fresh Ubuntu install now comes up healthy with the full schema applied.
+- **Vector search is treated as required during install** — since Qorven's database schema depends on it — so a missing extension fails early with the exact package to install, instead of failing later with a confusing error.
+
+---
+
 ## v0.12.1-alpha — 2026-06-16
 
 An install-experience release. Installation was rebuilt to be reliable, recoverable, and near-question-free on Linux, macOS, and Windows — fixing the PostgreSQL/pgvector failures some installs hit, and removing the networking questions that made setup feel complicated.
