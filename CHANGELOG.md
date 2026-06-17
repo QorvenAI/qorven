@@ -4,6 +4,14 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.12.5-alpha — 2026-06-17
+
+### Fixed
+
+- **Updating now does only the update work, not a full reinstall.** Choosing "Update" performs a true in-place upgrade — it swaps the binary, runs any new database migrations, and restarts the service — instead of re-running the entire installation (reinstalling PostgreSQL, recreating the database, reconfiguring the reverse proxy). "Reinstall" still performs the full repair when you want it.
+
+---
+
 ## v0.12.4-alpha — 2026-06-17
 
 ### Changed
