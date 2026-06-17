@@ -20,19 +20,15 @@ func Run(cfg Config) (bool, error) {
 
 	logHeader(cfg, resuming)
 
-	// Ask how the server will be reached BEFORE the install log scrolls by, so
-	// the question is the first thing the user sees. On an upgrade — or when
-	// there's no terminal — chooseConnection returns immediately without asking.
-	var conn connChoice
-	if cfg.Mode != InstallModeUpgrade {
-		conn = chooseConnection(cfg)
-		// Apply the choice: only attempt the Tailscale step when chosen.
-		cfg.SkipTailscale = !conn.useTailscale
-	} else {
-		conn = connChoice{useTailscale: !cfg.SkipTailscale}
-	}
+	// The Tailscale step is deferred until AFTER every other step runs, so the
+	// connection question appears once the install work is done — not up front.
+	// Identify it by label so this stays correct regardless of step ordering.
+	tsIdx := stepIndexByLabel(steps, "tailscale")
 
 	for i := range steps {
+		if i == tsIdx {
+			continue // handled after the loop, post-connection-prompt
+		}
 		// Steps pre-marked done by upgrade/resume are reported and skipped.
 		if steps[i].status == stepDone {
 			logStep(i, len(steps), steps[i].label, "skip", steps[i].detail)
@@ -60,8 +56,30 @@ func Run(cfg Config) (bool, error) {
 		}
 	}
 
+	// Now that the install work is done, ask how the server should be reached.
+	// On an upgrade — or with no terminal — chooseConnection returns without
+	// asking (fully unattended). Then run the deferred Tailscale step if chosen.
+	var conn connChoice
+	if cfg.Mode != InstallModeUpgrade {
+		conn = chooseConnection(cfg)
+	} else {
+		conn = connChoice{useTailscale: !cfg.SkipTailscale}
+	}
+	cfg.SkipTailscale = !conn.useTailscale
+
+	if tsIdx >= 0 && steps[tsIdx].status != stepDone {
+		detail, warn, _ := executeStep(tsIdx, cfg)
+		steps[tsIdx].detail = detail
+		if warn {
+			steps[tsIdx].status = stepWarn
+		} else {
+			steps[tsIdx].status = stepDone
+		}
+		logStep(tsIdx, len(steps), steps[tsIdx].label, statusWord(steps[tsIdx].status), detail)
+	}
+
 	// Resolve the URL the UI will be reached at, honouring the user's choice.
-	baseURL := resolveBaseURL(steps, conn)
+	baseURL := resolveBaseURL(steps, conn, tsIdx)
 
 	if err := writeConfigAndMigrate(cfg, baseURL); err != nil {
 		fmt.Printf("\n%s\n", err.Error())
@@ -77,9 +95,11 @@ func Run(cfg Config) (bool, error) {
 //  1. A user-chosen override (a detected IP they picked, or a custom URL).
 //  2. A Tailscale result: "connected:<ip>" → use it; "url:<auth-url>" → wait for
 //     the user to authorize in a browser, then use the assigned 100.x address.
+//     On a successful wait the step's detail is updated to "connected:<ip>" so
+//     the summary does not still show a stale "authorize this machine" notice.
 //  3. A detected public or LAN IP.
 //  4. localhost.
-func resolveBaseURL(steps []installStep, conn connChoice) string {
+func resolveBaseURL(steps []installStep, conn connChoice, tsIdx int) string {
 	if conn.overrideURL != "" {
 		return conn.overrideURL
 	}
@@ -91,6 +111,10 @@ func resolveBaseURL(steps []installStep, conn connChoice) string {
 	case strings.HasPrefix(tsDetail, "url:"):
 		authURL := strings.TrimPrefix(tsDetail, "url:")
 		if ip := awaitTailscaleAuth(authURL, 3*time.Minute); ip != "" {
+			// Mark the step connected so logDone won't repeat the auth notice.
+			if tsIdx >= 0 {
+				steps[tsIdx].detail = "connected:" + ip
+			}
 			return ip
 		}
 		// Not authorized in time — fall through to a detected address so the
@@ -105,6 +129,31 @@ func resolveBaseURL(steps []installStep, conn connChoice) string {
 		return ips.lanIPs[0]
 	}
 	return "localhost"
+}
+
+// stepIndexByLabel returns the index of the first step whose label contains
+// substr (case-insensitive), or -1 when none match (e.g. a platform with no
+// Tailscale step).
+func stepIndexByLabel(steps []installStep, substr string) int {
+	lower := strings.ToLower(substr)
+	for i := range steps {
+		if strings.Contains(strings.ToLower(steps[i].label), lower) {
+			return i
+		}
+	}
+	return -1
+}
+
+// statusWord maps a stepStatus to the short word shown in the step log.
+func statusWord(s stepStatus) string {
+	switch s {
+	case stepWarn:
+		return "warn"
+	case stepFail:
+		return "FAIL"
+	default:
+		return "ok"
+	}
 }
 
 // ── Plain log output (no terminal styling) ──────────────────────────────────
