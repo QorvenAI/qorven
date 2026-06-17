@@ -4,6 +4,18 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.12.3-alpha — 2026-06-17
+
+### Added
+
+- **The installer asks how you want to reach your server.** Up front, it offers a private Tailscale connection (recommended), this server's own address, or a custom domain you type in. If you choose Tailscale, it installs Tailscale, shows you the authorization link, waits for you to approve the machine, and then uses your private Tailscale address. The question only appears when you run the installer interactively — over SSH automation, cloud-init, or CI it stays fully unattended and uses the server's detected address.
+
+### Fixed
+
+- **Tailscale install is more robust.** It now retries if the system package manager is momentarily busy (common on a freshly booted server) and reports the real reason if it still can't install, instead of a vague "install failed."
+
+---
+
 ## v0.12.2-alpha — 2026-06-17
 
 A follow-up to the install-experience release. Installation is now fully unattended and works in any environment, and a fresh install on a clean server was tested end to end — surfacing and fixing several issues that previously stopped a brand-new install from completing.
