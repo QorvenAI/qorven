@@ -40,6 +40,8 @@ var (
 	installDataDir       string
 	installTailscaleKey  string
 	installSkipTailscale bool
+	installUpgrade       bool
+	installReinstall     bool
 )
 
 func init() {
@@ -48,6 +50,11 @@ func init() {
 	installCmd.Flags().StringVar(&installDataDir, "data-dir", "", "Directory for Qorven data files (default: /var/lib/qorven on Linux, /usr/local/var/qorven on macOS)")
 	installCmd.Flags().StringVar(&installTailscaleKey, "tailscale-auth-key", "", "Pre-auth key for headless Tailscale setup (tskey-auth-...)")
 	installCmd.Flags().BoolVar(&installSkipTailscale, "skip-tailscale", false, "Skip Tailscale installation")
+	// --upgrade / --reinstall make the intent explicit (the curl installer passes
+	// these based on the user's Update vs Reinstall choice). Without either, the
+	// mode is auto-detected.
+	installCmd.Flags().BoolVar(&installUpgrade, "upgrade", false, "Upgrade an existing install: swap the binary, migrate, restart — skip package/DB setup")
+	installCmd.Flags().BoolVar(&installReinstall, "reinstall", false, "Re-run the full idempotent install to repair an existing setup")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -75,6 +82,17 @@ func runInstall(cmd *cobra.Command) error {
 		}
 	}
 
+	// Explicit mode from flags wins over auto-detection. --upgrade → upgrade
+	// (binary swap + migrate + restart only); --reinstall → repair (full
+	// idempotent re-run). Neither set → auto-detect.
+	var mode installer.InstallMode
+	switch {
+	case installUpgrade:
+		mode = installer.InstallModeUpgrade
+	case installReinstall:
+		mode = installer.InstallModeRepair
+	}
+
 	ok, err := installer.Run(installer.Config{
 		Version:          Version,
 		DataDir:          dataDir,
@@ -82,6 +100,7 @@ func runInstall(cmd *cobra.Command) error {
 		SkipPG:           installSkipPG,
 		TailscaleAuthKey: installTailscaleKey,
 		SkipTailscale:    installSkipTailscale,
+		Mode:             mode,
 	})
 	if err != nil {
 		return err

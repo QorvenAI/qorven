@@ -86,6 +86,11 @@ func Run(cfg Config) (bool, error) {
 		return false, err
 	}
 
+	// Install finished successfully — clear the checkpoint so this COMPLETED run
+	// is not mistaken for an interrupted one next time (which would force a fresh
+	// re-install instead of letting auto-detect choose upgrade).
+	clearInstallState()
+
 	logDone(cfg, steps, baseURL)
 	return true, nil
 }

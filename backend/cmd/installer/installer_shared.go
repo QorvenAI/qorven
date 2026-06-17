@@ -77,6 +77,15 @@ func saveInstallState(s *installState) {
 	os.WriteFile(stateFilePath(), data, 0644) //nolint:errcheck
 }
 
+// clearInstallState removes the checkpoint file. Called once an install
+// finishes successfully so a COMPLETED install is never mistaken for an
+// interrupted one on the next run (which would force fresh/repair instead of
+// letting auto-detect choose upgrade). Errors are ignored — a stale file only
+// affects mode auto-detection, which the binary+config probe still backstops.
+func clearInstallState() {
+	os.Remove(stateFilePath())
+}
+
 // stepCompletedInState returns true if the given step index appears in the
 // state's CompletedSteps list.
 func stepCompletedInState(s *installState, idx int) bool {

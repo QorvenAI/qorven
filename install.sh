@@ -29,6 +29,9 @@ ok()   { printf "  ${GREEN}✓${NC} %s\n" "$*"; }
 
 # ── parse flags ───────────────────────────────────────────────────────────────
 PASSTHROUGH=()
+# INSTALL_MODE_FLAG carries the user's Update vs Reinstall choice through to the
+# binary (--upgrade / --reinstall). Empty → the binary auto-detects the mode.
+INSTALL_MODE_FLAG=""
 UNINSTALL=0
 for arg in "$@"; do
   case "$arg" in
@@ -134,9 +137,9 @@ if [ -n "$EXISTING_VERSION" ]; then
     read -r CHOICE </dev/tty || CHOICE="1"
     CHOICE="${CHOICE:-1}"
     case "$CHOICE" in
-      2) info "reinstalling ${EXISTING_VERSION}…"; RELEASE_TAG="$EXISTING_VERSION" ;;
+      2) info "reinstalling ${EXISTING_VERSION}…"; RELEASE_TAG="$EXISTING_VERSION"; INSTALL_MODE_FLAG="--reinstall" ;;
       3) printf "\n  Cancelled.\n\n"; exit 0 ;;
-      *) info "updating to ${LATEST_TAG}…"; RELEASE_TAG="$LATEST_TAG" ;;
+      *) info "updating to ${LATEST_TAG}…"; RELEASE_TAG="$LATEST_TAG"; INSTALL_MODE_FLAG="--upgrade" ;;
     esac
   else
     printf "  What would you like to do?\n\n"
@@ -148,6 +151,7 @@ if [ -n "$EXISTING_VERSION" ]; then
     [ "$CHOICE" = "2" ] && { printf "\n  Cancelled.\n\n"; exit 0; }
     info "reinstalling ${EXISTING_VERSION}…"
     RELEASE_TAG="${EXISTING_VERSION}"
+    INSTALL_MODE_FLAG="--reinstall"
   fi
   printf "\n"
 fi
@@ -203,4 +207,7 @@ ok "binary ready: $INSTALL_DIR/qorven  ($(du -sh "$INSTALL_DIR/qorven" 2>/dev/nu
 printf "\n"
 
 # ── hand off to the installation wizard ───────────────────────────────────────
+if [ -n "$INSTALL_MODE_FLAG" ]; then
+  exec "$INSTALL_DIR/qorven" install "$INSTALL_MODE_FLAG" "${PASSTHROUGH[@]}"
+fi
 exec "$INSTALL_DIR/qorven" install "${PASSTHROUGH[@]}"
