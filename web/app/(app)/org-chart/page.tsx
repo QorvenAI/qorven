@@ -27,17 +27,19 @@ const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 2;
 
 // ── Role metadata ───────────────────────────────────────────────────────────────
+// Colors are design tokens (defined in css/config.qorven.css) referenced via
+// var(), so the chart stays on the token system rather than hardcoding hex.
 const ROLE_META: Record<string, { label: string; color: string; Icon: React.ElementType }> = {
-  caio:  { label: 'CAIO',  color: '#a78bfa', Icon: Cpu },
-  coo:   { label: 'COO',   color: '#f59e0b', Icon: Building2 },
-  cto:   { label: 'CTO',   color: '#60a5fa', Icon: Code2 },
-  cmo:   { label: 'CMO',   color: '#f472b6', Icon: Megaphone },
-  cso:   { label: 'CSO',   color: '#34d399', Icon: ShoppingCart },
-  cco:   { label: 'CCO',   color: '#22d3ee', Icon: HeadphonesIcon },
-  chro:  { label: 'CHRO',  color: '#fb923c', Icon: UserCheck },
-  ciso:  { label: 'CISO',  color: '#f87171', Icon: Shield },
-  cko:   { label: 'CKO',   color: '#2dd4bf', Icon: BookOpen },
-  cfo:   { label: 'CFO',   color: '#a3e635', Icon: DollarSign },
+  caio:  { label: 'CAIO',  color: 'var(--org-role-caio)', Icon: Cpu },
+  coo:   { label: 'COO',   color: 'var(--org-role-coo)',  Icon: Building2 },
+  cto:   { label: 'CTO',   color: 'var(--org-role-cto)',  Icon: Code2 },
+  cmo:   { label: 'CMO',   color: 'var(--org-role-cmo)',  Icon: Megaphone },
+  cso:   { label: 'CSO',   color: 'var(--org-role-cso)',  Icon: ShoppingCart },
+  cco:   { label: 'CCO',   color: 'var(--org-role-cco)',  Icon: HeadphonesIcon },
+  chro:  { label: 'CHRO',  color: 'var(--org-role-chro)', Icon: UserCheck },
+  ciso:  { label: 'CISO',  color: 'var(--org-role-ciso)', Icon: Shield },
+  cko:   { label: 'CKO',   color: 'var(--org-role-cko)',  Icon: BookOpen },
+  cfo:   { label: 'CFO',   color: 'var(--org-role-cfo)',  Icon: DollarSign },
 };
 
 const C_SUITE_ROLES = new Set(['caio','coo','cto','cmo','cso','cco','chro','ciso','cko','cfo']);
@@ -46,11 +48,11 @@ const C_SUITE_ROLES = new Set(['caio','coo','cto','cmo','cso','cco','chro','ciso
 const CEO_ID = '__ceo__';
 
 const STATUS_COLOR: Record<string, string> = {
-  idle:      '#4ade80',
-  thinking:  '#f59e0b',
-  running:   '#22d3ee',
-  error:     '#f87171',
-  offline:   '#71717a',
+  idle:      'var(--org-status-idle)',
+  thinking:  'var(--org-status-thinking)',
+  running:   'var(--org-status-running)',
+  error:     'var(--org-status-error)',
+  offline:   'var(--org-status-offline)',
 };
 
 // Available org levels and roles for the hire form
@@ -154,18 +156,39 @@ function buildForest(agents: OrgChartAgent[], userName = 'You'): TreeNode[] {
     real.map(a => [a.id, { agent: a, children: [], x: 0, y: 0 }])
   );
 
-  // If manager_id links exist in data, use them directly
+  // The human user is the CEO at the very top — represented by a synthetic node,
+  // never a real agent. Every top-level agent (Prime and anyone without a
+  // resolvable manager) hangs under it, so the chart always reads You → Prime → … .
+  const makeCEONode = (): TreeNode => ({
+    agent: {
+      id: CEO_ID,
+      display_name: userName,
+      org_role: 'ceo',
+      org_level: 'l0',
+      title: 'Chief Executive Officer',
+      status: 'idle',
+    },
+    children: [],
+    x: 0, y: 0,
+  });
+
+  // If manager_id links exist in data, use them directly — but still root the
+  // whole forest under the synthetic CEO (You), rather than leaving bare roots.
   const hasManagerLinks = real.some(a => a.manager_id && byId.has(a.manager_id));
 
   if (hasManagerLinks) {
-    // Use explicit manager_id hierarchy
-    const roots: TreeNode[] = [];
+    const ceo = makeCEONode();
     for (const a of real) {
       const node = byId.get(a.id)!;
-      if (!a.manager_id || !byId.has(a.manager_id)) roots.push(node);
+      if (!a.manager_id || !byId.has(a.manager_id)) ceo.children.push(node);
       else byId.get(a.manager_id)!.children.push(node);
     }
-    return roots;
+    const sortChildrenML = (n: TreeNode) => {
+      n.children.sort((x, y) => (x.agent.display_name ?? '').localeCompare(y.agent.display_name ?? ''));
+      n.children.forEach(sortChildrenML);
+    };
+    sortChildrenML(ceo);
+    return [ceo];
   }
 
   // Infer hierarchy from org_role and agent_key:
@@ -716,7 +739,7 @@ export default function OrgChartPage() {
               <Icon className="h-3.5 w-3.5" />
             </button>
           ))}
-          <div className="mt-1 text-center text-[10px] text-muted-foreground/50 font-mono">
+          <div className="mt-1 text-center text-2xs text-muted-foreground/50 font-mono">
             {Math.round(zoom * 100)}%
           </div>
         </div>
@@ -796,16 +819,16 @@ export default function OrgChartPage() {
                         {a.display_name}
                       </span>
                       {isCEO ? (
-                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
+                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
                           CEO
                         </span>
                       ) : (a.agent_key === 'chief' || a.org_role === 'coo') ? (
-                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border border-violet-500/30 text-violet-400 bg-violet-500/10">
+                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold border border-violet-500/30 text-violet-400 bg-violet-500/10">
                           {roleMeta?.label ?? 'COO'}
                         </span>
                       ) : roleMeta ? (
                         <span
-                          className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold border border-current/20"
+                          className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-2xs font-bold border border-current/20"
                           style={{ color: roleMeta.color, background: roleMeta.color + '18' }}
                         >
                           {roleMeta.label}
@@ -814,7 +837,7 @@ export default function OrgChartPage() {
                     </div>
 
                     {/* model · department subline */}
-                    <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/70 leading-tight">
+                    <div className="flex items-center gap-1.5 mt-1 text-2xs text-muted-foreground/70 leading-tight">
                       {model && <span className="truncate">{model}</span>}
                       {model && department && <span className="text-border">·</span>}
                       {department && <span className="truncate">{department}</span>}

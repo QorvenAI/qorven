@@ -105,6 +105,25 @@
   --wf-bg:                 #52525b;   /* zinc-600    */
   --wf-label-fill:         #18181b;   /* zinc-950    */
   --wf-label-text:         #a1a1aa;   /* zinc-400    */
+
+  /* org-chart role colors — consumed by org-chart/page.tsx via var() */
+  --org-role-caio:  #a78bfa;   /* violet-400  */
+  --org-role-coo:   #f59e0b;   /* amber-500   */
+  --org-role-cto:   #60a5fa;   /* blue-400    */
+  --org-role-cmo:   #f472b6;   /* pink-400    */
+  --org-role-cso:   #34d399;   /* emerald-400 */
+  --org-role-cco:   #22d3ee;   /* cyan-400    */
+  --org-role-chro:  #fb923c;   /* orange-400  */
+  --org-role-ciso:  #f87171;   /* red-400     */
+  --org-role-cko:   #2dd4bf;   /* teal-400    */
+  --org-role-cfo:   #a3e635;   /* lime-400    */
+
+  /* org-chart status colors — consumed by org-chart/page.tsx via var() */
+  --org-status-idle:     #4ade80;   /* green-400  */
+  --org-status-thinking: #f59e0b;   /* amber-500  */
+  --org-status-running:  #22d3ee;   /* cyan-400   */
+  --org-status-error:    #f87171;   /* red-400    */
+  --org-status-offline:  #71717a;   /* zinc-500   */
 }
 
 .dark {
