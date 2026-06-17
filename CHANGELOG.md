@@ -4,6 +4,16 @@ All notable changes to Qorven are documented here.
 
 ---
 
+## v0.12.6-alpha — 2026-06-17
+
+### Changed
+
+- **A cleaner default team with one clear owner per area.** The starting team is now Prime — your coordinator, with the designation COO — and four officers reporting to it: CTO, CMO, CFO, and CHRO. You are the CEO, shown at the top of the org chart by your own name. Removed the overlapping roles: there's no longer a separate CEO seat alongside Prime, and no standalone Coder cluttering the roster.
+- **Coders are created on demand.** Instead of always existing, a coder is spawned the first time the team is asked to build something — and reused afterward — so it appears only when there's actually code to write.
+- **The org chart always shows you at the top.** Whatever the reporting lines, the chart consistently reads You (CEO) → Prime → officers, with your own name on the top seat. Agent names stay editable; the designation reflects each role.
+
+---
+
 ## v0.12.5-alpha — 2026-06-17
 
 ### Fixed
